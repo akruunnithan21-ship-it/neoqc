@@ -1,0 +1,692 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Neo QC - PC Quality Control Portal</title>
+  <!-- Google Fonts: Space Grotesk, Hanken Grotesk, JetBrains Mono -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:ital,wght@0,100..900;1,100..900&family=JetBrains+Mono:ital,wght@0,100..800;1,100..800&family=Space+Grotesk:wght@300..700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="light-mode">
+  
+  <!-- CUSTOM DRAGGABLE TITLEBAR -->
+  <div class="custom-titlebar">
+    <div class="titlebar-drag-area">
+      <span class="titlebar-logo">🤖</span>
+      <span class="titlebar-text">Neo QC // PC Quality Control Lab Portal</span>
+    </div>
+    <div class="titlebar-controls">
+      <button id="win-btn-minimize" class="titlebar-btn minimize" title="Minimize">—</button>
+      <button id="win-btn-maximize" class="titlebar-btn maximize" title="Maximize">⬜</button>
+      <button id="win-btn-close" class="titlebar-btn close" title="Close">&times;</button>
+    </div>
+  </div>
+
+  <!-- BACKGROUND BLUEPRINT DOTS -->
+  <div class="blueprint-dots"></div>
+
+  <!-- LAUNCH MODE SELECTION SCREEN -->
+  <div id="mode-selector-screen" class="screen active">
+    <div class="glass-slab mode-selector-card">
+      <div class="brand-header">
+        <div class="hanko-stamp">ネオ東京</div>
+        <span class="brand-logo-dot"></span>
+        <h1 class="logo-title">NEO QC</h1>
+        <p class="logo-subtitle">Neo Tokyo Kochi | PC Diagnostics</p>
+      </div>
+      <h2>Select Application Mode</h2>
+      <p class="selector-desc">Choose how you want to run this instance of Neo QC.</p>
+      <div class="mode-buttons-row">
+        <button id="btn-launch-staff" class="mode-btn primary-pink">
+          <div class="mode-icon">🖥️</div>
+          <div class="mode-title">Staff System</div>
+          <div class="mode-text">Full dashboard, manage tickets, technicians & print reports.</div>
+        </button>
+        <button id="btn-launch-client" class="mode-btn dark-slate">
+          <div class="mode-icon">🧪</div>
+          <div class="mode-title">Testing Client</div>
+          <div class="mode-text">Install on built PC. Auto-detect hardware, verify activation, and pull benchmark scores.</div>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- STAFF SYSTEM SCREEN -->
+  <div id="staff-screen" class="screen">
+    <!-- Navbar -->
+    <header class="glass-slab navbar">
+      <div class="nav-brand">
+        <span class="status-indicator optimal"></span>
+        <span class="nav-title">NEO QC // STAFF PORTAL</span>
+      </div>
+      <div class="nav-controls">
+        <button id="btn-toggle-theme" class="icon-btn" title="Toggle Dark/Light Mode">🌓</button>
+        <button id="btn-show-settings" class="secondary-btn">⚙️ Settings</button>
+        <button id="btn-new-ticket" class="primary-pink-btn">+ New Ticket</button>
+      </div>
+    </header>
+
+    <!-- Main Content Area -->
+    <main class="dashboard-container">
+      <!-- Search and filter panel -->
+      <section class="glass-slab search-filter-slab">
+        <input type="text" id="search-input" placeholder="Search by customer, technician, serial number..." />
+        <select id="filter-status">
+          <option value="all">All Statuses</option>
+          <option value="awaiting">Awaiting Components</option>
+          <option value="building">Build Commenced</option>
+          <option value="waiting_qc">Awaiting QC</option>
+          <option value="qc_testing">QC & Testing</option>
+          <option value="completed">Completed / Passed</option>
+        </select>
+        <select id="filter-tech">
+          <option value="all">All Technicians</option>
+        </select>
+      </section>
+
+      <!-- Active Tickets Grid -->
+      <section class="tickets-grid-section">
+        <h2 class="section-title">ACTIVE TICKETS <span id="active-count" class="badge">0</span></h2>
+        <div id="tickets-grid" class="grid-container">
+          <!-- Grid items dynamically injected -->
+          <div class="empty-state">
+            <p>No active builds or repairs found. Click "+ New Ticket" to create one.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- Archive / Completed Tickets Section -->
+      <section class="archive-section">
+        <div class="glass-slab archive-slab">
+          <div class="archive-header">
+            <h3>COMPLETED / PASSED SYSTEMS <span id="completed-count" class="badge green">0</span></h3>
+          </div>
+          <div class="table-container">
+            <table class="archive-table">
+              <thead>
+                <tr>
+                  <th>Ticket ID</th>
+                  <th>Customer</th>
+                  <th>Technician</th>
+                  <th>CPU / GPU</th>
+                  <th>Cinebench R23</th>
+                  <th>Completed Date</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="archive-table-body">
+                <!-- Dynamically injected rows -->
+                <tr>
+                  <td colspan="7" class="text-center">No completed tickets logged yet.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- TESTING CLIENT SCREEN -->
+  <div id="client-screen" class="screen">
+    <!-- Navbar -->
+    <header class="glass-slab navbar">
+      <div class="nav-brand">
+        <span class="status-indicator testing"></span>
+        <span class="nav-title">NEO QC // TESTING CLIENT</span>
+      </div>
+      <div class="nav-controls">
+        <button id="btn-client-refresh" class="secondary-btn">🔄 Refresh Tickets</button>
+        <button id="btn-client-exit" class="secondary-btn text-crimson">🚪 Switch Mode</button>
+      </div>
+    </header>
+
+    <div class="client-container">
+      <div class="glass-slab client-card">
+        <h2>Target PC Diagnostic Panel</h2>
+        <p class="card-subtitle">Connect this PC to an active ticket to run automated benchmarks and thermal analysis.</p>
+        
+        <!-- Ticket Association -->
+        <div class="form-group">
+          <label for="client-ticket-select">Select Active Build / Service Ticket:</label>
+          <select id="client-ticket-select" class="large-select">
+            <option value="">-- Choose Ticket --</option>
+          </select>
+        </div>
+
+        <div class="client-grid-row">
+          <!-- Hardware specs auto detect -->
+          <div class="client-panel">
+            <h3>1. Target Specifications</h3>
+            <button id="btn-client-detect-hw" class="primary-pink-btn full-width">🔍 Auto-Detect System Specs</button>
+            <div class="specs-readout">
+              <div class="spec-item"><span class="spec-label">CPU:</span> <span id="c-spec-cpu" class="spec-val font-mono">Not detected</span></div>
+              <div class="spec-item"><span class="spec-label">GPU:</span> <span id="c-spec-gpu" class="spec-val font-mono">Not detected</span></div>
+              <div class="spec-item"><span class="spec-label">RAM:</span> <span id="c-spec-ram" class="spec-val font-mono">Not detected</span></div>
+              <div class="spec-item"><span class="spec-label">SSD:</span> <span id="c-spec-storage" class="spec-val font-mono">Not detected</span></div>
+            </div>
+            <button id="btn-client-check-win" class="secondary-btn full-width margin-top">🛡️ Check Windows Activation State</button>
+            <div id="client-win-status" class="win-activation-status margin-top">
+              Activation Status: <span class="badge">Unverified</span>
+            </div>
+          </div>
+
+          <!-- Diagnostic Log File Parsers -->
+          <div class="client-panel">
+            <h3>2. Benchmark & Thermal Logging</h3>
+            <p class="panel-info-text">Run your benchmarks and load HWiNFO64, then select the report files to auto-pull results.</p>
+            
+            <!-- HWiNFO64 CSV Parser -->
+            <div class="log-uploader">
+              <label>HWiNFO64 Sensor Log (.csv):</label>
+              <div class="uploader-row">
+                <button id="btn-select-hwinfo" class="secondary-btn">Select CSV Log</button>
+                <span id="label-hwinfo-file" class="file-path-label font-mono">No log file selected...</span>
+              </div>
+              <div id="hwinfo-preview" class="results-preview font-mono">
+                CPU Temp: Min: -- | Max: -- | Avg: --<br>
+                GPU Temp: Min: -- | Max: -- | Avg: --
+              </div>
+            </div>
+
+            <!-- Cinebench Parser -->
+            <div class="log-uploader margin-top">
+              <label>Cinebench Saved Log / TXT Report:</label>
+              <div class="uploader-row">
+                <button id="btn-select-cinebench" class="secondary-btn">Select Cinebench File</button>
+                <span id="label-cinebench-file" class="file-path-label font-mono">No file selected...</span>
+              </div>
+              <div id="cinebench-preview" class="results-preview font-mono">
+                Cinebench Score: -- pts
+              </div>
+            </div>
+
+            <!-- CrystalDiskMark Parser -->
+            <div class="log-uploader margin-top">
+              <label>CrystalDiskMark TXT Result:</label>
+              <div class="uploader-row">
+                <button id="btn-select-crystal" class="secondary-btn">Select Speed File</button>
+                <span id="label-crystal-file" class="file-path-label font-mono">No speed file selected...</span>
+              </div>
+              <div id="crystal-preview" class="results-preview font-mono">
+                Sequential Read: -- MB/s | Write: -- MB/s
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="client-actions-row">
+          <button id="btn-client-submit" class="primary-pink-btn large-btn" disabled>💾 Upload Results to Ticket & Sync</button>
+          <button id="btn-client-export" class="secondary-btn large-btn">💾 Export Offline Config File (.json)</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- NEW TICKET / EDIT TICKET MODAL -->
+  <div id="ticket-modal" class="modal-overlay">
+    <div class="glass-slab modal-card">
+      <div class="modal-header">
+        <h2 id="modal-title">Create Service Ticket</h2>
+        <button id="btn-close-ticket-modal" class="close-btn">&times;</button>
+      </div>
+      
+      <form id="ticket-form">
+        <!-- Hidden values -->
+        <input type="hidden" id="form-ticket-id">
+        <input type="hidden" id="form-created-at">
+
+        <div class="modal-body">
+          <!-- BASIC INFO TAB/SECTION -->
+          <div class="form-section">
+            <h3>📋 Basic Details</h3>
+            <div class="form-grid-3">
+              <div class="form-group">
+                <label for="form-customer-name">Customer Name *</label>
+                <input type="text" id="form-customer-name" required placeholder="Neo Tokyo Customer">
+              </div>
+              <div class="form-group">
+                <label for="form-deadline">Deadline *</label>
+                <input type="datetime-local" id="form-deadline" required>
+              </div>
+              <div class="form-group">
+                <label for="form-technician">Assigned Technician</label>
+                <select id="form-technician">
+                  <!-- Injected from settings -->
+                </select>
+              </div>
+            </div>
+            
+            <div class="form-grid-2 margin-top">
+              <div class="form-group">
+                <label for="form-ticket-type">Ticket Type</label>
+                <select id="form-ticket-type">
+                  <option value="build">New PC Build</option>
+                  <option value="service">Service / Repair</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label for="form-missing-components-toggle">Awaiting Components?</label>
+                <div class="input-toggle-row">
+                  <input type="checkbox" id="form-missing-components-toggle">
+                  <input type="text" id="form-missing-components" disabled placeholder="Specify missing parts (e.g. RAM, GPU)">
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- STEP 1: PC ASSEMBLY (BUILD PHASE) -->
+          <div class="form-section margin-top">
+            <div class="section-header-row">
+              <h3>🛠️ Step 1: PC Assembly Progress</h3>
+              <span id="build-status-badge" class="badge">0% Complete</span>
+            </div>
+            <div class="checkbox-grid">
+              <label class="checkbox-label">
+                <input type="checkbox" id="check-cpu-ram-ssd"> CPU, RAM, and SSD seated on Motherboard
+              </label>
+              <label class="checkbox-label">
+                <input type="checkbox" id="check-mobo-case"> Motherboard attached securely to Case
+              </label>
+              <label class="checkbox-label">
+                <input type="checkbox" id="check-cooler"> Cooler / AIO Liquid Cooler installed correctly
+              </label>
+              <label class="checkbox-label">
+                <input type="checkbox" id="check-cables"> Cable & Wire management completed
+              </label>
+            </div>
+          </div>
+
+          <!-- STEP 2: QUALITY CONTROL TESTS -->
+          <div id="qc-testing-section" class="form-section margin-top locked">
+            <div class="locked-overlay">
+              <div class="locked-message">🔒 QC Checklist unlocks when PC Assembly is 100% Completed.</div>
+            </div>
+            <div class="section-header-row">
+              <h3>🧪 Step 2: Quality Control Checklist</h3>
+              <button type="button" id="btn-qc-check-all" class="text-btn">Check All Standard Items</button>
+            </div>
+
+            <!-- Checklist Grid -->
+            <div class="checkbox-grid-3">
+              <div class="checklist-group">
+                <h4>Physical Checks</h4>
+                <label class="checkbox-label"><input type="checkbox" id="qc-phys-cabinet"> Cabinet Scratch-Free</label>
+                <label class="checkbox-label"><input type="checkbox" id="qc-phys-motherboard"> Motherboard Socket & Pins OK</label>
+                <label class="checkbox-label"><input type="checkbox" id="qc-phys-ram"> RAM Checked & Clean</label>
+                <label class="checkbox-label"><input type="checkbox" id="qc-phys-screws"> All Screws Secured</label>
+              </div>
+
+              <div class="checklist-group">
+                <h4>Software & Setup Checks</h4>
+                <label class="checkbox-label"><input type="checkbox" id="qc-soft-windows"> Windows Activated</label>
+                <label class="checkbox-label"><input type="checkbox" id="qc-soft-drivers"> All System Drivers Downloaded</label>
+                <label class="checkbox-label"><input type="checkbox" id="qc-soft-bios"> BIOS Updated to Latest</label>
+              </div>
+
+              <div class="checklist-group">
+                <h4>Ports & Connectors</h4>
+                <label class="checkbox-label"><input type="checkbox" id="qc-port-usb"> USB Connecting Ports Test</label>
+                <label class="checkbox-label"><input type="checkbox" id="qc-port-video"> HDMI & DP Outputs Checked</label>
+                <label class="checkbox-label"><input type="checkbox" id="qc-port-audio"> Audio Jack Out/In Tested</label>
+                <label class="checkbox-label"><input type="checkbox" id="qc-port-wifi"> Wi-Fi Antenna Installed</label>
+              </div>
+            </div>
+
+            <div class="form-grid-2 margin-top">
+              <div class="form-group">
+                <label for="form-wifi-speed">Wi-Fi Download Speed (Mbps)</label>
+                <input type="number" id="form-wifi-speed" placeholder="e.g. 250">
+              </div>
+              <div class="form-group">
+                <label for="form-wifi-range">Wi-Fi Antenna Range (Signal %)</label>
+                <input type="number" id="form-wifi-range" min="0" max="100" placeholder="e.g. 95">
+              </div>
+            </div>
+          </div>
+
+          <!-- DIAGNOSTICS & SYSTEM METRICS -->
+          <div id="diagnostics-section" class="form-section margin-top locked">
+            <div class="locked-overlay"></div>
+            <h3>🔥 System Thermal & Benchmark Results</h3>
+            
+            <div class="form-grid-3">
+              <div class="form-group">
+                <label>CPU Temp (Min / Max / Avg)</label>
+                <div class="triple-input">
+                  <input type="number" id="form-cpu-temp-min" placeholder="Min">
+                  <input type="number" id="form-cpu-temp-max" placeholder="Max">
+                  <input type="number" id="form-cpu-temp-avg" readonly placeholder="Avg">
+                </div>
+              </div>
+              
+              <div class="form-group">
+                <label>GPU Temp (Min / Max / Avg)</label>
+                <div class="triple-input">
+                  <input type="number" id="form-gpu-temp-min" placeholder="Min">
+                  <input type="number" id="form-gpu-temp-max" placeholder="Max">
+                  <input type="number" id="form-gpu-temp-avg" readonly placeholder="Avg">
+                </div>
+              </div>
+
+              <div class="form-group">
+                <label for="form-cinebench-score">Cinebench Score</label>
+                <input type="number" id="form-cinebench-score" placeholder="e.g. 14850">
+              </div>
+            </div>
+
+            <div class="form-grid-3 margin-top">
+              <div class="form-group">
+                <label for="form-ssd-read">SSD Seq Read Speed (MB/s)</label>
+                <input type="number" id="form-ssd-read" placeholder="e.g. 5200">
+              </div>
+              <div class="form-group">
+                <label for="form-ssd-write">SSD Seq Write Speed (MB/s)</label>
+                <input type="number" id="form-ssd-write" placeholder="e.g. 4800">
+              </div>
+              <div class="form-group">
+                <label for="form-rival-select">Compare Against Rival Config</label>
+                <select id="form-rival-select">
+                  <option value="">-- Choose Rival Configuration --</option>
+                </select>
+              </div>
+            </div>
+            
+            <!-- Rival Comparison Readout -->
+            <div id="rival-comparison-output" class="comparison-readout margin-top font-mono hidden">
+              <!-- Comparison values dynamically populated -->
+            </div>
+          </div>
+
+          <!-- SERIAL NUMBERS & INVOICE REFERENCE -->
+          <div id="serials-section" class="form-section margin-top locked">
+            <div class="locked-overlay"></div>
+            <h3>🔍 Component Serials & Invoice Cross-Reference</h3>
+            <p class="panel-info-text">Double-click fields to toggle barcode scan mode. Red borders warn about duplicates.</p>
+            <div class="form-grid-2">
+              <div class="form-group">
+                <label for="serial-motherboard">Motherboard Serial</label>
+                <input type="text" id="serial-motherboard" placeholder="Scan or type serial number" class="serial-field">
+              </div>
+              <div class="form-group">
+                <label for="serial-gpu">Graphics Card Serial</label>
+                <input type="text" id="serial-gpu" placeholder="Scan or type serial number" class="serial-field">
+              </div>
+            </div>
+            <div class="form-grid-2 margin-top">
+              <div class="form-group">
+                <label for="serial-ssd">SSD Serial</label>
+                <input type="text" id="serial-ssd" placeholder="Scan or type serial number" class="serial-field">
+              </div>
+              <div class="form-group">
+                <label for="serial-cabinet">Cabinet Serial / Box Barcode</label>
+                <input type="text" id="serial-cabinet" placeholder="Scan or type serial number" class="serial-field">
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="modal-footer">
+          <button type="button" id="btn-print-report" class="secondary-btn text-pink hidden">🖨️ Print QC Report</button>
+          <div class="footer-actions">
+            <button type="button" id="btn-delete-ticket" class="secondary-btn text-crimson hidden">🗑️ Delete</button>
+            <button type="button" id="btn-cancel-ticket" class="secondary-btn">Cancel</button>
+            <button type="submit" id="btn-save-ticket" class="primary-pink-btn">Save Ticket</button>
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- SETTINGS MODAL -->
+  <div id="settings-modal" class="modal-overlay">
+    <div class="glass-slab modal-card settings-card">
+      <div class="modal-header">
+        <h2>Application Settings</h2>
+        <button id="btn-close-settings" class="close-btn">&times;</button>
+      </div>
+      <div class="modal-body">
+        
+        <!-- Technician Config -->
+        <div class="form-section">
+          <h3>👥 Technician Directory</h3>
+          <div class="tech-settings-row">
+            <input type="text" id="settings-add-tech-name" placeholder="Enter new technician name">
+            <button id="btn-settings-add-tech" class="primary-pink-btn">+ Add Tech</button>
+          </div>
+          <ul id="settings-tech-list" class="settings-list margin-top">
+            <!-- Tech list dynamically injected -->
+          </ul>
+        </div>
+
+        <!-- Supabase database settings -->
+        <div class="form-section margin-top">
+          <h3>☁️ Supabase Cloud Database Integration</h3>
+          <p class="panel-info-text">Connect all local shop systems together. Enter your Supabase connection parameters.</p>
+          <div class="form-group">
+            <label for="settings-supabase-url">Supabase Project URL</label>
+            <input type="text" id="settings-supabase-url" placeholder="https://xxxx.supabase.co">
+          </div>
+          <div class="form-group margin-top">
+            <label for="settings-supabase-key">Supabase Public Anon Key</label>
+            <input type="password" id="settings-supabase-key" placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...">
+          </div>
+          <div class="margin-top">
+            <button id="btn-test-db-connection" class="secondary-btn">Check Supabase Status</button>
+            <span id="db-connection-status" class="status-msg"></span>
+          </div>
+        </div>
+
+        <!-- Rival Configurations -->
+        <div class="form-section margin-top">
+          <h3>📊 Rival Benchmarks Database</h3>
+          <div class="table-container">
+            <table class="settings-table">
+              <thead>
+                <tr>
+                  <th>Config Name</th>
+                  <th>Cinebench R23 Expected</th>
+                  <th>SSD Read (MB/s)</th>
+                  <th>SSD Write (MB/s)</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="settings-rivals-table-body">
+                <!-- Injected dynamically -->
+              </tbody>
+            </table>
+          </div>
+          <div class="add-rival-form-row margin-top">
+            <input type="text" id="new-rival-name" placeholder="Ryzen 5 7600 + RTX 4060">
+            <input type="number" id="new-rival-cb" placeholder="CB Score">
+            <input type="number" id="new-rival-read" placeholder="Read MB/s">
+            <input type="number" id="new-rival-write" placeholder="Write MB/s">
+            <button id="btn-add-rival" class="primary-pink-btn">Add Config</button>
+          </div>
+        </div>
+
+      </div>
+      <div class="modal-footer">
+        <button id="btn-reseed-data" class="secondary-btn text-pink">🔄 Reseed Demo Data</button>
+        <button id="btn-save-settings" class="primary-pink-btn">Save Settings</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- PRINTABLE QC REPORT TEMPLATE (Hidden from normal view, displays during print) -->
+  <div id="print-report-container" class="print-only">
+    <div class="print-header">
+      <div class="print-logo-section">
+        <h1>NEO QC</h1>
+        <h3>NEO TOKYO KOCHI</h3>
+        <p>Service, Assembly & Quality Assurance Department</p>
+      </div>
+      <div class="print-meta-section">
+        <p><strong>Ticket ID:</strong> <span id="print-ticket-id">--</span></p>
+        <p><strong>Date:</strong> <span id="print-date">--</span></p>
+        <p><strong>Technician:</strong> <span id="print-tech">--</span></p>
+      </div>
+    </div>
+
+    <hr class="print-divider">
+
+    <div class="print-section">
+      <h3>Customer Information</h3>
+      <table class="print-table-fields">
+        <tr>
+          <td><strong>Customer Name:</strong></td>
+          <td id="print-customer-name">--</td>
+          <td><strong>Job Status:</strong></td>
+          <td>COMPLETED & VERIFIED (QC PASS)</td>
+        </tr>
+      </table>
+    </div>
+
+    <div class="print-section">
+      <h3>System Hardware Specifications</h3>
+      <table class="print-spec-table">
+        <thead>
+          <tr>
+            <th>Component</th>
+            <th>Installed hardware Configuration</th>
+            <th>Verified Serial Number</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>Processor (CPU)</strong></td>
+            <td id="print-spec-cpu">--</td>
+            <td>N/A</td>
+          </tr>
+          <tr>
+            <td><strong>Graphics Card (GPU)</strong></td>
+            <td id="print-spec-gpu">--</td>
+            <td id="print-serial-gpu">--</td>
+          </tr>
+          <tr>
+            <td><strong>System Memory (RAM)</strong></td>
+            <td id="print-spec-ram">--</td>
+            <td id="print-serial-ram">--</td>
+          </tr>
+          <tr>
+            <td><strong>Solid State Drive (SSD)</strong></td>
+            <td id="print-spec-storage">--</td>
+            <td id="print-serial-ssd">--</td>
+          </tr>
+          <tr>
+            <td><strong>Chassis / Cabinet</strong></td>
+            <td>Neo Tokyo Custom Design</td>
+            <td id="print-serial-cabinet">--</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="print-section">
+      <h3>Quality Assurance & Hardware Tests Checklist</h3>
+      <div class="print-checklist-grid">
+        <div class="print-chk-item">✔️ Physical Condition Clean & Checked</div>
+        <div class="print-chk-item">✔️ Motherboard Socket & CPU Pins Checked</div>
+        <div class="print-chk-item">✔️ RAM Modules Correctly Installed</div>
+        <div class="print-chk-item">✔️ CPU Cooler / AIO Thermal Assembly Secured</div>
+        <div class="print-chk-item">✔️ Structural Cables Organized & Zip-tied</div>
+        <div class="print-chk-item">✔️ Windows OS Installed & Fully Licensed</div>
+        <div class="print-chk-item">✔️ System Hardware Drivers Updated</div>
+        <div class="print-chk-item">✔️ Motherboard BIOS Updated</div>
+        <div class="print-chk-item">✔️ Front/Rear USB Ports Functional</div>
+        <div class="print-chk-item">✔️ HDMI & DisplayPort Output Verified</div>
+        <div class="print-chk-item">✔️ Audio Port Sound Jack Checked</div>
+        <div class="print-chk-item">✔️ Wi-Fi Antenna Mounted & Calibrated</div>
+      </div>
+    </div>
+
+    <div class="print-section">
+      <h3>Diagnostic, Thermal & Benchmark Metrics</h3>
+      <table class="print-metric-table">
+        <thead>
+          <tr>
+            <th>Test Parameters</th>
+            <th>Minimum Logged</th>
+            <th>Maximum Logged</th>
+            <th>Averaged Real-Load</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>CPU Temperatures (during Cinebench load)</strong></td>
+            <td id="print-cpu-min">-- °C</td>
+            <td id="print-cpu-max">-- °C</td>
+            <td id="print-cpu-avg">-- °C</td>
+          </tr>
+          <tr>
+            <td><strong>GPU Temperatures (during Furmark load)</strong></td>
+            <td id="print-gpu-min">-- °C</td>
+            <td id="print-gpu-max">-- °C</td>
+            <td id="print-gpu-avg">-- °C</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <table class="print-bench-table margin-top">
+        <thead>
+          <tr>
+            <th>Benchmark Target</th>
+            <th>Neo Tokyo Build Score</th>
+            <th>Expected Competitor Config</th>
+            <th>Status Delta</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>Cinebench R23 Score</strong></td>
+            <td id="print-score-cb">-- pts</td>
+            <td id="print-rival-cb">-- pts</td>
+            <td id="print-delta-cb">--</td>
+          </tr>
+          <tr>
+            <td><strong>SSD Sequential Read Speed</strong></td>
+            <td id="print-score-read">-- MB/s</td>
+            <td id="print-rival-read">-- MB/s</td>
+            <td id="print-delta-read">--</td>
+          </tr>
+          <tr>
+            <td><strong>SSD Sequential Write Speed</strong></td>
+            <td id="print-score-write">-- MB/s</td>
+            <td id="print-rival-write">-- MB/s</td>
+            <td id="print-delta-write">--</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="print-section">
+      <table class="print-table-fields">
+        <tr>
+          <td><strong>Wi-Fi Signal Strength:</strong></td>
+          <td id="print-wifi-signal">-- %</td>
+          <td><strong>Wi-Fi Download Speed:</strong></td>
+          <td id="print-wifi-speed-val">-- Mbps</td>
+        </tr>
+      </table>
+    </div>
+
+    <div class="print-footer">
+      <div class="signature-line">
+        <br><br>
+        <p>______________________________________</p>
+        <p><strong>Technician Signature</strong></p>
+        <p>Neo Tokyo Kochi QA Lab</p>
+      </div>
+      <div class="stamp-section">
+        <div class="stamp-box">QC APPROVED</div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="app.js"></script>
+</body>
+</html>

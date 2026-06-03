@@ -1,0 +1,32 @@
+{
+  "name": "neo-qc",
+  "version": "1.0.0",
+  "description": "PC Assembly Workflow & Quality Control Tracker for Neo Tokyo Kochi",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder"
+  },
+  "keywords": [
+    "pc",
+    "qc",
+    "assembly",
+    "electron"
+  ],
+  "author": "Ananthakrishnan / Neo Tokyo Kochi",
+  "license": "ISC",
+  "devDependencies": {
+    "electron": "^30.0.0",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.neotokyo.neoqc",
+    "productName": "NeoQC",
+    "win": {
+      "target": "portable"
+    },
+    "directories": {
+      "output": "dist"
+    }
+  }
+}
