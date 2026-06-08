@@ -1,0 +1,756 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Neo QC // Customer Build Tracker</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Outfit:wght@300;400;500;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --primary-pink: #e7014e;
+      --primary-pink-hover: #c9003f;
+      --bg-dark: #0b0f19;
+      --glass-bg: rgba(255, 255, 255, 0.05);
+      --glass-border: rgba(255, 255, 255, 0.08);
+      --text-light: #f3f4f6;
+      --text-muted: #9ca3af;
+      --status-done: #10b981;
+      --status-active: #3b82f6;
+      --status-pending: rgba(255, 255, 255, 0.1);
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: 'Outfit', sans-serif;
+      background: var(--bg-dark) url('japanese_vector_bg.png') no-repeat center center fixed;
+      background-size: cover;
+      color: var(--text-light);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 24px;
+    }
+
+    .container {
+      max-width: 680px;
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      gap: 24px;
+      margin-top: 20px;
+      margin-bottom: 40px;
+    }
+
+    /* Brand Header */
+    .brand-header {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+      text-align: center;
+      margin-bottom: 12px;
+    }
+
+    .brand-logo-wrapper {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .brand-dot {
+      width: 12px;
+      height: 12px;
+      background: var(--primary-pink);
+      border-radius: 50%;
+      box-shadow: 0 0 10px var(--primary-pink);
+    }
+
+    .brand-title {
+      font-family: 'Space Grotesk', sans-serif;
+      font-weight: 700;
+      font-size: 1.5rem;
+      letter-spacing: 0.05em;
+    }
+
+    .brand-subtitle {
+      font-size: 0.9rem;
+      color: var(--text-muted);
+      letter-spacing: 0.05em;
+    }
+
+    /* Glass Slab Container */
+    .glass-card {
+      background: rgba(255, 255, 255, 0.04);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border: 1px solid var(--glass-border);
+      border-radius: 20px;
+      padding: 30px;
+      box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+    }
+
+    /* Search/Lookup Form */
+    .search-panel {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      text-align: center;
+    }
+
+    .search-row {
+      display: flex;
+      gap: 10px;
+    }
+
+    .search-input {
+      font-family: inherit;
+      flex-grow: 1;
+      background: rgba(11, 15, 25, 0.5);
+      border: 1px solid var(--glass-border);
+      padding: 12px 16px;
+      border-radius: 10px;
+      color: var(--text-light);
+      outline: none;
+      font-size: 0.95rem;
+    }
+
+    .search-input:focus {
+      border-color: var(--primary-pink);
+    }
+
+    .btn {
+      font-family: inherit;
+      font-weight: 600;
+      padding: 12px 24px;
+      border-radius: 10px;
+      border: none;
+      background: var(--primary-pink);
+      color: var(--text-light);
+      cursor: pointer;
+      font-size: 0.95rem;
+      transition: background 0.2s ease;
+    }
+
+    .btn:hover {
+      background: var(--primary-pink-hover);
+    }
+
+    /* Timeline Styling */
+    .timeline-container {
+      display: flex;
+      flex-direction: column;
+      gap: 24px;
+      margin-top: 12px;
+      position: relative;
+    }
+
+    .timeline-line {
+      position: absolute;
+      left: 17px;
+      top: 10px;
+      width: 2px;
+      height: calc(100% - 20px);
+      background: rgba(255, 255, 255, 0.08);
+      z-index: 0;
+    }
+
+    .timeline-line-fill {
+      position: absolute;
+      left: 17px;
+      top: 10px;
+      width: 2px;
+      background: var(--status-done);
+      z-index: 1;
+      height: 0%;
+      transition: height 0.6s ease;
+    }
+
+    .timeline-step {
+      display: flex;
+      gap: 20px;
+      align-items: flex-start;
+      position: relative;
+      z-index: 2;
+    }
+
+    .step-node {
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      background: #171d2b;
+      border: 2px solid var(--glass-border);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+      font-size: 0.9rem;
+      transition: all 0.4s ease;
+      color: var(--text-muted);
+    }
+
+    .timeline-step.done .step-node {
+      background: var(--status-done);
+      border-color: var(--status-done);
+      color: #fff;
+      box-shadow: 0 0 10px rgba(16, 185, 129, 0.4);
+    }
+
+    .timeline-step.active .step-node {
+      background: var(--status-active);
+      border-color: var(--status-active);
+      color: #fff;
+      box-shadow: 0 0 12px rgba(59, 130, 246, 0.5);
+    }
+
+    .step-content {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      padding-top: 6px;
+    }
+
+    .step-title {
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 1.05rem;
+      font-weight: 700;
+      color: var(--text-muted);
+      transition: color 0.4s ease;
+    }
+
+    .timeline-step.done .step-title,
+    .timeline-step.active .step-title {
+      color: var(--text-light);
+    }
+
+    .step-desc {
+      font-size: 0.85rem;
+      color: var(--text-muted);
+    }
+
+    /* System Details Card */
+    .system-details {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .details-title {
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 1.15rem;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      padding-bottom: 8px;
+    }
+
+    .spec-list {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+
+    .spec-item {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .spec-label {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.02em;
+    }
+
+    .spec-value {
+      font-size: 0.9rem;
+      font-weight: 500;
+    }
+
+    /* Checklist Box */
+    .checklist-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      font-size: 0.85rem;
+      margin-top: 8px;
+    }
+
+    .check-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .check-icon {
+      font-size: 0.9rem;
+    }
+
+    .check-icon.pass { color: var(--status-done); }
+    .check-icon.fail { color: #f87171; }
+
+    /* Settings Button at bottom */
+    .config-trigger {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      text-decoration: none;
+      cursor: pointer;
+      text-align: center;
+      margin-top: 10px;
+    }
+
+    .config-trigger:hover {
+      color: var(--text-light);
+    }
+
+    /* Modal dialog */
+    .config-modal {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.8);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.2s ease;
+    }
+
+    .config-modal.active {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    .modal-content {
+      background: #0f172a;
+      border: 1px solid var(--glass-border);
+      border-radius: 16px;
+      width: 320px;
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .form-group {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .form-group label {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+    }
+
+    .form-group input {
+      font-family: inherit;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid var(--glass-border);
+      padding: 8px 12px;
+      border-radius: 8px;
+      color: var(--text-light);
+      outline: none;
+      font-size: 0.85rem;
+    }
+
+    .form-group input:focus {
+      border-color: var(--primary-pink);
+    }
+
+    .back-btn {
+      font-size: 0.85rem;
+      color: var(--primary-pink);
+      cursor: pointer;
+      align-self: flex-start;
+      margin-bottom: 8px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .back-btn:hover {
+      text-decoration: underline;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="container">
+    
+    <!-- Header -->
+    <div class="brand-header">
+      <div class="brand-logo-wrapper">
+        <span class="brand-dot"></span>
+        <h1 class="brand-title">NEO QC</h1>
+      </div>
+      <p class="brand-subtitle">Quality Assurance System Status</p>
+    </div>
+
+    <!-- TICKET SEARCH SCREEN (Visible if no ID set) -->
+    <div class="glass-card" id="search-view">
+      <div class="search-panel">
+        <h2>Track Your System Build</h2>
+        <p style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 8px;">
+          Enter the ticket ID received on your booking voucher to view real-time QC progress.
+        </p>
+        <div class="search-row">
+          <input type="text" id="input-search-id" class="search-input" placeholder="e.g. t_mock4">
+          <button class="btn" id="btn-search">Track Order</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- LIVE TRACKING SCREEN (Visible if ID matches) -->
+    <div class="glass-card" id="tracking-view" style="display: none;">
+      <div class="back-btn" id="btn-back">← Search Another Build</div>
+      
+      <div class="system-details" style="margin-bottom: 24px;">
+        <h2 id="customer-title">Build Status Summary</h2>
+        <div class="spec-list">
+          <div class="spec-item">
+            <span class="spec-label">Order Type</span>
+            <span class="spec-value" id="spec-order-type">--</span>
+          </div>
+          <div class="spec-item">
+            <span class="spec-label">Estimated Delivery</span>
+            <span class="spec-value" id="spec-delivery">--</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="system-details" style="margin-bottom: 30px;">
+        <h3 class="details-title">🛠️ Progress Timeline</h3>
+        <div class="timeline-container">
+          <div class="timeline-line"></div>
+          <div class="timeline-line-fill" id="timeline-fill"></div>
+
+          <!-- Step 1 -->
+          <div class="timeline-step" id="step-1">
+            <div class="step-node">1</div>
+            <div class="step-content">
+              <span class="step-title">Order Received</span>
+              <span class="step-desc">Invoice generated, and system scheduled for building.</span>
+            </div>
+          </div>
+
+          <!-- Step 2 -->
+          <div class="timeline-step" id="step-2">
+            <div class="step-node">2</div>
+            <div class="step-content">
+              <span class="step-title">Hardware Assembly</span>
+              <span class="step-desc">Core components secured inside chassis; structural cables zip-tied.</span>
+            </div>
+          </div>
+
+          <!-- Step 3 -->
+          <div class="timeline-step" id="step-3">
+            <div class="step-node">3</div>
+            <div class="step-content">
+              <span class="step-title">System & Port Testing</span>
+              <span class="step-desc">OS and drivers configuration; verification of USB, audio, and video ports.</span>
+            </div>
+          </div>
+
+          <!-- Step 4 -->
+          <div class="timeline-step" id="step-4">
+            <div class="step-node">4</div>
+            <div class="step-content">
+              <span class="step-title">Thermal Load Stress Test</span>
+              <span class="step-desc">Heavy test benchmark loop; verification of CPU and GPU cooling assembly.</span>
+            </div>
+          </div>
+
+          <!-- Step 5 -->
+          <div class="timeline-step" id="step-5">
+            <div class="step-node">5</div>
+            <div class="step-content">
+              <span class="step-title">System Verified / Ready</span>
+              <span class="step-desc">Quality Control sign-off complete. Ready for collection!</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Specs & Verified details -->
+      <div class="system-details" style="margin-bottom: 24px;">
+        <h3 class="details-title">🖥️ Hardware Configuration</h3>
+        <div class="spec-list">
+          <div class="spec-item">
+            <span class="spec-label">Processor (CPU)</span>
+            <span class="spec-value" id="info-cpu">--</span>
+          </div>
+          <div class="spec-item">
+            <span class="spec-label">Graphics Card (GPU)</span>
+            <span class="spec-value" id="info-gpu">--</span>
+          </div>
+          <div class="spec-item">
+            <span class="spec-label">RAM Memory</span>
+            <span class="spec-value" id="info-ram">--</span>
+          </div>
+          <div class="spec-item">
+            <span class="spec-label">SSD Storage</span>
+            <span class="spec-value" id="info-storage">--</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- QC Certificate pass card -->
+      <div class="system-details">
+        <h3 class="details-title">🛡️ Quality Control Report Card</h3>
+        <div class="checklist-grid" id="customer-checklist">
+          <!-- Populated dynamically -->
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Settings trigger -->
+    <span class="config-trigger" id="btn-show-config">⚙️ Cloud database settings</span>
+
+  </div>
+
+  <!-- CONFIG MODAL -->
+  <div class="config-modal" id="config-modal">
+    <div class="modal-content">
+      <h3 style="font-family: 'Space Grotesk', sans-serif;">Database Configuration</h3>
+      <div class="form-group">
+        <label for="modal-sb-url">Supabase URL</label>
+        <input type="text" id="modal-sb-url" placeholder="https://xxxx.supabase.co">
+      </div>
+      <div class="form-group">
+        <label for="modal-sb-key">Supabase Anon Key</label>
+        <input type="password" id="modal-sb-key" placeholder="Anon key...">
+      </div>
+      <button class="btn" id="btn-save-modal-config" style="padding: 10px;">Save & Connect</button>
+      <button class="btn" id="btn-close-modal" style="background: rgba(255,255,255,0.05); color: var(--text-light); padding: 8px;">Cancel</button>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script>
+    let supabaseClient = null;
+    let currentTicket = null;
+
+    // Load credentials from localStorage
+    function loadConfig() {
+      const url = localStorage.getItem('neo_qc_sb_url');
+      const key = localStorage.getItem('neo_qc_sb_key');
+      if (url && key) {
+        document.getElementById('modal-sb-url').value = url;
+        document.getElementById('modal-sb-key').value = key;
+        supabaseClient = window.supabase.createClient(url, key);
+        
+        // Auto-check URL parameters
+        checkUrlParams();
+      } else {
+        // Show modal if not configured
+        document.getElementById('config-modal').classList.add('active');
+      }
+    }
+
+    // Save configuration
+    document.getElementById('btn-save-modal-config').addEventListener('click', () => {
+      const url = document.getElementById('modal-sb-url').value.trim();
+      const key = document.getElementById('modal-sb-key').value.trim();
+      if (url && key) {
+        localStorage.setItem('neo_qc_sb_url', url);
+        localStorage.setItem('neo_qc_sb_key', key);
+        supabaseClient = window.supabase.createClient(url, key);
+        document.getElementById('config-modal').classList.remove('active');
+        checkUrlParams();
+      }
+    });
+
+    // Check URL parameters
+    function checkUrlParams() {
+      const urlParams = new URLSearchParams(window.location.search);
+      const ticketId = urlParams.get('id');
+      if (ticketId) {
+        fetchTicketStatus(ticketId);
+      } else {
+        showSearchView();
+      }
+    }
+
+    // Fetch Ticket Status
+    async function fetchTicketStatus(id) {
+      if (!supabaseClient) return;
+      try {
+        const { data, error } = await supabaseClient
+          .from('tickets')
+          .select('*')
+          .eq('id', id)
+          .single();
+
+        if (error || !data) {
+          alert("Could not find ticket ID: " + id);
+          showSearchView();
+          return;
+        }
+
+        currentTicket = data;
+        renderTrackingView();
+      } catch (err) {
+        console.error("Fetch ticket error:", err);
+        showSearchView();
+      }
+    }
+
+    function showSearchView() {
+      document.getElementById('search-view').style.display = 'block';
+      document.getElementById('tracking-view').style.display = 'none';
+      const cleanUrl = window.location.protocol + "//" + window.location.host + window.location.pathname;
+      window.history.replaceState({ path: cleanUrl }, '', cleanUrl);
+    }
+
+    // Render Live tracking screen
+    function renderTrackingView() {
+      document.getElementById('search-view').style.display = 'none';
+      document.getElementById('tracking-view').style.display = 'block';
+
+      document.getElementById('customer-title').textContent = `${currentTicket.customer_name}'s Custom Build`;
+      document.getElementById('spec-order-type').textContent = currentTicket.type ? currentTicket.type.toUpperCase() : 'BUILD';
+      
+      const formattedDeadline = currentTicket.deadline ? new Date(currentTicket.deadline).toLocaleDateString('en-US', {
+        month: 'long',
+        day: 'numeric',
+        year: 'numeric'
+      }) : 'TBD';
+      document.getElementById('spec-delivery').textContent = formattedDeadline;
+
+      // Specs
+      document.getElementById('info-cpu').textContent = currentTicket.specs?.cpu || '--';
+      document.getElementById('info-gpu').textContent = currentTicket.specs?.gpu || '--';
+      document.getElementById('info-ram').textContent = currentTicket.specs?.ram || '--';
+      document.getElementById('info-storage').textContent = currentTicket.specs?.storage || '--';
+
+      // Checklist Report Card
+      renderChecklist();
+
+      // Timeline stages matching
+      updateTimelineState();
+    }
+
+    function renderChecklist() {
+      const container = document.getElementById('customer-checklist');
+      container.innerHTML = '';
+
+      const checks = [
+        { label: "Cabinet Physical Cleanliness", checked: currentTicket.qc_checks?.physCabinet },
+        { label: "Memory Assembly Check", checked: currentTicket.qc_checks?.physRam },
+        { label: "Motherboard CPU Socket verification", checked: currentTicket.qc_checks?.physMobo },
+        { label: "Processor Cooler Assembly", checked: currentTicket.build_checks?.cooler },
+        { label: "Structural Cable Routing", checked: currentTicket.build_checks?.cables },
+        { label: "Licensed Windows Installation", checked: currentTicket.qc_checks?.softWindows },
+        { label: "Motherboard BIOS Upgraded", checked: currentTicket.qc_checks?.softBios },
+        { label: "System Drivers Configured", checked: currentTicket.qc_checks?.softDrivers },
+        { label: "Rear & Front Ports Functionality", checked: currentTicket.qc_checks?.portUsb },
+        { label: "HDMI/DisplayPort Output verified", checked: currentTicket.qc_checks?.portVideo },
+        { label: "Audio Headphone Jack Verification", checked: currentTicket.qc_checks?.portAudio },
+        { label: "Wi-Fi Signal Calibration", checked: currentTicket.qc_checks?.portWifi }
+      ];
+
+      checks.forEach(c => {
+        const div = document.createElement('div');
+        div.className = 'check-item';
+        div.innerHTML = `
+          <span class="check-icon ${c.checked ? 'pass' : 'fail'}">${c.checked ? '✔' : '✖'}</span>
+          <span>${c.label}</span>
+        `;
+        container.appendChild(div);
+      });
+    }
+
+    function calculateBuildPercentage(t) {
+      if (!t.build_checks) return 0;
+      let count = 0;
+      if (t.build_checks.cpuRamSsd) count++;
+      if (t.build_checks.moboCase) count++;
+      if (t.build_checks.cooler) count++;
+      if (t.build_checks.cables) count++;
+      return Math.round((count / 4) * 100);
+    }
+
+    function updateTimelineState() {
+      // Timeline active steps logic based on status
+      const steps = [
+        document.getElementById('step-1'),
+        document.getElementById('step-2'),
+        document.getElementById('step-3'),
+        document.getElementById('step-4'),
+        document.getElementById('step-5')
+      ];
+
+      steps.forEach(s => s.className = 'timeline-step');
+
+      const status = currentTicket.status;
+      const buildPct = calculateBuildPercentage(currentTicket);
+      
+      let currentStepIndex = 0; // 0-indexed
+
+      if (status === 'completed') {
+        currentStepIndex = 4;
+      } else if (status === 'qc_testing') {
+        // check if stress testing is running or just port checks
+        const isStressTesting = currentTicket.diagnostics?.cpuTempAvg !== null || currentTicket.diagnostics?.cinebench !== null;
+        currentStepIndex = isStressTesting ? 3 : 2;
+      } else if (status === 'waiting_qc') {
+        currentStepIndex = 2; // Ports and configuration
+      } else if (status === 'building') {
+        currentStepIndex = 1;
+      } else {
+        // awaiting
+        currentStepIndex = 0;
+      }
+
+      // Mark stages
+      for (let i = 0; i <= 4; i++) {
+        if (i < currentStepIndex) {
+          steps[i].classList.add('done');
+        } else if (i === currentStepIndex) {
+          steps[i].classList.add('active');
+        }
+      }
+
+      // Fill line height percentage
+      const fillPercent = currentStepIndex * 25; // 0, 25, 50, 75, 100
+      document.getElementById('timeline-fill').style.height = fillPercent + '%';
+    }
+
+    // UI Event Listeners
+    document.getElementById('btn-search').addEventListener('click', () => {
+      const id = document.getElementById('input-search-id').value.trim();
+      if (id) {
+        // Set query param and reload/fetch
+        const newUrl = window.location.protocol + "//" + window.location.host + window.location.pathname + '?id=' + id;
+        window.history.pushState({ path: newUrl }, '', newUrl);
+        fetchTicketStatus(id);
+      }
+    });
+
+    document.getElementById('btn-back').addEventListener('click', showSearchView);
+
+    // Config Dialog toggles
+    document.getElementById('btn-show-config').addEventListener('click', () => {
+      document.getElementById('config-modal').classList.add('active');
+    });
+    document.getElementById('btn-close-modal').addEventListener('click', () => {
+      document.getElementById('config-modal').classList.remove('active');
+    });
+
+    // Load
+    loadConfig();
+  </script>
+</body>
+</html>

@@ -1,0 +1,827 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Neo QC // Sales Queue Dashboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Outfit:wght@300;400;500;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --primary-pink: #e7014e;
+      --primary-pink-hover: #c9003f;
+      --bg-dark: #0b0f19;
+      --glass-bg: rgba(255, 255, 255, 0.07);
+      --glass-border: rgba(255, 255, 255, 0.1);
+      --text-light: #f3f4f6;
+      --text-muted: #9ca3af;
+      --status-awaiting: #f59e0b;
+      --status-building: #3b82f6;
+      --status-testing: #a855f7;
+      --status-completed: #10b981;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: 'Outfit', sans-serif;
+      background: var(--bg-dark) url('japanese_vector_bg.png') no-repeat center center fixed;
+      background-size: cover;
+      color: var(--text-light);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      padding: 24px;
+    }
+
+    /* Glassmorphism Scrollbar */
+    ::-webkit-scrollbar {
+      width: 8px;
+    }
+    ::-webkit-scrollbar-track {
+      background: rgba(255, 255, 255, 0.02);
+      border-radius: 8px;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.1);
+      border-radius: 8px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: rgba(255, 255, 255, 0.2);
+    }
+
+    header.navbar {
+      background: rgba(11, 15, 25, 0.5);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid var(--glass-border);
+      border-radius: 16px;
+      padding: 16px 24px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 24px;
+      box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3);
+    }
+
+    .nav-brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .brand-dot {
+      width: 12px;
+      height: 12px;
+      background: var(--primary-pink);
+      border-radius: 50%;
+      box-shadow: 0 0 10px var(--primary-pink);
+    }
+
+    .nav-title {
+      font-family: 'Space Grotesk', sans-serif;
+      font-weight: 700;
+      font-size: 1.25rem;
+      letter-spacing: 0.05em;
+    }
+
+    .nav-controls {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    /* Buttons */
+    .btn {
+      font-family: inherit;
+      font-weight: 500;
+      font-size: 0.85rem;
+      padding: 8px 16px;
+      border-radius: 8px;
+      border: 1px solid var(--glass-border);
+      background: var(--glass-bg);
+      color: var(--text-light);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      transition: all 0.2s ease;
+    }
+
+    .btn:hover {
+      background: rgba(255, 255, 255, 0.15);
+      border-color: rgba(255, 255, 255, 0.2);
+    }
+
+    .btn-pink {
+      background: var(--primary-pink);
+      border-color: var(--primary-pink);
+    }
+
+    .btn-pink:hover {
+      background: var(--primary-pink-hover);
+      border-color: var(--primary-pink-hover);
+    }
+
+    /* Search & Filter Container */
+    .filter-bar {
+      display: grid;
+      grid-template-columns: 1fr auto auto;
+      gap: 12px;
+      margin-bottom: 24px;
+    }
+
+    .search-input {
+      font-family: inherit;
+      width: 100%;
+      background: rgba(11, 15, 25, 0.4);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid var(--glass-border);
+      border-radius: 10px;
+      padding: 12px 16px;
+      color: var(--text-light);
+      outline: none;
+      font-size: 0.9rem;
+      transition: border-color 0.2s ease;
+    }
+
+    .search-input:focus {
+      border-color: var(--primary-pink);
+    }
+
+    .select-filter {
+      font-family: inherit;
+      background: rgba(11, 15, 25, 0.4);
+      backdrop-filter: blur(12px);
+      border: 1px solid var(--glass-border);
+      border-radius: 10px;
+      padding: 0 16px;
+      color: var(--text-light);
+      outline: none;
+      cursor: pointer;
+      font-size: 0.9rem;
+    }
+
+    /* Queue Dashboard Layout */
+    .dashboard-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+      gap: 20px;
+      flex-grow: 1;
+    }
+
+    .ticket-card {
+      background: rgba(255, 255, 255, 0.04);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid var(--glass-border);
+      border-radius: 16px;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.2);
+      transition: transform 0.2s ease, border-color 0.2s ease;
+    }
+
+    .ticket-card:hover {
+      transform: translateY(-2px);
+      border-color: rgba(255, 255, 255, 0.2);
+    }
+
+    .card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+    }
+
+    .ticket-id {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      background: rgba(255, 255, 255, 0.05);
+      padding: 4px 8px;
+      border-radius: 4px;
+    }
+
+    .status-badge {
+      font-size: 0.75rem;
+      font-weight: 700;
+      padding: 4px 10px;
+      border-radius: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.02em;
+    }
+
+    .badge-awaiting { background: rgba(245, 158, 11, 0.15); color: var(--status-awaiting); border: 1px solid rgba(245, 158, 11, 0.3); }
+    .badge-building { background: rgba(59, 130, 246, 0.15); color: var(--status-building); border: 1px solid rgba(59, 130, 246, 0.3); }
+    .badge-testing { background: rgba(168, 85, 247, 0.15); color: var(--status-testing); border: 1px solid rgba(168, 85, 247, 0.3); }
+    .badge-completed { background: rgba(16, 185, 129, 0.15); color: var(--status-completed); border: 1px solid rgba(16, 185, 129, 0.3); }
+
+    .customer-info h3 {
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 1.15rem;
+      margin-bottom: 4px;
+    }
+
+    .customer-info p {
+      font-size: 0.85rem;
+      color: var(--text-muted);
+    }
+
+    /* Progress Indicators */
+    .progress-section {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      padding: 12px;
+      background: rgba(255, 255, 255, 0.02);
+      border-radius: 10px;
+      border: 1px solid rgba(255, 255, 255, 0.03);
+    }
+
+    .progress-row {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .progress-labels {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.75rem;
+      color: var(--text-muted);
+    }
+
+    .progress-bar-bg {
+      width: 100%;
+      height: 6px;
+      background: rgba(255, 255, 255, 0.08);
+      border-radius: 4px;
+      overflow: hidden;
+    }
+
+    .progress-bar-fill {
+      height: 100%;
+      background: linear-gradient(90deg, var(--primary-pink) 0%, #ff4b82 100%);
+      border-radius: 4px;
+      transition: width 0.4s ease;
+    }
+
+    .progress-bar-fill.qc {
+      background: linear-gradient(90deg, #10b981 0%, #34d399 100%);
+    }
+
+    /* Missing parts notice */
+    .missing-parts-banner {
+      background: rgba(239, 68, 68, 0.1);
+      border: 1px solid rgba(239, 68, 68, 0.25);
+      border-radius: 8px;
+      padding: 8px 12px;
+      font-size: 0.8rem;
+      color: #f87171;
+    }
+
+    /* Card Details Grid */
+    .spec-preview-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      font-size: 0.8rem;
+    }
+
+    .spec-item {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .spec-label {
+      color: var(--text-muted);
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 0.02em;
+    }
+
+    .spec-value {
+      font-weight: 500;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .card-footer {
+      border-top: 1px solid rgba(255, 255, 255, 0.08);
+      padding-top: 12px;
+      margin-top: auto;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .tech-tag {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .tech-avatar {
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.15);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.6rem;
+      font-weight: 700;
+      color: var(--text-light);
+    }
+
+    .action-link {
+      font-size: 0.8rem;
+      color: var(--primary-pink);
+      text-decoration: none;
+      font-weight: 500;
+      cursor: pointer;
+    }
+
+    .action-link:hover {
+      text-decoration: underline;
+    }
+
+    /* Configuration Modal/Drawer */
+    .config-drawer {
+      position: fixed;
+      top: 0;
+      right: 0;
+      width: 320px;
+      height: 100%;
+      background: rgba(11, 15, 25, 0.95);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border-left: 1px solid var(--glass-border);
+      z-index: 100;
+      padding: 30px 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+      box-shadow: -10px 0 30px rgba(0, 0, 0, 0.5);
+      transform: translateX(100%);
+      transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    .config-drawer.active {
+      transform: translateX(0);
+    }
+
+    .drawer-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+      padding-bottom: 12px;
+    }
+
+    .drawer-header h3 {
+      font-family: 'Space Grotesk', sans-serif;
+    }
+
+    .close-btn {
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      cursor: pointer;
+      font-size: 1.2rem;
+    }
+
+    .form-group {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .form-group label {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      font-weight: 500;
+    }
+
+    .form-group input {
+      font-family: inherit;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid var(--glass-border);
+      padding: 10px;
+      border-radius: 8px;
+      color: var(--text-light);
+      outline: none;
+      font-size: 0.85rem;
+    }
+
+    .form-group input:focus {
+      border-color: var(--primary-pink);
+    }
+
+    .status-msg {
+      font-size: 0.8rem;
+      padding: 8px;
+      border-radius: 6px;
+      display: none;
+    }
+
+    .status-msg.success {
+      background: rgba(16, 185, 129, 0.15);
+      color: var(--status-completed);
+      border: 1px solid rgba(16, 185, 129, 0.3);
+      display: block;
+    }
+
+    .status-msg.error {
+      background: rgba(239, 68, 68, 0.15);
+      color: #f87171;
+      border: 1px solid rgba(239, 68, 68, 0.3);
+      display: block;
+    }
+
+    .empty-state {
+      grid-column: 1 / -1;
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px dashed var(--glass-border);
+      border-radius: 16px;
+      padding: 60px;
+      text-align: center;
+      color: var(--text-muted);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .empty-icon {
+      font-size: 2.5rem;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- NAVIGATION NAVBAR -->
+  <header class="navbar">
+    <div class="nav-brand">
+      <span class="brand-dot"></span>
+      <span class="nav-title">NEO QC // SALES INTERFACE</span>
+    </div>
+    <div class="nav-controls">
+      <button class="btn" id="btn-open-config">⚙️ Cloud Database Config</button>
+      <button class="btn btn-pink" id="btn-refresh">🔄 Sync Now</button>
+    </div>
+  </header>
+
+  <!-- SEARCH & FILTER ROW -->
+  <div class="filter-bar">
+    <input type="text" id="sales-search" class="search-input" placeholder="Search customer builds, technicians, or components...">
+    <select id="sales-status-filter" class="select-filter">
+      <option value="all">All Statuses</option>
+      <option value="awaiting">Awaiting Components</option>
+      <option value="building">Build Commenced</option>
+      <option value="waiting_qc">Awaiting QC Check</option>
+      <option value="qc_testing">QC Stress Testing</option>
+      <option value="completed">Completed / Passed</option>
+    </select>
+  </div>
+
+  <!-- TICKETS CONTAINER -->
+  <div class="dashboard-grid" id="sales-dashboard-grid">
+    <!-- Injected dynamically -->
+    <div class="empty-state">
+      <div class="empty-icon">🔌</div>
+      <div>
+        <h3>Database Not Connected</h3>
+        <p style="margin-top: 4px; font-size: 0.9rem;">Please configure the Supabase cloud connection to pull live build statuses.</p>
+      </div>
+      <button class="btn btn-pink" id="btn-empty-config" style="margin-top: 8px;">Configure Cloud Access</button>
+    </div>
+  </div>
+
+  <!-- CONFIGURATION DRAWER -->
+  <div class="config-drawer" id="config-drawer">
+    <div class="drawer-header">
+      <h3>Supabase Config</h3>
+      <button class="close-btn" id="btn-close-config">✕</button>
+    </div>
+    <div id="config-status" class="status-msg"></div>
+    <div class="form-group">
+      <label for="input-sb-url">Supabase API URL</label>
+      <input type="text" id="input-sb-url" placeholder="https://xxxx.supabase.co">
+    </div>
+    <div class="form-group">
+      <label for="input-sb-key">Supabase Anon Key</label>
+      <input type="password" id="input-sb-key" placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...">
+    </div>
+    <button class="btn btn-pink" id="btn-save-config" style="justify-content: center; font-size: 0.9rem; padding: 10px;">Save & Connect</button>
+    <p style="font-size: 0.75rem; color: var(--text-muted); line-height: 1.4;">
+      Enter the same Supabase credentials set in your Neo QC desktop app's Settings panel to establish a secure real-time listener.
+    </p>
+  </div>
+
+  <!-- supabase library -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script>
+    let supabaseClient = null;
+    let tickets = [];
+
+    // Load credentials from localStorage
+    function loadConfig() {
+      const url = localStorage.getItem('neo_qc_sb_url');
+      const key = localStorage.getItem('neo_qc_sb_key');
+      if (url && key) {
+        document.getElementById('input-sb-url').value = url;
+        document.getElementById('input-sb-key').value = key;
+        initSupabase(url, key);
+      }
+    }
+
+    // Initialize Supabase Client
+    function initSupabase(url, key) {
+      const statusEl = document.getElementById('config-status');
+      try {
+        supabaseClient = window.supabase.createClient(url, key);
+        statusEl.className = "status-msg success";
+        statusEl.textContent = "Connected successfully to Supabase!";
+        
+        // Load initial data
+        fetchTickets();
+
+        // Establish Realtime subscription
+        setupRealtime();
+      } catch (err) {
+        statusEl.className = "status-msg error";
+        statusEl.textContent = "Connection failed: " + err.message;
+        supabaseClient = null;
+      }
+    }
+
+    // Save configurations
+    document.getElementById('btn-save-config').addEventListener('click', () => {
+      const url = document.getElementById('input-sb-url').value.trim();
+      const key = document.getElementById('input-sb-key').value.trim();
+      
+      if (!url || !key) {
+        const statusEl = document.getElementById('config-status');
+        statusEl.className = "status-msg error";
+        statusEl.textContent = "Please fill in all configuration fields.";
+        return;
+      }
+
+      localStorage.setItem('neo_qc_sb_url', url);
+      localStorage.setItem('neo_qc_sb_key', key);
+      initSupabase(url, key);
+    });
+
+    // Fetch Tickets
+    async function fetchTickets() {
+      if (!supabaseClient) return;
+      try {
+        const { data, error } = await supabaseClient
+          .from('tickets')
+          .select('*')
+          .order('deadline', { ascending: true });
+
+        if (error) throw error;
+        tickets = data || [];
+        renderDashboard();
+      } catch (err) {
+        console.error("Fetch tickets error:", err);
+      }
+    }
+
+    // Real-time listener
+    function setupRealtime() {
+      if (!supabaseClient) return;
+      supabaseClient
+        .channel('public:tickets')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'tickets' }, payload => {
+          console.log("Realtime sync change payload:", payload);
+          const newRow = payload.new;
+          const oldRow = payload.old;
+          
+          if (payload.eventType === 'INSERT') {
+            tickets.push(newRow);
+          } else if (payload.eventType === 'UPDATE') {
+            const idx = tickets.findIndex(t => t.id === newRow.id);
+            if (idx !== -1) {
+              tickets[idx] = newRow;
+            }
+          } else if (payload.eventType === 'DELETE') {
+            tickets = tickets.filter(t => t.id !== oldRow.id);
+          }
+          renderDashboard();
+        })
+        .subscribe();
+    }
+
+    // Helper functions for progress calculations
+    function calculateBuildPercentage(t) {
+      if (!t.build_checks) return 0;
+      let count = 0;
+      if (t.build_checks.cpuRamSsd) count++;
+      if (t.build_checks.moboCase) count++;
+      if (t.build_checks.cooler) count++;
+      if (t.build_checks.cables) count++;
+      return Math.round((count / 4) * 100);
+    }
+
+    function calculateQcPercentage(t) {
+      if (!t.qc_checks) return 0;
+      let count = 0;
+      const qcKeys = [
+        'physCabinet', 'physMobo', 'physRam', 'physScrews',
+        'softWindows', 'softDrivers', 'softBios',
+        'portUsb', 'portVideo', 'portAudio', 'portWifi'
+      ];
+      qcKeys.forEach(k => {
+        if (t.qc_checks[k]) count++;
+      });
+      return Math.round((count / qcKeys.length) * 100);
+    }
+
+    function getStatusLabel(status) {
+      switch (status) {
+        case 'awaiting': return 'Awaiting Components';
+        case 'building': return 'Building';
+        case 'waiting_qc': return 'Awaiting QC';
+        case 'qc_testing': return 'QC Stress Testing';
+        case 'completed': return 'Completed';
+        default: return 'Pending';
+      }
+    }
+
+    function getStatusBadgeClass(status) {
+      switch (status) {
+        case 'awaiting': return 'badge-awaiting';
+        case 'building': return 'badge-building';
+        case 'waiting_qc': return 'badge-awaiting';
+        case 'qc_testing': return 'badge-testing';
+        case 'completed': return 'badge-completed';
+        default: return '';
+      }
+    }
+
+    // Render Dashboard Grid
+    function renderDashboard() {
+      const grid = document.getElementById('sales-dashboard-grid');
+      const searchQuery = document.getElementById('sales-search').value.toLowerCase().trim();
+      const statusFilter = document.getElementById('sales-status-filter').value;
+
+      grid.innerHTML = '';
+
+      const filtered = tickets.filter(t => {
+        // Status filter
+        if (statusFilter !== 'all' && t.status !== statusFilter) return false;
+
+        // Search query filter
+        if (searchQuery) {
+          const matchCustomer = t.customer_name && t.customer_name.toLowerCase().includes(searchQuery);
+          const matchTech = t.technician && t.technician.toLowerCase().includes(searchQuery);
+          const matchCpu = t.specs && t.specs.cpu && t.specs.cpu.toLowerCase().includes(searchQuery);
+          const matchGpu = t.specs && t.specs.gpu && t.specs.gpu.toLowerCase().includes(searchQuery);
+          return matchCustomer || matchTech || matchCpu || matchGpu;
+        }
+        return true;
+      });
+
+      if (filtered.length === 0) {
+        grid.innerHTML = `
+          <div class="empty-state">
+            <div class="empty-icon">🔍</div>
+            <div>
+              <h3>No Matching Builds Found</h3>
+              <p style="margin-top: 4px; font-size: 0.9rem;">There are no active orders matching your current search parameters.</p>
+            </div>
+          </div>
+        `;
+        return;
+      }
+
+      filtered.forEach(t => {
+        const buildPct = calculateBuildPercentage(t);
+        const qcPct = calculateQcPercentage(t);
+        
+        const card = document.createElement('div');
+        card.className = 'ticket-card';
+        
+        let missingPartsHtml = '';
+        if (t.missing_components_toggle && t.missing_components) {
+          missingPartsHtml = `
+            <div class="missing-parts-banner">
+              ⚠️ <strong>Missing parts:</strong> ${t.missing_components}
+            </div>
+          `;
+        }
+
+        const formattedDeadline = t.deadline ? new Date(t.deadline).toLocaleDateString('en-US', {
+          month: 'short',
+          day: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit'
+        }) : 'No Deadline';
+
+        const cpuSpec = t.specs && t.specs.cpu ? t.specs.cpu : '--';
+        const gpuSpec = t.specs && t.specs.gpu ? t.specs.gpu : '--';
+        const ramSpec = t.specs && t.specs.ram ? t.specs.ram : '--';
+        const diskSpec = t.specs && t.specs.storage ? t.specs.storage : '--';
+
+        card.innerHTML = `
+          <div class="card-header">
+            <span class="ticket-id">ID: ${t.id.slice(-6).toUpperCase()}</span>
+            <span class="status-badge ${getStatusBadgeClass(t.status)}">${getStatusLabel(t.status)}</span>
+          </div>
+          
+          <div class="customer-info">
+            <h3>${t.customer_name}</h3>
+            <p>Target Deadline: <strong>${formattedDeadline}</strong></p>
+          </div>
+
+          ${missingPartsHtml}
+
+          <!-- Live Progress Section -->
+          <div class="progress-section">
+            <div class="progress-row">
+              <div class="progress-labels">
+                <span>Assembly Completion</span>
+                <strong>${buildPct}%</strong>
+              </div>
+              <div class="progress-bar-bg">
+                <div class="progress-bar-fill" style="width: ${buildPct}%;"></div>
+              </div>
+            </div>
+            <div class="progress-row">
+              <div class="progress-labels">
+                <span>Quality Control Verification</span>
+                <strong>${qcPct}%</strong>
+              </div>
+              <div class="progress-bar-bg">
+                <div class="progress-bar-fill qc" style="width: ${qcPct}%;"></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Specs Preview Grid -->
+          <div class="spec-preview-grid">
+            <div class="spec-item">
+              <span class="spec-label">Processor</span>
+              <span class="spec-value" title="${cpuSpec}">${cpuSpec}</span>
+            </div>
+            <div class="spec-item">
+              <span class="spec-label">Graphics Card</span>
+              <span class="spec-value" title="${gpuSpec}">${gpuSpec}</span>
+            </div>
+            <div class="spec-item">
+              <span class="spec-label">System Memory</span>
+              <span class="spec-value" title="${ramSpec}">${ramSpec}</span>
+            </div>
+            <div class="spec-item">
+              <span class="spec-label">SSD Storage</span>
+              <span class="spec-value" title="${diskSpec}">${diskSpec}</span>
+            </div>
+          </div>
+
+          <div class="card-footer">
+            <div class="tech-tag">
+              <div class="tech-avatar">${t.technician ? t.technician[0].toUpperCase() : '?' }</div>
+              <span>Tech: <strong>${t.technician || 'Unassigned'}</strong></span>
+            </div>
+            <a class="action-link" onclick="openCustomerLink('${t.id}')">Customer View ↗</a>
+          </div>
+        `;
+        grid.appendChild(card);
+      });
+    }
+
+    function openCustomerLink(id) {
+      window.open(`customer.html?id=${id}`, '_blank');
+    }
+
+    // Search and filter listeners
+    document.getElementById('sales-search').addEventListener('input', renderDashboard);
+    document.getElementById('sales-status-filter').addEventListener('change', renderDashboard);
+    document.getElementById('btn-refresh').addEventListener('click', fetchTickets);
+
+    // Config drawer toggle
+    const drawer = document.getElementById('config-drawer');
+    document.getElementById('btn-open-config').addEventListener('click', () => drawer.classList.add('active'));
+    document.getElementById('btn-empty-config').addEventListener('click', () => drawer.classList.add('active'));
+    document.getElementById('btn-close-config').addEventListener('click', () => drawer.classList.remove('active'));
+
+    // On Load
+    loadConfig();
+  </script>
+</body>
+</html>
