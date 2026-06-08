@@ -652,6 +652,7 @@
         { label: "Motherboard CPU Socket verification", checked: currentTicket.qc_checks?.physMobo },
         { label: "Processor Cooler Assembly", checked: currentTicket.build_checks?.cooler },
         { label: "Structural Cable Routing", checked: currentTicket.build_checks?.cables },
+        { label: "System Posted successfully to BIOS", checked: currentTicket.build_checks?.posted },
         { label: "Licensed Windows Installation", checked: currentTicket.qc_checks?.softWindows },
         { label: "Motherboard BIOS Upgraded", checked: currentTicket.qc_checks?.softBios },
         { label: "System Drivers Configured", checked: currentTicket.qc_checks?.softDrivers },
@@ -679,7 +680,8 @@
       if (t.build_checks.moboCase) count++;
       if (t.build_checks.cooler) count++;
       if (t.build_checks.cables) count++;
-      return Math.round((count / 4) * 100);
+      if (t.build_checks.posted) count++;
+      return Math.round((count / 5) * 100);
     }
 
     function updateTimelineState() {

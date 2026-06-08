@@ -635,7 +635,8 @@
       if (t.build_checks.moboCase) count++;
       if (t.build_checks.cooler) count++;
       if (t.build_checks.cables) count++;
-      return Math.round((count / 4) * 100);
+      if (t.build_checks.posted) count++;
+      return Math.round((count / 5) * 100);
     }
 
     function calculateQcPercentage(t) {

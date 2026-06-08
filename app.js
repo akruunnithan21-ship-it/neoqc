@@ -42,8 +42,18 @@ async function loadDatabase() {
     { id: "2", name: "Intel i7-14700K + RTX 4070 Ti", cpu: "Core i7-14700K", gpu: "RTX 4070 Ti Super", cinebenchR23: 35000, readSpeed: 7000, writeSpeed: 6000, price: "₹68,000 (~$820)" }
   ];
 
-  // Database migration & normalization for default rival configs
+  // Database migration & normalization for default rival configs and new build checks
   let databaseNeedsSaving = false;
+  
+  if (appState.tickets && appState.tickets.length > 0) {
+    appState.tickets.forEach(t => {
+      if (t.buildChecks && t.buildChecks.posted === undefined) {
+        t.buildChecks.posted = (t.status !== 'building' && t.status !== 'awaiting');
+        databaseNeedsSaving = true;
+      }
+    });
+  }
+
   if (appState.rivalBenchmarks && appState.rivalBenchmarks.length > 0) {
     appState.rivalBenchmarks.forEach(rival => {
       if (rival.id === "1") {
@@ -325,7 +335,8 @@ function calculateBuildPercentage(t) {
   if (t.buildChecks.moboCase) count++;
   if (t.buildChecks.cooler) count++;
   if (t.buildChecks.cables) count++;
-  return Math.round((count / 4) * 100);
+  if (t.buildChecks.posted) count++;
+  return Math.round((count / 5) * 100);
 }
 
 function calculateQcPercentage(t) {
@@ -403,6 +414,7 @@ function openTicketModal(ticketId = null) {
       document.getElementById('check-mobo-case').checked = ticket.buildChecks.moboCase;
       document.getElementById('check-cooler').checked = ticket.buildChecks.cooler;
       document.getElementById('check-cables').checked = ticket.buildChecks.cables;
+      document.getElementById('check-posted').checked = ticket.buildChecks.posted || false;
 
       // Lock triggers check
       const buildPct = calculateBuildPercentage(ticket);
@@ -633,7 +645,8 @@ async function handleTicketFormSubmit(e) {
     cpuRamSsd: document.getElementById('check-cpu-ram-ssd').checked,
     moboCase: document.getElementById('check-mobo-case').checked,
     cooler: document.getElementById('check-cooler').checked,
-    cables: document.getElementById('check-cables').checked
+    cables: document.getElementById('check-cables').checked,
+    posted: document.getElementById('check-posted').checked
   };
 
   const qcChecks = {
@@ -675,7 +688,7 @@ async function handleTicketFormSubmit(e) {
 
   // Determine current status
   let status = 'awaiting';
-  const isBuildComplete = buildChecks.cpuRamSsd && buildChecks.moboCase && buildChecks.cooler && buildChecks.cables;
+  const isBuildComplete = buildChecks.cpuRamSsd && buildChecks.moboCase && buildChecks.cooler && buildChecks.cables && buildChecks.posted;
   
   if (isBuildComplete) {
     status = 'waiting_qc';
@@ -1151,6 +1164,7 @@ function populatePrintChecklist(ticket) {
       { checked: getQcCheck('physRam'), label: "RAM Modules Correctly Installed" },
       { checked: getBuildCheck('cooler'), label: "CPU Cooler / AIO Thermal Assembly Secured" },
       { checked: getBuildCheck('cables'), label: "Structural Cables Organized & Zip-tied" },
+      { checked: getBuildCheck('posted'), label: "System Posted successfully to BIOS" },
       { checked: getQcCheck('softWindows'), label: "Windows OS Installed & Fully Licensed" },
       { checked: getQcCheck('softDrivers'), label: "System Hardware Drivers Updated" },
       { checked: getQcCheck('softBios'), label: "Motherboard BIOS Updated" },
@@ -1453,14 +1467,14 @@ function setupEventListeners() {
   });
 
   // Lock transitions checker on physical build checkbox clicks
-  const buildCheckboxes = ['check-cpu-ram-ssd', 'check-mobo-case', 'check-cooler', 'check-cables'];
+  const buildCheckboxes = ['check-cpu-ram-ssd', 'check-mobo-case', 'check-cooler', 'check-cables', 'check-posted'];
   buildCheckboxes.forEach(id => {
     document.getElementById(id).addEventListener('change', () => {
       let count = 0;
       buildCheckboxes.forEach(cid => {
         if (document.getElementById(cid).checked) count++;
       });
-      const pct = Math.round((count / 4) * 100);
+      const pct = Math.round((count / 5) * 100);
       updateFormLockStates(pct);
     });
   });
@@ -1770,7 +1784,8 @@ function seedMockTickets() {
         cpuRamSsd: true,
         moboCase: true,
         cooler: false,
-        cables: false
+        cables: false,
+        posted: false
       },
       qcChecks: {
         physCabinet: false, physMobo: false, physRam: false, physScrews: false,
@@ -1801,7 +1816,8 @@ function seedMockTickets() {
         cpuRamSsd: true,
         moboCase: true,
         cooler: true,
-        cables: true
+        cables: true,
+        posted: true
       },
       qcChecks: {
         physCabinet: false, physMobo: false, physRam: false, physScrews: false,
@@ -1832,7 +1848,8 @@ function seedMockTickets() {
         cpuRamSsd: true,
         moboCase: false,
         cooler: false,
-        cables: false
+        cables: false,
+        posted: false
       },
       qcChecks: {
         physCabinet: false, physMobo: false, physRam: false, physScrews: false,
@@ -1863,7 +1880,8 @@ function seedMockTickets() {
         cpuRamSsd: true,
         moboCase: true,
         cooler: true,
-        cables: true
+        cables: true,
+        posted: true
       },
       qcChecks: {
         physCabinet: true,
@@ -1903,7 +1921,8 @@ function seedMockTickets() {
         cpuRamSsd: true,
         moboCase: true,
         cooler: true,
-        cables: true
+        cables: true,
+        posted: true
       },
       qcChecks: {
         physCabinet: true, physMobo: true, physRam: true, physScrews: true,
