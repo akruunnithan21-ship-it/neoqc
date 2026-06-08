@@ -1447,6 +1447,10 @@ function setupEventListeners() {
   document.getElementById('btn-client-exit').addEventListener('click', () => {
     switchScreen('selector');
   });
+  // Staff exit
+  document.getElementById('btn-staff-exit').addEventListener('click', () => {
+    switchScreen('selector');
+  });
   document.getElementById('btn-client-refresh').addEventListener('click', () => {
     populateClientTicketSelect();
     checkClientFormReady();
