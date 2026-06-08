@@ -357,10 +357,20 @@
             </div>
           </div>
 
-          <!-- DIAGNOSTICS & SYSTEM METRICS -->
           <div id="diagnostics-section" class="form-section margin-top locked">
             <div class="locked-overlay"></div>
             <h3>🔥 System Thermal & Benchmark Results</h3>
+            
+            <!-- Automated Stress Test in Modal -->
+            <div class="diagnostics-auto-run-card" style="background: rgba(231, 1, 78, 0.03); border: 1px dashed rgba(231, 1, 78, 0.2); padding: 12px; border-radius: 8px; margin-bottom: 16px; display: flex; flex-direction: column; gap: 8px;">
+              <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+                <label style="color: var(--primary-pink); font-weight: 700; margin-bottom: 0;">🚀 Automated Benchmarks</label>
+                <button type="button" id="btn-modal-run-diagnostics" class="primary-pink-btn" style="padding: 6px 12px; font-size: 0.8rem;">Run Stress Test & Auto-Fill</button>
+              </div>
+              <div id="modal-diagnostics-status" class="font-mono" style="font-size: 0.75rem; color: var(--text-muted); line-height: 1.4;">
+                HWiNFO64: [Idle] | Cinebench R23: [Idle] | FurMark: [Idle]
+              </div>
+            </div>
             
             <div class="form-grid-3">
               <div class="form-group">

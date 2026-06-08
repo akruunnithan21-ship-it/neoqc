@@ -745,6 +745,14 @@
     overflow: hidden;
     animation: modal-enter 0.3s cubic-bezier(0.16, 1, 0.3, 1);
   }
+
+  #ticket-form {
+    display: flex;
+    flex-direction: column;
+    flex-grow: 1;
+    min-height: 0;
+    overflow: hidden;
+  }
   
   .settings-card {
     max-width: 700px;

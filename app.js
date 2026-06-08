@@ -422,6 +422,7 @@ function openTicketModal(ticketId = null) {
       printBtn.classList.remove('hidden');
       document.getElementById('btn-save-pdf').classList.remove('hidden');
       deleteBtn.classList.remove('hidden');
+      updateModalDiagnosticsStatus();
     }
   } else {
     title.textContent = "Create Service Ticket";
@@ -430,6 +431,7 @@ function openTicketModal(ticketId = null) {
     printBtn.classList.add('hidden');
     document.getElementById('btn-save-pdf').classList.add('hidden');
     deleteBtn.classList.add('hidden');
+    updateModalDiagnosticsStatus();
   }
 
   modal.classList.add('active');
@@ -454,6 +456,33 @@ function updateFormLockStates(buildPct) {
   }
 }
 
+function updateModalDiagnosticsStatus() {
+  const statusBox = document.getElementById('modal-diagnostics-status');
+  if (!statusBox) return;
+
+  const hasHw = appState.settings.pathHwInfo || appState.settings.pathHwInfo === 'mock';
+  const hasCb = appState.settings.pathCinebench || appState.settings.pathCinebench === 'mock';
+  const hasFm = appState.settings.pathFurmark || appState.settings.pathFurmark === 'mock';
+
+  // Check values in modal inputs
+  const cpuAvg = document.getElementById('form-cpu-temp-avg').value;
+  const cbScore = document.getElementById('form-cinebench-score').value;
+
+  let hwStatus = hasHw ? "Ready" : "Not Configured";
+  let cbStatus = hasCb ? "Ready" : "Not Configured";
+  let fmStatus = hasFm ? "Ready" : "Not Configured";
+
+  if (cpuAvg) hwStatus = "Calculated";
+  if (cbScore) cbStatus = `Completed (${cbScore} pts)`;
+  if (cpuAvg) fmStatus = "Completed";
+
+  statusBox.innerHTML = `
+    HWiNFO64: <strong style="color: ${hwStatus === 'Calculated' ? 'var(--status-completed)' : 'inherit'}">${hwStatus}</strong> | 
+    Cinebench R23: <strong style="color: ${cbStatus.startsWith('Completed') ? 'var(--status-completed)' : 'inherit'}">${cbStatus}</strong> | 
+    FurMark: <strong style="color: ${fmStatus === 'Completed' ? 'var(--status-completed)' : 'inherit'}">${fmStatus}</strong>
+  `;
+}
+
 function setupFormCalculations() {
   // Auto average temps
   const cpuMin = document.getElementById('form-cpu-temp-min');
@@ -468,6 +497,7 @@ function setupFormCalculations() {
     } else {
       cpuAvg.value = '';
     }
+    updateModalDiagnosticsStatus();
   };
   cpuMin.addEventListener('input', calcCpuAvg);
   cpuMax.addEventListener('input', calcCpuAvg);
@@ -484,9 +514,15 @@ function setupFormCalculations() {
     } else {
       gpuAvg.value = '';
     }
+    updateModalDiagnosticsStatus();
   };
   gpuMin.addEventListener('input', calcGpuAvg);
   gpuMax.addEventListener('input', calcGpuAvg);
+  
+  // Cinebench input trigger
+  document.getElementById('form-cinebench-score').addEventListener('input', () => {
+    updateModalDiagnosticsStatus();
+  });
   
   // Rival comparator trigger
   document.getElementById('form-rival-select').addEventListener('change', updateRivalComparisonOutput);
@@ -868,10 +904,10 @@ async function setupClientMode() {
   });
 }
 
-function parseHwInfoCsv(content) {
-  if (!content) return;
+function getHwInfoStats(content) {
+  if (!content) return null;
   const lines = content.split('\n');
-  if (lines.length < 2) return;
+  if (lines.length < 2) return null;
 
   // Auto-detect delimiter (, or ;)
   let delimiter = ',';
@@ -893,10 +929,7 @@ function parseHwInfoCsv(content) {
   if (cpuIdx === -1) cpuIdx = headers.findIndex(h => h.toLowerCase().includes('cpu') && h.includes('°C'));
   if (gpuIdx === -1) gpuIdx = headers.findIndex(h => h.toLowerCase().includes('gpu') && h.includes('°C'));
 
-  if (cpuIdx === -1 && gpuIdx === -1) {
-    alert("Could not map temperature columns in this CSV. Please check HWiNFO64 sensor headers.");
-    return;
-  }
+  if (cpuIdx === -1 && gpuIdx === -1) return null;
 
   let cpuVals = [];
   let gpuVals = [];
@@ -924,10 +957,19 @@ function parseHwInfoCsv(content) {
     return { min: Math.round(min), max: Math.round(max), avg };
   };
 
-  parsedTemps = {
+  return {
     cpu: getStats(cpuVals),
     gpu: getStats(gpuVals)
   };
+}
+
+function parseHwInfoCsv(content) {
+  const stats = getHwInfoStats(content);
+  if (!stats) {
+    alert("Could not map temperature columns in this CSV. Please check HWiNFO64 sensor headers.");
+    return;
+  }
+  parsedTemps = stats;
 
   document.getElementById('hwinfo-preview').innerHTML = `
     CPU Temp: Min: ${parsedTemps.cpu.min}°C | Max: ${parsedTemps.cpu.max}°C | Avg: ${parsedTemps.cpu.avg}°C<br>
@@ -1406,6 +1448,70 @@ function setupEventListeners() {
     if (editingTicketId) {
       triggerSavePdf(editingTicketId);
     }
+  });
+
+  // Modal automated diagnostics run button
+  document.getElementById('btn-modal-run-diagnostics').addEventListener('click', async () => {
+    const btn = document.getElementById('btn-modal-run-diagnostics');
+    const statusBox = document.getElementById('modal-diagnostics-status');
+    if (!statusBox) return;
+
+    // Check if paths are configured
+    const hasHw = appState.settings.pathHwInfo || appState.settings.pathHwInfo === 'mock';
+    const hasCb = appState.settings.pathCinebench || appState.settings.pathCinebench === 'mock';
+    const hasFm = appState.settings.pathFurmark || appState.settings.pathFurmark === 'mock';
+
+    if (!hasHw && !hasCb && !hasFm) {
+      alert("No diagnostic tools configured! Please go to Settings and enter the executable paths or 'mock' to simulate.");
+      return;
+    }
+
+    btn.disabled = true;
+    btn.textContent = "⚡ Running Stress Tests...";
+    
+    // Set status to running for active tools
+    let hwRunText = hasHw ? "<strong style='color: var(--status-urgent)'>Running...</strong>" : "Not Configured";
+    let cbRunText = hasCb ? "<strong style='color: var(--status-urgent)'>Running...</strong>" : "Not Configured";
+    let fmRunText = hasFm ? "<strong style='color: var(--status-urgent)'>Running...</strong>" : "Not Configured";
+
+    statusBox.innerHTML = `
+      HWiNFO64: ${hwRunText} | 
+      Cinebench R23: ${cbRunText} | 
+      FurMark: ${fmRunText}
+    `;
+
+    const res = await ipcRenderer.invoke('sys:run-diagnostics', appState.settings);
+    
+    btn.disabled = false;
+    btn.textContent = "Run Stress Test & Auto-Fill";
+
+    if (!res.success) {
+      statusBox.innerHTML = `<span style="color: var(--status-urgent)">Error: ${res.error}</span>`;
+      return;
+    }
+
+    // Populate parsed temperatures
+    if (res.csvContent) {
+      const stats = getHwInfoStats(res.csvContent);
+      if (stats) {
+        if (stats.cpu.min !== null) document.getElementById('form-cpu-temp-min').value = stats.cpu.min;
+        if (stats.cpu.max !== null) document.getElementById('form-cpu-temp-max').value = stats.cpu.max;
+        if (stats.cpu.avg !== null) document.getElementById('form-cpu-temp-avg').value = stats.cpu.avg;
+        
+        if (stats.gpu.min !== null) document.getElementById('form-gpu-temp-min').value = stats.gpu.min;
+        if (stats.gpu.max !== null) document.getElementById('form-gpu-temp-max').value = stats.gpu.max;
+        if (stats.gpu.avg !== null) document.getElementById('form-gpu-temp-avg').value = stats.gpu.avg;
+      }
+    }
+
+    // Populate Cinebench score
+    if (res.cinebenchScore) {
+      document.getElementById('form-cinebench-score').value = res.cinebenchScore;
+    }
+
+    // Trigger calculations and comparisons
+    updateRivalComparisonOutput();
+    updateModalDiagnosticsStatus();
   });
 
   // Settings executable path browsers
