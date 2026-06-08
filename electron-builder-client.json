@@ -1,0 +1,11 @@
+{
+  "appId": "com.neotokyo.neoqc.client",
+  "productName": "NeoQC Client",
+  "win": {
+    "target": "portable",
+    "icon": "assets/icon.ico"
+  },
+  "directories": {
+    "output": "dist"
+  }
+}

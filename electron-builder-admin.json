@@ -1,0 +1,11 @@
+{
+  "appId": "com.neotokyo.neoqc.admin",
+  "productName": "NeoQC Admin",
+  "win": {
+    "target": "portable",
+    "icon": "assets/icon.ico"
+  },
+  "directories": {
+    "output": "dist"
+  }
+}

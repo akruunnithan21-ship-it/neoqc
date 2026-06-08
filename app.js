@@ -1,4 +1,6 @@
 const { ipcRenderer } = require('electron');
+const fs = require('fs');
+const path = require('path');
 
 // App Global State
 let appState = {
@@ -26,12 +28,29 @@ document.addEventListener('DOMContentLoaded', async () => {
   updateTimeDisplay();
   setInterval(updateTimeDisplay, 60000);
 
-  // Navigate to initial screen based on isMaster setting
-  if (appState.settings.isMaster) {
-    switchScreen('selector');
-  } else {
-    switchScreen('client-welcome');
+  // Navigate to initial screen based on app-config.json or settings
+  let bootMode = 'client-welcome';
+  try {
+    const configPath = path.join(__dirname, 'app-config.json');
+    if (fs.existsSync(configPath)) {
+      const cfg = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+      if (cfg.mode === 'admin') {
+        bootMode = 'staff';
+      }
+    }
+  } catch (e) {
+    console.error("Error reading app-config.json:", e);
   }
+
+  if (bootMode !== 'staff') {
+    if (appState.settings.isMaster) {
+      bootMode = 'selector';
+    } else {
+      bootMode = 'client-welcome';
+    }
+  }
+
+  switchScreen(bootMode);
 });
 
 // Load DB from local Electron AppData Storage
@@ -1926,6 +1945,10 @@ function setupEventListeners() {
   window.addEventListener('keydown', (e) => {
     if (e.ctrlKey && e.altKey && e.key.toLowerCase() === 's') {
       openSettingsModal();
+    }
+    // Secret technician shortcut to access staff portal directly (Ctrl + Alt + P)
+    if (e.ctrlKey && e.altKey && e.key.toLowerCase() === 'p') {
+      switchScreen('staff');
     }
   });
 }

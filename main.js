@@ -272,13 +272,49 @@ async function measureDiskSpeed() {
   }
 }
 
+// Path resolver helper to automatically locate executables inside provided directory paths
+function resolveExecutable(providedPath, defaultExecutables) {
+  if (!providedPath) return "";
+  try {
+    let resolved = providedPath;
+    if (fs.existsSync(resolved)) {
+      const stat = fs.statSync(resolved);
+      if (stat.isDirectory()) {
+        for (const exe of defaultExecutables) {
+          const checkPath = path.join(resolved, exe);
+          if (fs.existsSync(checkPath)) {
+            return checkPath;
+          }
+        }
+        // Search for any .exe inside the folder
+        const files = fs.readdirSync(resolved);
+        const exeFiles = files.filter(f => f.toLowerCase().endsWith('.exe'));
+        if (exeFiles.length > 0) {
+          const keyword = defaultExecutables[0].split('.')[0].toLowerCase();
+          const match = exeFiles.find(f => f.toLowerCase().includes(keyword));
+          if (match) return path.join(resolved, match);
+          return path.join(resolved, exeFiles[0]); // fallback
+        }
+      }
+      return resolved;
+    }
+  } catch (e) {
+    console.error("resolveExecutable error:", e);
+  }
+  return providedPath;
+}
+
 // IPC Handler: Run Automated Diagnostics (External Path Config)
 ipcMain.handle('sys:run-diagnostics', async (event, config) => {
   const { pathHwInfo, pathCinebench, pathFurmark } = config;
 
+  const realHwInfo = resolveExecutable(pathHwInfo, ['HWiNFO64.exe', 'HWiNFO32.exe', 'HWiNFO64 Pro.exe']);
+  const realCinebench = resolveExecutable(pathCinebench, ['Cinebench.exe', 'CinebenchR23.exe', 'Cinebench 2024.exe', 'Cinebench_x64.exe']);
+  const realFurmark = resolveExecutable(pathFurmark, ['FurMark.exe', 'FurMark2.exe', 'Furmark.exe', 'Geeks3D FurMark.exe', 'FurMark_x64.exe', 'FurMark2_x64.exe']);
+
   // Mock Mode: if any path is "mock" or if all are blank, simulate execution
-  const isMock = !pathHwInfo && !pathCinebench && !pathFurmark;
-  if (isMock || pathHwInfo === 'mock' || pathCinebench === 'mock' || pathFurmark === 'mock') {
+  const isMock = (!pathHwInfo || pathHwInfo === 'mock') && (!pathCinebench || pathCinebench === 'mock') && (!pathFurmark || pathFurmark === 'mock');
+  if (isMock) {
     const diskSpeeds = await measureDiskSpeed();
     return new Promise((resolve) => {
       setTimeout(() => {
@@ -302,10 +338,10 @@ ipcMain.handle('sys:run-diagnostics', async (event, config) => {
     });
   }
 
-  // Real Mode
-  if (!fs.existsSync(pathHwInfo)) return { success: false, error: `HWiNFO64 path does not exist: ${pathHwInfo}` };
-  if (!fs.existsSync(pathCinebench)) return { success: false, error: `Cinebench R23 path does not exist: ${pathCinebench}` };
-  if (!fs.existsSync(pathFurmark)) return { success: false, error: `FurMark path does not exist: ${pathFurmark}` };
+  // Real Mode Checks
+  if (!realHwInfo || !fs.existsSync(realHwInfo)) return { success: false, error: `HWiNFO64 path does not exist: ${realHwInfo}` };
+  if (!realCinebench || !fs.existsSync(realCinebench)) return { success: false, error: `Cinebench R23 path does not exist: ${realCinebench}` };
+  if (!realFurmark || !fs.existsSync(realFurmark)) return { success: false, error: `FurMark path does not exist: ${realFurmark}` };
 
   const tempDir = 'C:\\temp';
   if (!fs.existsSync(tempDir)) {
@@ -316,6 +352,13 @@ ipcMain.handle('sys:run-diagnostics', async (event, config) => {
     try { fs.unlinkSync(csvPath); } catch(e) {}
   }
 
+  // Pre-emptively kill any running HWiNFO64 instance so logging starts clean
+  await new Promise((resolveKill) => {
+    exec('taskkill /F /IM HWiNFO64.exe /IM HWiNFO32.exe', () => {
+      resolveKill();
+    });
+  });
+
   return new Promise(async (resolve) => {
     let cinebenchDone = false;
     let furmarkDone = false;
@@ -325,29 +368,51 @@ ipcMain.handle('sys:run-diagnostics', async (event, config) => {
     const diskSpeedsPromise = measureDiskSpeed();
 
     // 1. Launch HWiNFO64 minimized logging
-    const hwinfoCmd = `"${pathHwInfo}" -log="${csvPath}" -minimize`;
-    exec(hwinfoCmd, (err) => {
+    const hwinfoCmd = `"${realHwInfo}" -log="${csvPath}" -minimize`;
+    exec(hwinfoCmd, { cwd: path.dirname(realHwInfo) }, (err) => {
       if (err) console.error("HWiNFO64 launch/run error:", err);
     });
 
-    // 2. Launch Cinebench (Multi-Core test, 2-minute minimum run time)
-    const cbCmd = `"${pathCinebench}" g_CinebenchCpuXTest=true g_CinebenchMinimumRunTime=120`;
-    exec(cbCmd, (err, stdout) => {
+    // 2. Launch Cinebench (Multi-Core test)
+    let cbCmd;
+    if (realCinebench.toLowerCase().includes('2024')) {
+      cbCmd = `"${realCinebench}" g_CinebenchCpuXTest=true g_CinebenchMinimumRunTime=120`;
+    } else {
+      cbCmd = `"${realCinebench}" -cb_cpux`;
+    }
+    exec(cbCmd, { cwd: path.dirname(realCinebench) }, (err, stdout, stderr) => {
       cinebenchDone = true;
-      if (stdout) {
+      if (err) console.error("Cinebench run error:", err);
+      let outputStr = stdout || "";
+      if (stderr) outputStr += "\n" + stderr;
+      if (outputStr) {
         const multiCoreRegex = /(?:Multi\s*Core|Multi-Core|MC)[^\d]*:\s*([\d,]+)/i;
         const scoreRegex = /(?:Score|Points|Result)\s*:\s*([\d,]+)/i;
-        const match = stdout.match(multiCoreRegex) || stdout.match(scoreRegex) || stdout.match(/(\d+)\s*(?:pts|points)/i);
+        const match = outputStr.match(multiCoreRegex) || outputStr.match(scoreRegex) || outputStr.match(/(\d+)\s*(?:pts|points)/i);
         if (match) {
           cinebenchScore = parseInt(match[1].replace(/,/g, ''));
+        } else {
+          // Fallback: search for any 3 to 6-digit numbers in the output and pick the largest one
+          const nums = outputStr.match(/\b\d{3,6}\b/g);
+          if (nums) {
+            const numericScores = nums.map(n => parseInt(n)).filter(n => n >= 100);
+            if (numericScores.length > 0) {
+              cinebenchScore = Math.max(...numericScores);
+            }
+          }
         }
       }
       checkCompletion();
     });
 
-    // 3. Launch FurMark (120 seconds duration benchmark in 720p windowed mode, no GUI)
-    const fmCmd = `"${pathFurmark}" /width=1280 /height=720 /run_time=120000 /nogui`;
-    exec(fmCmd, (err) => {
+    // 3. Launch FurMark (OpenGL or Vulkan benchmark)
+    let fmCmd;
+    if (realFurmark.toLowerCase().includes('furmark2') || realFurmark.toLowerCase().includes('furmark 2') || realFurmark.toLowerCase().includes('furmark2_x64')) {
+      fmCmd = `"${realFurmark}" --width=1280 --height=720 --max-time=120 --demo=furmark-vk --vsync=0`;
+    } else {
+      fmCmd = `"${realFurmark}" /width=1280 /height=720 /run_time=120000 /nogui`;
+    }
+    exec(fmCmd, { cwd: path.dirname(realFurmark) }, (err) => {
       if (err) console.error("FurMark error:", err);
       furmarkDone = true;
       checkCompletion();
@@ -357,7 +422,7 @@ ipcMain.handle('sys:run-diagnostics', async (event, config) => {
       if (cinebenchDone && furmarkDone) {
         const diskSpeeds = await diskSpeedsPromise;
         // Kill HWiNFO64 to close and flush the CSV file
-        exec('taskkill /F /IM HWiNFO64.exe', () => {
+        exec('taskkill /F /IM HWiNFO64.exe /IM HWiNFO32.exe', () => {
           setTimeout(() => {
             let csvContent = '';
             if (fs.existsSync(csvPath)) {
