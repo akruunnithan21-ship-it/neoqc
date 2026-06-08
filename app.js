@@ -948,35 +948,69 @@ async function setupClientMode() {
 
 function getHwInfoStats(content) {
   if (!content) return null;
-  const lines = content.split('\n');
+  const lines = content.split('\n').map(l => l.trim()).filter(l => l.length > 0);
   if (lines.length < 2) return null;
 
   // Auto-detect delimiter (, or ;)
   let delimiter = ',';
-  if (lines[0].includes(';')) {
-    const commas = (lines[0].match(/,/g) || []).length;
-    const semicolons = (lines[0].match(/;/g) || []).length;
-    if (semicolons > commas) {
-      delimiter = ';';
+  let testLine = lines[0];
+  for (let i = 0; i < Math.min(lines.length, 5); i++) {
+    if (lines[i].includes(';') || lines[i].includes(',')) {
+      testLine = lines[i];
+      break;
+    }
+  }
+  const commas = (testLine.match(/,/g) || []).length;
+  const semicolons = (testLine.match(/;/g) || []).length;
+  if (semicolons > commas) {
+    delimiter = ';';
+  }
+
+  // Find the header row dynamically (skipping blank/metadata lines)
+  let headerLineIndex = 0;
+  for (let i = 0; i < Math.min(lines.length, 10); i++) {
+    const line = lines[i];
+    const lower = line.toLowerCase();
+    if ((line.includes('Date') || line.includes('Time')) && (lower.includes('cpu') || lower.includes('gpu'))) {
+      headerLineIndex = i;
+      break;
     }
   }
 
-  const headers = lines[0].split(delimiter).map(h => h.replace(/"/g, '').trim());
+  const headers = lines[headerLineIndex].split(delimiter).map(h => h.replace(/"/g, '').trim());
   
-  // Find indices for CPU and GPU Temperature columns
-  let cpuIdx = headers.findIndex(h => h.includes('CPU (Tctl/Tdie)') || h.includes('CPU Package') || h.includes('CPU [°C]'));
-  let gpuIdx = headers.findIndex(h => h.includes('GPU Temperature') || h.includes('GPU Core') || h.includes('GPU [°C]'));
+  // Find indices for CPU and GPU Temperature columns (Case-Insensitive matching)
+  let cpuIdx = headers.findIndex(h => {
+    const lower = h.toLowerCase();
+    return lower.includes('cpu (tctl/tdie)') || 
+           lower.includes('cpu package') || 
+           lower.includes('cpu [°c]') || 
+           lower.includes('cpu die (average)') || 
+           lower.includes('core max') || 
+           lower.includes('cpu core') ||
+           lower.includes('cpu temp') ||
+           lower.includes('cpu temperature');
+  });
+
+  let gpuIdx = headers.findIndex(h => {
+    const lower = h.toLowerCase();
+    return lower.includes('gpu temperature') || 
+           lower.includes('gpu core') || 
+           lower.includes('gpu [°c]') || 
+           lower.includes('gpu temp') ||
+           lower.includes('gpu thermal diode');
+  });
 
   // Fallbacks
-  if (cpuIdx === -1) cpuIdx = headers.findIndex(h => h.toLowerCase().includes('cpu') && h.includes('°C'));
-  if (gpuIdx === -1) gpuIdx = headers.findIndex(h => h.toLowerCase().includes('gpu') && h.includes('°C'));
+  if (cpuIdx === -1) cpuIdx = headers.findIndex(h => h.toLowerCase().includes('cpu') && (h.includes('°C') || h.toLowerCase().includes('temp') || h.toLowerCase().includes('tctl')));
+  if (gpuIdx === -1) gpuIdx = headers.findIndex(h => h.toLowerCase().includes('gpu') && (h.includes('°C') || h.toLowerCase().includes('temp') || h.toLowerCase().includes('core')));
 
   if (cpuIdx === -1 && gpuIdx === -1) return null;
 
   let cpuVals = [];
   let gpuVals = [];
 
-  for (let i = 1; i < lines.length; i++) {
+  for (let i = headerLineIndex + 1; i < lines.length; i++) {
     if (!lines[i]) continue;
     const cols = lines[i].split(delimiter);
     
