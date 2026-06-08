@@ -204,3 +204,133 @@ ipcMain.on('win:maximize', () => {
 ipcMain.on('win:close', () => {
   if (mainWindow) mainWindow.close();
 });
+
+// IPC Handler: Print as PDF (Save Report to File Dialog)
+ipcMain.handle('sys:print-pdf', async (event, filename) => {
+  if (!mainWindow) return { success: false };
+  try {
+    const result = await dialog.showSaveDialog(mainWindow, {
+      title: 'Save Quality Control Report as PDF',
+      defaultPath: filename || 'QC-Report.pdf',
+      filters: [{ name: 'PDF Files', extensions: ['pdf'] }]
+    });
+
+    if (result.canceled || !result.filePath) {
+      return { success: false, error: 'Cancelled' };
+    }
+
+    const pdfData = await mainWindow.webContents.printToPDF({
+      margins: {
+        marginType: 'default'
+      },
+      printBackground: true,
+      color: false // Force grayscale for ink-saving
+    });
+
+    fs.writeFileSync(result.filePath, pdfData);
+    return { success: true, filePath: result.filePath };
+  } catch (err) {
+    console.error("Print to PDF Error:", err);
+    return { success: false, error: err.message };
+  }
+});
+
+// IPC Handler: Run Automated Diagnostics (External Path Config)
+ipcMain.handle('sys:run-diagnostics', async (event, config) => {
+  const { pathHwInfo, pathCinebench, pathFurmark } = config;
+
+  // Mock Mode: if any path is "mock" or if all are blank, simulate execution
+  const isMock = !pathHwInfo && !pathCinebench && !pathFurmark;
+  if (isMock || pathHwInfo === 'mock' || pathCinebench === 'mock' || pathFurmark === 'mock') {
+    return new Promise((resolve) => {
+      setTimeout(() => {
+        const mockCsv = `
+"Date","Time","CPU (Tctl/Tdie) [°C]","GPU Temperature [°C]"
+"08.06.2026","12:00:00",35.0,40.0
+"08.06.2026","12:00:10",82.5,75.0
+"08.06.2026","12:00:20",85.0,78.0
+"08.06.2026","12:00:30",80.0,76.0
+"08.06.2026","12:00:40",68.0,70.0
+`;
+        resolve({
+          success: true,
+          mock: true,
+          csvContent: mockCsv,
+          cinebenchScore: 14850
+        });
+      }, 5000);
+    });
+  }
+
+  // Real Mode
+  if (!fs.existsSync(pathHwInfo)) return { success: false, error: `HWiNFO64 path does not exist: ${pathHwInfo}` };
+  if (!fs.existsSync(pathCinebench)) return { success: false, error: `Cinebench R23 path does not exist: ${pathCinebench}` };
+  if (!fs.existsSync(pathFurmark)) return { success: false, error: `FurMark path does not exist: ${pathFurmark}` };
+
+  const tempDir = 'C:\\temp';
+  if (!fs.existsSync(tempDir)) {
+    fs.mkdirSync(tempDir, { recursive: true });
+  }
+  const csvPath = path.join(tempDir, 'neoqc_sensors.csv');
+  if (fs.existsSync(csvPath)) {
+    try { fs.unlinkSync(csvPath); } catch(e) {}
+  }
+
+  return new Promise((resolve) => {
+    let cinebenchDone = false;
+    let furmarkDone = false;
+    let cinebenchScore = 0;
+
+    // 1. Launch HWiNFO64 minimized logging
+    const hwinfoCmd = `"${pathHwInfo}" -log="${csvPath}" -minimize`;
+    exec(hwinfoCmd, (err) => {
+      if (err) console.error("HWiNFO64 launch/run error:", err);
+    });
+
+    // 2. Launch Cinebench (Multi-Core test, 2-minute minimum run time)
+    const cbCmd = `"${pathCinebench}" g_CinebenchCpuXTest=true g_CinebenchMinimumRunTime=120`;
+    exec(cbCmd, (err, stdout) => {
+      cinebenchDone = true;
+      if (stdout) {
+        const multiCoreRegex = /(?:Multi\s*Core|Multi-Core|MC)[^\d]*:\s*([\d,]+)/i;
+        const scoreRegex = /(?:Score|Points|Result)\s*:\s*([\d,]+)/i;
+        const match = stdout.match(multiCoreRegex) || stdout.match(scoreRegex) || stdout.match(/(\d+)\s*(?:pts|points)/i);
+        if (match) {
+          cinebenchScore = parseInt(match[1].replace(/,/g, ''));
+        }
+      }
+      checkCompletion();
+    });
+
+    // 3. Launch FurMark (120 seconds duration benchmark in 720p windowed mode, no GUI)
+    const fmCmd = `"${pathFurmark}" /width=1280 /height=720 /run_time=120000 /nogui`;
+    exec(fmCmd, (err) => {
+      if (err) console.error("FurMark error:", err);
+      furmarkDone = true;
+      checkCompletion();
+    });
+
+    function checkCompletion() {
+      if (cinebenchDone && furmarkDone) {
+        // Kill HWiNFO64 to close and flush the CSV file
+        exec('taskkill /F /IM HWiNFO64.exe', () => {
+          setTimeout(() => {
+            let csvContent = '';
+            if (fs.existsSync(csvPath)) {
+              try {
+                csvContent = fs.readFileSync(csvPath, 'utf-8');
+              } catch (e) {
+                console.error("Read CSV Log Error:", e);
+              }
+            }
+            resolve({
+              success: true,
+              csvContent,
+              cinebenchScore
+            });
+          }, 1500);
+        });
+      }
+    }
+  });
+});

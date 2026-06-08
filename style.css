@@ -930,6 +930,10 @@
     pointer-events: none;
   }
   
+  .locked-overlay {
+    display: none !important;
+  }
+  
   .form-section.locked .locked-overlay {
     position: absolute;
     top: 0;
@@ -940,7 +944,7 @@
     backdrop-filter: blur(1px);
     z-index: 5;
     border-radius: 12px;
-    display: flex;
+    display: flex !important;
     justify-content: center;
     align-items: center;
   }

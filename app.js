@@ -7,7 +7,10 @@ let appState = {
   rivalBenchmarks: [],
   settings: {
     supabaseUrl: "",
-    supabaseAnonKey: ""
+    supabaseAnonKey: "",
+    pathHwInfo: "",
+    pathCinebench: "",
+    pathFurmark: ""
   }
 };
 
@@ -38,7 +41,13 @@ async function loadDatabase() {
     { id: "1", name: "Ryzen 5 7600 + RTX 4060", cpu: "Ryzen 5 7600", gpu: "RTX 4060", cinebenchR23: 14500, readSpeed: 5000, writeSpeed: 4000 },
     { id: "2", name: "Intel i7-14700K + RTX 4070 Ti", cpu: "Core i7-14700K", gpu: "RTX 4070 Ti Super", cinebenchR23: 35000, readSpeed: 7000, writeSpeed: 6000 }
   ];
-  if (!appState.settings) appState.settings = { supabaseUrl: "", supabaseAnonKey: "" };
+  if (!appState.settings) {
+    appState.settings = { supabaseUrl: "", supabaseAnonKey: "", pathHwInfo: "", pathCinebench: "", pathFurmark: "" };
+  } else {
+    if (!appState.settings.pathHwInfo) appState.settings.pathHwInfo = "";
+    if (!appState.settings.pathCinebench) appState.settings.pathCinebench = "";
+    if (!appState.settings.pathFurmark) appState.settings.pathFurmark = "";
+  }
   
   // Seed beautiful mock tickets if db is empty to showcase the UI immediately!
   if (!appState.tickets || appState.tickets.length === 0) {
@@ -259,7 +268,8 @@ function renderDashboard() {
         <td class="font-mono">${t.diagnostics ? (t.diagnostics.cinebench || 'Not Run') : 'N/A'} pts</td>
         <td>${t.completedAt ? new Date(t.completedAt).toLocaleDateString() : 'N/A'}</td>
         <td>
-          <button class="text-btn print-row-btn">🖨️ Print Report</button>
+          <button class="text-btn print-row-btn">🖨️ Print</button>
+          <button class="text-btn pdf-row-btn">💾 PDF</button>
           <button class="text-btn edit-row-btn">✏️ Edit</button>
         </td>
       `;
@@ -267,6 +277,10 @@ function renderDashboard() {
       row.querySelector('.print-row-btn').addEventListener('click', (e) => {
         e.stopPropagation();
         triggerPrintReport(t.id);
+      });
+      row.querySelector('.pdf-row-btn').addEventListener('click', (e) => {
+        e.stopPropagation();
+        triggerSavePdf(t.id);
       });
       row.querySelector('.edit-row-btn').addEventListener('click', (e) => {
         e.stopPropagation();
@@ -406,6 +420,7 @@ function openTicketModal(ticketId = null) {
       updateRivalComparisonOutput();
 
       printBtn.classList.remove('hidden');
+      document.getElementById('btn-save-pdf').classList.remove('hidden');
       deleteBtn.classList.remove('hidden');
     }
   } else {
@@ -413,6 +428,7 @@ function openTicketModal(ticketId = null) {
     document.getElementById('form-ticket-id').value = '';
     document.getElementById('form-created-at').value = '';
     printBtn.classList.add('hidden');
+    document.getElementById('btn-save-pdf').classList.add('hidden');
     deleteBtn.classList.add('hidden');
   }
 
@@ -672,6 +688,50 @@ let parsedCinebench = null;
 let parsedDiskSpeeds = null;
 
 async function setupClientMode() {
+  // Automated Stress Test Execution
+  document.getElementById('btn-run-auto-diagnostics').addEventListener('click', async () => {
+    const btn = document.getElementById('btn-run-auto-diagnostics');
+    const consoleBox = document.getElementById('diagnostics-log-console');
+    
+    consoleBox.classList.remove('hidden');
+    consoleBox.innerHTML = `[${new Date().toLocaleTimeString()}] Checking diagnostic tool configurations...<br>`;
+    
+    btn.disabled = true;
+    btn.textContent = "⚡ Running Stress Tests...";
+
+    const res = await ipcRenderer.invoke('sys:run-diagnostics', appState.settings);
+    if (!res.success) {
+      consoleBox.innerHTML += `<span style="color: var(--status-urgent)">[Error] ${res.error}</span><br>`;
+      btn.disabled = false;
+      btn.textContent = "Run Automated Diagnostics";
+      return;
+    }
+
+    consoleBox.innerHTML += `[${new Date().toLocaleTimeString()}] Diagnostics completed successfully.<br>`;
+    if (res.mock) {
+      consoleBox.innerHTML += `[Info] Running in MOCK Mode.<br>`;
+    }
+
+    // Parse HWiNFO log CSV
+    if (res.csvContent) {
+      consoleBox.innerHTML += `[${new Date().toLocaleTimeString()}] Parsing thermal logs...<br>`;
+      parseHwInfoCsv(res.csvContent);
+    }
+
+    // Load Cinebench
+    if (res.cinebenchScore) {
+      consoleBox.innerHTML += `[${new Date().toLocaleTimeString()}] Cinebench Score parsed: ${res.cinebenchScore} pts<br>`;
+      parsedCinebench = res.cinebenchScore;
+      document.getElementById('cinebench-preview').textContent = `Cinebench Score: ${parsedCinebench} pts`;
+    }
+
+    btn.textContent = "✅ Stress Tests Complete";
+    btn.classList.add('secondary-btn');
+    btn.classList.remove('primary-pink-btn');
+    
+    checkClientFormReady();
+  });
+
   // Trigger system specs detection
   document.getElementById('btn-client-detect-hw').addEventListener('click', async () => {
     const btn = document.getElementById('btn-client-detect-hw');
@@ -961,9 +1021,38 @@ function checkClientFormReady() {
 // ==========================================================================
 // PRINTING REPORTS MAPPING (A4 Layout Integration)
 // ==========================================================================
-function triggerPrintReport(ticketId) {
+function populatePrintChecklist(ticket) {
+  const qcContainer = document.getElementById('print-checklist-container');
+  if (qcContainer) {
+    const getBuildCheck = (prop) => (ticket.buildChecks && ticket.buildChecks[prop]) || false;
+    const getQcCheck = (prop) => (ticket.qcChecks && ticket.qcChecks[prop]) || false;
+
+    const items = [
+      { checked: getQcCheck('physCabinet'), label: "Physical Condition Clean & Checked" },
+      { checked: getQcCheck('physMobo'), label: "Motherboard Socket & CPU Pins Checked" },
+      { checked: getQcCheck('physRam'), label: "RAM Modules Correctly Installed" },
+      { checked: getBuildCheck('cooler'), label: "CPU Cooler / AIO Thermal Assembly Secured" },
+      { checked: getBuildCheck('cables'), label: "Structural Cables Organized & Zip-tied" },
+      { checked: getQcCheck('softWindows'), label: "Windows OS Installed & Fully Licensed" },
+      { checked: getQcCheck('softDrivers'), label: "System Hardware Drivers Updated" },
+      { checked: getQcCheck('softBios'), label: "Motherboard BIOS Updated" },
+      { checked: getQcCheck('portUsb'), label: "Front/Rear USB Ports Functional" },
+      { checked: getQcCheck('portVideo'), label: "HDMI & DisplayPort Output Verified" },
+      { checked: getQcCheck('portAudio'), label: "Audio Port Sound Jack Checked" },
+      { checked: getQcCheck('portWifi'), label: "Wi-Fi Antenna Mounted & Calibrated" }
+    ];
+    qcContainer.innerHTML = items.map(item => `
+      <div class="print-chk-item">${item.checked ? '✔️' : '❌'} ${item.label}</div>
+    `).join('');
+  }
+}
+
+function triggerPrintReport(ticketId, shouldPrint = true) {
   const ticket = appState.tickets.find(t => t.id === ticketId);
   if (!ticket) return;
+
+  // Populate checklist dynamically
+  populatePrintChecklist(ticket);
 
   // Header Details
   document.getElementById('print-ticket-id').textContent = ticket.id.slice(-6).toUpperCase();
@@ -1026,7 +1115,89 @@ function triggerPrintReport(ticketId) {
   }
 
   // Execute print in main Electron window
-  ipcRenderer.invoke('sys:print');
+  if (shouldPrint) {
+    ipcRenderer.invoke('sys:print');
+  }
+}
+
+// Save Report as PDF File
+async function triggerSavePdf(ticketId) {
+  const ticket = appState.tickets.find(t => t.id === ticketId);
+  if (!ticket) return;
+
+  // Populate checklist dynamically
+  populatePrintChecklist(ticket);
+
+  // Header Details
+  document.getElementById('print-ticket-id').textContent = ticket.id.slice(-6).toUpperCase();
+  document.getElementById('print-date').textContent = new Date().toLocaleDateString();
+  document.getElementById('print-tech').textContent = ticket.technician;
+  document.getElementById('print-customer-name').textContent = ticket.customerName;
+
+  // Specs Mapping
+  document.getElementById('print-spec-cpu').textContent = ticket.specs ? (ticket.specs.cpu || '--') : '--';
+  document.getElementById('print-spec-gpu').textContent = ticket.specs ? (ticket.specs.gpu || '--') : '--';
+  document.getElementById('print-spec-ram').textContent = ticket.specs ? (ticket.specs.ram || '--') : '--';
+  document.getElementById('print-spec-storage').textContent = ticket.specs ? (ticket.specs.storage || '--') : '--';
+
+  // Serials
+  document.getElementById('print-serial-gpu').textContent = ticket.serials.gpu || 'N/A';
+  document.getElementById('print-serial-ram').textContent = ticket.serials.ram || 'N/A';
+  document.getElementById('print-serial-ssd').textContent = ticket.serials.ssd || 'N/A';
+  document.getElementById('print-serial-cabinet').textContent = ticket.serials.cabinet || 'N/A';
+
+  // Temps
+  document.getElementById('print-cpu-min').textContent = (ticket.diagnostics.cpuTempMin || '--') + ' °C';
+  document.getElementById('print-cpu-max').textContent = (ticket.diagnostics.cpuTempMax || '--') + ' °C';
+  document.getElementById('print-cpu-avg').textContent = (ticket.diagnostics.cpuTempAvg || '--') + ' °C';
+  document.getElementById('print-gpu-min').textContent = (ticket.diagnostics.gpuTempMin || '--') + ' °C';
+  document.getElementById('print-gpu-max').textContent = (ticket.diagnostics.gpuTempMax || '--') + ' °C';
+  document.getElementById('print-gpu-avg').textContent = (ticket.diagnostics.gpuTempAvg || '--') + ' °C';
+
+  // Benchmarks
+  document.getElementById('print-score-cb').textContent = (ticket.diagnostics.cinebench || '--') + ' pts';
+  document.getElementById('print-score-read').textContent = (ticket.diagnostics.ssdRead || '--') + ' MB/s';
+  document.getElementById('print-score-write').textContent = (ticket.diagnostics.ssdWrite || '--') + ' MB/s';
+
+  // Wi-Fi signal
+  document.getElementById('print-wifi-signal').textContent = (ticket.qcChecks.wifiRange || '--') + ' %';
+  document.getElementById('print-wifi-speed-val').textContent = (ticket.qcChecks.wifiSpeed || '--') + ' Mbps';
+
+  // Rival comparison delta mappings
+  const rivalId = ticket.diagnostics.rivalConfigId;
+  const rival = appState.rivalBenchmarks.find(r => r.id === rivalId);
+  if (rival) {
+    document.getElementById('print-rival-cb').textContent = rival.cinebenchR23 + ' pts';
+    document.getElementById('print-rival-read').textContent = rival.readSpeed + ' MB/s';
+    document.getElementById('print-rival-write').textContent = rival.writeSpeed + ' MB/s';
+
+    const getDiffStr = (curr, tgt) => {
+      if (!curr || !tgt) return '--';
+      const d = ((curr - tgt) / tgt) * 100;
+      return `${d >= 0 ? '+' : ''}${d.toFixed(1)}%`;
+    };
+    document.getElementById('print-delta-cb').textContent = getDiffStr(ticket.diagnostics.cinebench, rival.cinebenchR23);
+    document.getElementById('print-delta-read').textContent = getDiffStr(ticket.diagnostics.ssdRead, rival.readSpeed);
+    document.getElementById('print-delta-write').textContent = getDiffStr(ticket.diagnostics.ssdWrite, rival.writeSpeed);
+  } else {
+    document.getElementById('print-rival-cb').textContent = '--';
+    document.getElementById('print-rival-read').textContent = '--';
+    document.getElementById('print-rival-write').textContent = '--';
+    document.getElementById('print-delta-cb').textContent = '--';
+    document.getElementById('print-delta-read').textContent = '--';
+    document.getElementById('print-delta-write').textContent = '--';
+  }
+
+  // Save PDF filename
+  const cleanName = ticket.customerName.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+  const defaultFilename = `QC_Report_${cleanName}_${ticket.id.slice(-6)}.pdf`;
+
+  const result = await ipcRenderer.invoke('sys:print-pdf', defaultFilename);
+  if (result.success) {
+    alert(`PDF Report successfully saved to:\n${result.filePath}`);
+  } else if (result.error !== 'Cancelled') {
+    alert(`Failed to save PDF: ${result.error}`);
+  }
 }
 
 // ==========================================================================
@@ -1069,6 +1240,9 @@ function openSettingsModal() {
 
   document.getElementById('settings-supabase-url').value = appState.settings.supabaseUrl || '';
   document.getElementById('settings-supabase-key').value = appState.settings.supabaseAnonKey || '';
+  document.getElementById('settings-path-hwinfo').value = appState.settings.pathHwInfo || '';
+  document.getElementById('settings-path-cinebench').value = appState.settings.pathCinebench || '';
+  document.getElementById('settings-path-furmark').value = appState.settings.pathFurmark || '';
 
   modal.classList.add('active');
 }
@@ -1076,6 +1250,9 @@ function openSettingsModal() {
 async function handleSaveSettings() {
   appState.settings.supabaseUrl = document.getElementById('settings-supabase-url').value.trim();
   appState.settings.supabaseAnonKey = document.getElementById('settings-supabase-key').value.trim();
+  appState.settings.pathHwInfo = document.getElementById('settings-path-hwinfo').value.trim();
+  appState.settings.pathCinebench = document.getElementById('settings-path-cinebench').value.trim();
+  appState.settings.pathFurmark = document.getElementById('settings-path-furmark').value.trim();
 
   await saveDatabase();
   document.getElementById('settings-modal').classList.remove('active');
@@ -1223,6 +1400,26 @@ function setupEventListeners() {
       triggerPrintReport(editingTicketId);
     }
   });
+
+  // Save as PDF button directly in the modal footer
+  document.getElementById('btn-save-pdf').addEventListener('click', () => {
+    if (editingTicketId) {
+      triggerSavePdf(editingTicketId);
+    }
+  });
+
+  // Settings executable path browsers
+  const setupPathBrowser = (btnId, inputId) => {
+    document.getElementById(btnId).addEventListener('click', async () => {
+      const pathVal = await ipcRenderer.invoke('dialog:open-file', [{ name: 'Executables', extensions: ['exe'] }]);
+      if (pathVal) {
+        document.getElementById(inputId).value = pathVal;
+      }
+    });
+  };
+  setupPathBrowser('btn-select-path-hwinfo', 'settings-path-hwinfo');
+  setupPathBrowser('btn-select-path-cinebench', 'settings-path-cinebench');
+  setupPathBrowser('btn-select-path-furmark', 'settings-path-furmark');
 
   // Filters and search fields triggers
   document.getElementById('search-input').addEventListener('input', renderDashboard);

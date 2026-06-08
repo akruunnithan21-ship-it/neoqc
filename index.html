@@ -177,7 +177,16 @@
           <!-- Diagnostic Log File Parsers -->
           <div class="client-panel">
             <h3>2. Benchmark & Thermal Logging</h3>
-            <p class="panel-info-text">Run your benchmarks and load HWiNFO64, then select the report files to auto-pull results.</p>
+            <p class="panel-info-text">Run your benchmarks and load HWiNFO64, or use the automated execution tool below.</p>
+            
+            <!-- Automated Stress Test Execution -->
+            <div class="log-uploader" style="background: rgba(231, 1, 78, 0.03); border: 1px dashed rgba(231, 1, 78, 0.2); padding: 12px; border-radius: 8px; margin-bottom: 16px;">
+              <label style="color: var(--primary-pink); font-weight: 700;">🚀 Auto-Stress Test (2-Min CPU/GPU loop)</label>
+              <button id="btn-run-auto-diagnostics" class="primary-pink-btn full-width" style="margin-top: 6px;">Run Automated Diagnostics</button>
+              <div id="diagnostics-log-console" class="results-preview font-mono margin-top hidden" style="max-height: 100px; overflow-y: auto; background: rgba(15,23,42,0.06); padding: 8px;">
+                [Idle] Ready...
+              </div>
+            </div>
             
             <!-- HWiNFO64 CSV Parser -->
             <div class="log-uploader">
@@ -435,6 +444,7 @@
 
         <div class="modal-footer">
           <button type="button" id="btn-print-report" class="secondary-btn text-pink hidden">🖨️ Print QC Report</button>
+          <button type="button" id="btn-save-pdf" class="secondary-btn text-pink hidden">💾 Save as PDF</button>
           <div class="footer-actions">
             <button type="button" id="btn-delete-ticket" class="secondary-btn text-crimson hidden">🗑️ Delete</button>
             <button type="button" id="btn-cancel-ticket" class="secondary-btn">Cancel</button>
@@ -481,6 +491,33 @@
           <div class="margin-top">
             <button id="btn-test-db-connection" class="secondary-btn">Check Supabase Status</button>
             <span id="db-connection-status" class="status-msg"></span>
+          </div>
+        </div>
+
+        <!-- Diagnostic Tools Paths -->
+        <div class="form-section margin-top">
+          <h3>🛠️ Diagnostic Tools Paths (External Path Config)</h3>
+          <p class="panel-info-text">Configure folders or executable paths for testing tools. Enter "mock" or leave blank to simulate diagnostic runs.</p>
+          <div class="form-group">
+            <label for="settings-path-hwinfo">HWiNFO64 Executable Path</label>
+            <div class="uploader-row">
+              <input type="text" id="settings-path-hwinfo" placeholder="C:\Diagnostics\HWiNFO64.exe" style="flex-grow: 1;">
+              <button id="btn-select-path-hwinfo" class="secondary-btn" type="button">Browse</button>
+            </div>
+          </div>
+          <div class="form-group margin-top">
+            <label for="settings-path-cinebench">Cinebench R23 Executable Path</label>
+            <div class="uploader-row">
+              <input type="text" id="settings-path-cinebench" placeholder="C:\Diagnostics\Cinebench.exe" style="flex-grow: 1;">
+              <button id="btn-select-path-cinebench" class="secondary-btn" type="button">Browse</button>
+            </div>
+          </div>
+          <div class="form-group margin-top">
+            <label for="settings-path-furmark">FurMark Executable Path</label>
+            <div class="uploader-row">
+              <input type="text" id="settings-path-furmark" placeholder="C:\Diagnostics\FurMark.exe" style="flex-grow: 1;">
+              <button id="btn-select-path-furmark" class="secondary-btn" type="button">Browse</button>
+            </div>
           </div>
         </div>
 
@@ -591,7 +628,7 @@
 
     <div class="print-section">
       <h3>Quality Assurance & Hardware Tests Checklist</h3>
-      <div class="print-checklist-grid">
+      <div id="print-checklist-container" class="print-checklist-grid">
         <div class="print-chk-item">✔️ Physical Condition Clean & Checked</div>
         <div class="print-chk-item">✔️ Motherboard Socket & CPU Pins Checked</div>
         <div class="print-chk-item">✔️ RAM Modules Correctly Installed</div>
