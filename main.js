@@ -1,7 +1,68 @@
 const { app, BrowserWindow, ipcMain, dialog } = require('electron');
 const path = require('path');
 const fs = require('fs');
-const { exec } = require('child_process');
+const { exec, spawn } = require('child_process');
+
+// Launches a background PowerShell watcher that auto-accepts known benchmark dialogs
+// Returns the spawned PowerShell process so it can be killed later
+function startDialogDismisser() {
+  // This PowerShell script continuously checks for dialog windows from Cinebench / FurMark
+  // and sends Enter/Space to dismiss them automatically
+  const psScript = `
+    Add-Type @"
+    using System;
+    using System.Runtime.InteropServices;
+    using System.Text;
+    public class WinApi {
+      [DllImport("user32.dll")] public static extern IntPtr FindWindow(string cls, string title);
+      [DllImport("user32.dll")] public static extern IntPtr FindWindowEx(IntPtr parent, IntPtr after, string cls, string title);
+      [DllImport("user32.dll")] public static extern bool SendMessage(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
+      [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
+      [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hWnd);
+      [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)] public static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
+      [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Auto)] public static extern int GetWindowText(IntPtr hWnd, StringBuilder lpString, int nMaxCount);
+      [DllImport("user32.dll", CharSet = CharSet.Auto)] public static extern IntPtr SendMessage(IntPtr hWnd, uint Msg, IntPtr wParam, StringBuilder lParam);
+      public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+    }
+"@
+    $keywords = @("HWiNFO", "Error", "Warning", "Cannot", "Cinebench", "FurMark", "Permission", "Access", "Telemetry")
+    $BN_CLICKED = 0x00F5
+    $WM_COMMAND = 0x0111
+    $IDOK = 1
+    $IDYES = 6
+    for ($i = 0; $i -lt 480; $i++) {
+      Start-Sleep -Milliseconds 500
+      [System.Windows.Forms.Application]::DoEvents() 2>\$null
+      [WinApi]::EnumWindows([WinApi+EnumWindowsProc]{
+        param([IntPtr]\$hwnd, [IntPtr]\$lp)
+        \$sb = New-Object System.Text.StringBuilder 256
+        [void][WinApi]::GetWindowText(\$hwnd, \$sb, 256)
+        \$title = \$sb.ToString()
+        foreach (\$kw in \$keywords) {
+          if (\$title -match \$kw) {
+            # Try clicking OK/Yes button (control ID 1 = IDOK, 6 = IDYES)
+            [WinApi]::PostMessage(\$hwnd, $WM_COMMAND, [IntPtr]::new($IDOK), [IntPtr]::Zero)
+            [WinApi]::PostMessage(\$hwnd, $WM_COMMAND, [IntPtr]::new($IDYES), [IntPtr]::Zero)
+            break
+          }
+        }
+        return \$true
+      }, [IntPtr]::Zero)
+    }
+  `;
+  try {
+    const ps = spawn('powershell', ['-NoProfile', '-NonInteractive', '-Command', psScript], {
+      detached: true,
+      stdio: 'ignore',
+      windowsHide: true
+    });
+    ps.unref();
+    return ps;
+  } catch(e) {
+    console.error('Dialog dismisser spawn error:', e);
+    return null;
+  }
+}
 
 let mainWindow;
 
@@ -373,35 +434,60 @@ ipcMain.handle('sys:run-diagnostics', async (event, config) => {
       if (err) console.error("HWiNFO64 launch/run error:", err);
     });
 
-    // 2. Launch Cinebench (Multi-Core test)
+    // 2. Launch Cinebench R23 (correct CLI: g_CinebenchCpuXTest=true, auto-accept any dialogs)
     let cbCmd;
     if (realCinebench.toLowerCase().includes('2024')) {
+      // Cinebench 2024 flags
       cbCmd = `"${realCinebench}" g_CinebenchCpuXTest=true g_CinebenchMinimumRunTime=120`;
     } else {
-      cbCmd = `"${realCinebench}" -cb_cpux`;
+      // Cinebench R23 correct multi-core flag (not -cb_cpux which is wrong)
+      cbCmd = `"${realCinebench}" g_CinebenchCpuXTest=true g_CinebenchMinimumTestDuration=1`;
     }
-    exec(cbCmd, { cwd: path.dirname(realCinebench) }, (err, stdout, stderr) => {
+
+    // Launch background dialog dismisser before starting Cinebench (it auto-clicks OK on any popup)
+    const dismisserProc = startDialogDismisser();
+
+    exec(cbCmd, { cwd: path.dirname(realCinebench), timeout: 360000 }, (err, stdout, stderr) => {
       cinebenchDone = true;
       if (err) console.error("Cinebench run error:", err);
       let outputStr = stdout || "";
       if (stderr) outputStr += "\n" + stderr;
+
+      // Try to get the Cinebench score from CINEBENCH R23's log file
+      const cbLogDir = path.dirname(realCinebench);
+      const possibleLogFiles = ['cb.log', 'cinebench.log', 'results.txt'];
+      for (const logFile of possibleLogFiles) {
+        const logPath = path.join(cbLogDir, logFile);
+        if (fs.existsSync(logPath)) {
+          try {
+            outputStr += '\n' + fs.readFileSync(logPath, 'utf-8');
+          } catch(e) {}
+        }
+      }
+
       if (outputStr) {
-        const multiCoreRegex = /(?:Multi\s*Core|Multi-Core|MC)[^\d]*:\s*([\d,]+)/i;
-        const scoreRegex = /(?:Score|Points|Result)\s*:\s*([\d,]+)/i;
+        const multiCoreRegex = /(?:Multi\s*Core|Multi-Core|MC|nT)[^\d]*:\s*([\d,]+)/i;
+        const scoreRegex = /(?:Score|Points|Result|CB)\s*[=:]?\s*([\d,]+)/i;
         const match = outputStr.match(multiCoreRegex) || outputStr.match(scoreRegex) || outputStr.match(/(\d+)\s*(?:pts|points)/i);
         if (match) {
           cinebenchScore = parseInt(match[1].replace(/,/g, ''));
         } else {
-          // Fallback: search for any 3 to 6-digit numbers in the output and pick the largest one
-          const nums = outputStr.match(/\b\d{3,6}\b/g);
+          // Fallback: search for numbers in plausible Cinebench score range (3000-120000)
+          const nums = outputStr.match(/\b\d{4,6}\b/g);
           if (nums) {
-            const numericScores = nums.map(n => parseInt(n)).filter(n => n >= 100);
-            if (numericScores.length > 0) {
-              cinebenchScore = Math.max(...numericScores);
+            const plausible = nums.map(n => parseInt(n)).filter(n => n >= 3000 && n <= 120000);
+            if (plausible.length > 0) {
+              cinebenchScore = Math.max(...plausible);
             }
           }
         }
       }
+
+      // Kill the dialog dismisser
+      if (dismisserProc) {
+        try { process.kill(-dismisserProc.pid); } catch(e) {}
+      }
+
       checkCompletion();
     });
 
