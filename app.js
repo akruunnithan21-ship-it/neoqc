@@ -403,6 +403,17 @@ function openTicketModal(ticketId = null) {
       document.getElementById('form-technician').value = ticket.technician;
       document.getElementById('form-ticket-type').value = ticket.type;
       
+      // Load specs into modal fields
+      document.getElementById('modal-spec-cpu').textContent = ticket.specs ? (ticket.specs.cpu || '--') : '--';
+      document.getElementById('modal-spec-gpu').textContent = ticket.specs ? (ticket.specs.gpu || '--') : '--';
+      document.getElementById('modal-spec-ram').textContent = ticket.specs ? (ticket.specs.ram || '--') : '--';
+      document.getElementById('modal-spec-storage').textContent = ticket.specs ? (ticket.specs.storage || '--') : '--';
+      
+      // Reset rival pulled banner
+      const rivalBanner = document.getElementById('modal-rival-pulled-banner');
+      rivalBanner.classList.add('hidden');
+      rivalBanner.innerHTML = '';
+
       const partsToggle = document.getElementById('form-missing-components-toggle');
       partsToggle.checked = ticket.missingComponentsToggle;
       const partsInput = document.getElementById('form-missing-components');
@@ -476,6 +487,17 @@ function openTicketModal(ticketId = null) {
     title.textContent = "Create Service Ticket";
     document.getElementById('form-ticket-id').value = '';
     document.getElementById('form-created-at').value = '';
+    
+    // Reset specs
+    document.getElementById('modal-spec-cpu').textContent = '--';
+    document.getElementById('modal-spec-gpu').textContent = '--';
+    document.getElementById('modal-spec-ram').textContent = '--';
+    document.getElementById('modal-spec-storage').textContent = '--';
+    
+    const rivalBanner = document.getElementById('modal-rival-pulled-banner');
+    rivalBanner.classList.add('hidden');
+    rivalBanner.innerHTML = '';
+
     printBtn.classList.add('hidden');
     document.getElementById('btn-save-pdf').classList.add('hidden');
     deleteBtn.classList.add('hidden');
@@ -726,14 +748,23 @@ async function handleTicketFormSubmit(e) {
     completedAt: status === 'completed' ? new Date().toISOString() : null
   };
 
-  // Check specs (retrieve hardware info from ticket logs if available)
+  // Read specs directly from the modal UI fields
+  const detectedCpuVal = document.getElementById('modal-spec-cpu').textContent;
+  const detectedGpuVal = document.getElementById('modal-spec-gpu').textContent;
+  const detectedRamVal = document.getElementById('modal-spec-ram').textContent;
+  const detectedStorageVal = document.getElementById('modal-spec-storage').textContent;
+
+  updatedTicket.specs = {
+    cpu: (detectedCpuVal === '--' || detectedCpuVal === 'Not detected') ? '' : detectedCpuVal,
+    gpu: (detectedGpuVal === '--' || detectedGpuVal === 'Not detected') ? '' : detectedGpuVal,
+    ram: (detectedRamVal === '--' || detectedRamVal === 'Not detected') ? '' : detectedRamVal,
+    storage: (detectedStorageVal === '--' || detectedStorageVal === 'Not detected') ? '' : detectedStorageVal
+  };
+
   if (editingTicketId) {
-    const existing = appState.tickets.find(t => t.id === editingTicketId);
-    updatedTicket.specs = existing ? existing.specs : {};
     const index = appState.tickets.findIndex(t => t.id === editingTicketId);
     appState.tickets[index] = updatedTicket;
   } else {
-    updatedTicket.specs = {};
     appState.tickets.push(updatedTicket);
   }
 
@@ -1458,6 +1489,83 @@ function setupEventListeners() {
 
   document.getElementById('ticket-form').addEventListener('submit', handleTicketFormSubmit);
 
+  // Staff Modal System Auto-Detect Local Specs click handler
+  document.getElementById('btn-modal-detect-hw').addEventListener('click', async () => {
+    const btn = document.getElementById('btn-modal-detect-hw');
+    const oldText = btn.textContent;
+    btn.textContent = "🔍 Detecting hardware...";
+    btn.disabled = true;
+
+    try {
+      const detected = await ipcRenderer.invoke('sys:detect-hw');
+      
+      // Update modal spec elements
+      document.getElementById('modal-spec-cpu').textContent = detected.cpu || "Failed to detect";
+      document.getElementById('modal-spec-gpu').textContent = detected.gpu || "Failed to detect";
+      document.getElementById('modal-spec-ram').textContent = detected.ram || "Failed to detect";
+      document.getElementById('modal-spec-storage').textContent = detected.storage || "Failed to detect";
+
+      // Identify rival competitor processor counterpart
+      const comp = getCompetitorModel(detected.cpu);
+
+      // Show loader on rival banner
+      const rivalBanner = document.getElementById('modal-rival-pulled-banner');
+      rivalBanner.classList.remove('hidden');
+      rivalBanner.innerHTML = `
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span style="font-size: 1.1rem; line-height: 1;" class="animate-spin">⏳</span>
+          <span>Locating competitor pricing & performance from the web...</span>
+        </div>
+      `;
+
+      // Fetch live price online
+      const livePrice = await getLiveCompetitorPrice(comp.name);
+
+      // Find matching benchmark in local database to use as fallback price & set matching select value
+      let matchedRival = appState.rivalBenchmarks.find(r => {
+        const rName = r.name.toLowerCase();
+        const rCpu = (r.cpu || '').toLowerCase();
+        const compName = comp.name.toLowerCase();
+        return compName.includes(rCpu) || rName.includes(compName) || compName.includes(rName);
+      });
+
+      if (!matchedRival) {
+        if (comp.name.includes("7600")) {
+          matchedRival = appState.rivalBenchmarks.find(r => r.id === "1");
+        } else if (comp.name.includes("14700")) {
+          matchedRival = appState.rivalBenchmarks.find(r => r.id === "2");
+        }
+      }
+
+      const finalPrice = livePrice || (matchedRival ? matchedRival.price : null) || "₹18,500";
+      const numericPrice = parsePriceNumeric(finalPrice);
+      
+      let ratioText = '';
+      if (numericPrice > 0) {
+        const ratio = (comp.cinebench / (numericPrice / 1000)).toFixed(2);
+        ratioText = `<br><span style="color: var(--primary-pink); font-weight: bold;">Price-Performance Ratio:</span> <strong>${ratio} Cinebench pts / ₹1,000 spent</strong>.`;
+      }
+
+      // Update banner with full competitor spec detail & ratio
+      rivalBanner.innerHTML = `
+        <strong>🌐 Live Competitor Match:</strong> For a similar budget, the rival <strong>${comp.name}</strong> (${comp.desc}) costs <strong>${finalPrice}</strong> and offers <strong>${comp.cinebench.toLocaleString()} pts</strong> in Cinebench R23. Ensure this build's price-to-performance remains optimal!${ratioText}
+      `;
+
+      // Set the select dropdown and trigger comparison output update
+      if (matchedRival) {
+        const select = document.getElementById('form-rival-select');
+        select.value = matchedRival.id;
+        updateRivalComparisonOutput();
+      }
+    } catch (err) {
+      console.error("Hardware spec detection failed in modal:", err);
+      alert("Hardware specs detection failed: " + err.message);
+    } finally {
+      btn.textContent = oldText;
+      btn.disabled = false;
+    }
+  });
+
   // Missing components details toggling inputs
   const componentsToggle = document.getElementById('form-missing-components-toggle');
   componentsToggle.addEventListener('change', () => {
@@ -1757,6 +1865,79 @@ function setupRealtimeListener() {
   } catch (err) {
     console.error("Failed to setup realtime listener:", err);
   }
+}
+
+// ==========================================================================
+// ONLINE COMPETITOR & PRICE AUTO-PULL (PRICE-TO-PERFORMANCE ratio)
+// ==========================================================================
+function getCompetitorModel(detectedCpu) {
+  const cpu = (detectedCpu || '').toLowerCase();
+  if (cpu.includes('i9') || cpu.includes('14900') || cpu.includes('13900') || cpu.includes('7950') || cpu.includes('7900')) {
+    if (cpu.includes('ryzen')) {
+      return { name: "Intel Core i9-14900K", desc: "Flagship Intel 24-Core CPU", cinebench: 39500 };
+    } else {
+      return { name: "AMD Ryzen 9 7950X", desc: "Flagship AMD 16-Core Processor", cinebench: 38000 };
+    }
+  }
+  if (cpu.includes('i7') || cpu.includes('14700') || cpu.includes('13700') || cpu.includes('7800') || cpu.includes('7700') || cpu.includes('5800')) {
+    if (cpu.includes('ryzen')) {
+      return { name: "Intel Core i7-14700K", desc: "Premium Intel 20-Core CPU", cinebench: 35000 };
+    } else {
+      return { name: "AMD Ryzen 7 7800X3D", desc: "Premium AMD 8-Core Gaming CPU", cinebench: 18500 };
+    }
+  }
+  if (cpu.includes('i5') || cpu.includes('14400') || cpu.includes('14500') || cpu.includes('14600') || cpu.includes('13400') || cpu.includes('13500') || cpu.includes('13600') || cpu.includes('7600') || cpu.includes('7500') || cpu.includes('5600')) {
+    if (cpu.includes('ryzen')) {
+      return { name: "Intel Core i5-14400", desc: "Mainstream Intel 10-Core CPU", cinebench: 14500 };
+    } else {
+      return { name: "AMD Ryzen 5 7600", desc: "Mainstream AMD 6-Core CPU", cinebench: 13800 };
+    }
+  }
+  return { name: "AMD Ryzen 5 7600", desc: "Mainstream AMD 6-Core CPU", cinebench: 13800 };
+}
+
+async function getLiveCompetitorPrice(competitorName) {
+  try {
+    const query = `${competitorName} price in India INR`;
+    const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error("Fetch failed");
+    const html = await res.text();
+
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(html, 'text/html');
+    const snippets = Array.from(doc.querySelectorAll('.result__snippet')).map(el => el.textContent);
+
+    // Look for price patterns like ₹XX,XXX or Rs. XX,XXX or XX,XXX INR
+    const priceRegex = /(?:₹|Rs\.?)\s?([0-9]{1,2},[0-9]{3})/i;
+    for (const snippet of snippets) {
+      const match = snippet.match(priceRegex);
+      if (match) {
+        return match[0].trim();
+      }
+    }
+
+    // Fallback regex for USD if INR is not found
+    const usdRegex = /\$\s?([0-9]{2,3})/i;
+    for (const snippet of snippets) {
+      const match = snippet.match(usdRegex);
+      if (match) {
+        const usdVal = parseInt(match[1].replace(/,/g, ''));
+        const inrVal = Math.round(usdVal * 83);
+        return `₹${inrVal.toLocaleString('en-IN')} (~$${usdVal})`;
+      }
+    }
+  } catch (err) {
+    console.error("Live competitor price search failed:", err);
+  }
+  return null;
+}
+
+function parsePriceNumeric(priceStr) {
+  if (!priceStr) return 0;
+  let clean = priceStr.split('(')[0];
+  clean = clean.replace(/[^0-9]/g, '');
+  return parseInt(clean) || 0;
 }
 
 // ==========================================================================

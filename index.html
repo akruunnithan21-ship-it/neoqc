@@ -303,6 +303,36 @@
             </div>
           </div>
 
+          <!-- SYSTEM HARDWARE SPECIFICATION AUTO-DETECTION -->
+          <div class="form-section margin-top">
+            <div class="section-header-row">
+              <h3>🖥️ System Hardware Specs (Verification)</h3>
+              <button type="button" id="btn-modal-detect-hw" class="primary-pink-btn" style="padding: 6px 12px; font-size: 0.8rem;">🔍 Auto-Detect Local Specs</button>
+            </div>
+            <div class="specs-readout-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 10px;">
+              <div class="spec-readout-card" style="background: rgba(255,255,255,0.03); border: 1px solid var(--glass-border); padding: 8px 12px; border-radius: 8px;">
+                <span class="spec-label" style="font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em;">Processor (CPU)</span>
+                <div id="modal-spec-cpu" class="spec-value" style="font-family: 'JetBrains Mono', monospace; font-size: 0.82rem; font-weight: 700; margin-top: 2px;">--</div>
+              </div>
+              <div class="spec-readout-card" style="background: rgba(255,255,255,0.03); border: 1px solid var(--glass-border); padding: 8px 12px; border-radius: 8px;">
+                <span class="spec-label" style="font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em;">Graphics Card (GPU)</span>
+                <div id="modal-spec-gpu" class="spec-value" style="font-family: 'JetBrains Mono', monospace; font-size: 0.82rem; font-weight: 700; margin-top: 2px;">--</div>
+              </div>
+              <div class="spec-readout-card" style="background: rgba(255,255,255,0.03); border: 1px solid var(--glass-border); padding: 8px 12px; border-radius: 8px;">
+                <span class="spec-label" style="font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em;">System Memory (RAM)</span>
+                <div id="modal-spec-ram" class="spec-value" style="font-family: 'JetBrains Mono', monospace; font-size: 0.82rem; font-weight: 700; margin-top: 2px;">--</div>
+              </div>
+              <div class="spec-readout-card" style="background: rgba(255,255,255,0.03); border: 1px solid var(--glass-border); padding: 8px 12px; border-radius: 8px;">
+                <span class="spec-label" style="font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em;">SSD / Storage</span>
+                <div id="modal-spec-storage" class="spec-value" style="font-family: 'JetBrains Mono', monospace; font-size: 0.82rem; font-weight: 700; margin-top: 2px;">--</div>
+              </div>
+            </div>
+            <!-- Rival specs dynamically pulled banner -->
+            <div id="modal-rival-pulled-banner" class="comparison-readout margin-top font-mono hidden" style="background: rgba(231, 1, 78, 0.05); border: 1px dashed rgba(231, 1, 78, 0.25); color: #ff9ebb; padding: 10px; border-radius: 8px; font-size: 0.8rem; line-height: 1.4; margin-top: 10px;">
+              <!-- Rival specs details populated here -->
+            </div>
+          </div>
+
           <!-- STEP 1: PC ASSEMBLY (BUILD PHASE) -->
           <div class="form-section margin-top">
             <div class="section-header-row">
