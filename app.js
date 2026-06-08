@@ -38,9 +38,31 @@ async function loadDatabase() {
   if (!appState.tickets) appState.tickets = [];
   if (!appState.technicians) appState.technicians = ["Adhil", "Amal", "Ananthakrishnan", "Athul"];
   if (!appState.rivalBenchmarks) appState.rivalBenchmarks = [
-    { id: "1", name: "Ryzen 5 7600 + RTX 4060", cpu: "Ryzen 5 7600", gpu: "RTX 4060", cinebenchR23: 14500, readSpeed: 5000, writeSpeed: 4000 },
-    { id: "2", name: "Intel i7-14700K + RTX 4070 Ti", cpu: "Core i7-14700K", gpu: "RTX 4070 Ti Super", cinebenchR23: 35000, readSpeed: 7000, writeSpeed: 6000 }
+    { id: "1", name: "Ryzen 5 7600 + RTX 4060", cpu: "Ryzen 5 7600", gpu: "RTX 4060", cinebenchR23: 13800, readSpeed: 5000, writeSpeed: 4000, price: "₹18,500 (~$210)" },
+    { id: "2", name: "Intel i7-14700K + RTX 4070 Ti", cpu: "Core i7-14700K", gpu: "RTX 4070 Ti Super", cinebenchR23: 35000, readSpeed: 7000, writeSpeed: 6000, price: "₹68,000 (~$820)" }
   ];
+
+  // Database migration & normalization for default rival configs
+  let databaseNeedsSaving = false;
+  if (appState.rivalBenchmarks && appState.rivalBenchmarks.length > 0) {
+    appState.rivalBenchmarks.forEach(rival => {
+      if (rival.id === "1") {
+        if (rival.cinebenchR23 === 14500 || !rival.price) {
+          rival.cinebenchR23 = 13800;
+          rival.price = "₹18,500 (~$210)";
+          databaseNeedsSaving = true;
+        }
+      } else if (rival.id === "2") {
+        if (!rival.price) {
+          rival.price = "₹68,000 (~$820)";
+          databaseNeedsSaving = true;
+        }
+      }
+    });
+  }
+  if (databaseNeedsSaving) {
+    await saveDatabase();
+  }
   if (!appState.settings) {
     appState.settings = { supabaseUrl: "", supabaseAnonKey: "", pathHwInfo: "", pathCinebench: "", pathFurmark: "" };
   } else {
@@ -337,6 +359,12 @@ function getStatusLabelText(status) {
   }
 }
 
+function isI514thGen(cpuStr) {
+  if (!cpuStr) return false;
+  const s = cpuStr.toLowerCase();
+  return s.includes('i5') && (s.includes('14400') || s.includes('14500') || s.includes('14600') || s.includes('14th') || s.includes('14900') || s.includes('14700') || (s.includes('14') && s.includes('gen')));
+}
+
 // ==========================================================================
 // TICKET FORM & MODAL ACTIONS (STAFF PORTAL)
 // ==========================================================================
@@ -406,7 +434,15 @@ function openTicketModal(ticketId = null) {
       document.getElementById('form-cinebench-score').value = ticket.diagnostics.cinebench || '';
       document.getElementById('form-ssd-read').value = ticket.diagnostics.ssdRead || '';
       document.getElementById('form-ssd-write').value = ticket.diagnostics.ssdWrite || '';
-      document.getElementById('form-rival-select').value = ticket.diagnostics.rivalConfigId || '';
+      let rivalId = ticket.diagnostics.rivalConfigId || '';
+      if (!rivalId && ticket.specs && ticket.specs.cpu && isI514thGen(ticket.specs.cpu)) {
+        const amdRival = appState.rivalBenchmarks.find(r => r.cpu && r.cpu.toLowerCase().includes('ryzen 5 7600') || r.id === '1');
+        if (amdRival) {
+          rivalId = amdRival.id;
+          ticket.diagnostics.rivalConfigId = rivalId;
+        }
+      }
+      document.getElementById('form-rival-select').value = rivalId;
 
       document.getElementById('serial-motherboard').value = ticket.serials.motherboard || '';
       document.getElementById('serial-ram').value = ticket.serials.ram || '';
@@ -547,7 +583,13 @@ function updateRivalComparisonOutput() {
   }
 
   outputDiv.classList.remove('hidden');
-  outputDiv.innerHTML = `<div class="comparison-row header"><span>Parameter</span><span>Your Build</span><span>Target rival</span><span>Delta</span></div>`;
+  outputDiv.innerHTML = `
+    <div style="margin-bottom: 8px; font-size: 0.85rem; border-bottom: 1px solid rgba(15, 23, 42, 0.08); padding-bottom: 6px;">
+      <strong>Target Competitor:</strong> ${rival.name}<br>
+      <span style="opacity: 0.8;">CPU: ${rival.cpu || '--'} | GPU: ${rival.gpu || '--'} | Price: ${rival.price || '--'}</span>
+    </div>
+    <div class="comparison-row header"><span>Parameter</span><span>Your Build</span><span>Target rival</span><span>Delta</span></div>
+  `;
 
   const compareMetric = (label, currentVal, rivalVal) => {
     if (isNaN(currentVal)) {
@@ -1089,10 +1131,7 @@ function populatePrintChecklist(ticket) {
   }
 }
 
-function triggerPrintReport(ticketId, shouldPrint = true) {
-  const ticket = appState.tickets.find(t => t.id === ticketId);
-  if (!ticket) return;
-
+function populatePrintFields(ticket) {
   // Populate checklist dynamically
   populatePrintChecklist(ticket);
 
@@ -1132,9 +1171,32 @@ function triggerPrintReport(ticketId, shouldPrint = true) {
   document.getElementById('print-wifi-speed-val').textContent = (ticket.qcChecks.wifiSpeed || '--') + ' Mbps';
 
   // Rival comparison delta mappings
-  const rivalId = ticket.diagnostics.rivalConfigId;
+  let rivalId = ticket.diagnostics.rivalConfigId;
+  if (!rivalId && ticket.specs && ticket.specs.cpu && isI514thGen(ticket.specs.cpu)) {
+    const amdRival = appState.rivalBenchmarks.find(r => r.cpu && r.cpu.toLowerCase().includes('ryzen 5 7600') || r.id === '1');
+    if (amdRival) {
+      rivalId = amdRival.id;
+    }
+  }
+
   const rival = appState.rivalBenchmarks.find(r => r.id === rivalId);
+  const rivalHeaderEl = document.getElementById('print-rival-header');
+  const rivalSpecsBox = document.getElementById('print-rival-specs-box');
+
   if (rival) {
+    if (rivalHeaderEl) {
+      rivalHeaderEl.textContent = `Expected: ${rival.cpu || rival.name}`;
+    }
+    if (rivalSpecsBox) {
+      rivalSpecsBox.style.display = 'block';
+      const cpuEl = document.getElementById('print-rival-spec-cpu');
+      const gpuEl = document.getElementById('print-rival-spec-gpu');
+      const priceEl = document.getElementById('print-rival-spec-price');
+      if (cpuEl) cpuEl.textContent = rival.cpu || '--';
+      if (gpuEl) gpuEl.textContent = rival.gpu || '--';
+      if (priceEl) priceEl.textContent = rival.price || '--';
+    }
+
     document.getElementById('print-rival-cb').textContent = rival.cinebenchR23 + ' pts';
     document.getElementById('print-rival-read').textContent = rival.readSpeed + ' MB/s';
     document.getElementById('print-rival-write').textContent = rival.writeSpeed + ' MB/s';
@@ -1148,6 +1210,12 @@ function triggerPrintReport(ticketId, shouldPrint = true) {
     document.getElementById('print-delta-read').textContent = getDiffStr(ticket.diagnostics.ssdRead, rival.readSpeed);
     document.getElementById('print-delta-write').textContent = getDiffStr(ticket.diagnostics.ssdWrite, rival.writeSpeed);
   } else {
+    if (rivalHeaderEl) {
+      rivalHeaderEl.textContent = 'Expected Competitor Config';
+    }
+    if (rivalSpecsBox) {
+      rivalSpecsBox.style.display = 'none';
+    }
     document.getElementById('print-rival-cb').textContent = '--';
     document.getElementById('print-rival-read').textContent = '--';
     document.getElementById('print-rival-write').textContent = '--';
@@ -1155,6 +1223,13 @@ function triggerPrintReport(ticketId, shouldPrint = true) {
     document.getElementById('print-delta-read').textContent = '--';
     document.getElementById('print-delta-write').textContent = '--';
   }
+}
+
+function triggerPrintReport(ticketId, shouldPrint = true) {
+  const ticket = appState.tickets.find(t => t.id === ticketId);
+  if (!ticket) return;
+
+  populatePrintFields(ticket);
 
   // Execute print in main Electron window
   if (shouldPrint) {
@@ -1162,73 +1237,11 @@ function triggerPrintReport(ticketId, shouldPrint = true) {
   }
 }
 
-// Save Report as PDF File
 async function triggerSavePdf(ticketId) {
   const ticket = appState.tickets.find(t => t.id === ticketId);
   if (!ticket) return;
 
-  // Populate checklist dynamically
-  populatePrintChecklist(ticket);
-
-  // Header Details
-  document.getElementById('print-ticket-id').textContent = ticket.id.slice(-6).toUpperCase();
-  document.getElementById('print-date').textContent = new Date().toLocaleDateString();
-  document.getElementById('print-tech').textContent = ticket.technician;
-  document.getElementById('print-customer-name').textContent = ticket.customerName;
-
-  // Specs Mapping
-  document.getElementById('print-spec-cpu').textContent = ticket.specs ? (ticket.specs.cpu || '--') : '--';
-  document.getElementById('print-spec-gpu').textContent = ticket.specs ? (ticket.specs.gpu || '--') : '--';
-  document.getElementById('print-spec-ram').textContent = ticket.specs ? (ticket.specs.ram || '--') : '--';
-  document.getElementById('print-spec-storage').textContent = ticket.specs ? (ticket.specs.storage || '--') : '--';
-
-  // Serials
-  document.getElementById('print-serial-gpu').textContent = ticket.serials.gpu || 'N/A';
-  document.getElementById('print-serial-ram').textContent = ticket.serials.ram || 'N/A';
-  document.getElementById('print-serial-ssd').textContent = ticket.serials.ssd || 'N/A';
-  document.getElementById('print-serial-cabinet').textContent = ticket.serials.cabinet || 'N/A';
-
-  // Temps
-  document.getElementById('print-cpu-min').textContent = (ticket.diagnostics.cpuTempMin || '--') + ' °C';
-  document.getElementById('print-cpu-max').textContent = (ticket.diagnostics.cpuTempMax || '--') + ' °C';
-  document.getElementById('print-cpu-avg').textContent = (ticket.diagnostics.cpuTempAvg || '--') + ' °C';
-  document.getElementById('print-gpu-min').textContent = (ticket.diagnostics.gpuTempMin || '--') + ' °C';
-  document.getElementById('print-gpu-max').textContent = (ticket.diagnostics.gpuTempMax || '--') + ' °C';
-  document.getElementById('print-gpu-avg').textContent = (ticket.diagnostics.gpuTempAvg || '--') + ' °C';
-
-  // Benchmarks
-  document.getElementById('print-score-cb').textContent = (ticket.diagnostics.cinebench || '--') + ' pts';
-  document.getElementById('print-score-read').textContent = (ticket.diagnostics.ssdRead || '--') + ' MB/s';
-  document.getElementById('print-score-write').textContent = (ticket.diagnostics.ssdWrite || '--') + ' MB/s';
-
-  // Wi-Fi signal
-  document.getElementById('print-wifi-signal').textContent = (ticket.qcChecks.wifiRange || '--') + ' %';
-  document.getElementById('print-wifi-speed-val').textContent = (ticket.qcChecks.wifiSpeed || '--') + ' Mbps';
-
-  // Rival comparison delta mappings
-  const rivalId = ticket.diagnostics.rivalConfigId;
-  const rival = appState.rivalBenchmarks.find(r => r.id === rivalId);
-  if (rival) {
-    document.getElementById('print-rival-cb').textContent = rival.cinebenchR23 + ' pts';
-    document.getElementById('print-rival-read').textContent = rival.readSpeed + ' MB/s';
-    document.getElementById('print-rival-write').textContent = rival.writeSpeed + ' MB/s';
-
-    const getDiffStr = (curr, tgt) => {
-      if (!curr || !tgt) return '--';
-      const d = ((curr - tgt) / tgt) * 100;
-      return `${d >= 0 ? '+' : ''}${d.toFixed(1)}%`;
-    };
-    document.getElementById('print-delta-cb').textContent = getDiffStr(ticket.diagnostics.cinebench, rival.cinebenchR23);
-    document.getElementById('print-delta-read').textContent = getDiffStr(ticket.diagnostics.ssdRead, rival.readSpeed);
-    document.getElementById('print-delta-write').textContent = getDiffStr(ticket.diagnostics.ssdWrite, rival.writeSpeed);
-  } else {
-    document.getElementById('print-rival-cb').textContent = '--';
-    document.getElementById('print-rival-read').textContent = '--';
-    document.getElementById('print-rival-write').textContent = '--';
-    document.getElementById('print-delta-cb').textContent = '--';
-    document.getElementById('print-delta-read').textContent = '--';
-    document.getElementById('print-delta-write').textContent = '--';
-  }
+  populatePrintFields(ticket);
 
   // Save PDF filename
   const cleanName = ticket.customerName.replace(/[^a-z0-9]/gi, '_').toLowerCase();
@@ -1268,6 +1281,7 @@ function openSettingsModal() {
     const row = document.createElement('tr');
     row.innerHTML = `
       <td>${rival.name}</td>
+      <td>${rival.price || '--'}</td>
       <td>${rival.cinebenchR23}</td>
       <td>${rival.readSpeed}</td>
       <td>${rival.writeSpeed}</td>
@@ -1353,6 +1367,7 @@ function setupEventListeners() {
   // Add rival config
   document.getElementById('btn-add-rival').addEventListener('click', () => {
     const name = document.getElementById('new-rival-name').value.trim();
+    const price = document.getElementById('new-rival-price').value.trim();
     const cb = parseInt(document.getElementById('new-rival-cb').value);
     const read = parseInt(document.getElementById('new-rival-read').value);
     const write = parseInt(document.getElementById('new-rival-write').value);
@@ -1361,12 +1376,14 @@ function setupEventListeners() {
       const newRival = {
         id: 'r_' + Date.now().toString(36),
         name,
+        price: price || '--',
         cinebenchR23: cb,
         readSpeed: read || 5000,
         writeSpeed: write || 4000
       };
       appState.rivalBenchmarks.push(newRival);
       document.getElementById('new-rival-name').value = '';
+      document.getElementById('new-rival-price').value = '';
       document.getElementById('new-rival-cb').value = '';
       document.getElementById('new-rival-read').value = '';
       document.getElementById('new-rival-write').value = '';

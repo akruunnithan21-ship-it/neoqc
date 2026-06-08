@@ -539,6 +539,7 @@
               <thead>
                 <tr>
                   <th>Config Name</th>
+                  <th>Price</th>
                   <th>Cinebench R23 Expected</th>
                   <th>SSD Read (MB/s)</th>
                   <th>SSD Write (MB/s)</th>
@@ -551,10 +552,11 @@
             </table>
           </div>
           <div class="add-rival-form-row margin-top">
-            <input type="text" id="new-rival-name" placeholder="Ryzen 5 7600 + RTX 4060">
-            <input type="number" id="new-rival-cb" placeholder="CB Score">
-            <input type="number" id="new-rival-read" placeholder="Read MB/s">
-            <input type="number" id="new-rival-write" placeholder="Write MB/s">
+            <input type="text" id="new-rival-name" placeholder="Ryzen 5 7600 + RTX 4060" style="flex: 2;">
+            <input type="text" id="new-rival-price" placeholder="Price (e.g. ₹18,500)" style="flex: 1;">
+            <input type="number" id="new-rival-cb" placeholder="CB Score" style="flex: 1;">
+            <input type="number" id="new-rival-read" placeholder="Read MB/s" style="flex: 1;">
+            <input type="number" id="new-rival-write" placeholder="Write MB/s" style="flex: 1;">
             <button id="btn-add-rival" class="primary-pink-btn">Add Config</button>
           </div>
         </div>
@@ -686,7 +688,7 @@
           <tr>
             <th>Benchmark Target</th>
             <th>Neo Tokyo Build Score</th>
-            <th>Expected Competitor Config</th>
+            <th id="print-rival-header">Expected Competitor Config</th>
             <th>Status Delta</th>
           </tr>
         </thead>
@@ -711,6 +713,15 @@
           </tr>
         </tbody>
       </table>
+
+      <div id="print-rival-specs-box" class="margin-top" style="font-size: 8.5pt; border: 1px solid #ccc; padding: 6px 10px; border-radius: 4px; margin-top: 8px; display: none;">
+        <strong>Target Competitor Details:</strong>
+        <div style="display: flex; gap: 20px; margin-top: 4px;">
+          <span><strong>CPU:</strong> <span id="print-rival-spec-cpu">--</span></span>
+          <span><strong>GPU:</strong> <span id="print-rival-spec-gpu">--</span></span>
+          <span><strong>Rival Config Price:</strong> <span id="print-rival-spec-price">--</span></span>
+        </div>
+      </div>
     </div>
 
     <div class="print-section">
