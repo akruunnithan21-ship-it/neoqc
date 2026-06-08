@@ -395,9 +395,13 @@ function openTicketModal(ticketId = null) {
       document.getElementById('form-rival-select').value = ticket.diagnostics.rivalConfigId || '';
 
       document.getElementById('serial-motherboard').value = ticket.serials.motherboard || '';
+      document.getElementById('serial-ram').value = ticket.serials.ram || '';
       document.getElementById('serial-gpu').value = ticket.serials.gpu || '';
       document.getElementById('serial-ssd').value = ticket.serials.ssd || '';
       document.getElementById('serial-cabinet').value = ticket.serials.cabinet || '';
+
+      // Run duplicate check on load
+      document.querySelectorAll('.serial-field').forEach(field => verifyFieldDuplicate(field));
 
       updateRivalComparisonOutput();
 
@@ -445,6 +449,8 @@ function setupFormCalculations() {
     const maxVal = parseFloat(cpuMax.value);
     if (!isNaN(minVal) && !isNaN(maxVal)) {
       cpuAvg.value = Math.round((minVal + maxVal) / 2);
+    } else {
+      cpuAvg.value = '';
     }
   };
   cpuMin.addEventListener('input', calcCpuAvg);
@@ -459,6 +465,8 @@ function setupFormCalculations() {
     const maxVal = parseFloat(gpuMax.value);
     if (!isNaN(minVal) && !isNaN(maxVal)) {
       gpuAvg.value = Math.round((minVal + maxVal) / 2);
+    } else {
+      gpuAvg.value = '';
     }
   };
   gpuMin.addEventListener('input', calcGpuAvg);
@@ -565,6 +573,7 @@ async function handleTicketFormSubmit(e) {
 
   const serials = {
     motherboard: document.getElementById('serial-motherboard').value,
+    ram: document.getElementById('serial-ram').value,
     gpu: document.getElementById('serial-gpu').value,
     ssd: document.getElementById('serial-ssd').value,
     cabinet: document.getElementById('serial-cabinet').value
@@ -628,24 +637,28 @@ async function handleTicketFormSubmit(e) {
 }
 
 // Duplicate Serial checking
+function verifyFieldDuplicate(field) {
+  if (!field) return;
+  const val = field.value.trim();
+  field.classList.remove('duplicate-err');
+
+  if (val.length < 3) return;
+
+  const isDuplicate = appState.tickets.some(t => {
+    if (t.id === editingTicketId) return false;
+    return t.serials && Object.values(t.serials).some(s => s && s.trim() === val);
+  });
+
+  if (isDuplicate) {
+    field.classList.add('duplicate-err');
+  }
+}
+
 function setupSerialVerification() {
   const fields = document.querySelectorAll('.serial-field');
   fields.forEach(field => {
     field.addEventListener('input', (e) => {
-      const val = e.target.value.trim();
-      field.classList.remove('duplicate-err');
-
-      if (val.length < 3) return;
-
-      // Scan other tickets for duplicate serials
-      const isDuplicate = appState.tickets.some(t => {
-        if (t.id === editingTicketId) return false;
-        return Object.values(t.serials).some(s => s && s.trim() === val);
-      });
-
-      if (isDuplicate) {
-        field.classList.add('duplicate-err');
-      }
+      verifyFieldDuplicate(e.target);
     });
   });
 }
@@ -800,7 +813,17 @@ function parseHwInfoCsv(content) {
   const lines = content.split('\n');
   if (lines.length < 2) return;
 
-  const headers = lines[0].split(',').map(h => h.replace(/"/g, '').trim());
+  // Auto-detect delimiter (, or ;)
+  let delimiter = ',';
+  if (lines[0].includes(';')) {
+    const commas = (lines[0].match(/,/g) || []).length;
+    const semicolons = (lines[0].match(/;/g) || []).length;
+    if (semicolons > commas) {
+      delimiter = ';';
+    }
+  }
+
+  const headers = lines[0].split(delimiter).map(h => h.replace(/"/g, '').trim());
   
   // Find indices for CPU and GPU Temperature columns
   let cpuIdx = headers.findIndex(h => h.includes('CPU (Tctl/Tdie)') || h.includes('CPU Package') || h.includes('CPU [°C]'));
@@ -820,7 +843,7 @@ function parseHwInfoCsv(content) {
 
   for (let i = 1; i < lines.length; i++) {
     if (!lines[i]) continue;
-    const cols = lines[i].split(',');
+    const cols = lines[i].split(delimiter);
     
     if (cpuIdx !== -1 && cols[cpuIdx]) {
       const v = parseFloat(cols[cpuIdx].replace(/"/g, '').trim());
@@ -854,12 +877,17 @@ function parseHwInfoCsv(content) {
 }
 
 function parseCinebenchLog(content) {
-  // Look for score line: standard Cinebench reports say e.g., "Score: 14850 pts" or just has numbers.
-  const scoreRegex = /(?:Score|Points|Result)\s*:\s*([\d,]+)/i;
-  const match = content.match(scoreRegex) || content.match(/(\d+)\s*(?:pts|points)/i);
+  // Prioritize Multi Core score explicitly to prevent grabbing Single Core score if listed first
+  const multiCoreRegex = /(?:Multi\s*Core|Multi-Core|MC)[^\d]*:\s*([\d,]+)/i;
+  const matchMulti = content.match(multiCoreRegex);
   
-  if (match) {
-    parsedCinebench = parseInt(match[1].replace(/,/g, ''));
+  const scoreRegex = /(?:Score|Points|Result)\s*:\s*([\d,]+)/i;
+  const matchGen = content.match(scoreRegex) || content.match(/(\d+)\s*(?:pts|points)/i);
+  
+  const finalMatch = matchMulti || matchGen;
+  
+  if (finalMatch) {
+    parsedCinebench = parseInt(finalMatch[1].replace(/,/g, ''));
     document.getElementById('cinebench-preview').textContent = `Cinebench Score: ${parsedCinebench} pts`;
   } else {
     // Attempt raw numeric extract
@@ -1397,7 +1425,7 @@ function seedMockTickets() {
         gpuTempMin: null, gpuTempMax: null, gpuTempAvg: null,
         cinebench: null, ssdRead: null, ssdWrite: null, rivalConfigId: ""
       },
-      serials: { motherboard: "", gpu: "", ssd: "", cabinet: "" },
+      serials: { motherboard: "", ram: "", gpu: "", ssd: "", cabinet: "" },
       specs: { cpu: "Ryzen 7 7800X3D", gpu: "RTX 4070 Ti Super", ram: "32 GB DDR5", storage: "2TB NVMe SSD" },
       status: "building",
       completedAt: null
@@ -1428,7 +1456,7 @@ function seedMockTickets() {
         gpuTempMin: null, gpuTempMax: null, gpuTempAvg: null,
         cinebench: null, ssdRead: null, ssdWrite: null, rivalConfigId: ""
       },
-      serials: { motherboard: "", gpu: "", ssd: "", cabinet: "" },
+      serials: { motherboard: "", ram: "", gpu: "", ssd: "", cabinet: "" },
       specs: { cpu: "Core i9-14900K", gpu: "RTX 4090", ram: "64 GB DDR5", storage: "4TB Gen4 SSD" },
       status: "waiting_qc",
       completedAt: null
@@ -1459,7 +1487,7 @@ function seedMockTickets() {
         gpuTempMin: null, gpuTempMax: null, gpuTempAvg: null,
         cinebench: null, ssdRead: null, ssdWrite: null, rivalConfigId: ""
       },
-      serials: { motherboard: "", gpu: "", ssd: "", cabinet: "" },
+      serials: { motherboard: "", ram: "", gpu: "", ssd: "", cabinet: "" },
       specs: { cpu: "Ryzen 9 7950X", gpu: "", ram: "64 GB DDR5", storage: "2TB Gen4 SSD" },
       status: "awaiting",
       completedAt: null
@@ -1499,7 +1527,7 @@ function seedMockTickets() {
         gpuTempMin: 40, gpuTempMax: 78, gpuTempAvg: 70,
         cinebench: 14200, ssdRead: 4900, ssdWrite: 3950, rivalConfigId: "1"
       },
-      serials: { motherboard: "MB-84729104", gpu: "GPU-7739102", ssd: "SSD-391023", cabinet: "CAB-99238" },
+      serials: { motherboard: "MB-84729104", ram: "RAM-984719", gpu: "GPU-7739102", ssd: "SSD-391023", cabinet: "CAB-99238" },
       specs: { cpu: "Ryzen 5 7600", gpu: "RTX 4060", ram: "16 GB DDR5", storage: "1TB SSD" },
       status: "qc_testing",
       completedAt: null
@@ -1530,7 +1558,7 @@ function seedMockTickets() {
         gpuTempMin: 35, gpuTempMax: 68, gpuTempAvg: 60,
         cinebench: 12500, ssdRead: 3500, ssdWrite: 3000, rivalConfigId: "1"
       },
-      serials: { motherboard: "MB-11239023", gpu: "GPU-2239102", ssd: "SSD-449102", cabinet: "CAB-55102" },
+      serials: { motherboard: "MB-11239023", ram: "RAM-449231", gpu: "GPU-2239102", ssd: "SSD-449102", cabinet: "CAB-55102" },
       specs: { cpu: "Core i5-13400", gpu: "RTX 3060", ram: "16 GB DDR4", storage: "1TB SSD" },
       status: "completed",
       completedAt: new Date(Date.now() - 48*60*60*1000).toISOString()
