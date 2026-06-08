@@ -25,6 +25,13 @@ document.addEventListener('DOMContentLoaded', async () => {
   setupEventListeners();
   updateTimeDisplay();
   setInterval(updateTimeDisplay, 60000);
+
+  // Navigate to initial screen based on isMaster setting
+  if (appState.settings.isMaster) {
+    switchScreen('selector');
+  } else {
+    switchScreen('client-welcome');
+  }
 });
 
 // Load DB from local Electron AppData Storage
@@ -74,11 +81,12 @@ async function loadDatabase() {
     await saveDatabase();
   }
   if (!appState.settings) {
-    appState.settings = { supabaseUrl: "", supabaseAnonKey: "", pathHwInfo: "", pathCinebench: "", pathFurmark: "" };
+    appState.settings = { supabaseUrl: "", supabaseAnonKey: "", pathHwInfo: "", pathCinebench: "", pathFurmark: "", isMaster: false };
   } else {
     if (!appState.settings.pathHwInfo) appState.settings.pathHwInfo = "";
     if (!appState.settings.pathCinebench) appState.settings.pathCinebench = "";
     if (!appState.settings.pathFurmark) appState.settings.pathFurmark = "";
+    if (appState.settings.isMaster === undefined) appState.settings.isMaster = false;
   }
   
   // Seed beautiful mock tickets if db is empty to showcase the UI immediately!
@@ -116,6 +124,17 @@ function switchScreen(mode) {
   } else if (mode === 'client') {
     document.getElementById('client-screen').classList.add('active');
     populateClientTicketSelect();
+    handleClientTicketSelect();
+  } else if (mode === 'client-welcome') {
+    document.getElementById('client-welcome-screen').classList.add('active');
+    const welcomeExit = document.getElementById('btn-welcome-exit');
+    if (welcomeExit) {
+      if (appState.settings.isMaster) {
+        welcomeExit.classList.remove('hidden');
+      } else {
+        welcomeExit.classList.add('hidden');
+      }
+    }
   } else {
     document.getElementById('mode-selector-screen').classList.add('active');
   }
@@ -161,6 +180,18 @@ function populateTechnicianDropdowns() {
       opt.value = rival.id;
       opt.textContent = rival.name;
       rivalSelect.appendChild(opt);
+    });
+  }
+
+  // Populate Rivals in client form
+  const clientRivalSelect = document.getElementById('c-rival-select');
+  if (clientRivalSelect) {
+    clientRivalSelect.innerHTML = '<option value="">-- Choose Rival Configuration --</option>';
+    appState.rivalBenchmarks.forEach(rival => {
+      const opt = document.createElement('option');
+      opt.value = rival.id;
+      opt.textContent = rival.name;
+      clientRivalSelect.appendChild(opt);
     });
   }
 }
@@ -648,6 +679,189 @@ function updateRivalComparisonOutput() {
   outputDiv.innerHTML += compareMetric("SSD Write Speed (MB/s)", writeSpeed, rival.writeSpeed);
 }
 
+function handleClientTicketSelect() {
+  const ticketId = document.getElementById('client-ticket-select').value;
+  const submitBtn = document.getElementById('btn-client-submit');
+  const detectHwBtn = document.getElementById('btn-client-detect-hw');
+  const runDiagBtn = document.getElementById('btn-run-auto-diagnostics');
+  const checkWinBtn = document.getElementById('btn-client-check-win');
+
+  if (!ticketId) {
+    submitBtn.setAttribute('disabled', 'true');
+    detectHwBtn.setAttribute('disabled', 'true');
+    runDiagBtn.setAttribute('disabled', 'true');
+    checkWinBtn.setAttribute('disabled', 'true');
+
+    // Clear spec display
+    document.getElementById('c-spec-cpu').textContent = 'Not detected';
+    document.getElementById('c-spec-gpu').textContent = 'Not detected';
+    document.getElementById('c-spec-ram').textContent = 'Not detected';
+    document.getElementById('c-spec-storage').textContent = 'Not detected';
+
+    // Clear inputs
+    document.getElementById('c-cpu-temp-min').value = '';
+    document.getElementById('c-cpu-temp-max').value = '';
+    document.getElementById('c-cpu-temp-avg').value = '';
+    document.getElementById('c-gpu-temp-min').value = '';
+    document.getElementById('c-gpu-temp-max').value = '';
+    document.getElementById('c-gpu-temp-avg').value = '';
+    document.getElementById('c-cinebench-score').value = '';
+    document.getElementById('c-ssd-read').value = '';
+    document.getElementById('c-ssd-write').value = '';
+    document.getElementById('c-rival-select').value = '';
+    document.getElementById('c-rival-comparison-output').classList.add('hidden');
+    
+    // Clear status
+    document.getElementById('c-diagnostics-status').innerHTML = 'HWiNFO64: [Idle] | Cinebench R23: [Idle] | FurMark: [Idle]';
+    return;
+  }
+
+  submitBtn.removeAttribute('disabled');
+  detectHwBtn.removeAttribute('disabled');
+  runDiagBtn.removeAttribute('disabled');
+  checkWinBtn.removeAttribute('disabled');
+
+  const ticket = appState.tickets.find(t => t.id === ticketId);
+  if (ticket) {
+    // Populate specs
+    document.getElementById('c-spec-cpu').textContent = ticket.specs ? (ticket.specs.cpu || 'Not detected') : 'Not detected';
+    document.getElementById('c-spec-gpu').textContent = ticket.specs ? (ticket.specs.gpu || 'Not detected') : 'Not detected';
+    document.getElementById('c-spec-ram').textContent = ticket.specs ? (ticket.specs.ram || 'Not detected') : 'Not detected';
+    document.getElementById('c-spec-storage').textContent = ticket.specs ? (ticket.specs.storage || 'Not detected') : 'Not detected';
+
+    // Set global detectedSpecs if already present in ticket
+    if (ticket.specs && ticket.specs.cpu) {
+      detectedSpecs = {
+        cpu: ticket.specs.cpu,
+        gpu: ticket.specs.gpu,
+        ram: ticket.specs.ram,
+        storage: ticket.specs.storage
+      };
+    } else {
+      detectedSpecs = null;
+    }
+
+    // Populate temps
+    document.getElementById('c-cpu-temp-min').value = ticket.diagnostics.cpuTempMin || '';
+    document.getElementById('c-cpu-temp-max').value = ticket.diagnostics.cpuTempMax || '';
+    document.getElementById('c-cpu-temp-avg').value = ticket.diagnostics.cpuTempAvg || '';
+    document.getElementById('c-gpu-temp-min').value = ticket.diagnostics.gpuTempMin || '';
+    document.getElementById('c-gpu-temp-max').value = ticket.diagnostics.gpuTempMax || '';
+    document.getElementById('c-gpu-temp-avg').value = ticket.diagnostics.gpuTempAvg || '';
+
+    // Populate benchmarks
+    document.getElementById('c-cinebench-score').value = ticket.diagnostics.cinebench || '';
+    document.getElementById('c-ssd-read').value = ticket.diagnostics.ssdRead || '';
+    document.getElementById('c-ssd-write').value = ticket.diagnostics.ssdWrite || '';
+    
+    // Populate rival select
+    let rivalId = ticket.diagnostics.rivalConfigId || '';
+    if (!rivalId && ticket.specs && ticket.specs.cpu && isI514thGen(ticket.specs.cpu)) {
+      const amdRival = appState.rivalBenchmarks.find(r => r.cpu && r.cpu.toLowerCase().includes('ryzen 5 7600') || r.id === '1');
+      if (amdRival) {
+        rivalId = amdRival.id;
+      }
+    }
+    document.getElementById('c-rival-select').value = rivalId;
+
+    // Load status display depending on existing data
+    const hasTemps = ticket.diagnostics.cpuTempAvg !== null;
+    const hasCb = ticket.diagnostics.cinebench !== null;
+    document.getElementById('c-diagnostics-status').innerHTML = `
+      HWiNFO64: <strong style="color: ${hasTemps ? 'var(--status-completed)' : 'inherit'}">${hasTemps ? 'Calculated' : '[Idle]'}</strong> | 
+      Cinebench R23: <strong style="color: ${hasCb ? 'var(--status-completed)' : 'inherit'}">${hasCb ? 'Completed (' + ticket.diagnostics.cinebench + ' pts)' : '[Idle]'}</strong> | 
+      FurMark: <strong style="color: ${hasTemps ? 'var(--status-completed)' : 'inherit'}">${hasTemps ? 'Completed' : '[Idle]'}</strong>
+    `;
+
+    // Trigger comparison output calculation
+    updateClientRivalComparisonOutput();
+  }
+}
+
+function updateClientRivalComparisonOutput() {
+  const rivalId = document.getElementById('c-rival-select').value;
+  const cbScore = parseFloat(document.getElementById('c-cinebench-score').value);
+  const readSpeed = parseFloat(document.getElementById('c-ssd-read').value);
+  const writeSpeed = parseFloat(document.getElementById('c-ssd-write').value);
+  const outputDiv = document.getElementById('c-rival-comparison-output');
+
+  if (!rivalId) {
+    outputDiv.classList.add('hidden');
+    return;
+  }
+
+  const rival = appState.rivalBenchmarks.find(r => r.id === rivalId);
+  if (!rival) {
+    outputDiv.classList.add('hidden');
+    return;
+  }
+
+  outputDiv.classList.remove('hidden');
+  outputDiv.innerHTML = `
+    <div style="margin-bottom: 8px; font-size: 0.85rem; border-bottom: 1px solid rgba(15, 23, 42, 0.08); padding-bottom: 6px;">
+      <strong>Target Competitor:</strong> ${rival.name}<br>
+      <span style="opacity: 0.8;">CPU: ${rival.cpu || '--'} | GPU: ${rival.gpu || '--'} | Price: ${rival.price || '--'}</span>
+    </div>
+    <div class="comparison-row header"><span>Parameter</span><span>Your Build</span><span>Target rival</span><span>Delta</span></div>
+  `;
+
+  const compareMetric = (label, currentVal, rivalVal) => {
+    if (isNaN(currentVal)) {
+      return `<div class="comparison-row"><span>${label}</span><span>--</span><span>${rivalVal}</span><span>--</span></div>`;
+    }
+    const pctDiff = ((currentVal - rivalVal) / rivalVal) * 100;
+    const sign = pctDiff >= 0 ? '+' : '';
+    const isPass = pctDiff >= -5;
+    const deltaClass = isPass ? 'delta-pass' : 'delta-fail';
+    return `
+      <div class="comparison-row">
+        <span>${label}</span>
+        <span>${currentVal}</span>
+        <span>${rivalVal}</span>
+        <span class="${deltaClass}">${sign}${pctDiff.toFixed(1)}% (${isPass ? 'OK' : 'UNDER'})</span>
+      </div>
+    `;
+  };
+
+  outputDiv.innerHTML += compareMetric("Cinebench Score", cbScore, rival.cinebenchR23);
+  outputDiv.innerHTML += compareMetric("SSD Read Speed (MB/s)", readSpeed, rival.readSpeed);
+  outputDiv.innerHTML += compareMetric("SSD Write Speed (MB/s)", writeSpeed, rival.writeSpeed);
+}
+
+function setupClientFormCalculations() {
+  const cpuMin = document.getElementById('c-cpu-temp-min');
+  const cpuMax = document.getElementById('c-cpu-temp-max');
+  const cpuAvg = document.getElementById('c-cpu-temp-avg');
+
+  const calcCpuAvg = () => {
+    const minVal = parseFloat(cpuMin.value);
+    const maxVal = parseFloat(cpuMax.value);
+    if (!isNaN(minVal) && !isNaN(maxVal)) {
+      cpuAvg.value = Math.round((minVal + maxVal) / 2);
+    } else {
+      cpuAvg.value = '';
+    }
+  };
+  cpuMin.addEventListener('input', calcCpuAvg);
+  cpuMax.addEventListener('input', calcCpuAvg);
+
+  const gpuMin = document.getElementById('c-gpu-temp-min');
+  const gpuMax = document.getElementById('c-gpu-temp-max');
+  const gpuAvg = document.getElementById('c-gpu-temp-avg');
+
+  const calcGpuAvg = () => {
+    const minVal = parseFloat(gpuMin.value);
+    const maxVal = parseFloat(gpuMax.value);
+    if (!isNaN(minVal) && !isNaN(maxVal)) {
+      gpuAvg.value = Math.round((minVal + maxVal) / 2);
+    } else {
+      gpuAvg.value = '';
+    }
+  };
+  gpuMin.addEventListener('input', calcGpuAvg);
+  gpuMax.addEventListener('input', calcGpuAvg);
+}
+
 // Save ticket form data
 async function handleTicketFormSubmit(e) {
   e.preventDefault();
@@ -810,11 +1024,12 @@ let parsedCinebench = null;
 let parsedDiskSpeeds = null;
 
 async function setupClientMode() {
-  // Automated Stress Test Execution
+  // Automated Stress Test Execution (Client Portal)
   document.getElementById('btn-run-auto-diagnostics').addEventListener('click', async () => {
     const btn = document.getElementById('btn-run-auto-diagnostics');
-    const consoleBox = document.getElementById('diagnostics-log-console');
-    
+    const statusBox = document.getElementById('c-diagnostics-status');
+    if (!statusBox) return;
+
     // Check if paths are configured
     const hasHw = appState.settings.pathHwInfo || appState.settings.pathHwInfo === 'mock';
     const hasCb = appState.settings.pathCinebench || appState.settings.pathCinebench === 'mock';
@@ -825,74 +1040,123 @@ async function setupClientMode() {
       return;
     }
 
-    consoleBox.classList.remove('hidden');
-    consoleBox.innerHTML = `[${new Date().toLocaleTimeString()}] Checking diagnostic tool configurations...<br>`;
-    
     btn.disabled = true;
     btn.textContent = "⚡ Running Stress Tests...";
+    
+    // Set status to running for active tools
+    let hwRunText = hasHw ? "<strong style='color: var(--status-urgent)'>Running...</strong>" : "Not Configured";
+    let cbRunText = hasCb ? "<strong style='color: var(--status-urgent)'>Running...</strong>" : "Not Configured";
+    let fmRunText = hasFm ? "<strong style='color: var(--status-urgent)'>Running...</strong>" : "Not Configured";
 
-    let hwRunText = hasHw ? "Running..." : "Not Configured";
-    let cbRunText = hasCb ? "Running..." : "Not Configured";
-    let fmRunText = hasFm ? "Running..." : "Not Configured";
-    consoleBox.innerHTML += `[Status] HWiNFO64: ${hwRunText} | Cinebench: ${cbRunText} | FurMark: ${fmRunText}<br>`;
+    statusBox.innerHTML = `
+      HWiNFO64: ${hwRunText} | 
+      Cinebench R23: ${cbRunText} | 
+      FurMark: ${fmRunText}
+    `;
 
     const res = await ipcRenderer.invoke('sys:run-diagnostics', appState.settings);
+    
+    btn.disabled = false;
+    btn.textContent = "Run Stress Test & Auto-Fill";
+
     if (!res.success) {
-      consoleBox.innerHTML += `<span style="color: var(--status-urgent)">[Error] ${res.error}</span><br>`;
-      btn.disabled = false;
-      btn.textContent = "Run Automated Diagnostics";
+      statusBox.innerHTML = `<span style="color: var(--status-urgent)">Error: ${res.error}</span>`;
       return;
     }
 
-    consoleBox.innerHTML += `[${new Date().toLocaleTimeString()}] Diagnostics completed successfully.<br>`;
-    if (res.mock) {
-      consoleBox.innerHTML += `[Info] Running in MOCK Mode.<br>`;
-    }
-
-    // Parse HWiNFO log CSV
+    // Populate parsed temperatures
     if (res.csvContent) {
-      consoleBox.innerHTML += `[${new Date().toLocaleTimeString()}] Parsing thermal logs...<br>`;
-      parseHwInfoCsv(res.csvContent);
+      const stats = getHwInfoStats(res.csvContent);
+      if (stats) {
+        if (stats.cpu.min !== null) document.getElementById('c-cpu-temp-min').value = stats.cpu.min;
+        if (stats.cpu.max !== null) document.getElementById('c-cpu-temp-max').value = stats.cpu.max;
+        if (stats.cpu.avg !== null) document.getElementById('c-cpu-temp-avg').value = stats.cpu.avg;
+        
+        if (stats.gpu.min !== null) document.getElementById('c-gpu-temp-min').value = stats.gpu.min;
+        if (stats.gpu.max !== null) document.getElementById('c-gpu-temp-max').value = stats.gpu.max;
+        if (stats.gpu.avg !== null) document.getElementById('c-gpu-temp-avg').value = stats.gpu.avg;
+      }
     }
 
-    // Load Cinebench
+    // Populate Cinebench score
     if (res.cinebenchScore) {
-      consoleBox.innerHTML += `[${new Date().toLocaleTimeString()}] Cinebench Score parsed: ${res.cinebenchScore} pts<br>`;
-      parsedCinebench = res.cinebenchScore;
-      document.getElementById('cinebench-preview').textContent = `Cinebench Score: ${parsedCinebench} pts`;
+      document.getElementById('c-cinebench-score').value = res.cinebenchScore;
     }
 
-    // Load sequential SSD speed benchmark
-    if (res.ssdRead && res.ssdWrite) {
-      consoleBox.innerHTML += `[${new Date().toLocaleTimeString()}] SSD sequential speeds benchmarked: Read ${res.ssdRead} MB/s | Write ${res.ssdWrite} MB/s<br>`;
-      parsedDiskSpeeds = { read: res.ssdRead, write: res.ssdWrite };
-      document.getElementById('crystal-preview').innerHTML = `Sequential Read: ${res.ssdRead} MB/s | Write: ${res.ssdWrite} MB/s`;
+    // Populate SSD read/write speeds
+    if (res.ssdRead) {
+      document.getElementById('c-ssd-read').value = res.ssdRead;
+    }
+    if (res.ssdWrite) {
+      document.getElementById('c-ssd-write').value = res.ssdWrite;
     }
 
-    btn.textContent = "✅ Stress Tests Complete";
-    btn.classList.add('secondary-btn');
-    btn.classList.remove('primary-pink-btn');
-    
+    // Trigger calculations and comparisons
+    updateClientRivalComparisonOutput();
+
+    // Set completed status
+    const finalCbScore = res.cinebenchScore || 0;
+    statusBox.innerHTML = `
+      HWiNFO64: <strong style="color: var(--status-completed)">Calculated</strong> | 
+      Cinebench R23: <strong style="color: var(--status-completed)">Completed (${finalCbScore} pts)</strong> | 
+      FurMark: <strong style="color: var(--status-completed)">Completed</strong>
+    `;
+
     checkClientFormReady();
   });
 
   // Trigger system specs detection
   document.getElementById('btn-client-detect-hw').addEventListener('click', async () => {
     const btn = document.getElementById('btn-client-detect-hw');
+    const oldText = btn.textContent;
     btn.textContent = "🔍 Detecting hardware...";
     btn.disabled = true;
 
-    detectedSpecs = await ipcRenderer.invoke('sys:detect-hw');
-    
-    document.getElementById('c-spec-cpu').textContent = detectedSpecs.cpu || "Failed to detect";
-    document.getElementById('c-spec-gpu').textContent = detectedSpecs.gpu || "Failed to detect";
-    document.getElementById('c-spec-ram').textContent = detectedSpecs.ram || "Failed to detect";
-    document.getElementById('c-spec-storage').textContent = detectedSpecs.storage || "Failed to detect";
+    try {
+      detectedSpecs = await ipcRenderer.invoke('sys:detect-hw');
+      
+      document.getElementById('c-spec-cpu').textContent = detectedSpecs.cpu || "Failed to detect";
+      document.getElementById('c-spec-gpu').textContent = detectedSpecs.gpu || "Failed to detect";
+      document.getElementById('c-spec-ram').textContent = detectedSpecs.ram || "Failed to detect";
+      document.getElementById('c-spec-storage').textContent = detectedSpecs.storage || "Failed to detect";
 
-    btn.textContent = "🔍 Hardware Specs Detected";
-    btn.classList.add('secondary-btn');
-    btn.classList.remove('primary-pink-btn');
-    checkClientFormReady();
+      btn.textContent = "🔍 Hardware Specs Detected";
+      btn.classList.add('secondary-btn');
+      btn.classList.remove('primary-pink-btn');
+
+      // Automap to competitor config
+      const comp = getCompetitorModel(detectedSpecs.cpu);
+      let matchedRival = appState.rivalBenchmarks.find(r => {
+        const rName = r.name.toLowerCase();
+        const rCpu = (r.cpu || '').toLowerCase();
+        const compName = comp.name.toLowerCase();
+        return compName.includes(rCpu) || rName.includes(compName) || compName.includes(rName);
+      });
+
+      if (!matchedRival) {
+        if (comp.name.includes("7600")) {
+          matchedRival = appState.rivalBenchmarks.find(r => r.id === "1");
+        } else if (comp.name.includes("14700")) {
+          matchedRival = appState.rivalBenchmarks.find(r => r.id === "2");
+        }
+      }
+
+      if (matchedRival) {
+        const select = document.getElementById('c-rival-select');
+        select.value = matchedRival.id;
+        updateClientRivalComparisonOutput();
+      }
+
+      checkClientFormReady();
+    } catch (err) {
+      console.error("Client specs detection error:", err);
+      alert("Specs detection failed: " + err.message);
+    } finally {
+      btn.disabled = false;
+      if (btn.textContent === "🔍 Detecting hardware...") {
+        btn.textContent = oldText;
+      }
+    }
   });
 
   // Windows Activation Check
@@ -909,36 +1173,6 @@ async function setupClientMode() {
       winStatusBox.dataset.activated = "false";
     }
     checkClientFormReady();
-  });
-
-  // Select HWiNFO64 Log CSV
-  document.getElementById('btn-select-hwinfo').addEventListener('click', async () => {
-    const filePath = await ipcRenderer.invoke('dialog:open-file', [{ name: 'CSV Files', extensions: ['csv'] }]);
-    if (filePath) {
-      document.getElementById('label-hwinfo-file').textContent = filePath.split('\\').pop();
-      const csvContent = await ipcRenderer.invoke('file:read-text', filePath);
-      parseHwInfoCsv(csvContent);
-    }
-  });
-
-  // Select Cinebench Log File
-  document.getElementById('btn-select-cinebench').addEventListener('click', async () => {
-    const filePath = await ipcRenderer.invoke('dialog:open-file', [{ name: 'Text Reports', extensions: ['txt', 'log'] }]);
-    if (filePath) {
-      document.getElementById('label-cinebench-file').textContent = filePath.split('\\').pop();
-      const txtContent = await ipcRenderer.invoke('file:read-text', filePath);
-      parseCinebenchLog(txtContent);
-    }
-  });
-
-  // Select CrystalDiskMark file
-  document.getElementById('btn-select-crystal').addEventListener('click', async () => {
-    const filePath = await ipcRenderer.invoke('dialog:open-file', [{ name: 'Text Reports', extensions: ['txt', 'log'] }]);
-    if (filePath) {
-      document.getElementById('label-crystal-file').textContent = filePath.split('\\').pop();
-      const txtContent = await ipcRenderer.invoke('file:read-text', filePath);
-      parseCrystalDiskLog(txtContent);
-    }
   });
 
   // Submit client results
@@ -967,26 +1201,22 @@ async function setupClientMode() {
       t.qcChecks.softWindows = true;
     }
 
-    // Populate parsed temperatures
-    if (parsedTemps) {
-      t.diagnostics.cpuTempMin = parsedTemps.cpu.min;
-      t.diagnostics.cpuTempMax = parsedTemps.cpu.max;
-      t.diagnostics.cpuTempAvg = parsedTemps.cpu.avg;
-      
-      t.diagnostics.gpuTempMin = parsedTemps.gpu.min;
-      t.diagnostics.gpuTempMax = parsedTemps.gpu.max;
-      t.diagnostics.gpuTempAvg = parsedTemps.gpu.avg;
-    }
+    // Populate diagnostics from inputs
+    t.diagnostics.cpuTempMin = parseFloat(document.getElementById('c-cpu-temp-min').value) || null;
+    t.diagnostics.cpuTempMax = parseFloat(document.getElementById('c-cpu-temp-max').value) || null;
+    t.diagnostics.cpuTempAvg = parseFloat(document.getElementById('c-cpu-temp-avg').value) || null;
+    
+    t.diagnostics.gpuTempMin = parseFloat(document.getElementById('c-gpu-temp-min').value) || null;
+    t.diagnostics.gpuTempMax = parseFloat(document.getElementById('c-gpu-temp-max').value) || null;
+    t.diagnostics.gpuTempAvg = parseFloat(document.getElementById('c-gpu-temp-avg').value) || null;
 
-    // Cinebench & SSD speed updates
-    if (parsedCinebench) t.diagnostics.cinebench = parsedCinebench;
-    if (parsedDiskSpeeds) {
-      t.diagnostics.ssdRead = parsedDiskSpeeds.read;
-      t.diagnostics.ssdWrite = parsedDiskSpeeds.write;
-    }
+    t.diagnostics.cinebench = parseFloat(document.getElementById('c-cinebench-score').value) || null;
+    t.diagnostics.ssdRead = parseFloat(document.getElementById('c-ssd-read').value) || null;
+    t.diagnostics.ssdWrite = parseFloat(document.getElementById('c-ssd-write').value) || null;
+    t.diagnostics.rivalConfigId = document.getElementById('c-rival-select').value || "";
 
     // Set QC check indicators
-    if (parsedTemps) {
+    if (t.diagnostics.cpuTempAvg !== null) {
       t.qcChecks.physCabinet = true; // Default auto physical checks pass on client submission to bypass manually typing
       t.qcChecks.softDrivers = true;
       t.qcChecks.softBios = true;
@@ -1008,8 +1238,22 @@ async function setupClientMode() {
     await saveDatabase();
     await syncTicketToCloud(t);
     alert("Diagnostic data successfully uploaded to database!");
-    switchScreen('selector');
+    
+    if (appState.settings.isMaster) {
+      switchScreen('selector');
+    } else {
+      switchScreen('client-welcome');
+    }
   });
+
+  // Client comparison value sync event listeners
+  document.getElementById('c-rival-select').addEventListener('change', updateClientRivalComparisonOutput);
+  document.getElementById('c-cinebench-score').addEventListener('input', updateClientRivalComparisonOutput);
+  document.getElementById('c-ssd-read').addEventListener('input', updateClientRivalComparisonOutput);
+  document.getElementById('c-ssd-write').addEventListener('input', updateClientRivalComparisonOutput);
+
+  // Setup client temperature averaging calculations
+  setupClientFormCalculations();
 }
 
 function getHwInfoStats(content) {
@@ -1105,97 +1349,10 @@ function getHwInfoStats(content) {
   };
 }
 
-function parseHwInfoCsv(content) {
-  const stats = getHwInfoStats(content);
-  if (!stats) {
-    alert("Could not map temperature columns in this CSV. Please check HWiNFO64 sensor headers.");
-    return;
-  }
-  parsedTemps = stats;
-
-  document.getElementById('hwinfo-preview').innerHTML = `
-    CPU Temp: Min: ${parsedTemps.cpu.min}°C | Max: ${parsedTemps.cpu.max}°C | Avg: ${parsedTemps.cpu.avg}°C<br>
-    GPU Temp: Min: ${parsedTemps.gpu.min}°C | Max: ${parsedTemps.gpu.max}°C | Avg: ${parsedTemps.gpu.avg}°C
-  `;
-  checkClientFormReady();
-}
-
-function parseCinebenchLog(content) {
-  // Prioritize Multi Core score explicitly to prevent grabbing Single Core score if listed first
-  const multiCoreRegex = /(?:Multi\s*Core|Multi-Core|MC)[^\d]*:\s*([\d,]+)/i;
-  const matchMulti = content.match(multiCoreRegex);
-  
-  const scoreRegex = /(?:Score|Points|Result)\s*:\s*([\d,]+)/i;
-  const matchGen = content.match(scoreRegex) || content.match(/(\d+)\s*(?:pts|points)/i);
-  
-  const finalMatch = matchMulti || matchGen;
-  
-  if (finalMatch) {
-    parsedCinebench = parseInt(finalMatch[1].replace(/,/g, ''));
-    document.getElementById('cinebench-preview').textContent = `Cinebench Score: ${parsedCinebench} pts`;
-  } else {
-    // Attempt raw numeric extract
-    const nums = content.match(/\b\d{3,5}\b/g);
-    if (nums) {
-      parsedCinebench = parseInt(nums[0]);
-      document.getElementById('cinebench-preview').textContent = `Cinebench Score (Extracted): ${parsedCinebench} pts`;
-    } else {
-      alert("Cinebench score could not be automatically extracted. Please paste standard result TXT.");
-    }
-  }
-  checkClientFormReady();
-}
-
-function parseCrystalDiskLog(content) {
-  // CrystalDiskMark output matches:
-  // [Read]
-  // SEQ    1MiB Q8T1:  7435.21 MB/s
-  // [Write]
-  // SEQ    1MiB Q8T1:  6320.12 MB/s
-  const lines = content.split('\n');
-  let readSpeed = 0;
-  let writeSpeed = 0;
-
-  let isWriteSection = false;
-  lines.forEach(line => {
-    if (line.toLowerCase().includes('[write]')) {
-      isWriteSection = true;
-    }
-    const match = line.match(/(?:SEQ|Seq)\s+\d+M\w+\s+\w+\s*:\s*([\d.]+)/);
-    if (match) {
-      const speedVal = parseFloat(match[1]);
-      if (isWriteSection && !writeSpeed) {
-        writeSpeed = speedVal;
-      } else if (!isWriteSection && !readSpeed) {
-        readSpeed = speedVal;
-      }
-    }
-  });
-
-  // Secondary layout regex check
-  if (!readSpeed || !writeSpeed) {
-    const reads = content.match(/Read\s*\(MB\/s\)\s*:\s*([\d.]+)/i) || content.match(/Seq\s*Read\s*.*:\s*([\d.]+)/i);
-    const writes = content.match(/Write\s*\(MB\/s\)\s*:\s*([\d.]+)/i) || content.match(/Seq\s*Write\s*.*:\s*([\d.]+)/i);
-    if (reads) readSpeed = parseFloat(reads[1]);
-    if (writes) writeSpeed = parseFloat(writes[1]);
-  }
-
-  if (readSpeed && writeSpeed) {
-    parsedDiskSpeeds = {
-      read: Math.round(readSpeed),
-      write: Math.round(writeSpeed)
-    };
-    document.getElementById('crystal-preview').textContent = `Sequential Read: ${parsedDiskSpeeds.read} MB/s | Write: ${parsedDiskSpeeds.write} MB/s`;
-  } else {
-    alert("Could not automatically parse CrystalDiskMark. Ensure it is saved via 'File -> Save Test Result as TXT'.");
-  }
-  checkClientFormReady();
-}
-
 function checkClientFormReady() {
   const ticketId = document.getElementById('client-ticket-select').value;
   const submitBtn = document.getElementById('btn-client-submit');
-  if (ticketId && (detectedSpecs || parsedTemps || parsedCinebench || parsedDiskSpeeds)) {
+  if (ticketId) {
     submitBtn.removeAttribute('disabled');
   } else {
     submitBtn.setAttribute('disabled', 'true');
@@ -1400,6 +1557,7 @@ function openSettingsModal() {
   document.getElementById('settings-path-hwinfo').value = appState.settings.pathHwInfo || '';
   document.getElementById('settings-path-cinebench').value = appState.settings.pathCinebench || '';
   document.getElementById('settings-path-furmark').value = appState.settings.pathFurmark || '';
+  document.getElementById('settings-is-master').checked = !!appState.settings.isMaster;
 
   modal.classList.add('active');
 }
@@ -1410,10 +1568,20 @@ async function handleSaveSettings() {
   appState.settings.pathHwInfo = document.getElementById('settings-path-hwinfo').value.trim();
   appState.settings.pathCinebench = document.getElementById('settings-path-cinebench').value.trim();
   appState.settings.pathFurmark = document.getElementById('settings-path-furmark').value.trim();
+  appState.settings.isMaster = document.getElementById('settings-is-master').checked;
 
   await saveDatabase();
   document.getElementById('settings-modal').classList.remove('active');
-  renderDashboard();
+  
+  if (!appState.settings.isMaster) {
+    switchScreen('client-welcome');
+  } else {
+    if (currentMode === 'staff') {
+      renderDashboard();
+    } else {
+      switchScreen('selector');
+    }
+  }
 }
 
 // ==========================================================================
@@ -1429,7 +1597,6 @@ function setupEventListeners() {
   document.getElementById('btn-launch-staff').addEventListener('click', () => switchScreen('staff'));
   document.getElementById('btn-launch-client').addEventListener('click', () => {
     switchScreen('client');
-    setupClientMode();
   });
 
   // Theme change toggle
@@ -1621,19 +1788,31 @@ function setupEventListeners() {
     });
   });
 
-  // Client exit
+  // Client exit (takes client back to laboratory welcome screen)
   document.getElementById('btn-client-exit').addEventListener('click', () => {
+    switchScreen('client-welcome');
+  });
+
+  // Client welcome screen selection button event listeners
+  document.getElementById('btn-workflow-build').addEventListener('click', () => {
+    switchScreen('client');
+  });
+  document.getElementById('btn-workflow-service').addEventListener('click', () => {
+    alert("Coming Soon: The Service & Repair workflow is currently under design and will be available in a future update.");
+  });
+  document.getElementById('btn-welcome-exit').addEventListener('click', () => {
     switchScreen('selector');
   });
+
   // Staff exit
   document.getElementById('btn-staff-exit').addEventListener('click', () => {
     switchScreen('selector');
   });
   document.getElementById('btn-client-refresh').addEventListener('click', () => {
     populateClientTicketSelect();
-    checkClientFormReady();
+    handleClientTicketSelect();
   });
-  document.getElementById('client-ticket-select').addEventListener('change', checkClientFormReady);
+  document.getElementById('client-ticket-select').addEventListener('change', handleClientTicketSelect);
 
   // Print button directly in the modal footer
   document.getElementById('btn-print-report').addEventListener('click', () => {
@@ -1741,6 +1920,14 @@ function setupEventListeners() {
 
   setupFormCalculations();
   setupSerialVerification();
+  setupClientMode();
+
+  // Secret technician shortcut to open settings (Ctrl + Alt + S)
+  window.addEventListener('keydown', (e) => {
+    if (e.ctrlKey && e.altKey && e.key.toLowerCase() === 's') {
+      openSettingsModal();
+    }
+  });
 }
 
 // ==========================================================================

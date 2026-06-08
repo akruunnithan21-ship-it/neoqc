@@ -1475,3 +1475,23 @@
     animation: spin 1s linear infinite;
     display: inline-block;
   }
+
+  /* Workflow welcome selector styles */
+  .workflow-card {
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1) !important;
+  }
+  .workflow-card:hover {
+    transform: translateY(-5px);
+    border-color: var(--primary-pink) !important;
+    box-shadow: 0 12px 30px rgba(231, 1, 78, 0.15) !important;
+  }
+  .workflow-card.locked {
+    opacity: 0.5;
+    cursor: not-allowed !important;
+    pointer-events: none;
+  }
+  .workflow-card.locked:hover {
+    transform: none !important;
+    border-color: var(--glass-border) !important;
+    box-shadow: none !important;
+  }
