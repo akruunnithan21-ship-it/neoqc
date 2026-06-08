@@ -253,19 +253,28 @@
     margin-bottom: 24px;
   }
   
+  .brand-logo-wrapper {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    margin-bottom: 8px;
+  }
+  
   .brand-logo-dot {
-    width: 16px;
-    height: 16px;
+    width: 14px;
+    height: 14px;
     background: var(--primary-pink);
     border-radius: 50%;
-    margin-bottom: 12px;
-    box-shadow: 0 0 12px var(--primary-pink);
+    box-shadow: 0 0 10px var(--primary-pink);
     animation: pulse-pink 2s infinite;
   }
   
   .logo-title {
     font-size: 2.2rem;
     color: var(--text-dark);
+    margin: 0;
+    line-height: 1;
   }
   
   .logo-subtitle {
