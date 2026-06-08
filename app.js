@@ -815,11 +815,26 @@ async function setupClientMode() {
     const btn = document.getElementById('btn-run-auto-diagnostics');
     const consoleBox = document.getElementById('diagnostics-log-console');
     
+    // Check if paths are configured
+    const hasHw = appState.settings.pathHwInfo || appState.settings.pathHwInfo === 'mock';
+    const hasCb = appState.settings.pathCinebench || appState.settings.pathCinebench === 'mock';
+    const hasFm = appState.settings.pathFurmark || appState.settings.pathFurmark === 'mock';
+
+    if (!hasHw && !hasCb && !hasFm) {
+      alert("No diagnostic tools configured! Please go to Settings and enter the executable paths or 'mock' to simulate.");
+      return;
+    }
+
     consoleBox.classList.remove('hidden');
     consoleBox.innerHTML = `[${new Date().toLocaleTimeString()}] Checking diagnostic tool configurations...<br>`;
     
     btn.disabled = true;
     btn.textContent = "⚡ Running Stress Tests...";
+
+    let hwRunText = hasHw ? "Running..." : "Not Configured";
+    let cbRunText = hasCb ? "Running..." : "Not Configured";
+    let fmRunText = hasFm ? "Running..." : "Not Configured";
+    consoleBox.innerHTML += `[Status] HWiNFO64: ${hwRunText} | Cinebench: ${cbRunText} | FurMark: ${fmRunText}<br>`;
 
     const res = await ipcRenderer.invoke('sys:run-diagnostics', appState.settings);
     if (!res.success) {
@@ -845,6 +860,13 @@ async function setupClientMode() {
       consoleBox.innerHTML += `[${new Date().toLocaleTimeString()}] Cinebench Score parsed: ${res.cinebenchScore} pts<br>`;
       parsedCinebench = res.cinebenchScore;
       document.getElementById('cinebench-preview').textContent = `Cinebench Score: ${parsedCinebench} pts`;
+    }
+
+    // Load sequential SSD speed benchmark
+    if (res.ssdRead && res.ssdWrite) {
+      consoleBox.innerHTML += `[${new Date().toLocaleTimeString()}] SSD sequential speeds benchmarked: Read ${res.ssdRead} MB/s | Write ${res.ssdWrite} MB/s<br>`;
+      parsedDiskSpeeds = { read: res.ssdRead, write: res.ssdWrite };
+      document.getElementById('crystal-preview').innerHTML = `Sequential Read: ${res.ssdRead} MB/s | Write: ${res.ssdWrite} MB/s`;
     }
 
     btn.textContent = "✅ Stress Tests Complete";
@@ -1684,6 +1706,14 @@ function setupEventListeners() {
     // Populate Cinebench score
     if (res.cinebenchScore) {
       document.getElementById('form-cinebench-score').value = res.cinebenchScore;
+    }
+
+    // Populate SSD read/write speeds
+    if (res.ssdRead) {
+      document.getElementById('form-ssd-read').value = res.ssdRead;
+    }
+    if (res.ssdWrite) {
+      document.getElementById('form-ssd-write').value = res.ssdWrite;
     }
 
     // Trigger calculations and comparisons

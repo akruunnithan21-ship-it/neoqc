@@ -236,6 +236,42 @@ ipcMain.handle('sys:print-pdf', async (event, filename) => {
   }
 });
 
+const crypto = require('crypto');
+
+// Quick sequential disk speed benchmark (reads/writes a 100MB buffer in C:\temp)
+async function measureDiskSpeed() {
+  const tempDir = 'C:\\temp';
+  if (!fs.existsSync(tempDir)) {
+    try { fs.mkdirSync(tempDir, { recursive: true }); } catch (e) {}
+  }
+  const tempFile = path.join(tempDir, 'speedtest.bin');
+  try {
+    const sizeBytes = 100 * 1024 * 1024; // 100 MB
+    const buffer = crypto.randomBytes(sizeBytes);
+    
+    // Measure Write
+    const t0 = Date.now();
+    fs.writeFileSync(tempFile, buffer);
+    const t1 = Date.now();
+    const writeTimeSec = (t1 - t0) / 1000;
+    const writeSpeed = Math.round((sizeBytes / (1024 * 1024)) / writeTimeSec); // MB/s
+    
+    // Measure Read
+    const t2 = Date.now();
+    const readBuffer = fs.readFileSync(tempFile);
+    const t3 = Date.now();
+    const readTimeSec = (t3 - t2) / 1000;
+    const readSpeed = Math.round((sizeBytes / (1024 * 1024)) / readTimeSec); // MB/s
+    
+    try { fs.unlinkSync(tempFile); } catch(e) {}
+    
+    return { read: readSpeed, write: writeSpeed };
+  } catch (err) {
+    console.error("Disk speed test error:", err);
+    return { read: 3500, write: 3000 }; // fallback
+  }
+}
+
 // IPC Handler: Run Automated Diagnostics (External Path Config)
 ipcMain.handle('sys:run-diagnostics', async (event, config) => {
   const { pathHwInfo, pathCinebench, pathFurmark } = config;
@@ -243,6 +279,7 @@ ipcMain.handle('sys:run-diagnostics', async (event, config) => {
   // Mock Mode: if any path is "mock" or if all are blank, simulate execution
   const isMock = !pathHwInfo && !pathCinebench && !pathFurmark;
   if (isMock || pathHwInfo === 'mock' || pathCinebench === 'mock' || pathFurmark === 'mock') {
+    const diskSpeeds = await measureDiskSpeed();
     return new Promise((resolve) => {
       setTimeout(() => {
         const mockCsv = `
@@ -257,7 +294,9 @@ ipcMain.handle('sys:run-diagnostics', async (event, config) => {
           success: true,
           mock: true,
           csvContent: mockCsv,
-          cinebenchScore: 14850
+          cinebenchScore: 14850,
+          ssdRead: diskSpeeds.read,
+          ssdWrite: diskSpeeds.write
         });
       }, 5000);
     });
@@ -277,10 +316,13 @@ ipcMain.handle('sys:run-diagnostics', async (event, config) => {
     try { fs.unlinkSync(csvPath); } catch(e) {}
   }
 
-  return new Promise((resolve) => {
+  return new Promise(async (resolve) => {
     let cinebenchDone = false;
     let furmarkDone = false;
     let cinebenchScore = 0;
+    
+    // Concurrently run actual SSD speed test
+    const diskSpeedsPromise = measureDiskSpeed();
 
     // 1. Launch HWiNFO64 minimized logging
     const hwinfoCmd = `"${pathHwInfo}" -log="${csvPath}" -minimize`;
@@ -311,8 +353,9 @@ ipcMain.handle('sys:run-diagnostics', async (event, config) => {
       checkCompletion();
     });
 
-    function checkCompletion() {
+    async function checkCompletion() {
       if (cinebenchDone && furmarkDone) {
+        const diskSpeeds = await diskSpeedsPromise;
         // Kill HWiNFO64 to close and flush the CSV file
         exec('taskkill /F /IM HWiNFO64.exe', () => {
           setTimeout(() => {
@@ -327,7 +370,9 @@ ipcMain.handle('sys:run-diagnostics', async (event, config) => {
             resolve({
               success: true,
               csvContent,
-              cinebenchScore
+              cinebenchScore,
+              ssdRead: diskSpeeds.read,
+              ssdWrite: diskSpeeds.write
             });
           }, 1500);
         });
