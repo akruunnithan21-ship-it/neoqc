@@ -44,6 +44,7 @@ function createWindow() {
     frame: false, // Frameless window!
     transparent: false,
     title: "Neo QC",
+    icon: path.join(__dirname, 'assets', 'icon.ico'),
     webPreferences: {
       nodeIntegration: true,
       contextIsolation: false // Simpler for local utility apps

@@ -23,7 +23,8 @@
     "appId": "com.neotokyo.neoqc",
     "productName": "NeoQC",
     "win": {
-      "target": "portable"
+      "target": "portable",
+      "icon": "assets/icon.ico"
     },
     "directories": {
       "output": "dist"

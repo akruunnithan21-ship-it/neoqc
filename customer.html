@@ -6,7 +6,7 @@
   <title>Neo QC // Customer Build Tracker</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Outfit:wght@300;400;500;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Syncopate:wght@700&family=Space+Grotesk:wght@400;500;700&family=Outfit:wght@300;400;500;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
   <style>
     :root {
       --primary-pink: #e7014e;
@@ -65,25 +65,44 @@
       gap: 10px;
     }
 
-    .brand-dot {
-      width: 12px;
-      height: 12px;
-      background: var(--primary-pink);
-      border-radius: 50%;
-      box-shadow: 0 0 10px var(--primary-pink);
+    .brand-logo-svg {
+      width: 36px;
+      height: 36px;
+      display: block;
+    }
+
+    .brand-text-col {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
     }
 
     .brand-title {
-      font-family: 'Space Grotesk', sans-serif;
+      font-family: 'Syncopate', sans-serif;
       font-weight: 700;
-      font-size: 1.5rem;
+      font-size: 1.6rem;
       letter-spacing: 0.05em;
+      line-height: 1.1;
+    }
+
+    .brand-tagline {
+      font-family: 'Outfit', sans-serif;
+      font-size: 0.55rem;
+      font-weight: 500;
+      color: var(--text-muted);
+      margin: 2px 0 0 0;
+      letter-spacing: 0.35em;
+      line-height: 1;
+      text-transform: uppercase;
     }
 
     .brand-subtitle {
-      font-size: 0.9rem;
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 0.8rem;
       color: var(--text-muted);
-      letter-spacing: 0.05em;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      margin-top: 4px;
     }
 
     /* Glass Slab Container */
@@ -391,10 +410,23 @@
     <!-- Header -->
     <div class="brand-header">
       <div class="brand-logo-wrapper">
-        <span class="brand-dot"></span>
-        <h1 class="brand-title">NEO QC</h1>
+        <svg class="brand-logo-svg" viewBox="0 0 100 100">
+          <defs>
+            <linearGradient id="logo-grad-cust" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stop-color="#ff1a75" />
+              <stop offset="50%" stop-color="#e7014e" />
+              <stop offset="100%" stop-color="#b3003b" />
+            </linearGradient>
+          </defs>
+          <circle cx="50" cy="50" r="40" stroke="url(#logo-grad-cust)" stroke-width="10" fill="none" stroke-dasharray="78.776 5" stroke-dashoffset="60.332" />
+          <path d="M 50,23 L 72,70 C 58,58 50,56 50,56 C 50,56 42,58 28,70 Z" fill="url(#logo-grad-cust)" />
+        </svg>
+        <div class="brand-text-col">
+          <h1 class="brand-title">NEO TOKYO</h1>
+          <p class="brand-tagline">ACCELERATING YOUR INFRA</p>
+        </div>
       </div>
-      <p class="brand-subtitle">Quality Assurance System Status</p>
+      <p class="brand-subtitle">QUALITY ASSURANCE SYSTEM STATUS</p>
     </div>
 
     <!-- TICKET SEARCH SCREEN (Visible if no ID set) -->

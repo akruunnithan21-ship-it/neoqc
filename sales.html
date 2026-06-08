@@ -6,7 +6,7 @@
   <title>Neo QC // Sales Queue Dashboard</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Outfit:wght@300;400;500;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Syncopate:wght@700&family=Space+Grotesk:wght@400;500;700&family=Outfit:wght@300;400;500;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
   <style>
     :root {
       --primary-pink: #e7014e;
@@ -75,18 +75,16 @@
       gap: 12px;
     }
 
-    .brand-dot {
-      width: 12px;
-      height: 12px;
-      background: var(--primary-pink);
-      border-radius: 50%;
-      box-shadow: 0 0 10px var(--primary-pink);
+    .brand-logo-svg {
+      width: 22px;
+      height: 22px;
+      color: var(--primary-pink);
     }
 
     .nav-title {
-      font-family: 'Space Grotesk', sans-serif;
+      font-family: 'Syncopate', sans-serif;
       font-weight: 700;
-      font-size: 1.25rem;
+      font-size: 1.15rem;
       letter-spacing: 0.05em;
     }
 
@@ -475,8 +473,8 @@
   <!-- NAVIGATION NAVBAR -->
   <header class="navbar">
     <div class="nav-brand">
-      <span class="brand-dot"></span>
-      <span class="nav-title">NEO QC // SALES INTERFACE</span>
+      <svg class="brand-logo-svg" viewBox="0 0 100 100"><circle cx="50" cy="50" r="40" stroke="currentColor" stroke-width="10" fill="none" stroke-dasharray="78.776 5" stroke-dashoffset="60.332" /><path d="M 50,23 L 72,70 C 58,58 50,56 50,56 C 50,56 42,58 28,70 Z" fill="currentColor" /></svg>
+      <span class="nav-title">NEO TOKYO // SALES QUEUE</span>
     </div>
     <div class="nav-controls">
       <button class="btn" id="btn-open-config">⚙️ Cloud Database Config</button>

@@ -7,7 +7,7 @@
   <!-- Google Fonts: Space Grotesk, Hanken Grotesk, JetBrains Mono -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:ital,wght@0,100..900;1,100..900&family=JetBrains+Mono:ital,wght@0,100..800;1,100..800&family=Space+Grotesk:wght@300..700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Syncopate:wght@700&family=Hanken+Grotesk:ital,wght@0,100..900;1,100..900&family=JetBrains+Mono:ital,wght@0,100..800;1,100..800&family=Space+Grotesk:wght@300..700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
 </head>
 <body class="light-mode">
@@ -15,8 +15,8 @@
   <!-- CUSTOM DRAGGABLE TITLEBAR -->
   <div class="custom-titlebar">
     <div class="titlebar-drag-area">
-      <span class="titlebar-logo">🤖</span>
-      <span class="titlebar-text">Neo QC // PC Quality Control Lab Portal</span>
+      <svg class="titlebar-logo-svg" viewBox="0 0 100 100"><circle cx="50" cy="50" r="40" stroke="currentColor" stroke-width="10" fill="none" stroke-dasharray="78.776 5" stroke-dashoffset="60.332" /><path d="M 50,23 L 72,70 C 58,58 50,56 50,56 C 50,56 42,58 28,70 Z" fill="currentColor" /></svg>
+      <span class="titlebar-text">NEO TOKYO // QC & Diagnostics Lab Portal</span>
     </div>
     <div class="titlebar-controls">
       <button id="win-btn-minimize" class="titlebar-btn minimize" title="Minimize">—</button>
@@ -34,10 +34,23 @@
       <div class="brand-header">
         <div class="hanko-stamp">ネオ東京</div>
         <div class="brand-logo-wrapper">
-          <span class="brand-logo-dot"></span>
-          <h1 class="logo-title">NEO QC</h1>
+          <svg class="brand-logo-svg" viewBox="0 0 100 100">
+            <defs>
+              <linearGradient id="logo-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stop-color="#ff1a75" />
+                <stop offset="50%" stop-color="#e7014e" />
+                <stop offset="100%" stop-color="#b3003b" />
+              </linearGradient>
+            </defs>
+            <circle cx="50" cy="50" r="40" stroke="url(#logo-grad)" stroke-width="10" fill="none" stroke-dasharray="78.776 5" stroke-dashoffset="60.332" />
+            <path d="M 50,23 L 72,70 C 58,58 50,56 50,56 C 50,56 42,58 28,70 Z" fill="url(#logo-grad)" />
+          </svg>
+          <div class="brand-text-col">
+            <h1 class="logo-title">NEO TOKYO</h1>
+            <p class="logo-tagline">ACCELERATING YOUR INFRA</p>
+          </div>
         </div>
-        <p class="logo-subtitle">Neo Tokyo Kochi | PC Diagnostics</p>
+        <p class="logo-subtitle">QUALITY CONTROL LAB SYSTEM</p>
       </div>
       <h2>Select Application Mode</h2>
       <p class="selector-desc">Choose how you want to run this instance of Neo QC.</p>
@@ -61,8 +74,8 @@
     <!-- Navbar -->
     <header class="glass-slab navbar">
       <div class="nav-brand">
-        <span class="status-indicator optimal"></span>
-        <span class="nav-title">NEO QC // STAFF PORTAL</span>
+        <svg class="brand-logo-svg" viewBox="0 0 100 100" style="width: 22px; height: 22px; vertical-align: middle; margin-right: 6px; color: var(--primary-pink);"><circle cx="50" cy="50" r="40" stroke="currentColor" stroke-width="10" fill="none" stroke-dasharray="78.776 5" stroke-dashoffset="60.332" /><path d="M 50,23 L 72,70 C 58,58 50,56 50,56 C 50,56 42,58 28,70 Z" fill="currentColor" /></svg>
+        <span class="nav-title">NEO TOKYO // STAFF PORTAL</span>
       </div>
       <div class="nav-controls">
         <button id="btn-toggle-theme" class="icon-btn" title="Toggle Dark/Light Mode">🌓</button>
@@ -138,8 +151,8 @@
     <!-- Navbar -->
     <header class="glass-slab navbar">
       <div class="nav-brand">
-        <span class="status-indicator testing"></span>
-        <span class="nav-title">NEO QC // TESTING CLIENT</span>
+        <svg class="brand-logo-svg" viewBox="0 0 100 100" style="width: 22px; height: 22px; vertical-align: middle; margin-right: 6px; color: var(--primary-pink);"><circle cx="50" cy="50" r="40" stroke="currentColor" stroke-width="10" fill="none" stroke-dasharray="78.776 5" stroke-dashoffset="60.332" /><path d="M 50,23 L 72,70 C 58,58 50,56 50,56 C 50,56 42,58 28,70 Z" fill="currentColor" /></svg>
+        <span class="nav-title">NEO TOKYO // TESTING CLIENT</span>
       </div>
       <div class="nav-controls">
         <button id="btn-client-refresh" class="secondary-btn">🔄 Refresh Tickets</button>
@@ -579,9 +592,11 @@
   <div id="print-report-container" class="print-only">
     <div class="print-header">
       <div class="print-logo-section">
-        <h1>NEO QC</h1>
-        <h3>NEO TOKYO KOCHI</h3>
-        <p>Service, Assembly & Quality Assurance Department</p>
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <svg viewBox="0 0 100 100" style="width: 28px; height: 28px; fill: none; stroke: black; stroke-width: 10; display: inline-block; vertical-align: middle;"><circle cx="50" cy="50" r="40" stroke="black" stroke-width="10" fill="none" stroke-dasharray="78.776 5" stroke-dashoffset="60.332" /><path d="M 50,23 L 72,70 C 58,58 50,56 50,56 C 50,56 42,58 28,70 Z" fill="black" /></svg>
+          <h1 style="margin: 0; font-family: 'Syncopate', sans-serif; font-weight: 700; font-size: 20px; letter-spacing: 0.05em; line-height: 1;">NEO TOKYO</h1>
+        </div>
+        <p style="margin: 4px 0 0 0; font-size: 10px; color: #555; text-transform: uppercase; letter-spacing: 0.1em;">Service, Assembly & Quality Assurance Department</p>
       </div>
       <div class="print-meta-section">
         <p><strong>Ticket ID:</strong> <span id="print-ticket-id">--</span></p>
