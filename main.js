@@ -150,6 +150,23 @@ app.whenReady().then(() => {
   initDb();
   createWindow();
 
+  // Determine channel based on app-config.json
+  let updateChannel = 'client';
+  try {
+    const configPath = path.join(__dirname, 'app-config.json');
+    if (fs.existsSync(configPath)) {
+      const cfg = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+      if (cfg.mode === 'admin') {
+        updateChannel = 'admin';
+      }
+    }
+  } catch (e) {
+    log.error("Error reading app-config.json in main process:", e);
+  }
+  
+  autoUpdater.channel = updateChannel;
+  log.info(`Setting autoUpdater channel to: ${updateChannel}`);
+
   // Check for updates and notify the user
   autoUpdater.checkForUpdatesAndNotify();
 
