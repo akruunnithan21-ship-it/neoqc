@@ -2,9 +2,26 @@
   "appId": "com.neotokyo.neoqc.client",
   "productName": "NeoQC Client",
   "win": {
-    "target": "portable",
-    "icon": "assets/icon.ico"
+    "target": [
+      "nsis",
+      "portable"
+    ],
+    "icon": "assets/icon.ico",
+    "requestedExecutionLevel": "requireAdministrator"
   },
+  "nsis": {
+    "oneClick": false,
+    "allowToChangeInstallationDirectory": true,
+    "deleteAppDataOnUninstall": true
+  },
+  "publish": {
+    "provider": "github",
+    "owner": "akruunnithan21-ship-it",
+    "repo": "neoqc"
+  },
+  "asarUnpack": [
+    "assets/diagnostics/**"
+  ],
   "directories": {
     "output": "dist"
   }

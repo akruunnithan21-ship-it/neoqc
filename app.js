@@ -29,7 +29,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   setInterval(updateTimeDisplay, 60000);
 
   // Navigate to initial screen based on app-config.json or settings
-  let bootMode = 'client-welcome';
+  let bootMode = 'client';
   try {
     const configPath = path.join(__dirname, 'app-config.json');
     if (fs.existsSync(configPath)) {
@@ -46,7 +46,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (appState.settings.isMaster) {
       bootMode = 'selector';
     } else {
-      bootMode = 'client-welcome';
+      bootMode = 'client';
     }
   }
 
@@ -77,6 +77,10 @@ async function loadDatabase() {
         t.buildChecks.posted = (t.status !== 'building' && t.status !== 'awaiting');
         databaseNeedsSaving = true;
       }
+      if (t.diagnostics && t.diagnostics.furmark === undefined) {
+        t.diagnostics.furmark = null;
+        databaseNeedsSaving = true;
+      }
     });
   }
 
@@ -100,13 +104,39 @@ async function loadDatabase() {
     await saveDatabase();
   }
   if (!appState.settings) {
-    appState.settings = { supabaseUrl: "", supabaseAnonKey: "", pathHwInfo: "", pathCinebench: "", pathFurmark: "", isMaster: false };
+    appState.settings = { 
+      supabaseUrl: "https://ggsxkhenzdhaachubrsc.supabase.co", 
+      supabaseAnonKey: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imdnc3hraGVuemRoYWFjaHVicnNjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE3MTEwNjEsImV4cCI6MjA5NzI4NzA2MX0.bDhUK-qJSgcBEcNdEdOaZGg5vsUF6jH2gbSRQaMhjBo", 
+      pathHwInfo: "", 
+      pathCinebench: "", 
+      pathFurmark: "", 
+      isMaster: false,
+      accentColor: "pink",
+      cpuMaxTemp: 85,
+      gpuMaxTemp: 80,
+      minSsdSpeed: 3000,
+      autoPdf: false,
+      soundEnabled: true,
+      shopName: "Neo Tokyo Kochi",
+      contactInfo: "kochi@neotokyo.in"
+    };
   } else {
+    if (!appState.settings.supabaseUrl) appState.settings.supabaseUrl = "https://ggsxkhenzdhaachubrsc.supabase.co";
+    if (!appState.settings.supabaseAnonKey) appState.settings.supabaseAnonKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imdnc3hraGVuemRoYWFjaHVicnNjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE3MTEwNjEsImV4cCI6MjA5NzI4NzA2MX0.bDhUK-qJSgcBEcNdEdOaZGg5vsUF6jH2gbSRQaMhjBo";
     if (!appState.settings.pathHwInfo) appState.settings.pathHwInfo = "";
     if (!appState.settings.pathCinebench) appState.settings.pathCinebench = "";
     if (!appState.settings.pathFurmark) appState.settings.pathFurmark = "";
     if (appState.settings.isMaster === undefined) appState.settings.isMaster = false;
+    if (!appState.settings.accentColor) appState.settings.accentColor = "pink";
+    if (appState.settings.cpuMaxTemp === undefined) appState.settings.cpuMaxTemp = 85;
+    if (appState.settings.gpuMaxTemp === undefined) appState.settings.gpuMaxTemp = 80;
+    if (appState.settings.minSsdSpeed === undefined) appState.settings.minSsdSpeed = 3000;
+    if (appState.settings.autoPdf === undefined) appState.settings.autoPdf = false;
+    if (appState.settings.soundEnabled === undefined) appState.settings.soundEnabled = true;
+    if (!appState.settings.shopName) appState.settings.shopName = "Neo Tokyo Kochi";
+    if (!appState.settings.contactInfo) appState.settings.contactInfo = "kochi@neotokyo.in";
   }
+  applyAccentColor(appState.settings.accentColor);
   
   // Seed beautiful mock tickets if db is empty to showcase the UI immediately!
   if (!appState.tickets || appState.tickets.length === 0) {
@@ -116,6 +146,17 @@ async function loadDatabase() {
   
   initSupabase();
   await syncFromCloud();
+
+  // Version check and Changelog Modal trigger
+  const currentVersion = require('./package.json').version;
+  if (appState.lastRunVersion !== currentVersion) {
+    setTimeout(() => {
+      const changelogModal = document.getElementById('changelog-modal');
+      if (changelogModal) {
+        changelogModal.classList.add('active');
+      }
+    }, 1000);
+  }
 }
 
 // Save DB back to local storage
@@ -124,7 +165,7 @@ async function saveDatabase() {
 }
 
 // Switch between screens
-function switchScreen(mode) {
+function switchScreen(mode, selectedId = null) {
   currentMode = mode;
   
   // Programmatic scroll resets to prevent offsets
@@ -141,17 +182,30 @@ function switchScreen(mode) {
     populateTechnicianDropdowns();
     renderDashboard();
   } else if (mode === 'client') {
-    document.getElementById('client-screen').classList.add('active');
-    populateClientTicketSelect();
-    handleClientTicketSelect();
-  } else if (mode === 'client-welcome') {
     document.getElementById('client-welcome-screen').classList.add('active');
-    const welcomeExit = document.getElementById('btn-welcome-exit');
-    if (welcomeExit) {
+    populateWelcomeTicketSelect();
+    
+    // Hide or show exit button depending on isMaster
+    const welcomeExitBtn = document.getElementById('btn-welcome-exit');
+    if (welcomeExitBtn) {
       if (appState.settings.isMaster) {
-        welcomeExit.classList.remove('hidden');
+        welcomeExitBtn.classList.remove('hidden');
       } else {
-        welcomeExit.classList.add('hidden');
+        welcomeExitBtn.classList.add('hidden');
+      }
+    }
+  } else if (mode === 'client-console') {
+    document.getElementById('client-screen').classList.add('active');
+    populateClientTicketSelect(selectedId);
+    handleClientTicketSelect();
+    
+    // Hide or show exit button depending on isMaster
+    const clientExitBtn = document.getElementById('btn-client-exit');
+    if (clientExitBtn) {
+      if (appState.settings.isMaster) {
+        clientExitBtn.classList.remove('hidden');
+      } else {
+        clientExitBtn.classList.add('hidden');
       }
     }
   } else {
@@ -215,11 +269,28 @@ function populateTechnicianDropdowns() {
   }
 }
 
-function populateClientTicketSelect() {
+function populateClientTicketSelect(selectedId = null) {
   const select = document.getElementById('client-ticket-select');
   if (select) {
     select.innerHTML = '<option value="">-- Choose Ticket --</option>';
     // Filter active builds/repairs only
+    const activeTickets = appState.tickets.filter(t => t.status !== 'completed');
+    activeTickets.forEach(t => {
+      const opt = document.createElement('option');
+      opt.value = t.id;
+      opt.textContent = `[${t.type.toUpperCase()}] ${t.customerName} - Deadline: ${formatDateShort(t.deadline)}`;
+      if (selectedId && t.id === selectedId) {
+        opt.selected = true;
+      }
+      select.appendChild(opt);
+    });
+  }
+}
+
+function populateWelcomeTicketSelect() {
+  const select = document.getElementById('welcome-ticket-select');
+  if (select) {
+    select.innerHTML = '<option value="">-- Choose Active Ticket --</option>';
     const activeTickets = appState.tickets.filter(t => t.status !== 'completed');
     activeTickets.forEach(t => {
       const opt = document.createElement('option');
@@ -449,7 +520,9 @@ function openTicketModal(ticketId = null) {
       document.getElementById('form-ticket-id').value = ticket.id;
       document.getElementById('form-created-at').value = ticket.createdAt;
       document.getElementById('form-customer-name').value = ticket.customerName;
-      document.getElementById('form-deadline').value = ticket.deadline;
+      document.getElementById('form-deadline').value = formatDateTimeLocal(ticket.deadline);
+      document.getElementById('form-deadline').disabled = true;
+      document.getElementById('btn-change-deadline').style.display = 'block';
       document.getElementById('form-technician').value = ticket.technician;
       document.getElementById('form-ticket-type').value = ticket.type;
       
@@ -505,6 +578,7 @@ function openTicketModal(ticketId = null) {
       document.getElementById('form-gpu-temp-max').value = ticket.diagnostics.gpuTempMax || '';
       document.getElementById('form-gpu-temp-avg').value = ticket.diagnostics.gpuTempAvg || '';
       document.getElementById('form-cinebench-score').value = ticket.diagnostics.cinebench || '';
+      document.getElementById('form-furmark-score').value = ticket.diagnostics.furmark || '';
       document.getElementById('form-ssd-read').value = ticket.diagnostics.ssdRead || '';
       document.getElementById('form-ssd-write').value = ticket.diagnostics.ssdWrite || '';
       let rivalId = ticket.diagnostics.rivalConfigId || '';
@@ -543,6 +617,13 @@ function openTicketModal(ticketId = null) {
     document.getElementById('modal-spec-gpu').textContent = '--';
     document.getElementById('modal-spec-ram').textContent = '--';
     document.getElementById('modal-spec-storage').textContent = '--';
+    
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    tomorrow.setHours(18, 0, 0, 0);
+    document.getElementById('form-deadline').value = formatDateTimeLocal(tomorrow.toISOString());
+    document.getElementById('form-deadline').disabled = false;
+    document.getElementById('btn-change-deadline').style.display = 'none';
     
     const rivalBanner = document.getElementById('modal-rival-pulled-banner');
     rivalBanner.classList.add('hidden');
@@ -770,6 +851,7 @@ function handleClientTicketSelect() {
 
     // Populate benchmarks
     document.getElementById('c-cinebench-score').value = ticket.diagnostics.cinebench || '';
+    document.getElementById('c-furmark-score').value = ticket.diagnostics.furmark || '';
     document.getElementById('c-ssd-read').value = ticket.diagnostics.ssdRead || '';
     document.getElementById('c-ssd-write').value = ticket.diagnostics.ssdWrite || '';
     
@@ -782,6 +864,27 @@ function handleClientTicketSelect() {
       }
     }
     document.getElementById('c-rival-select').value = rivalId;
+
+    // Load port checking states from ticket's qcChecks
+    const portUsb = !!(ticket.qcChecks && ticket.qcChecks.portUsb);
+    const portVideo = !!(ticket.qcChecks && ticket.qcChecks.portVideo);
+    const portAudio = !!(ticket.qcChecks && ticket.qcChecks.portAudio);
+    const portRgb = !!(ticket.qcChecks && ticket.qcChecks.portRgb);
+
+    setPortButtonState('btn-port-usb', portUsb);
+    setPortButtonState('btn-port-video', portVideo);
+    setPortButtonState('btn-port-audio', portAudio);
+    setPortButtonState('btn-port-rgb', portRgb);
+
+    // Show/hide RGB preview strip
+    const rgbStrip = document.getElementById('c-rgb-preview-bar');
+    if (rgbStrip) {
+      if (portRgb) {
+        rgbStrip.classList.remove('hidden');
+      } else {
+        rgbStrip.classList.add('hidden');
+      }
+    }
 
     // Load status display depending on existing data
     const hasTemps = ticket.diagnostics.cpuTempAvg !== null;
@@ -881,6 +984,205 @@ function setupClientFormCalculations() {
   gpuMax.addEventListener('input', calcGpuAvg);
 }
 
+function setPortButtonState(btnId, isPassed) {
+  const btn = document.getElementById(btnId);
+  if (btn) {
+    btn.dataset.checked = isPassed ? "true" : "false";
+    if (isPassed) {
+      btn.classList.add('passed');
+    } else {
+      btn.classList.remove('passed');
+    }
+  }
+}
+
+function updatePortDetailsDisplay(category, devices) {
+  const container = document.getElementById('c-port-details-container');
+  const list = document.getElementById('c-port-details-list');
+  if (container && list) {
+    container.classList.remove('hidden');
+    list.innerHTML = `<div class="port-details-header">🔌 Detected Connection: ${category}</div>`;
+    if (!devices || devices.length === 0) {
+      list.innerHTML += `<div class="port-detail-line" style="color: var(--status-urgent)">No active devices detected. Check connection!</div>`;
+    } else {
+      devices.forEach(dev => {
+        list.innerHTML += `
+          <div class="port-detail-line">
+            <span>• ${dev}</span>
+            <span class="port-detail-val">Active</span>
+          </div>
+        `;
+      });
+    }
+  }
+}
+
+function setupRgbController() {
+  const modeSelect = document.getElementById('rgb-mode-select');
+  const colorGroup = document.getElementById('rgb-color-group');
+  const colorPicker = document.getElementById('rgb-color-picker');
+  const presets = document.querySelectorAll('.preset-dot');
+  const speedSlider = document.getElementById('rgb-speed-slider');
+  const applyBtn = document.getElementById('btn-apply-rgb-sync');
+
+  const chFans = document.getElementById('rgb-ch-fans');
+  const chRam = document.getElementById('rgb-ch-ram');
+  const chCooler = document.getElementById('rgb-ch-cooler');
+  const chStrips = document.getElementById('rgb-ch-strips');
+
+  if (!modeSelect) return;
+
+  function updateRgbPreview() {
+    const mode = modeSelect.value;
+    const color = colorPicker.value;
+    const speedVal = parseFloat(speedSlider.value);
+    
+    const speedDuration = (6 - speedVal) + "s";
+    const fanSpeedDuration = (6 - speedVal) * 0.5 + "s";
+
+    const pcCase = document.querySelector('.pc-case');
+    if (pcCase) {
+      pcCase.style.setProperty('--rgb-color', color);
+      pcCase.style.setProperty('--rgb-anim-duration', speedDuration);
+      pcCase.style.setProperty('--fan-speed', fanSpeedDuration);
+    }
+
+    const elements = document.querySelectorAll('.rgb-element');
+    elements.forEach(el => {
+      let shouldSync = false;
+      if (el.classList.contains('pc-fan') && chFans.checked) shouldSync = true;
+      if (el.classList.contains('pc-ram') && chRam.checked) shouldSync = true;
+      if (el.classList.contains('pc-cpu-cooler') && chCooler.checked) shouldSync = true;
+      if (el.classList.contains('pc-led-strip') && chStrips.checked) shouldSync = true;
+      if (el.classList.contains('pc-gpu') && chCooler.checked) shouldSync = true;
+
+      el.className = el.className.split(' ').filter(c => !c.startsWith('effect-')).join(' ');
+
+      if (shouldSync) {
+        el.classList.add('effect-' + mode);
+      } else {
+        el.classList.add('effect-off');
+      }
+    });
+
+    if (mode === 'static' || mode === 'breathing') {
+      colorGroup.style.display = 'block';
+    } else {
+      colorGroup.style.display = 'none';
+    }
+  }
+
+  modeSelect.addEventListener('change', updateRgbPreview);
+  colorPicker.addEventListener('input', updateRgbPreview);
+  speedSlider.addEventListener('input', updateRgbPreview);
+  [chFans, chRam, chCooler, chStrips].forEach(cb => {
+    if (cb) cb.addEventListener('change', updateRgbPreview);
+  });
+
+  presets.forEach(dot => {
+    dot.addEventListener('click', () => {
+      colorPicker.value = dot.dataset.color;
+      updateRgbPreview();
+    });
+  });
+
+  applyBtn.addEventListener('click', async () => {
+    const ticketId = document.getElementById('client-ticket-select').value;
+    if (!ticketId) {
+      alert("Please select a ticket first before applying RGB Sync!");
+      return;
+    }
+
+    const index = appState.tickets.findIndex(t => t.id === ticketId);
+    if (index === -1) return;
+    const ticket = appState.tickets[index];
+
+    appendConsoleLine('c-console-box', `[RGB CONTROLLER] Applying RGB effect '${modeSelect.value.toUpperCase()}'...`);
+    appendConsoleLine('c-console-box', `[RGB CONTROLLER] Syncing motherboard headers, RAM channels, and fans...`);
+    
+    await new Promise(r => setTimeout(r, 600));
+
+    appendConsoleLine('c-console-box', `[RGB CONTROLLER] Hardware sync applied successfully!`);
+
+    setPortButtonState('btn-port-rgb', true);
+    if (!ticket.qcChecks) ticket.qcChecks = {};
+    ticket.qcChecks.portRgb = true;
+
+    appState.tickets[index] = ticket;
+    await saveDatabase();
+    await syncTicketToCloud(ticket);
+  });
+
+  updateRgbPreview();
+}
+
+function setupPortsChecker() {
+  const ports = [
+    { id: 'btn-port-usb', type: 'usb', name: 'USB Ports', desc: 'active USB devices' },
+    { id: 'btn-port-video', type: 'video', name: 'HDMI / DP', desc: 'active display monitors' },
+    { id: 'btn-port-audio', type: 'audio', name: 'Audio Jacks', desc: 'sound controllers' },
+    { id: 'btn-port-rgb', type: 'rgb', name: 'RGB Synced', desc: 'system RGB sync configuration' }
+  ];
+  
+  ports.forEach(port => {
+    const btn = document.getElementById(port.id);
+    if (btn) {
+      btn.addEventListener('click', async () => {
+        const ticketId = document.getElementById('client-ticket-select').value;
+        if (!ticketId) {
+          alert("Please select a ticket first before verifying ports!");
+          return;
+        }
+
+        const index = appState.tickets.findIndex(t => t.id === ticketId);
+        if (index === -1) return;
+        const ticket = appState.tickets[index];
+
+        appendConsoleLine('c-console-box', `[SYS] Verifying active ${port.desc}...`);
+        
+        try {
+          const result = await ipcRenderer.invoke('sys:check-port-hardware', port.type);
+          const nextState = !!result.passed;
+
+          setPortButtonState(port.id, nextState);
+
+          if (!ticket.qcChecks) ticket.qcChecks = {};
+
+          let logMsg = '';
+          if (port.type === 'usb') {
+            ticket.qcChecks.portUsb = nextState;
+            logMsg = `[SYS] USB check: ${nextState ? 'Passed' : 'Failed'} (Found ${result.count || 0} active USB device(s))`;
+            updatePortDetailsDisplay('USB Connection List', result.devices);
+          } else if (port.type === 'video') {
+            ticket.qcChecks.portVideo = nextState;
+            logMsg = `[SYS] Display check: ${nextState ? 'Passed' : 'Failed'} (Found ${result.count || 0} active monitor connection(s))`;
+            updatePortDetailsDisplay('Video Outputs', result.devices);
+          } else if (port.type === 'audio') {
+            ticket.qcChecks.portAudio = nextState;
+            logMsg = `[SYS] Audio check: ${nextState ? 'Passed' : 'Failed'} (Found ${result.count || 0} sound controller device(s))`;
+            updatePortDetailsDisplay('Audio Output hardware', result.devices);
+          } else if (port.type === 'rgb') {
+            ticket.qcChecks.portRgb = nextState;
+            logMsg = `[SYS] RGB check: ${nextState ? 'Passed' : 'Failed'} (${result.hasSyncSoftware ? 'RGB sync controller software running' : 'System default controller active'})`;
+          }
+
+          appendConsoleLine('c-console-box', logMsg);
+
+          appState.tickets[index] = ticket;
+          await saveDatabase();
+          await syncTicketToCloud(ticket);
+        } catch (e) {
+          console.error(e);
+          appendConsoleLine('c-console-box', `[SYS ERROR] ${port.name} verification failed: ${e.message}`);
+        }
+      });
+    }
+  });
+
+  // Call the RGB controller setup
+  setupRgbController();
+}
+
 // Save ticket form data
 async function handleTicketFormSubmit(e) {
   e.preventDefault();
@@ -890,11 +1192,16 @@ async function handleTicketFormSubmit(e) {
   
   const ticketType = document.getElementById('form-ticket-type').value;
   const customerName = document.getElementById('form-customer-name').value;
-  const deadline = document.getElementById('form-deadline').value;
+  const deadlineVal = document.getElementById('form-deadline').value;
+  const deadline = deadlineVal ? new Date(deadlineVal).toISOString() : new Date().toISOString();
   const technician = document.getElementById('form-technician').value;
 
   const missingComponentsToggle = document.getElementById('form-missing-components-toggle').checked;
   const missingComponents = document.getElementById('form-missing-components').value;
+
+  const existingTicket = editingTicketId ? appState.tickets.find(t => t.id === editingTicketId) : null;
+  const oldQc = existingTicket ? (existingTicket.qcChecks || {}) : {};
+  const oldDiag = existingTicket ? (existingTicket.diagnostics || {}) : {};
 
   const buildChecks = {
     cpuRamSsd: document.getElementById('check-cpu-ram-ssd').checked,
@@ -905,6 +1212,7 @@ async function handleTicketFormSubmit(e) {
   };
 
   const qcChecks = {
+    ...oldQc,
     physCabinet: document.getElementById('qc-phys-cabinet').checked,
     physMobo: document.getElementById('qc-phys-motherboard').checked,
     physRam: document.getElementById('qc-phys-ram').checked,
@@ -921,6 +1229,7 @@ async function handleTicketFormSubmit(e) {
   };
 
   const diagnostics = {
+    ...oldDiag,
     cpuTempMin: parseFloat(document.getElementById('form-cpu-temp-min').value) || null,
     cpuTempMax: parseFloat(document.getElementById('form-cpu-temp-max').value) || null,
     cpuTempAvg: parseFloat(document.getElementById('form-cpu-temp-avg').value) || null,
@@ -928,6 +1237,7 @@ async function handleTicketFormSubmit(e) {
     gpuTempMax: parseFloat(document.getElementById('form-gpu-temp-max').value) || null,
     gpuTempAvg: parseFloat(document.getElementById('form-gpu-temp-avg').value) || null,
     cinebench: parseFloat(document.getElementById('form-cinebench-score').value) || null,
+    furmark: parseFloat(document.getElementById('form-furmark-score').value) || null,
     ssdRead: parseFloat(document.getElementById('form-ssd-read').value) || null,
     ssdWrite: parseFloat(document.getElementById('form-ssd-write').value) || null,
     rivalConfigId: document.getElementById('form-rival-select').value || ""
@@ -1045,83 +1355,7 @@ let parsedDiskSpeeds = null;
 async function setupClientMode() {
   // Automated Stress Test Execution (Client Portal)
   document.getElementById('btn-run-auto-diagnostics').addEventListener('click', async () => {
-    const btn = document.getElementById('btn-run-auto-diagnostics');
-    const statusBox = document.getElementById('c-diagnostics-status');
-    if (!statusBox) return;
-
-    // Check if paths are configured
-    const hasHw = appState.settings.pathHwInfo || appState.settings.pathHwInfo === 'mock';
-    const hasCb = appState.settings.pathCinebench || appState.settings.pathCinebench === 'mock';
-    const hasFm = appState.settings.pathFurmark || appState.settings.pathFurmark === 'mock';
-
-    if (!hasHw && !hasCb && !hasFm) {
-      alert("No diagnostic tools configured! Please go to Settings and enter the executable paths or 'mock' to simulate.");
-      return;
-    }
-
-    btn.disabled = true;
-    btn.textContent = "⚡ Running Stress Tests...";
-    
-    // Set status to running for active tools
-    let hwRunText = hasHw ? "<strong style='color: var(--status-urgent)'>Running...</strong>" : "Not Configured";
-    let cbRunText = hasCb ? "<strong style='color: var(--status-urgent)'>Running...</strong>" : "Not Configured";
-    let fmRunText = hasFm ? "<strong style='color: var(--status-urgent)'>Running...</strong>" : "Not Configured";
-
-    statusBox.innerHTML = `
-      HWiNFO64: ${hwRunText} | 
-      Cinebench R23: ${cbRunText} | 
-      FurMark: ${fmRunText}
-    `;
-
-    const res = await ipcRenderer.invoke('sys:run-diagnostics', appState.settings);
-    
-    btn.disabled = false;
-    btn.textContent = "Run Stress Test & Auto-Fill";
-
-    if (!res.success) {
-      statusBox.innerHTML = `<span style="color: var(--status-urgent)">Error: ${res.error}</span>`;
-      return;
-    }
-
-    // Populate parsed temperatures
-    if (res.csvContent) {
-      const stats = getHwInfoStats(res.csvContent);
-      if (stats) {
-        if (stats.cpu.min !== null) document.getElementById('c-cpu-temp-min').value = stats.cpu.min;
-        if (stats.cpu.max !== null) document.getElementById('c-cpu-temp-max').value = stats.cpu.max;
-        if (stats.cpu.avg !== null) document.getElementById('c-cpu-temp-avg').value = stats.cpu.avg;
-        
-        if (stats.gpu.min !== null) document.getElementById('c-gpu-temp-min').value = stats.gpu.min;
-        if (stats.gpu.max !== null) document.getElementById('c-gpu-temp-max').value = stats.gpu.max;
-        if (stats.gpu.avg !== null) document.getElementById('c-gpu-temp-avg').value = stats.gpu.avg;
-      }
-    }
-
-    // Populate Cinebench score
-    if (res.cinebenchScore) {
-      document.getElementById('c-cinebench-score').value = res.cinebenchScore;
-    }
-
-    // Populate SSD read/write speeds
-    if (res.ssdRead) {
-      document.getElementById('c-ssd-read').value = res.ssdRead;
-    }
-    if (res.ssdWrite) {
-      document.getElementById('c-ssd-write').value = res.ssdWrite;
-    }
-
-    // Trigger calculations and comparisons
-    updateClientRivalComparisonOutput();
-
-    // Set completed status
-    const finalCbScore = res.cinebenchScore || 0;
-    statusBox.innerHTML = `
-      HWiNFO64: <strong style="color: var(--status-completed)">Calculated</strong> | 
-      Cinebench R23: <strong style="color: var(--status-completed)">Completed (${finalCbScore} pts)</strong> | 
-      FurMark: <strong style="color: var(--status-completed)">Completed</strong>
-    `;
-
-    checkClientFormReady();
+    await executeDiagnosticsWorkflow(false);
   });
 
   // Trigger system specs detection
@@ -1230,6 +1464,7 @@ async function setupClientMode() {
     t.diagnostics.gpuTempAvg = parseFloat(document.getElementById('c-gpu-temp-avg').value) || null;
 
     t.diagnostics.cinebench = parseFloat(document.getElementById('c-cinebench-score').value) || null;
+    t.diagnostics.furmark = parseFloat(document.getElementById('c-furmark-score').value) || null;
     t.diagnostics.ssdRead = parseFloat(document.getElementById('c-ssd-read').value) || null;
     t.diagnostics.ssdWrite = parseFloat(document.getElementById('c-ssd-write').value) || null;
     t.diagnostics.rivalConfigId = document.getElementById('c-rival-select').value || "";
@@ -1261,7 +1496,7 @@ async function setupClientMode() {
     if (appState.settings.isMaster) {
       switchScreen('selector');
     } else {
-      switchScreen('client-welcome');
+      switchScreen('client');
     }
   });
 
@@ -1273,6 +1508,7 @@ async function setupClientMode() {
 
   // Setup client temperature averaging calculations
   setupClientFormCalculations();
+  setupPortsChecker();
 }
 
 function getHwInfoStats(content) {
@@ -1440,6 +1676,7 @@ function populatePrintFields(ticket) {
 
   // Benchmarks
   document.getElementById('print-score-cb').textContent = (ticket.diagnostics.cinebench || '--') + ' pts';
+  document.getElementById('print-score-fm').textContent = (ticket.diagnostics.furmark || '--') + ' pts';
   document.getElementById('print-score-read').textContent = (ticket.diagnostics.ssdRead || '--') + ' MB/s';
   document.getElementById('print-score-write').textContent = (ticket.diagnostics.ssdWrite || '--') + ' MB/s';
 
@@ -1578,6 +1815,26 @@ function openSettingsModal() {
   document.getElementById('settings-path-furmark').value = appState.settings.pathFurmark || '';
   document.getElementById('settings-is-master').checked = !!appState.settings.isMaster;
 
+  // Populate new general settings
+  document.getElementById('settings-shop-name').value = appState.settings.shopName || '';
+  document.getElementById('settings-contact-info').value = appState.settings.contactInfo || '';
+  document.getElementById('settings-accent-color').value = appState.settings.accentColor || 'pink';
+  document.getElementById('settings-sound-enabled').checked = !!appState.settings.soundEnabled;
+
+  // Populate thresholds
+  document.getElementById('settings-cpu-max-temp').value = appState.settings.cpuMaxTemp || 85;
+  document.getElementById('settings-cpu-max-temp-val').textContent = (appState.settings.cpuMaxTemp || 85) + '°C';
+  document.getElementById('settings-gpu-max-temp').value = appState.settings.gpuMaxTemp || 80;
+  document.getElementById('settings-gpu-max-temp-val').textContent = (appState.settings.gpuMaxTemp || 80) + '°C';
+  document.getElementById('settings-min-ssd-speed').value = appState.settings.minSsdSpeed || 3000;
+  document.getElementById('settings-auto-pdf').checked = !!appState.settings.autoPdf;
+
+  // Reset active tab in settings modal
+  document.querySelectorAll('.settings-tab-btn').forEach(btn => btn.classList.remove('active'));
+  document.querySelector('.settings-tab-btn[data-tab="tab-general"]').classList.add('active');
+  document.querySelectorAll('.settings-tab-content').forEach(c => c.classList.add('hidden'));
+  document.getElementById('tab-general').classList.remove('hidden');
+
   modal.classList.add('active');
 }
 
@@ -1589,11 +1846,23 @@ async function handleSaveSettings() {
   appState.settings.pathFurmark = document.getElementById('settings-path-furmark').value.trim();
   appState.settings.isMaster = document.getElementById('settings-is-master').checked;
 
+  // Save new settings
+  appState.settings.shopName = document.getElementById('settings-shop-name').value.trim();
+  appState.settings.contactInfo = document.getElementById('settings-contact-info').value.trim();
+  appState.settings.accentColor = document.getElementById('settings-accent-color').value;
+  appState.settings.soundEnabled = document.getElementById('settings-sound-enabled').checked;
+  appState.settings.cpuMaxTemp = parseInt(document.getElementById('settings-cpu-max-temp').value);
+  appState.settings.gpuMaxTemp = parseInt(document.getElementById('settings-gpu-max-temp').value);
+  appState.settings.minSsdSpeed = parseInt(document.getElementById('settings-min-ssd-speed').value) || 3000;
+  appState.settings.autoPdf = document.getElementById('settings-auto-pdf').checked;
+
+  applyAccentColor(appState.settings.accentColor);
+
   await saveDatabase();
   document.getElementById('settings-modal').classList.remove('active');
   
   if (!appState.settings.isMaster) {
-    switchScreen('client-welcome');
+    switchScreen('client');
   } else {
     if (currentMode === 'staff') {
       renderDashboard();
@@ -1618,6 +1887,48 @@ function setupEventListeners() {
     switchScreen('client');
   });
 
+  // Welcome Screen Listeners
+  const welcomeSelect = document.getElementById('welcome-ticket-select');
+  const welcomePreview = document.getElementById('welcome-spec-preview');
+  const welcomeLaunch = document.getElementById('btn-welcome-launch');
+
+  if (welcomeSelect) {
+    welcomeSelect.addEventListener('change', () => {
+      const ticketId = welcomeSelect.value;
+      if (!ticketId) {
+        welcomePreview.classList.add('hidden');
+        welcomeLaunch.disabled = true;
+        return;
+      }
+      const ticket = appState.tickets.find(t => t.id === ticketId);
+      if (ticket) {
+        document.getElementById('w-spec-cpu').textContent = ticket.specs ? (ticket.specs.cpu || 'Not detected') : 'Not detected';
+        document.getElementById('w-spec-gpu').textContent = ticket.specs ? (ticket.specs.gpu || 'Not detected') : 'Not detected';
+        document.getElementById('w-spec-ram').textContent = ticket.specs ? (ticket.specs.ram || 'Not detected') : 'Not detected';
+        document.getElementById('w-spec-storage').textContent = ticket.specs ? (ticket.specs.storage || 'Not detected') : 'Not detected';
+        
+        welcomePreview.classList.remove('hidden');
+        welcomeLaunch.disabled = false;
+      }
+    });
+  }
+
+  if (welcomeLaunch) {
+    welcomeLaunch.addEventListener('click', () => {
+      const ticketId = welcomeSelect.value;
+      if (ticketId) {
+        switchScreen('client-console', ticketId);
+      }
+    });
+  }
+
+  const welcomeExit = document.getElementById('btn-welcome-exit');
+  if (welcomeExit) {
+    welcomeExit.addEventListener('click', () => {
+      switchScreen('selector');
+    });
+  }
+
   // Theme change toggle
   document.getElementById('btn-toggle-theme').addEventListener('click', () => {
     document.body.classList.toggle('dark-mode');
@@ -1639,6 +1950,56 @@ function setupEventListeners() {
       alert("Mock database reseeded successfully!");
     }
   });
+
+  // Settings Tab switching
+  document.querySelectorAll('.settings-tab-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      const tabId = btn.getAttribute('data-tab');
+      document.querySelectorAll('.settings-tab-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      document.querySelectorAll('.settings-tab-content').forEach(c => c.classList.add('hidden'));
+      document.getElementById(tabId).classList.remove('hidden');
+    });
+  });
+
+  // Settings Max Temp Sliders value updates
+  const cpuSlider = document.getElementById('settings-cpu-max-temp');
+  if (cpuSlider) {
+    cpuSlider.addEventListener('input', () => {
+      document.getElementById('settings-cpu-max-temp-val').textContent = cpuSlider.value + '°C';
+    });
+  }
+  const gpuSlider = document.getElementById('settings-gpu-max-temp');
+  if (gpuSlider) {
+    gpuSlider.addEventListener('input', () => {
+      document.getElementById('settings-gpu-max-temp-val').textContent = gpuSlider.value + '°C';
+    });
+  }
+
+  // Password-protected ticket deadline unlock
+  const btnChangeDeadline = document.getElementById('btn-change-deadline');
+  if (btnChangeDeadline) {
+    btnChangeDeadline.addEventListener('click', () => {
+      const pw = prompt("Enter administrator password to edit deadline:");
+      if (pw === 'neoadmin') {
+        document.getElementById('form-deadline').disabled = false;
+        alert("Deadline unlocked. You can now modify the target date.");
+      } else {
+        alert("Incorrect password. Deadline locked.");
+      }
+    });
+  }
+
+  // Changelog close button
+  const btnCloseChangelog = document.getElementById('btn-close-changelog');
+  if (btnCloseChangelog) {
+    btnCloseChangelog.addEventListener('click', async () => {
+      document.getElementById('changelog-modal').classList.remove('active');
+      const currentVer = require('./package.json').version;
+      appState.lastRunVersion = currentVer;
+      await saveDatabase();
+    });
+  }
 
   // Add technician
   document.getElementById('btn-settings-add-tech').addEventListener('click', () => {
@@ -1807,19 +2168,8 @@ function setupEventListeners() {
     });
   });
 
-  // Client exit (takes client back to laboratory welcome screen)
+  // Client exit (takes client back to selector screen)
   document.getElementById('btn-client-exit').addEventListener('click', () => {
-    switchScreen('client-welcome');
-  });
-
-  // Client welcome screen selection button event listeners
-  document.getElementById('btn-workflow-build').addEventListener('click', () => {
-    switchScreen('client');
-  });
-  document.getElementById('btn-workflow-service').addEventListener('click', () => {
-    alert("Coming Soon: The Service & Repair workflow is currently under design and will be available in a future update.");
-  });
-  document.getElementById('btn-welcome-exit').addEventListener('click', () => {
     switchScreen('selector');
   });
 
@@ -1828,7 +2178,8 @@ function setupEventListeners() {
     switchScreen('selector');
   });
   document.getElementById('btn-client-refresh').addEventListener('click', () => {
-    populateClientTicketSelect();
+    const currentId = document.getElementById('client-ticket-select').value;
+    populateClientTicketSelect(currentId);
     handleClientTicketSelect();
   });
   document.getElementById('client-ticket-select').addEventListener('change', handleClientTicketSelect);
@@ -1849,74 +2200,7 @@ function setupEventListeners() {
 
   // Modal automated diagnostics run button
   document.getElementById('btn-modal-run-diagnostics').addEventListener('click', async () => {
-    const btn = document.getElementById('btn-modal-run-diagnostics');
-    const statusBox = document.getElementById('modal-diagnostics-status');
-    if (!statusBox) return;
-
-    // Check if paths are configured
-    const hasHw = appState.settings.pathHwInfo || appState.settings.pathHwInfo === 'mock';
-    const hasCb = appState.settings.pathCinebench || appState.settings.pathCinebench === 'mock';
-    const hasFm = appState.settings.pathFurmark || appState.settings.pathFurmark === 'mock';
-
-    if (!hasHw && !hasCb && !hasFm) {
-      alert("No diagnostic tools configured! Please go to Settings and enter the executable paths or 'mock' to simulate.");
-      return;
-    }
-
-    btn.disabled = true;
-    btn.textContent = "⚡ Running Stress Tests...";
-    
-    // Set status to running for active tools
-    let hwRunText = hasHw ? "<strong style='color: var(--status-urgent)'>Running...</strong>" : "Not Configured";
-    let cbRunText = hasCb ? "<strong style='color: var(--status-urgent)'>Running...</strong>" : "Not Configured";
-    let fmRunText = hasFm ? "<strong style='color: var(--status-urgent)'>Running...</strong>" : "Not Configured";
-
-    statusBox.innerHTML = `
-      HWiNFO64: ${hwRunText} | 
-      Cinebench R23: ${cbRunText} | 
-      FurMark: ${fmRunText}
-    `;
-
-    const res = await ipcRenderer.invoke('sys:run-diagnostics', appState.settings);
-    
-    btn.disabled = false;
-    btn.textContent = "Run Stress Test & Auto-Fill";
-
-    if (!res.success) {
-      statusBox.innerHTML = `<span style="color: var(--status-urgent)">Error: ${res.error}</span>`;
-      return;
-    }
-
-    // Populate parsed temperatures
-    if (res.csvContent) {
-      const stats = getHwInfoStats(res.csvContent);
-      if (stats) {
-        if (stats.cpu.min !== null) document.getElementById('form-cpu-temp-min').value = stats.cpu.min;
-        if (stats.cpu.max !== null) document.getElementById('form-cpu-temp-max').value = stats.cpu.max;
-        if (stats.cpu.avg !== null) document.getElementById('form-cpu-temp-avg').value = stats.cpu.avg;
-        
-        if (stats.gpu.min !== null) document.getElementById('form-gpu-temp-min').value = stats.gpu.min;
-        if (stats.gpu.max !== null) document.getElementById('form-gpu-temp-max').value = stats.gpu.max;
-        if (stats.gpu.avg !== null) document.getElementById('form-gpu-temp-avg').value = stats.gpu.avg;
-      }
-    }
-
-    // Populate Cinebench score
-    if (res.cinebenchScore) {
-      document.getElementById('form-cinebench-score').value = res.cinebenchScore;
-    }
-
-    // Populate SSD read/write speeds
-    if (res.ssdRead) {
-      document.getElementById('form-ssd-read').value = res.ssdRead;
-    }
-    if (res.ssdWrite) {
-      document.getElementById('form-ssd-write').value = res.ssdWrite;
-    }
-
-    // Trigger calculations and comparisons
-    updateRivalComparisonOutput();
-    updateModalDiagnosticsStatus();
+    await executeDiagnosticsWorkflow(true);
   });
 
   // Settings executable path browsers
@@ -2217,7 +2501,7 @@ function seedMockTickets() {
       diagnostics: {
         cpuTempMin: null, cpuTempMax: null, cpuTempAvg: null,
         gpuTempMin: null, gpuTempMax: null, gpuTempAvg: null,
-        cinebench: null, ssdRead: null, ssdWrite: null, rivalConfigId: ""
+        cinebench: null, furmark: null, ssdRead: null, ssdWrite: null, rivalConfigId: ""
       },
       serials: { motherboard: "", ram: "", gpu: "", ssd: "", cabinet: "" },
       specs: { cpu: "Ryzen 7 7800X3D", gpu: "RTX 4070 Ti Super", ram: "32 GB DDR5", storage: "2TB NVMe SSD" },
@@ -2249,7 +2533,7 @@ function seedMockTickets() {
       diagnostics: {
         cpuTempMin: null, cpuTempMax: null, cpuTempAvg: null,
         gpuTempMin: null, gpuTempMax: null, gpuTempAvg: null,
-        cinebench: null, ssdRead: null, ssdWrite: null, rivalConfigId: ""
+        cinebench: null, furmark: null, ssdRead: null, ssdWrite: null, rivalConfigId: ""
       },
       serials: { motherboard: "", ram: "", gpu: "", ssd: "", cabinet: "" },
       specs: { cpu: "Core i9-14900K", gpu: "RTX 4090", ram: "64 GB DDR5", storage: "4TB Gen4 SSD" },
@@ -2281,7 +2565,7 @@ function seedMockTickets() {
       diagnostics: {
         cpuTempMin: null, cpuTempMax: null, cpuTempAvg: null,
         gpuTempMin: null, gpuTempMax: null, gpuTempAvg: null,
-        cinebench: null, ssdRead: null, ssdWrite: null, rivalConfigId: ""
+        cinebench: null, furmark: null, ssdRead: null, ssdWrite: null, rivalConfigId: ""
       },
       serials: { motherboard: "", ram: "", gpu: "", ssd: "", cabinet: "" },
       specs: { cpu: "Ryzen 9 7950X", gpu: "", ram: "64 GB DDR5", storage: "2TB Gen4 SSD" },
@@ -2322,7 +2606,7 @@ function seedMockTickets() {
       diagnostics: {
         cpuTempMin: 35, cpuTempMax: 82, cpuTempAvg: 68,
         gpuTempMin: 40, gpuTempMax: 78, gpuTempAvg: 70,
-        cinebench: 14200, ssdRead: 4900, ssdWrite: 3950, rivalConfigId: "1"
+        cinebench: 14200, furmark: 9400, ssdRead: 4900, ssdWrite: 3950, rivalConfigId: "1"
       },
       serials: { motherboard: "MB-84729104", ram: "RAM-984719", gpu: "GPU-7739102", ssd: "SSD-391023", cabinet: "CAB-99238" },
       specs: { cpu: "Ryzen 5 7600", gpu: "RTX 4060", ram: "16 GB DDR5", storage: "1TB SSD" },
@@ -2354,7 +2638,7 @@ function seedMockTickets() {
       diagnostics: {
         cpuTempMin: 32, cpuTempMax: 70, cpuTempAvg: 55,
         gpuTempMin: 35, gpuTempMax: 68, gpuTempAvg: 60,
-        cinebench: 12500, ssdRead: 3500, ssdWrite: 3000, rivalConfigId: "1"
+        cinebench: 12500, furmark: 8200, ssdRead: 3500, ssdWrite: 3000, rivalConfigId: "1"
       },
       serials: { motherboard: "MB-11239023", ram: "RAM-449231", gpu: "GPU-2239102", ssd: "SSD-449102", cabinet: "CAB-55102" },
       specs: { cpu: "Core i5-13400", gpu: "RTX 3060", ram: "16 GB DDR4", storage: "1TB SSD" },
@@ -2362,4 +2646,366 @@ function seedMockTickets() {
       completedAt: new Date(Date.now() - 48*60*60*1000).toISOString()
     }
   ];
+}
+
+// ==========================================================================
+// REAL-TIME DIAGNOSTICS LOGGING & TELEMETRY
+// ==========================================================================
+
+function appendConsoleLine(boxId, text) {
+  const box = document.getElementById(boxId);
+  if (!box) return;
+  const line = document.createElement('div');
+  line.className = 'console-line';
+  
+  // Format line style based on contents
+  if (text.includes('[RAM Error]') || text.includes('[Error]')) {
+    line.style.color = 'var(--status-urgent)';
+    line.style.fontWeight = 'bold';
+  } else if (text.includes('[RAM]')) {
+    line.style.color = 'var(--status-testing)';
+  } else if (text.includes('completed') || text.includes('success') || text.includes('Passed') || text.includes('completed.')) {
+    line.style.color = 'var(--status-completed)';
+  } else if (text.includes('Launching') || text.includes('Spawning') || text.includes('Starting') || text.includes('Initiating')) {
+    line.style.color = '#38bdf8'; // light blue
+  }
+  
+  line.textContent = text;
+  box.appendChild(line);
+  box.scrollTop = box.scrollHeight;
+}
+
+function updateTempBar(valId, barId, tempVal) {
+  const valEl = document.getElementById(valId);
+  const barEl = document.getElementById(barId);
+  if (tempVal === undefined || tempVal === null) return;
+  
+  if (valEl) valEl.textContent = `${tempVal}°C`;
+  if (barEl) {
+    // Scale temp from 30 to 100
+    const pct = Math.min(100, Math.max(0, ((tempVal - 30) / (100 - 30)) * 100));
+    barEl.style.width = `${pct}%`;
+    
+    // Color thresholds
+    barEl.style.background = 'var(--status-completed)'; // Cool (under 60)
+    if (tempVal >= 80) {
+      barEl.style.background = 'var(--status-urgent)'; // Hot
+    } else if (tempVal >= 60) {
+      barEl.style.background = 'var(--status-awaiting)'; // Warm
+    }
+  }
+}
+
+// IPC Receivers for Real-time metrics
+ipcRenderer.on('sys:diag-log', (event, text) => {
+  let modifiedText = text;
+  if (text.includes("SSD")) {
+    modifiedText = `[PHASE: SSD SPEEDTEST] ` + text;
+  } else if (text.includes("RAM")) {
+    modifiedText = `[PHASE: RAM STRESSING] ` + text;
+  } else if (text.includes("FurMark") || text.includes("GPU")) {
+    modifiedText = `[PHASE: GPU STRESS] ` + text;
+  } else if (text.includes("Cinebench") || text.includes("CPU")) {
+    modifiedText = `[PHASE: CPU BENCHMARK] ` + text;
+  } else if (text.includes("LibreHardwareMonitor")) {
+    modifiedText = `[PHASE: SENSOR POLLING] ` + text;
+  }
+  appendConsoleLine('c-console-box', modifiedText);
+  appendConsoleLine('modal-console-box', modifiedText);
+});
+
+ipcRenderer.on('sys:sensor-update', (event, data) => {
+  if (data.cpuTemp) {
+    updateTempBar('c-hud-cpu-temp-val', 'c-hud-cpu-temp-bar', data.cpuTemp);
+    updateTempBar('modal-hud-cpu-temp-val', 'modal-hud-cpu-temp-bar', data.cpuTemp);
+  }
+  if (data.gpuTemp) {
+    updateTempBar('c-hud-gpu-temp-val', 'c-hud-gpu-temp-bar', data.gpuTemp);
+    updateTempBar('modal-hud-gpu-temp-val', 'modal-hud-gpu-temp-bar', data.gpuTemp);
+  }
+});
+
+ipcRenderer.on('sys:ram-update', (event, data) => {
+  const pct = data.percentDone || 0;
+  const iter = data.iterations || 0;
+  
+  const cVal = document.getElementById('c-hud-ram-val');
+  const cBar = document.getElementById('c-hud-ram-bar');
+  const cDesc = document.getElementById('c-hud-ram-desc');
+  if (cVal) cVal.textContent = `${pct}%`;
+  if (cBar) cBar.style.width = `${pct}%`;
+  if (cDesc) cDesc.textContent = `RAM Stressing: Iteration ${iter}`;
+
+  const mVal = document.getElementById('modal-hud-ram-val');
+  const mBar = document.getElementById('modal-hud-ram-bar');
+  const mDesc = document.getElementById('modal-hud-ram-desc');
+  if (mVal) mVal.textContent = `${pct}%`;
+  if (mBar) mBar.style.width = `${pct}%`;
+  if (mDesc) mDesc.textContent = `RAM Stressing: Iteration ${iter}`;
+});
+
+async function executeDiagnosticsWorkflow(isModal) {
+  const prefix = isModal ? 'form-' : 'c-';
+  const hudPrefix = isModal ? 'modal-' : 'c-';
+  const btnId = isModal ? 'btn-modal-run-diagnostics' : 'btn-run-auto-diagnostics';
+  const statusId = isModal ? 'modal-diagnostics-status' : 'c-diagnostics-status';
+  const pulseId = isModal ? 'modal-console-pulse' : 'c-console-pulse';
+  const boxId = isModal ? 'modal-console-box' : 'c-console-box';
+
+  const btn = document.getElementById(btnId);
+  const statusBox = document.getElementById(statusId);
+  const pulseDot = document.getElementById(pulseId);
+  const box = document.getElementById(boxId);
+
+  if (!btn) return;
+
+  btn.disabled = true;
+  btn.textContent = "⚡ Stress Testing...";
+
+  if (pulseDot) {
+    pulseDot.classList.remove('idle');
+    pulseDot.classList.add('testing');
+  }
+
+  // Clear previous console outputs and set default starting log
+  if (box) {
+    box.innerHTML = '';
+    appendConsoleLine(boxId, "[SYS] Initializing embedded diagnostics engine...");
+    appendConsoleLine(boxId, "[SYS] Checking Administrator permissions... OK");
+  }
+
+  // Reset progress indicators
+  updateTempBar(hudPrefix + 'hud-cpu-temp-val', hudPrefix + 'hud-cpu-temp-bar', 35);
+  updateTempBar(hudPrefix + 'hud-gpu-temp-val', hudPrefix + 'hud-gpu-temp-bar', 38);
+  
+  const ramVal = document.getElementById(hudPrefix + 'hud-ram-val');
+  const ramBar = document.getElementById(hudPrefix + 'hud-ram-bar');
+  const ramDesc = document.getElementById(hudPrefix + 'hud-ram-desc');
+  if (ramVal) ramVal.textContent = '0%';
+  if (ramBar) ramBar.style.width = '0%';
+  if (ramDesc) ramDesc.textContent = 'Initializing RAM worker...';
+
+  const ssdVal = document.getElementById(hudPrefix + 'hud-ssd-val');
+  const ssdBar = document.getElementById(hudPrefix + 'hud-ssd-bar');
+  if (ssdVal) ssdVal.textContent = 'Testing...';
+  if (ssdBar) ssdBar.style.width = '20%';
+
+  const durationSelectId = isModal ? 'modal-duration-select' : 'client-duration-select';
+  const durationSelectEl = document.getElementById(durationSelectId);
+  const duration = durationSelectEl ? parseInt(durationSelectEl.value) : 60;
+
+  let timeRemaining = duration;
+  if (statusBox) {
+    statusBox.innerHTML = `Cinebench R23: <strong style="color: var(--status-testing)">Testing...</strong> | FurMark: <strong style="color: var(--status-testing)">Testing...</strong> | RAM: <strong style="color: var(--status-testing)">Testing...</strong> | ⏳ Time Remaining: <strong style="color: var(--primary-pink)">~${timeRemaining}s</strong>`;
+  }
+
+  const timerInterval = setInterval(() => {
+    timeRemaining--;
+    if (timeRemaining < 0) timeRemaining = 0;
+    if (statusBox) {
+      statusBox.innerHTML = `Cinebench R23: <strong style="color: var(--status-testing)">Testing...</strong> | FurMark: <strong style="color: var(--status-testing)">Testing...</strong> | RAM: <strong style="color: var(--status-testing)">Testing...</strong> | ⏳ Time Remaining: <strong style="color: var(--primary-pink)">~${timeRemaining}s</strong>`;
+    }
+  }, 1000);
+
+  // Retrieve Cinebench useCase parameter from corresponding selector
+  const useCaseSelectId = isModal ? 'modal-usecase-select' : 'client-usecase-select';
+  const useCaseSelectEl = document.getElementById(useCaseSelectId);
+  const useCase = useCaseSelectEl ? useCaseSelectEl.value : 'gaming';
+
+  // Run diagnostics!
+  const res = await ipcRenderer.invoke('sys:run-diagnostics', {
+    ...appState.settings,
+    useCase: useCase,
+    duration: duration
+  });
+
+  clearInterval(timerInterval);
+
+  btn.disabled = false;
+  btn.textContent = "Run Stress Test & Auto-Fill";
+
+  if (pulseDot) {
+    pulseDot.classList.remove('testing');
+    pulseDot.classList.add('idle');
+  }
+
+  if (!res.success) {
+    if (statusBox) statusBox.innerHTML = `<span style="color: var(--status-urgent)">Error: ${res.error}</span>`;
+    appendConsoleLine(boxId, `[SYS ERROR] Diagnostics failed: ${res.error}`);
+    return;
+  }
+
+  // Populate actual inputs
+  document.getElementById(prefix + 'cpu-temp-min').value = res.cpuTempMin || '';
+  document.getElementById(prefix + 'cpu-temp-max').value = res.cpuTempMax || '';
+  document.getElementById(prefix + 'cpu-temp-avg').value = res.cpuTempAvg || '';
+
+  document.getElementById(prefix + 'gpu-temp-min').value = res.gpuTempMin || '';
+  document.getElementById(prefix + 'gpu-temp-max').value = res.gpuTempMax || '';
+  document.getElementById(prefix + 'gpu-temp-avg').value = res.gpuTempAvg || '';
+
+  document.getElementById(prefix + 'cinebench-score').value = res.cinebenchScore || '';
+  document.getElementById(prefix + 'furmark-score').value = res.furmarkScore || '';
+  document.getElementById(prefix + 'ssd-read').value = res.ssdRead || '';
+  document.getElementById(prefix + 'ssd-write').value = res.ssdWrite || '';
+
+  // Apply visual flash success highlight on the updated inputs
+  const inputsToFlash = ['cpu-temp-min', 'cpu-temp-max', 'cpu-temp-avg', 'gpu-temp-min', 'gpu-temp-max', 'gpu-temp-avg', 'cinebench-score', 'furmark-score', 'ssd-read', 'ssd-write'];
+  inputsToFlash.forEach(suffix => {
+    const el = document.getElementById(prefix + suffix);
+    if (el) {
+      el.classList.add('flash-success');
+      setTimeout(() => el.classList.remove('flash-success'), 1500);
+    }
+  });
+
+  // Update HUD
+  updateTempBar(hudPrefix + 'hud-cpu-temp-val', hudPrefix + 'hud-cpu-temp-bar', res.cpuTempAvg);
+  updateTempBar(hudPrefix + 'hud-gpu-temp-val', hudPrefix + 'hud-gpu-temp-bar', res.gpuTempAvg);
+
+  if (ramVal) ramVal.textContent = '100%';
+  if (ramBar) ramBar.style.width = '100%';
+  if (ramDesc) ramDesc.textContent = res.ramPassed ? 'RAM test passed successfully.' : 'RAM test failed!';
+
+  if (ssdVal) ssdVal.textContent = `${res.ssdRead} R / ${res.ssdWrite} W MB/s`;
+  if (ssdBar) ssdBar.style.width = '100%';
+
+  if (statusBox) {
+    statusBox.innerHTML = `
+      Cinebench R23: <strong style="color: var(--status-completed)">Completed (${res.cinebenchScore} pts)</strong> | 
+      FurMark: <strong style="color: var(--status-completed)">Completed</strong> | 
+      RAM: <strong style="color: ${res.ramPassed ? 'var(--status-completed)' : 'var(--status-urgent)'}">${res.ramPassed ? 'Passed' : 'Failed'}</strong>
+    `;
+  }
+
+  appendConsoleLine(boxId, `[SYS] All stress tests completed successfully.`);
+  appendConsoleLine(boxId, `[SYS] CPU package average temperature: ${res.cpuTempAvg}°C.`);
+  appendConsoleLine(boxId, `[SYS] GPU package average temperature: ${res.gpuTempAvg}°C.`);
+  appendConsoleLine(boxId, `[SYS] SSD speed read: ${res.ssdRead} MB/s, write: ${res.ssdWrite} MB/s.`);
+  appendConsoleLine(boxId, `[SYS] RAM test status: ${res.ramPassed ? "PASSED" : "FAILED"}.`);
+
+  // Auto-Save Diagnostics back into the loaded ticket
+  const ticketId = isModal 
+    ? (document.getElementById('form-ticket-id').value || editingTicketId) 
+    : document.getElementById('client-ticket-select').value;
+
+  if (ticketId) {
+    const ticketIndex = appState.tickets.findIndex(t => t.id === ticketId);
+    if (ticketIndex !== -1) {
+      const ticket = appState.tickets[ticketIndex];
+      ticket.diagnostics.cpuTempMin = res.cpuTempMin || null;
+      ticket.diagnostics.cpuTempMax = res.cpuTempMax || null;
+      ticket.diagnostics.cpuTempAvg = res.cpuTempAvg || null;
+      ticket.diagnostics.gpuTempMin = res.gpuTempMin || null;
+      ticket.diagnostics.gpuTempMax = res.gpuTempMax || null;
+      ticket.diagnostics.gpuTempAvg = res.gpuTempAvg || null;
+      ticket.diagnostics.cinebench = res.cinebenchScore || null;
+      ticket.diagnostics.furmark = res.furmarkScore || null;
+      ticket.diagnostics.ssdRead = res.ssdRead || null;
+      ticket.diagnostics.ssdWrite = res.ssdWrite || null;
+
+      if (!isModal) {
+        // Auto-match competitor config based on CPU specs
+        if (detectedSpecs && detectedSpecs.cpu) {
+          const comp = getCompetitorModel(detectedSpecs.cpu);
+          let matchedRival = appState.rivalBenchmarks.find(r => {
+            const rName = r.name.toLowerCase();
+            const rCpu = (r.cpu || '').toLowerCase();
+            const compName = comp.name.toLowerCase();
+            return compName.includes(rCpu) || rName.includes(compName) || compName.includes(rName);
+          });
+          if (!matchedRival) {
+            if (comp.name.includes("7600")) {
+              matchedRival = appState.rivalBenchmarks.find(r => r.id === "1");
+            } else if (comp.name.includes("14700")) {
+              matchedRival = appState.rivalBenchmarks.find(r => r.id === "2");
+            }
+          }
+          if (matchedRival) {
+            ticket.diagnostics.rivalConfigId = matchedRival.id;
+            const selectEl = document.getElementById('c-rival-select');
+            if (selectEl) selectEl.value = matchedRival.id;
+          }
+        }
+
+        // Auto-check standard QC check fields on test pass
+        if (res.ramPassed) {
+          ticket.qcChecks.physCabinet = true;
+          ticket.qcChecks.softDrivers = true;
+          ticket.qcChecks.softBios = true;
+          ticket.qcChecks.portUsb = true;
+          ticket.qcChecks.portVideo = true;
+          ticket.qcChecks.portAudio = true;
+          ticket.qcChecks.portWifi = true;
+        }
+      }
+
+      appState.tickets[ticketIndex] = ticket;
+      await saveDatabase();
+      await syncTicketToCloud(ticket);
+    }
+  }
+
+  if (isModal) {
+    updateRivalComparisonOutput();
+    updateModalDiagnosticsStatus();
+  } else {
+    updateClientRivalComparisonOutput();
+    checkClientFormReady();
+  }
+}
+
+// Accent Color Theme Applier
+function applyAccentColor(color) {
+  const root = document.documentElement;
+  let primary = '#e7014e';
+  let primaryRgb = '231, 1, 78';
+  
+  switch (color) {
+    case 'purple':
+      primary = '#8b5cf6';
+      primaryRgb = '139, 92, 246';
+      break;
+    case 'cyan':
+      primary = '#06b6d4';
+      primaryRgb = '6, 182, 212';
+      break;
+    case 'gold':
+      primary = '#f59e0b';
+      primaryRgb = '245, 158, 11';
+      break;
+    case 'green':
+      primary = '#10b981';
+      primaryRgb = '16, 185, 129';
+      break;
+    case 'pink':
+    default:
+      primary = '#e7014e';
+      primaryRgb = '231, 1, 78';
+      break;
+  }
+  root.style.setProperty('--primary-pink', primary);
+  root.style.setProperty('--primary-pink-rgb', primaryRgb);
+  
+  const logoGrad = document.getElementById('logo-grad');
+  if (logoGrad) {
+    logoGrad.innerHTML = `
+      <stop offset="0%" stop-color="${color === 'purple' ? '#a78bfa' : color === 'cyan' ? '#22d3ee' : color === 'gold' ? '#fbbf24' : color === 'green' ? '#34d399' : '#ff1a75'}" />
+      <stop offset="50%" stop-color="${primary}" />
+      <stop offset="100%" stop-color="${color === 'purple' ? '#6d28d9' : color === 'cyan' ? '#0891b2' : color === 'gold' ? '#d97706' : color === 'green' ? '#059669' : '#b3003b'}" />
+    `;
+  }
+}
+
+// Format Date to YYYY-MM-DDTHH:MM
+function formatDateTimeLocal(isoString) {
+  if (!isoString) return '';
+  try {
+    const d = new Date(isoString);
+    if (isNaN(d.getTime())) return '';
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  } catch (e) {
+    return '';
+  }
 }
