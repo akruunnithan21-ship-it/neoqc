@@ -218,9 +218,43 @@ ipcMain.handle('sys:detect-hw', () => {
     exec('powershell -Command "(Get-CimInstance Win32_Processor).Name"', (err, stdout) => {
       if (!err && stdout) hwSpecs.cpu = stdout.trim();
 
-      // Get GPU Name
-      exec('powershell -Command "(Get-CimInstance Win32_VideoController | Select-Object -First 1).Name"', (err, stdout) => {
-        if (!err && stdout) hwSpecs.gpu = stdout.trim();
+      // Get GPU Names (both Integrated and Discrete)
+      exec('powershell -Command "Get-CimInstance Win32_VideoController | Select-Object -ExpandProperty Name"', (err, stdout) => {
+        let igpu = "None";
+        let dgpu = "None";
+        if (!err && stdout) {
+          const lines = stdout.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+          const igpuKeywords = ['intel', 'graphics', 'uhd', 'iris', 'hd', 'amd radeon(tm)', 'radeon tm', 'integrated'];
+          
+          for (const name of lines) {
+            const lowerName = name.toLowerCase();
+            const hasIgpuKeyword = igpuKeywords.some(k => lowerName.includes(k));
+            const hasDgpuKeyword = lowerName.includes('nvidia') || lowerName.includes('geforce') || lowerName.includes('rtx') || lowerName.includes('gtx') || lowerName.includes('quadro') || lowerName.includes('radeon pro') || lowerName.includes('rx') || lowerName.includes('xt');
+            
+            if (hasDgpuKeyword) {
+              dgpu = name;
+            } else if (hasIgpuKeyword) {
+              igpu = name;
+            } else {
+              if (lowerName.includes('microsoft basic display adapter')) {
+                // Ignore
+              } else {
+                igpu = name; // fallback
+              }
+            }
+          }
+          
+          if (lines.length === 1 && igpu === "None" && dgpu === "None") {
+            const name = lines[0];
+            if (name.toLowerCase().includes('nvidia') || name.toLowerCase().includes('rtx') || name.toLowerCase().includes('rx')) {
+              dgpu = name;
+            } else {
+              igpu = name;
+            }
+          }
+        }
+        hwSpecs.igpu = igpu;
+        hwSpecs.dgpu = dgpu;
 
         // Get RAM capacity (Summed and converted to GB)
         exec('powershell -Command "[Math]::Round((Get-CimInstance Win32_PhysicalMemory | Measure-Object -Property Capacity -Sum).Sum / 1GB)"', (err, stdout) => {
@@ -670,13 +704,10 @@ ipcMain.handle('sys:check-port-hardware', async (event, portType) => {
 
   try {
     if (portType === 'rgb') {
-      // For RGB, we check if common RGB sync controllers are running or simulate sync status
       return new Promise((resolve) => {
-        exec('tasklist', (err, stdout) => {
-          const running = (stdout || '').toLowerCase();
-          const hasSyncSoftware = running.includes('rgb') || running.includes('aura') || running.includes('mystic') || running.includes('corsair') || running.includes('l-connect') || running.includes('icue') || running.includes('signalrgb');
-          resolve({ passed: true, hasSyncSoftware }); // Always pass but check if helper exists
-        });
+        const launcherPath = path.join(process.env.LOCALAPPDATA, 'VortxEngine', 'SignalRgbLauncher.exe');
+        const hasSyncSoftware = fs.existsSync(launcherPath);
+        resolve({ passed: hasSyncSoftware, hasSyncSoftware });
       });
     }
 
@@ -729,4 +760,103 @@ function estimateCinebenchScore(cpuName, isSingleCore) {
     return 13500 + variance;
   }
 }
+
+// IPC Handler: Check if SignalRGB is installed
+ipcMain.handle('sys:check-signalrgb', () => {
+  const launcherPath = path.join(process.env.LOCALAPPDATA, 'VortxEngine', 'SignalRgbLauncher.exe');
+  return fs.existsSync(launcherPath);
+});
+
+// IPC Handler: Apply RGB color/presets to SignalRGB via launcher URL protocol
+ipcMain.handle('sys:apply-rgb', (event, { mode, color }) => {
+  return new Promise((resolve) => {
+    const launcherPath = path.join(process.env.LOCALAPPDATA, 'VortxEngine', 'SignalRgbLauncher.exe');
+    if (!fs.existsSync(launcherPath)) {
+      resolve({ success: false, error: 'SignalRGB not installed' });
+      return;
+    }
+
+    let uri = '';
+    const hex = color.replace('#', '').toUpperCase();
+
+    if (mode === 'static') {
+      uri = `signalrgb://effect/apply/Solid%20Color?color=${hex}`;
+    } else if (mode === 'rainbow') {
+      uri = `signalrgb://effect/apply/Rainbow`;
+    } else if (mode === 'breathing') {
+      uri = `signalrgb://effect/apply/Breathing?color=${hex}`;
+    } else if (mode === 'cycle') {
+      uri = `signalrgb://effect/apply/Color%20Cycle`;
+    } else if (mode === 'off') {
+      uri = `signalrgb://effect/apply/Solid%20Color?color=000000`;
+    }
+
+    if (uri) {
+      // Execute the launcher with --url option and -silentlaunch- to avoid popping up the GUI
+      const cmd = `"${launcherPath}" --url "${uri}?-silentlaunch-"`;
+      exec(cmd, (err) => {
+        if (err) {
+          console.error("SignalRGB apply error:", err);
+          resolve({ success: false, error: err.message });
+        } else {
+          resolve({ success: true });
+        }
+      });
+    } else {
+      resolve({ success: false, error: 'Invalid mode' });
+    }
+  });
+});
+
+const https = require('https');
+// IPC Handler: Download and run SignalRGB installer
+ipcMain.handle('sys:download-install-signalrgb', async (event) => {
+  const installerUrl = 'https://www.signalrgb.com/download/Install%20SignalRGB.exe';
+  const tempInstallerPath = path.join(os.tmpdir(), 'Install_SignalRGB.exe');
+  
+  event.sender.send('sys:diag-log', "[RGB] Downloading SignalRGB installer from official website...");
+  
+  return new Promise((resolve) => {
+    const file = fs.createWriteStream(tempInstallerPath);
+    
+    function download(urlToGet) {
+      https.get(urlToGet, {
+        headers: { 'User-Agent': 'Mozilla/5.0' }
+      }, (response) => {
+        if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
+          download(response.headers.location);
+          return;
+        }
+        
+        if (response.statusCode !== 200) {
+          resolve({ success: false, error: `Download failed with HTTP ${response.statusCode}` });
+          return;
+        }
+        
+        response.pipe(file);
+        
+        file.on('finish', () => {
+          file.close();
+          event.sender.send('sys:diag-log', "[RGB] Download completed. Launching SignalRGB installation wizard...");
+          
+          // Execute installer
+          exec(`"${tempInstallerPath}"`, (err) => {
+            if (err) {
+              console.error("Installer execution error:", err);
+              resolve({ success: false, error: err.message });
+            } else {
+              resolve({ success: true });
+            }
+          });
+        });
+      }).on('error', (err) => {
+        fs.unlink(tempInstallerPath, () => {});
+        resolve({ success: false, error: err.message });
+      });
+    }
+    
+    download(installerUrl);
+  });
+});
+
 

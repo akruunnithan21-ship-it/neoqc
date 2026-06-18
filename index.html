@@ -221,7 +221,8 @@
             <button id="btn-client-detect-hw" class="primary-pink-btn full-width">🔍 Auto-Detect System Specs</button>
             <div class="specs-readout">
               <div class="spec-item"><span class="spec-label">CPU:</span> <span id="c-spec-cpu" class="spec-val font-mono">Not detected</span></div>
-              <div class="spec-item"><span class="spec-label">GPU:</span> <span id="c-spec-gpu" class="spec-val font-mono">Not detected</span></div>
+              <div class="spec-item"><span class="spec-label">iGPU:</span> <span id="c-spec-igpu" class="spec-val font-mono">Not detected</span></div>
+              <div class="spec-item"><span class="spec-label">dGPU:</span> <span id="c-spec-gpu" class="spec-val font-mono">Not detected</span></div>
               <div class="spec-item"><span class="spec-label">RAM:</span> <span id="c-spec-ram" class="spec-val font-mono">Not detected</span></div>
               <div class="spec-item"><span class="spec-label">SSD:</span> <span id="c-spec-storage" class="spec-val font-mono">Not detected</span></div>
             </div>
@@ -339,6 +340,11 @@
                       <input type="range" id="rgb-speed-slider" min="1" max="5" value="3" style="width: 100%;">
                     </div>
                     <button type="button" id="btn-apply-rgb-sync" class="secondary-btn full-width margin-top" style="padding: 6px; font-size: 0.8rem; font-weight: bold;">Apply & Sync Hardware</button>
+                    
+                    <div id="signalrgb-install-container" class="margin-top hidden" style="border: 1px solid var(--primary-pink); background: rgba(231,1,78,0.1); border-radius: 8px; padding: 10px; text-align: center;">
+                      <p style="font-size: 0.72rem; margin-bottom: 6px; color: var(--text-light); line-height: 1.3;">SignalRGB is required for native lighting control but was not detected.</p>
+                      <button type="button" id="btn-download-signalrgb" class="primary-pink-btn" style="padding: 4px 10px; font-size: 0.7rem; width: 100%;">Download & Install SignalRGB</button>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -593,12 +599,16 @@
               <button type="button" id="btn-modal-detect-hw" class="primary-pink-btn" style="padding: 6px 12px; font-size: 0.8rem;">🔍 Auto-Detect Local Specs</button>
             </div>
             <div class="specs-readout-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 10px;">
-              <div class="spec-readout-card" style="background: rgba(255,255,255,0.03); border: 1px solid var(--glass-border); padding: 8px 12px; border-radius: 8px;">
+              <div class="spec-readout-card" style="grid-column: span 2; background: rgba(255,255,255,0.03); border: 1px solid var(--glass-border); padding: 8px 12px; border-radius: 8px;">
                 <span class="spec-label" style="font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em;">Processor (CPU)</span>
                 <div id="modal-spec-cpu" class="spec-value" style="font-family: 'JetBrains Mono', monospace; font-size: 0.82rem; font-weight: 700; margin-top: 2px;">--</div>
               </div>
               <div class="spec-readout-card" style="background: rgba(255,255,255,0.03); border: 1px solid var(--glass-border); padding: 8px 12px; border-radius: 8px;">
-                <span class="spec-label" style="font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em;">Graphics Card (GPU)</span>
+                <span class="spec-label" style="font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em;">Integrated GPU (iGPU)</span>
+                <div id="modal-spec-igpu" class="spec-value" style="font-family: 'JetBrains Mono', monospace; font-size: 0.82rem; font-weight: 700; margin-top: 2px;">--</div>
+              </div>
+              <div class="spec-readout-card" style="background: rgba(255,255,255,0.03); border: 1px solid var(--glass-border); padding: 8px 12px; border-radius: 8px;">
+                <span class="spec-label" style="font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em;">Discrete GPU (dGPU)</span>
                 <div id="modal-spec-gpu" class="spec-value" style="font-family: 'JetBrains Mono', monospace; font-size: 0.82rem; font-weight: 700; margin-top: 2px;">--</div>
               </div>
               <div class="spec-readout-card" style="background: rgba(255,255,255,0.03); border: 1px solid var(--glass-border); padding: 8px 12px; border-radius: 8px;">

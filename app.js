@@ -43,11 +43,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   if (bootMode !== 'staff') {
-    if (appState.settings.isMaster) {
-      bootMode = 'selector';
-    } else {
-      bootMode = 'client';
-    }
+    bootMode = 'client';
   }
 
   switchScreen(bootMode);
@@ -1031,7 +1027,45 @@ function setupRgbController() {
   const chStrips = document.getElementById('rgb-ch-strips');
 
   if (!modeSelect) return;
+  // SignalRGB Installation Check
+  const signalRgbContainer = document.getElementById('signalrgb-install-container');
+  const downloadBtn = document.getElementById('btn-download-signalrgb');
+  
+  async function checkSignalRgb() {
+    const isInstalled = await ipcRenderer.invoke('sys:check-signalrgb');
+    if (isInstalled) {
+      if (signalRgbContainer) signalRgbContainer.classList.add('hidden');
+    } else {
+      if (signalRgbContainer) signalRgbContainer.classList.remove('hidden');
+    }
+    return isInstalled;
+  }
+  
+  checkSignalRgb();
 
+  if (downloadBtn) {
+    downloadBtn.addEventListener('click', async () => {
+      downloadBtn.disabled = true;
+      downloadBtn.textContent = "⏳ Downloading SignalRGB...";
+      appendConsoleLine('c-console-box', "[RGB] Initiating download of official SignalRGB installer...");
+      
+      const result = await ipcRenderer.invoke('sys:download-install-signalrgb');
+      if (result && result.success) {
+        appendConsoleLine('c-console-box', "[RGB] Installer launched. Please proceed with the installation wizard.");
+        downloadBtn.textContent = "Run Installer Again";
+        downloadBtn.disabled = false;
+        
+        // Re-check after 15s to see if they completed installation
+        setTimeout(checkSignalRgb, 15000);
+      } else {
+        appendConsoleLine('c-console-box', `[RGB ERROR] Failed to download/install: ${result ? result.error : 'Unknown error'}`);
+        downloadBtn.textContent = "Download & Install SignalRGB";
+        downloadBtn.disabled = false;
+      }
+    });
+  }
+
+  let rgbSyncTimeout = null;
   function updateRgbPreview() {
     const mode = modeSelect.value;
     const color = colorPicker.value;
@@ -1070,6 +1104,15 @@ function setupRgbController() {
     } else {
       colorGroup.style.display = 'none';
     }
+
+    // Debounce actual hardware RGB sync via SignalRGB to prevent process spamming
+    if (rgbSyncTimeout) clearTimeout(rgbSyncTimeout);
+    rgbSyncTimeout = setTimeout(async () => {
+      const isInstalled = await ipcRenderer.invoke('sys:check-signalrgb');
+      if (isInstalled) {
+        ipcRenderer.invoke('sys:apply-rgb', { mode, color });
+      }
+    }, 250);
   }
 
   modeSelect.addEventListener('change', updateRgbPreview);
@@ -1100,13 +1143,25 @@ function setupRgbController() {
     appendConsoleLine('c-console-box', `[RGB CONTROLLER] Applying RGB effect '${modeSelect.value.toUpperCase()}'...`);
     appendConsoleLine('c-console-box', `[RGB CONTROLLER] Syncing motherboard headers, RAM channels, and fans...`);
     
-    await new Promise(r => setTimeout(r, 600));
+    // Call IPC to apply immediately
+    const isInstalled = await ipcRenderer.invoke('sys:check-signalrgb');
+    let nextState = false;
+    
+    if (isInstalled) {
+      const result = await ipcRenderer.invoke('sys:apply-rgb', { mode: modeSelect.value, color: colorPicker.value });
+      if (result && result.success) {
+        appendConsoleLine('c-console-box', `[RGB CONTROLLER] Hardware sync applied via SignalRGB successfully!`);
+        nextState = true;
+      } else {
+        appendConsoleLine('c-console-box', `[RGB CONTROLLER ERROR] Failed to sync: ${result ? result.error : 'Unknown error'}`);
+      }
+    } else {
+      appendConsoleLine('c-console-box', `[RGB CONTROLLER ERROR] SignalRGB not found. Cannot apply hardware sync. Please install SignalRGB!`);
+    }
 
-    appendConsoleLine('c-console-box', `[RGB CONTROLLER] Hardware sync applied successfully!`);
-
-    setPortButtonState('btn-port-rgb', true);
+    setPortButtonState('btn-port-rgb', nextState);
     if (!ticket.qcChecks) ticket.qcChecks = {};
-    ticket.qcChecks.portRgb = true;
+    ticket.qcChecks.portRgb = nextState;
 
     appState.tickets[index] = ticket;
     await saveDatabase();
@@ -1369,7 +1424,8 @@ async function setupClientMode() {
       detectedSpecs = await ipcRenderer.invoke('sys:detect-hw');
       
       document.getElementById('c-spec-cpu').textContent = detectedSpecs.cpu || "Failed to detect";
-      document.getElementById('c-spec-gpu').textContent = detectedSpecs.gpu || "Failed to detect";
+      document.getElementById('c-spec-igpu').textContent = detectedSpecs.igpu || "None";
+      document.getElementById('c-spec-gpu').textContent = detectedSpecs.dgpu || "None";
       document.getElementById('c-spec-ram').textContent = detectedSpecs.ram || "Failed to detect";
       document.getElementById('c-spec-storage').textContent = detectedSpecs.storage || "Failed to detect";
 
@@ -2070,7 +2126,8 @@ function setupEventListeners() {
       
       // Update modal spec elements
       document.getElementById('modal-spec-cpu').textContent = detected.cpu || "Failed to detect";
-      document.getElementById('modal-spec-gpu').textContent = detected.gpu || "Failed to detect";
+      document.getElementById('modal-spec-igpu').textContent = detected.igpu || "None";
+      document.getElementById('modal-spec-gpu').textContent = detected.dgpu || "None";
       document.getElementById('modal-spec-ram').textContent = detected.ram || "Failed to detect";
       document.getElementById('modal-spec-storage').textContent = detected.storage || "Failed to detect";
 
