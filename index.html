@@ -99,7 +99,8 @@
           <h4 style="color: var(--primary-pink); margin-bottom: 8px; font-size: 0.85rem; text-transform: uppercase;">Ticket Specifications</h4>
           <div style="font-size: 0.85rem; line-height: 1.5; color: var(--text-dark);">
             <div><strong>CPU:</strong> <span id="w-spec-cpu">--</span></div>
-            <div><strong>GPU:</strong> <span id="w-spec-gpu">--</span></div>
+            <div><strong>Integrated GPU (iGPU):</strong> <span id="w-spec-igpu">--</span></div>
+            <div><strong>Discrete GPU (dGPU):</strong> <span id="w-spec-gpu">--</span></div>
             <div><strong>RAM:</strong> <span id="w-spec-ram">--</span></div>
             <div><strong>SSD:</strong> <span id="w-spec-storage">--</span></div>
           </div>
@@ -393,14 +394,14 @@
                   <div class="form-group mini">
                     <label>Min</label>
                     <div class="input-unit-wrapper unit-celsius">
-                      <input type="number" id="c-cpu-temp-min" readonly placeholder="Min">
+                      <input type="number" id="c-cpu-temp-min" placeholder="Min">
                       <span class="unit-label">°C</span>
                     </div>
                   </div>
                   <div class="form-group mini">
                     <label>Max</label>
                     <div class="input-unit-wrapper unit-celsius">
-                      <input type="number" id="c-cpu-temp-max" readonly placeholder="Max">
+                      <input type="number" id="c-cpu-temp-max" placeholder="Max">
                       <span class="unit-label">°C</span>
                     </div>
                   </div>
@@ -427,14 +428,14 @@
                   <div class="form-group mini">
                     <label>Min</label>
                     <div class="input-unit-wrapper unit-celsius">
-                      <input type="number" id="c-gpu-temp-min" readonly placeholder="Min">
+                      <input type="number" id="c-gpu-temp-min" placeholder="Min">
                       <span class="unit-label">°C</span>
                     </div>
                   </div>
                   <div class="form-group mini">
                     <label>Max</label>
                     <div class="input-unit-wrapper unit-celsius">
-                      <input type="number" id="c-gpu-temp-max" readonly placeholder="Max">
+                      <input type="number" id="c-gpu-temp-max" placeholder="Max">
                       <span class="unit-label">°C</span>
                     </div>
                   </div>
@@ -473,14 +474,14 @@
                   <div class="form-group mini">
                     <label>Seq Read</label>
                     <div class="input-unit-wrapper unit-mbs">
-                      <input type="number" id="c-ssd-read" readonly placeholder="e.g. 5200">
+                      <input type="number" id="c-ssd-read" placeholder="e.g. 5200">
                       <span class="unit-label">MB/s</span>
                     </div>
                   </div>
                   <div class="form-group mini">
                     <label>Seq Write</label>
                     <div class="input-unit-wrapper unit-mbs">
-                      <input type="number" id="c-ssd-write" readonly placeholder="e.g. 4800">
+                      <input type="number" id="c-ssd-write" placeholder="e.g. 4800">
                       <span class="unit-label">MB/s</span>
                     </div>
                   </div>
@@ -489,22 +490,22 @@
             </div>
 
             <!-- Benchmarks & Comparisons Row -->
-            <div class="form-grid-2 margin-top" style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+            <div class="form-grid-3 margin-top" style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px;">
               <div class="form-group">
                 <label for="c-cinebench-score">Cinebench R23 Score</label>
                 <div class="input-unit-wrapper unit-pts">
-                  <input type="number" id="c-cinebench-score" readonly placeholder="e.g. 14850">
+                  <input type="number" id="c-cinebench-score" placeholder="e.g. 14850">
                   <span class="unit-label">pts</span>
                 </div>
               </div>
               <div class="form-group">
                 <label for="c-furmark-score">FurMark GPU Score</label>
                 <div class="input-unit-wrapper unit-pts">
-                  <input type="number" id="c-furmark-score" readonly placeholder="e.g. 9250">
+                  <input type="number" id="c-furmark-score" placeholder="e.g. 9250">
                   <span class="unit-label">pts</span>
                 </div>
               </div>
-              <div class="form-group" style="display: none; grid-column: 1 / -1;">
+              <div class="form-group">
                 <label for="c-rival-select">Compare Against Rival Config</label>
                 <select id="c-rival-select">
                   <option value="">-- Choose Rival Configuration --</option>
@@ -1150,7 +1151,12 @@
             <td>N/A</td>
           </tr>
           <tr>
-            <td><strong>Graphics Card (GPU)</strong></td>
+            <td><strong>Integrated GPU (iGPU)</strong></td>
+            <td id="print-spec-igpu">--</td>
+            <td>N/A</td>
+          </tr>
+          <tr>
+            <td><strong>Discrete GPU (dGPU)</strong></td>
             <td id="print-spec-gpu">--</td>
             <td id="print-serial-gpu">--</td>
           </tr>

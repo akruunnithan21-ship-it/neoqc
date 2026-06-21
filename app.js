@@ -134,13 +134,19 @@ async function loadDatabase() {
   }
   applyAccentColor(appState.settings.accentColor);
   
+  initSupabase();
+
   // Seed beautiful mock tickets if db is empty to showcase the UI immediately!
   if (!appState.tickets || appState.tickets.length === 0) {
     seedMockTickets();
     await saveDatabase();
+    if (supabaseClient) {
+      for (const t of appState.tickets) {
+        await syncTicketToCloud(t);
+      }
+    }
   }
   
-  initSupabase();
   await syncFromCloud();
 
   // Version check and Changelog Modal trigger
@@ -524,6 +530,7 @@ function openTicketModal(ticketId = null) {
       
       // Load specs into modal fields
       document.getElementById('modal-spec-cpu').textContent = ticket.specs ? (ticket.specs.cpu || '--') : '--';
+      document.getElementById('modal-spec-igpu').textContent = ticket.specs ? (ticket.specs.igpu || '--') : '--';
       document.getElementById('modal-spec-gpu').textContent = ticket.specs ? (ticket.specs.gpu || '--') : '--';
       document.getElementById('modal-spec-ram').textContent = ticket.specs ? (ticket.specs.ram || '--') : '--';
       document.getElementById('modal-spec-storage').textContent = ticket.specs ? (ticket.specs.storage || '--') : '--';
@@ -821,6 +828,7 @@ function handleClientTicketSelect() {
   if (ticket) {
     // Populate specs
     document.getElementById('c-spec-cpu').textContent = ticket.specs ? (ticket.specs.cpu || 'Not detected') : 'Not detected';
+    document.getElementById('c-spec-igpu').textContent = ticket.specs ? (ticket.specs.igpu || 'None') : 'None';
     document.getElementById('c-spec-gpu').textContent = ticket.specs ? (ticket.specs.gpu || 'Not detected') : 'Not detected';
     document.getElementById('c-spec-ram').textContent = ticket.specs ? (ticket.specs.ram || 'Not detected') : 'Not detected';
     document.getElementById('c-spec-storage').textContent = ticket.specs ? (ticket.specs.storage || 'Not detected') : 'Not detected';
@@ -829,6 +837,7 @@ function handleClientTicketSelect() {
     if (ticket.specs && ticket.specs.cpu) {
       detectedSpecs = {
         cpu: ticket.specs.cpu,
+        igpu: ticket.specs.igpu || 'None',
         gpu: ticket.specs.gpu,
         ram: ticket.specs.ram,
         storage: ticket.specs.storage
@@ -1348,12 +1357,14 @@ async function handleTicketFormSubmit(e) {
 
   // Read specs directly from the modal UI fields
   const detectedCpuVal = document.getElementById('modal-spec-cpu').textContent;
+  const detectedIgpuVal = document.getElementById('modal-spec-igpu').textContent;
   const detectedGpuVal = document.getElementById('modal-spec-gpu').textContent;
   const detectedRamVal = document.getElementById('modal-spec-ram').textContent;
   const detectedStorageVal = document.getElementById('modal-spec-storage').textContent;
 
   updatedTicket.specs = {
     cpu: (detectedCpuVal === '--' || detectedCpuVal === 'Not detected') ? '' : detectedCpuVal,
+    igpu: (detectedIgpuVal === '--' || detectedIgpuVal === 'None' || detectedIgpuVal === '--') ? 'None' : detectedIgpuVal,
     gpu: (detectedGpuVal === '--' || detectedGpuVal === 'Not detected') ? '' : detectedGpuVal,
     ram: (detectedRamVal === '--' || detectedRamVal === 'Not detected') ? '' : detectedRamVal,
     storage: (detectedStorageVal === '--' || detectedStorageVal === 'Not detected') ? '' : detectedStorageVal
@@ -1498,6 +1509,7 @@ async function setupClientMode() {
     if (detectedSpecs) {
       t.specs = {
         cpu: detectedSpecs.cpu,
+        igpu: detectedSpecs.igpu || 'None',
         gpu: detectedSpecs.gpu,
         ram: detectedSpecs.ram,
         storage: detectedSpecs.storage
@@ -1712,6 +1724,7 @@ function populatePrintFields(ticket) {
 
   // Specs Mapping
   document.getElementById('print-spec-cpu').textContent = ticket.specs ? (ticket.specs.cpu || '--') : '--';
+  document.getElementById('print-spec-igpu').textContent = ticket.specs ? (ticket.specs.igpu || 'None') : '--';
   document.getElementById('print-spec-gpu').textContent = ticket.specs ? (ticket.specs.gpu || '--') : '--';
   document.getElementById('print-spec-ram').textContent = ticket.specs ? (ticket.specs.ram || '--') : '--';
   document.getElementById('print-spec-storage').textContent = ticket.specs ? (ticket.specs.storage || '--') : '--';
@@ -1959,6 +1972,7 @@ function setupEventListeners() {
       const ticket = appState.tickets.find(t => t.id === ticketId);
       if (ticket) {
         document.getElementById('w-spec-cpu').textContent = ticket.specs ? (ticket.specs.cpu || 'Not detected') : 'Not detected';
+        document.getElementById('w-spec-igpu').textContent = ticket.specs ? (ticket.specs.igpu || 'None') : 'None';
         document.getElementById('w-spec-gpu').textContent = ticket.specs ? (ticket.specs.gpu || 'Not detected') : 'Not detected';
         document.getElementById('w-spec-ram').textContent = ticket.specs ? (ticket.specs.ram || 'Not detected') : 'Not detected';
         document.getElementById('w-spec-storage').textContent = ticket.specs ? (ticket.specs.storage || 'Not detected') : 'Not detected';
@@ -2105,8 +2119,10 @@ function setupEventListeners() {
   });
   document.getElementById('btn-delete-ticket').addEventListener('click', async () => {
     if (editingTicketId && confirm("Are you sure you want to delete this ticket?")) {
-      appState.tickets = appState.tickets.filter(t => t.id !== editingTicketId);
+      const idToDelete = editingTicketId;
+      appState.tickets = appState.tickets.filter(t => t.id !== idToDelete);
       await saveDatabase();
+      await deleteTicketFromCloud(idToDelete);
       document.getElementById('ticket-modal').classList.remove('active');
       renderDashboard();
     }
@@ -2351,6 +2367,24 @@ async function syncTicketToCloud(ticket) {
   }
 }
 
+// Delete a single ticket from Supabase
+async function deleteTicketFromCloud(ticketId) {
+  if (!supabaseClient) return;
+  try {
+    const { error } = await supabaseClient
+      .from('tickets')
+      .delete()
+      .eq('id', ticketId);
+    if (error) {
+      console.error("Supabase delete failed:", error.message);
+    } else {
+      console.log(`Deleted ticket ${ticketId} from cloud.`);
+    }
+  } catch (err) {
+    console.error("Exception during ticket deletion from cloud:", err);
+  }
+}
+
 // Fetch all tickets from Supabase to sync local store
 async function syncFromCloud() {
   if (!supabaseClient) return;
@@ -2364,7 +2398,9 @@ async function syncFromCloud() {
       return;
     }
     
-    if (data && data.length > 0) {
+    if (data) {
+      const cloudIds = new Set(data.map(dbRow => dbRow.id));
+      
       data.forEach(dbRow => {
         const ticket = {
           id: dbRow.id,
@@ -2392,8 +2428,13 @@ async function syncFromCloud() {
           appState.tickets[index] = ticket;
         }
       });
+      
+      const oldLength = appState.tickets.length;
+      // Filter out local tickets not present in cloud
+      appState.tickets = appState.tickets.filter(t => cloudIds.has(t.id));
+      
       await saveDatabase(); // Persist merged dataset locally
-      console.log(`Pulled and merged ${data.length} tickets from Supabase cloud.`);
+      console.log(`Pulled ${data.length} tickets, removed ${oldLength - appState.tickets.length} deleted tickets from Supabase cloud.`);
     }
   } catch (err) {
     console.error("Exception during database sync:", err);
@@ -2408,6 +2449,25 @@ function setupRealtimeListener() {
       .channel('public:tickets')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'tickets' }, async payload => {
         console.log("Realtime event received:", payload);
+        
+        if (payload.eventType === 'DELETE') {
+          const deletedId = payload.old.id;
+          if (deletedId) {
+            appState.tickets = appState.tickets.filter(t => t.id !== deletedId);
+            await saveDatabase();
+            if (currentMode === 'staff') {
+              renderDashboard();
+              if (editingTicketId === deletedId) {
+                document.getElementById('ticket-modal').classList.remove('active');
+                editingTicketId = null;
+              }
+            } else if (currentMode === 'client') {
+              populateClientTicketSelect();
+            }
+          }
+          return;
+        }
+
         const dbRow = payload.new;
         if (dbRow) {
           const ticket = {
@@ -2435,10 +2495,78 @@ function setupRealtimeListener() {
             appState.tickets[index] = ticket;
           }
           await saveDatabase();
+          
           if (currentMode === 'staff') {
             renderDashboard();
+            // If editing this ticket right now, dynamically update form fields in real-time
+            if (editingTicketId === ticket.id && document.getElementById('ticket-modal').classList.contains('active')) {
+              document.getElementById('modal-spec-cpu').textContent = ticket.specs ? (ticket.specs.cpu || '--') : '--';
+              document.getElementById('modal-spec-igpu').textContent = ticket.specs ? (ticket.specs.igpu || '--') : '--';
+              document.getElementById('modal-spec-gpu').textContent = ticket.specs ? (ticket.specs.gpu || '--') : '--';
+              document.getElementById('modal-spec-ram').textContent = ticket.specs ? (ticket.specs.ram || '--') : '--';
+              document.getElementById('modal-spec-storage').textContent = ticket.specs ? (ticket.specs.storage || '--') : '--';
+              
+              document.getElementById('form-cpu-temp-min').value = ticket.diagnostics.cpuTempMin || '';
+              document.getElementById('form-cpu-temp-max').value = ticket.diagnostics.cpuTempMax || '';
+              document.getElementById('form-cpu-temp-avg').value = ticket.diagnostics.cpuTempAvg || '';
+              document.getElementById('form-gpu-temp-min').value = ticket.diagnostics.gpuTempMin || '';
+              document.getElementById('form-gpu-temp-max').value = ticket.diagnostics.gpuTempMax || '';
+              document.getElementById('form-gpu-temp-avg').value = ticket.diagnostics.gpuTempAvg || '';
+              document.getElementById('form-cinebench-score').value = ticket.diagnostics.cinebench || '';
+              document.getElementById('form-furmark-score').value = ticket.diagnostics.furmark || '';
+              document.getElementById('form-ssd-read').value = ticket.diagnostics.ssdRead || '';
+              document.getElementById('form-ssd-write').value = ticket.diagnostics.ssdWrite || '';
+              document.getElementById('form-rival-select').value = ticket.diagnostics.rivalConfigId || '';
+
+              updateTempBar('modal-hud-cpu-temp-val', 'modal-hud-cpu-temp-bar', ticket.diagnostics.cpuTempAvg);
+              updateTempBar('modal-hud-gpu-temp-val', 'modal-hud-gpu-temp-bar', ticket.diagnostics.gpuTempAvg);
+              
+              const mVal = document.getElementById('modal-hud-ram-val');
+              const mBar = document.getElementById('modal-hud-ram-bar');
+              const mDesc = document.getElementById('modal-hud-ram-desc');
+              if (ticket.diagnostics.cinebench) {
+                if (mVal) mVal.textContent = '100%';
+                if (mBar) mBar.style.width = '100%';
+                if (mDesc) mDesc.textContent = 'RAM test passed successfully.';
+              }
+              
+              const ssdVal = document.getElementById('modal-hud-ssd-val');
+              const ssdBar = document.getElementById('modal-hud-ssd-bar');
+              if (ticket.diagnostics.ssdRead) {
+                if (ssdVal) ssdVal.textContent = `${ticket.diagnostics.ssdRead} R / ${ticket.diagnostics.ssdWrite} W MB/s`;
+                if (ssdBar) ssdBar.style.width = '100%';
+              }
+              
+              const statusBox = document.getElementById('modal-diagnostics-status');
+              if (ticket.diagnostics.cinebench) {
+                if (statusBox) {
+                  statusBox.innerHTML = `
+                    Cinebench R23: <strong style="color: var(--status-completed)">Completed (${ticket.diagnostics.cinebench} pts)</strong> | 
+                    FurMark: <strong style="color: var(--status-completed)">Completed</strong> | 
+                    RAM: <strong style="color: var(--status-completed)">Passed</strong>
+                  `;
+                }
+              }
+
+              const fieldsToFlash = [
+                'form-cpu-temp-min', 'form-cpu-temp-max', 'form-cpu-temp-avg',
+                'form-gpu-temp-min', 'form-gpu-temp-max', 'form-gpu-temp-avg',
+                'form-cinebench-score', 'form-furmark-score', 'form-ssd-read', 'form-ssd-write'
+              ];
+              fieldsToFlash.forEach(id => {
+                const el = document.getElementById(id);
+                if (el) {
+                  el.classList.add('flash-success');
+                  setTimeout(() => el.classList.remove('flash-success'), 1500);
+                }
+              });
+            }
           } else if (currentMode === 'client') {
             populateClientTicketSelect();
+            const clientSelect = document.getElementById('client-ticket-select');
+            if (clientSelect && clientSelect.value === ticket.id) {
+              handleClientTicketSelect();
+            }
           }
         }
       })
