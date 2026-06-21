@@ -167,6 +167,43 @@ app.whenReady().then(() => {
   autoUpdater.channel = updateChannel;
   log.info(`Setting autoUpdater channel to: ${updateChannel}`);
 
+  // Auto-updater event logging
+  autoUpdater.on('checking-for-update', () => {
+    log.info('Checking for update...');
+  });
+  autoUpdater.on('update-available', (info) => {
+    log.info(`Update available: Version ${info.version}`);
+  });
+  autoUpdater.on('update-not-available', (info) => {
+    log.info('Update not available.');
+  });
+  autoUpdater.on('error', (err) => {
+    log.error('Error in auto-updater:', err);
+  });
+  autoUpdater.on('download-progress', (progressObj) => {
+    log.info(`Download speed: ${Math.round(progressObj.bytesPerSecond / 1024)} KB/s - Downloaded ${Math.round(progressObj.percent)}% (${progressObj.transferred}/${progressObj.total} bytes)`);
+  });
+
+  // Prompt user to install update when ready
+  autoUpdater.on('update-downloaded', (info) => {
+    log.info(`Update version ${info.version} downloaded successfully.`);
+    dialog.showMessageBox({
+      type: 'info',
+      title: 'Update Ready',
+      message: `Version ${info.version} has been downloaded. Restart the application now to apply the update?`,
+      buttons: ['Restart Now', 'Later'],
+      defaultId: 0,
+      cancelId: 1
+    }).then((result) => {
+      if (result.response === 0) {
+        log.info('User approved restart. Quitting and installing update...');
+        autoUpdater.quitAndInstall();
+      } else {
+        log.info('User chose to install update later.');
+      }
+    });
+  });
+
   // Check for updates and notify the user
   autoUpdater.checkForUpdatesAndNotify();
 
