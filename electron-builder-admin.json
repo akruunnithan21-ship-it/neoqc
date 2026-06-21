@@ -7,13 +7,13 @@
       "portable"
     ],
     "icon": "assets/icon.ico",
-    "requestedExecutionLevel": "requireAdministrator",
-    "artifactName": "NeoQC-Admin-Setup-${version}.${ext}"
+    "requestedExecutionLevel": "requireAdministrator"
   },
   "nsis": {
     "oneClick": false,
     "allowToChangeInstallationDirectory": true,
-    "deleteAppDataOnUninstall": true
+    "deleteAppDataOnUninstall": true,
+    "artifactName": "NeoQC-Admin-Setup-${version}.${ext}"
   },
   "publish": {
     "provider": "github",
