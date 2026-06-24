@@ -252,6 +252,10 @@
               <span>Activation Status</span>
               <span class="badge">Unverified</span>
             </div>
+            <div id="client-win-key-container" class="win-activation-status margin-top hidden" style="font-size: 0.8rem; display: flex; justify-content: space-between; align-items: center;">
+              <span>Product Key</span>
+              <span id="client-win-key" style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; font-weight: 700; color: var(--text-dark);">--</span>
+            </div>
 
             <!-- Port & RGB Sync Verification Checker -->
             <div class="port-rgb-checker-section margin-top">
@@ -514,7 +518,7 @@
             </div>
 
             <!-- Benchmarks & Comparisons Row -->
-            <div class="form-grid-3 margin-top" style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px;">
+            <div class="form-grid-2 margin-top" style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
               <div class="form-group">
                 <label for="c-cinebench-score">Cinebench R23 Score</label>
                 <div class="input-unit-wrapper unit-pts">
@@ -529,12 +533,6 @@
                   <span class="unit-label">pts</span>
                 </div>
               </div>
-              <div class="form-group">
-                <label for="c-rival-select">Compare Against Rival Config</label>
-                <select id="c-rival-select">
-                  <option value="">-- Choose Rival Configuration --</option>
-                </select>
-              </div>
             </div>
 
             <!-- Scrollable Console Terminal Output -->
@@ -548,10 +546,7 @@
               </div>
             </div>
             
-            <!-- Rival Comparison Readout -->
-            <div id="c-rival-comparison-output" class="comparison-readout margin-top font-mono hidden" style="margin-top: 16px;">
-              <!-- Comparison values dynamically populated -->
-            </div>
+
           </div>
         </div>
 
@@ -645,10 +640,7 @@
                 <div id="modal-spec-storage" class="spec-value" style="font-family: 'JetBrains Mono', monospace; font-size: 0.82rem; font-weight: 700; margin-top: 2px;">--</div>
               </div>
             </div>
-            <!-- Rival specs dynamically pulled banner -->
-            <div id="modal-rival-pulled-banner" class="comparison-readout margin-top font-mono hidden">
-              <!-- Rival specs details populated here -->
-            </div>
+
           </div>
 
           <!-- STEP 1: PC ASSEMBLY (BUILD PHASE) -->
@@ -705,19 +697,19 @@
                 <label class="checkbox-label"><input type="checkbox" id="qc-soft-windows"> Windows Activated</label>
                 <label class="checkbox-label"><input type="checkbox" id="qc-soft-drivers"> All System Drivers Downloaded</label>
                 <label class="checkbox-label"><input type="checkbox" id="qc-soft-bios"> BIOS Updated to Latest</label>
+                
+                <div id="modal-windows-activation-info" style="margin-top: 15px; padding: 12px; background: rgba(255,255,255,0.03); border: 1px solid var(--glass-border); border-radius: 10px; font-size: 0.82rem;">
+                  <div style="font-weight: 700; color: var(--primary-pink); margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.05em; font-size: 0.75rem;">🛡️ Windows License Tracker</div>
+                  <div style="display: flex; flex-direction: column; gap: 4px;">
+                    <div><strong>Operating System:</strong> <span id="modal-activation-os">Windows</span></div>
+                    <div><strong>Activation State:</strong> <span id="modal-activation-status" class="badge">Unverified</span></div>
+                    <div style="margin-top: 4px;"><strong>Product Key Used:</strong> <span id="modal-activation-key" style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; word-break: break-all;">--</span></div>
+                  </div>
+                </div>
               </div>
             </div>
 
-            <div class="form-grid-2 margin-top">
-              <div class="form-group">
-                <label for="form-wifi-speed">Wi-Fi Download Speed (Mbps)</label>
-                <input type="number" id="form-wifi-speed" placeholder="e.g. 250">
-              </div>
-              <div class="form-group">
-                <label for="form-wifi-range">Wi-Fi Antenna Range (Signal %)</label>
-                <input type="number" id="form-wifi-range" min="0" max="100" placeholder="e.g. 95">
-              </div>
-            </div>
+
           </div>
 
           <div id="diagnostics-section" class="form-section margin-top locked">
@@ -858,7 +850,7 @@
             </div>
 
             <!-- Benchmarks & Comparisons Row -->
-            <div class="form-grid-3 margin-top" style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px;">
+            <div class="form-grid-2 margin-top" style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
               <div class="form-group">
                 <label for="form-cinebench-score">Cinebench R23 Score</label>
                 <div class="input-unit-wrapper unit-pts">
@@ -873,12 +865,6 @@
                   <span class="unit-label">pts</span>
                 </div>
               </div>
-              <div class="form-group">
-                <label for="form-rival-select">Compare Against Rival Config</label>
-                <select id="form-rival-select">
-                  <option value="">-- Choose Rival Configuration --</option>
-                </select>
-              </div>
             </div>
 
             <!-- Scrollable Console Terminal Output -->
@@ -892,10 +878,7 @@
               </div>
             </div>
             
-            <!-- Rival Comparison Readout -->
-            <div id="rival-comparison-output" class="comparison-readout margin-top font-mono hidden">
-              <!-- Comparison values dynamically populated -->
-            </div>
+
           </div>
 
           <!-- SERIAL NUMBERS & INVOICE REFERENCE -->
@@ -1264,58 +1247,32 @@
           <tr>
             <th>Benchmark Target</th>
             <th>Neo Tokyo Build Score</th>
-            <th id="print-rival-header">Expected Competitor Config</th>
-            <th>Status Delta</th>
           </tr>
         </thead>
         <tbody>
           <tr>
             <td><strong>Cinebench R23 Score</strong></td>
             <td id="print-score-cb">-- pts</td>
-            <td id="print-rival-cb">-- pts</td>
-            <td id="print-delta-cb">--</td>
           </tr>
           <tr>
             <td><strong>FurMark GPU Score</strong></td>
             <td id="print-score-fm">-- pts</td>
-            <td>N/A</td>
-            <td>--</td>
           </tr>
           <tr>
             <td><strong>SSD Sequential Read Speed</strong></td>
             <td id="print-score-read">-- MB/s</td>
-            <td id="print-rival-read">-- MB/s</td>
-            <td id="print-delta-read">--</td>
           </tr>
           <tr>
             <td><strong>SSD Sequential Write Speed</strong></td>
             <td id="print-score-write">-- MB/s</td>
-            <td id="print-rival-write">-- MB/s</td>
-            <td id="print-delta-write">--</td>
           </tr>
         </tbody>
       </table>
 
-      <div id="print-rival-specs-box" class="margin-top" style="font-size: 8.5pt; border: 1px solid #ccc; padding: 6px 10px; border-radius: 4px; margin-top: 8px; display: none;">
-        <strong>Target Competitor Details:</strong>
-        <div style="display: flex; gap: 20px; margin-top: 4px;">
-          <span><strong>CPU:</strong> <span id="print-rival-spec-cpu">--</span></span>
-          <span><strong>GPU:</strong> <span id="print-rival-spec-gpu">--</span></span>
-          <span><strong>Rival Config Price:</strong> <span id="print-rival-spec-price">--</span></span>
-        </div>
-      </div>
+
     </div>
 
-    <div class="print-section">
-      <table class="print-table-fields">
-        <tr>
-          <td><strong>Wi-Fi Signal Strength:</strong></td>
-          <td id="print-wifi-signal">-- %</td>
-          <td><strong>Wi-Fi Download Speed:</strong></td>
-          <td id="print-wifi-speed-val">-- Mbps</td>
-        </tr>
-      </table>
-    </div>
+
 
     <div class="print-footer">
       <div class="signature-line">
@@ -1335,10 +1292,10 @@
     <div class="glass-slab modal-card" style="max-width: 650px; width: 100%; padding: 30px; border-radius: 20px;">
       <div class="modal-header" style="border-bottom: 1px solid var(--glass-border); padding-bottom: 15px; margin-bottom: 20px;">
         <h2 style="font-family: 'Syncopate', sans-serif; font-size: 1.3rem; color: var(--primary-pink); letter-spacing: 0.05em; margin: 0;">NEO QC UPDATED</h2>
-        <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; font-weight: 700; background: rgba(231, 1, 78, 0.1); color: var(--primary-pink); padding: 4px 8px; border-radius: 4px;">v1.0.4</span>
+        <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; font-weight: 700; background: rgba(231, 1, 78, 0.1); color: var(--primary-pink); padding: 4px 8px; border-radius: 4px;">v1.0.5a</span>
       </div>
       <div class="modal-body" style="font-size: 0.92rem; line-height: 1.6; color: var(--text-dark); max-height: 420px; overflow-y: auto; padding-right: 5px;">
-        <p style="margin-top: 0;">An update has been installed. Here are the key improvements in NeoQC <strong>v1.0.4</strong>:</p>
+        <p style="margin-top: 0;">An update has been installed. Here are the key improvements in NeoQC <strong>v1.0.5a</strong>:</p>
         <ul style="padding-left: 20px; display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px;">
           <li><strong>📋 Activity Log & Event History</strong>: Every ticket change (status, technician, deadline, diagnostics, parts) is now recorded in a chronological timeline visible in the admin edit modal.</li>
           <li><strong>🕐 UTC Date Standardization</strong>: All dates are now stored and displayed in UTC. Dates will no longer shift between different time zones on different machines.</li>
@@ -1351,7 +1308,7 @@
         </ul>
       </div>
       <div class="modal-footer" style="border-top: 1px solid var(--glass-border); padding-top: 15px; display: flex; justify-content: flex-end; margin-top: 20px;">
-        <button id="btn-close-changelog" class="primary-pink-btn" style="padding: 10px 24px; font-weight: 700; font-size: 0.95rem;">Launch NeoQC v1.0.4 🚀</button>
+        <button id="btn-close-changelog" class="primary-pink-btn" style="padding: 10px 24px; font-weight: 700; font-size: 0.95rem;">Launch NeoQC v1.0.5a 🚀</button>
       </div>
     </div>
   </div>

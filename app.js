@@ -246,29 +246,7 @@ function populateTechnicianDropdowns() {
     });
   }
   
-  // Populate Rivals in modal form
-  const rivalSelect = document.getElementById('form-rival-select');
-  if (rivalSelect) {
-    rivalSelect.innerHTML = '<option value="">-- Choose Rival Configuration --</option>';
-    appState.rivalBenchmarks.forEach(rival => {
-      const opt = document.createElement('option');
-      opt.value = rival.id;
-      opt.textContent = rival.name;
-      rivalSelect.appendChild(opt);
-    });
-  }
 
-  // Populate Rivals in client form
-  const clientRivalSelect = document.getElementById('c-rival-select');
-  if (clientRivalSelect) {
-    clientRivalSelect.innerHTML = '<option value="">-- Choose Rival Configuration --</option>';
-    appState.rivalBenchmarks.forEach(rival => {
-      const opt = document.createElement('option');
-      opt.value = rival.id;
-      opt.textContent = rival.name;
-      clientRivalSelect.appendChild(opt);
-    });
-  }
 }
 
 function populateClientTicketSelect(selectedId = null) {
@@ -556,8 +534,10 @@ function openTicketModal(ticketId = null) {
       
       // Reset rival pulled banner
       const rivalBanner = document.getElementById('modal-rival-pulled-banner');
-      rivalBanner.classList.add('hidden');
-      rivalBanner.innerHTML = '';
+      if (rivalBanner) {
+        rivalBanner.classList.add('hidden');
+        rivalBanner.innerHTML = '';
+      }
 
       const partsToggle = document.getElementById('form-missing-components-toggle');
       partsToggle.checked = ticket.missingComponentsToggle;
@@ -589,8 +569,7 @@ function openTicketModal(ticketId = null) {
       document.getElementById('qc-port-audio').checked = ticket.qcChecks.portAudio;
       document.getElementById('qc-port-wifi').checked = ticket.qcChecks.portWifi;
       
-      document.getElementById('form-wifi-speed').value = ticket.qcChecks.wifiSpeed || '';
-      document.getElementById('form-wifi-range').value = ticket.qcChecks.wifiRange || '';
+
 
       // Diagnostics & Serials
       document.getElementById('form-cpu-temp-min').value = ticket.diagnostics.cpuTempMin || '';
@@ -603,16 +582,6 @@ function openTicketModal(ticketId = null) {
       document.getElementById('form-furmark-score').value = ticket.diagnostics.furmark || '';
       document.getElementById('form-ssd-read').value = ticket.diagnostics.ssdRead || '';
       document.getElementById('form-ssd-write').value = ticket.diagnostics.ssdWrite || '';
-      let rivalId = ticket.diagnostics.rivalConfigId || '';
-      if (!rivalId && ticket.specs && ticket.specs.cpu && isI514thGen(ticket.specs.cpu)) {
-        const amdRival = appState.rivalBenchmarks.find(r => r.cpu && r.cpu.toLowerCase().includes('ryzen 5 7600') || r.id === '1');
-        if (amdRival) {
-          rivalId = amdRival.id;
-          ticket.diagnostics.rivalConfigId = rivalId;
-        }
-      }
-      document.getElementById('form-rival-select').value = rivalId;
-
       document.getElementById('serial-motherboard').value = ticket.serials.motherboard || '';
       document.getElementById('serial-ram').value = ticket.serials.ram || '';
       document.getElementById('serial-gpu').value = ticket.serials.gpu || '';
@@ -622,7 +591,18 @@ function openTicketModal(ticketId = null) {
       // Run duplicate check on load
       document.querySelectorAll('.serial-field').forEach(field => verifyFieldDuplicate(field));
 
-      updateRivalComparisonOutput();
+      // Windows Activation tracker
+      const winKey = ticket.specs ? (ticket.specs.windowsKey || '') : '';
+      const winState = ticket.specs ? (ticket.specs.windowsActivationState || 'Unverified') : 'Unverified';
+      document.getElementById('modal-activation-os').textContent = 'Windows';
+      const statusBadge = document.getElementById('modal-activation-status');
+      statusBadge.textContent = winState;
+      statusBadge.className = `badge ${winState === 'Activated' ? 'green' : (winState === 'Not Activated' ? 'red' : '')}`;
+      document.getElementById('modal-activation-key').textContent = winKey || '--';
+
+      if (winState === 'Activated') {
+        document.getElementById('qc-soft-windows').checked = true;
+      }
 
       printBtn.classList.remove('hidden');
       document.getElementById('btn-save-pdf').classList.remove('hidden');
@@ -650,9 +630,11 @@ function openTicketModal(ticketId = null) {
     document.getElementById('form-deadline').disabled = false;
     document.getElementById('btn-change-deadline').style.display = 'none';
     
-    const rivalBanner = document.getElementById('modal-rival-pulled-banner');
-    rivalBanner.classList.add('hidden');
-    rivalBanner.innerHTML = '';
+    document.getElementById('modal-activation-os').textContent = 'Windows';
+    const statusBadge = document.getElementById('modal-activation-status');
+    statusBadge.textContent = 'Unverified';
+    statusBadge.className = 'badge';
+    document.getElementById('modal-activation-key').textContent = '--';
 
     printBtn.classList.add('hidden');
     document.getElementById('btn-save-pdf').classList.add('hidden');
@@ -749,59 +731,6 @@ function setupFormCalculations() {
   document.getElementById('form-cinebench-score').addEventListener('input', () => {
     updateModalDiagnosticsStatus();
   });
-  
-  // Rival comparator trigger
-  document.getElementById('form-rival-select').addEventListener('change', updateRivalComparisonOutput);
-}
-
-function updateRivalComparisonOutput() {
-  const rivalId = document.getElementById('form-rival-select').value;
-  const cbScore = parseFloat(document.getElementById('form-cinebench-score').value);
-  const readSpeed = parseFloat(document.getElementById('form-ssd-read').value);
-  const writeSpeed = parseFloat(document.getElementById('form-ssd-write').value);
-  const outputDiv = document.getElementById('rival-comparison-output');
-
-  if (!rivalId) {
-    outputDiv.classList.add('hidden');
-    return;
-  }
-
-  const rival = appState.rivalBenchmarks.find(r => r.id === rivalId);
-  if (!rival) {
-    outputDiv.classList.add('hidden');
-    return;
-  }
-
-  outputDiv.classList.remove('hidden');
-  outputDiv.innerHTML = `
-    <div style="margin-bottom: 8px; font-size: 0.85rem; border-bottom: 1px solid rgba(15, 23, 42, 0.08); padding-bottom: 6px;">
-      <strong>Target Competitor:</strong> ${rival.name}<br>
-      <span style="opacity: 0.8;">CPU: ${rival.cpu || '--'} | GPU: ${rival.gpu || '--'} | Price: ${rival.price || '--'}</span>
-    </div>
-    <div class="comparison-row header"><span>Parameter</span><span>Your Build</span><span>Target rival</span><span>Delta</span></div>
-  `;
-
-  const compareMetric = (label, currentVal, rivalVal) => {
-    if (isNaN(currentVal)) {
-      return `<div class="comparison-row"><span>${label}</span><span>--</span><span>${rivalVal}</span><span>--</span></div>`;
-    }
-    const pctDiff = ((currentVal - rivalVal) / rivalVal) * 100;
-    const sign = pctDiff >= 0 ? '+' : '';
-    const isPass = pctDiff >= -5; // Within 5% tolerance is normal / pass
-    const deltaClass = isPass ? 'delta-pass' : 'delta-fail';
-    return `
-      <div class="comparison-row">
-        <span>${label}</span>
-        <span>${currentVal}</span>
-        <span>${rivalVal}</span>
-        <span class="${deltaClass}">${sign}${pctDiff.toFixed(1)}% (${isPass ? 'OK' : 'UNDER'})</span>
-      </div>
-    `;
-  };
-
-  outputDiv.innerHTML += compareMetric("Cinebench Score", cbScore, rival.cinebenchR23);
-  outputDiv.innerHTML += compareMetric("SSD Read Speed (MB/s)", readSpeed, rival.readSpeed);
-  outputDiv.innerHTML += compareMetric("SSD Write Speed (MB/s)", writeSpeed, rival.writeSpeed);
 }
 
 function handleClientTicketSelect() {
@@ -833,8 +762,15 @@ function handleClientTicketSelect() {
     document.getElementById('c-cinebench-score').value = '';
     document.getElementById('c-ssd-read').value = '';
     document.getElementById('c-ssd-write').value = '';
-    document.getElementById('c-rival-select').value = '';
-    document.getElementById('c-rival-comparison-output').classList.add('hidden');
+    const clientWinKeyContainer = document.getElementById('client-win-key-container');
+    const clientWinKey = document.getElementById('client-win-key');
+    const clientWinStatus = document.getElementById('client-win-status');
+    if (clientWinKeyContainer) clientWinKeyContainer.classList.add('hidden');
+    if (clientWinKey) clientWinKey.textContent = '--';
+    if (clientWinStatus) {
+      clientWinStatus.innerHTML = '<span>Activation Status</span> <span class="badge">Unverified</span>';
+      clientWinStatus.dataset.activated = 'false';
+    }
     
     // Clear status
     document.getElementById('c-diagnostics-status').innerHTML = 'HWiNFO64: [Idle] | Cinebench R23: [Idle] | FurMark: [Idle]';
@@ -882,15 +818,33 @@ function handleClientTicketSelect() {
     document.getElementById('c-ssd-read').value = ticket.diagnostics.ssdRead || '';
     document.getElementById('c-ssd-write').value = ticket.diagnostics.ssdWrite || '';
     
-    // Populate rival select
-    let rivalId = ticket.diagnostics.rivalConfigId || '';
-    if (!rivalId && ticket.specs && ticket.specs.cpu && isI514thGen(ticket.specs.cpu)) {
-      const amdRival = appState.rivalBenchmarks.find(r => r.cpu && r.cpu.toLowerCase().includes('ryzen 5 7600') || r.id === '1');
-      if (amdRival) {
-        rivalId = amdRival.id;
+    detectedWinKey = (ticket.specs && ticket.specs.windowsKey) ? ticket.specs.windowsKey : '';
+    detectedWinStatus = (ticket.specs && ticket.specs.windowsActivationState) ? ticket.specs.windowsActivationState : '';
+    
+    const clientWinKeyContainer = document.getElementById('client-win-key-container');
+    const clientWinKey = document.getElementById('client-win-key');
+    const clientWinStatus = document.getElementById('client-win-status');
+    if (clientWinStatus) {
+      if (detectedWinStatus === "Activated") {
+        clientWinStatus.innerHTML = `Activation Status: <span class="badge green">🛡️ Activated</span>`;
+        clientWinStatus.dataset.activated = "true";
+      } else if (detectedWinStatus === "Not Activated") {
+        clientWinStatus.innerHTML = `Activation Status: <span class="badge red">⚠️ Not Activated</span>`;
+        clientWinStatus.dataset.activated = "false";
+      } else {
+        clientWinStatus.innerHTML = `Activation Status: <span class="badge">Unverified</span>`;
+        clientWinStatus.dataset.activated = "false";
       }
     }
-    document.getElementById('c-rival-select').value = rivalId;
+    if (clientWinKeyContainer && clientWinKey) {
+      if (detectedWinKey) {
+        clientWinKey.textContent = detectedWinKey;
+        clientWinKeyContainer.classList.remove('hidden');
+      } else {
+        clientWinKeyContainer.classList.add('hidden');
+        clientWinKey.textContent = '--';
+      }
+    }
 
     // Load port checking states from ticket's qcChecks
     const portUsb = !!(ticket.qcChecks && ticket.qcChecks.portUsb);
@@ -921,60 +875,7 @@ function handleClientTicketSelect() {
       Cinebench R23: <strong style="color: ${hasCb ? 'var(--status-completed)' : 'inherit'}">${hasCb ? 'Completed (' + ticket.diagnostics.cinebench + ' pts)' : '[Idle]'}</strong> | 
       FurMark: <strong style="color: ${hasTemps ? 'var(--status-completed)' : 'inherit'}">${hasTemps ? 'Completed' : '[Idle]'}</strong>
     `;
-
-    // Trigger comparison output calculation
-    updateClientRivalComparisonOutput();
   }
-}
-
-function updateClientRivalComparisonOutput() {
-  const rivalId = document.getElementById('c-rival-select').value;
-  const cbScore = parseFloat(document.getElementById('c-cinebench-score').value);
-  const readSpeed = parseFloat(document.getElementById('c-ssd-read').value);
-  const writeSpeed = parseFloat(document.getElementById('c-ssd-write').value);
-  const outputDiv = document.getElementById('c-rival-comparison-output');
-
-  if (!rivalId) {
-    outputDiv.classList.add('hidden');
-    return;
-  }
-
-  const rival = appState.rivalBenchmarks.find(r => r.id === rivalId);
-  if (!rival) {
-    outputDiv.classList.add('hidden');
-    return;
-  }
-
-  outputDiv.classList.remove('hidden');
-  outputDiv.innerHTML = `
-    <div style="margin-bottom: 8px; font-size: 0.85rem; border-bottom: 1px solid rgba(15, 23, 42, 0.08); padding-bottom: 6px;">
-      <strong>Target Competitor:</strong> ${rival.name}<br>
-      <span style="opacity: 0.8;">CPU: ${rival.cpu || '--'} | GPU: ${rival.gpu || '--'} | Price: ${rival.price || '--'}</span>
-    </div>
-    <div class="comparison-row header"><span>Parameter</span><span>Your Build</span><span>Target rival</span><span>Delta</span></div>
-  `;
-
-  const compareMetric = (label, currentVal, rivalVal) => {
-    if (isNaN(currentVal)) {
-      return `<div class="comparison-row"><span>${label}</span><span>--</span><span>${rivalVal}</span><span>--</span></div>`;
-    }
-    const pctDiff = ((currentVal - rivalVal) / rivalVal) * 100;
-    const sign = pctDiff >= 0 ? '+' : '';
-    const isPass = pctDiff >= -5;
-    const deltaClass = isPass ? 'delta-pass' : 'delta-fail';
-    return `
-      <div class="comparison-row">
-        <span>${label}</span>
-        <span>${currentVal}</span>
-        <span>${rivalVal}</span>
-        <span class="${deltaClass}">${sign}${pctDiff.toFixed(1)}% (${isPass ? 'OK' : 'UNDER'})</span>
-      </div>
-    `;
-  };
-
-  outputDiv.innerHTML += compareMetric("Cinebench Score", cbScore, rival.cinebenchR23);
-  outputDiv.innerHTML += compareMetric("SSD Read Speed (MB/s)", readSpeed, rival.readSpeed);
-  outputDiv.innerHTML += compareMetric("SSD Write Speed (MB/s)", writeSpeed, rival.writeSpeed);
 }
 
 function setupClientFormCalculations() {
@@ -1326,9 +1227,7 @@ async function handleTicketFormSubmit(e) {
     portUsb: document.getElementById('qc-port-usb').checked,
     portVideo: document.getElementById('qc-port-video').checked,
     portAudio: document.getElementById('qc-port-audio').checked,
-    portWifi: document.getElementById('qc-port-wifi').checked,
-    wifiSpeed: parseFloat(document.getElementById('form-wifi-speed').value) || null,
-    wifiRange: parseFloat(document.getElementById('form-wifi-range').value) || null
+    portWifi: document.getElementById('qc-port-wifi').checked
   };
 
   const diagnostics = {
@@ -1343,7 +1242,7 @@ async function handleTicketFormSubmit(e) {
     furmark: parseFloat(document.getElementById('form-furmark-score').value) || null,
     ssdRead: parseFloat(document.getElementById('form-ssd-read').value) || null,
     ssdWrite: parseFloat(document.getElementById('form-ssd-write').value) || null,
-    rivalConfigId: document.getElementById('form-rival-select').value || ""
+    rivalConfigId: ""
   };
 
   const serials = {
@@ -1406,8 +1305,18 @@ async function handleTicketFormSubmit(e) {
     igpu: (detectedIgpuVal === '--' || detectedIgpuVal === 'None' || detectedIgpuVal === '--') ? 'None' : detectedIgpuVal,
     gpu: (detectedGpuVal === '--' || detectedGpuVal === 'Not detected') ? '' : detectedGpuVal,
     ram: (detectedRamVal === '--' || detectedRamVal === 'Not detected') ? '' : detectedRamVal,
-    storage: (detectedStorageVal === '--' || detectedStorageVal === 'Not detected') ? '' : detectedStorageVal
+    storage: (detectedStorageVal === '--' || detectedStorageVal === 'Not detected') ? '' : detectedStorageVal,
+    os: 'Windows',
+    windowsKey: document.getElementById('modal-activation-key').textContent === '--' ? (existingTicket && existingTicket.specs ? (existingTicket.specs.windowsKey || '') : '') : document.getElementById('modal-activation-key').textContent,
+    windowsActivationState: document.getElementById('modal-activation-status').textContent === 'Unverified' ? (existingTicket && existingTicket.specs ? (existingTicket.specs.windowsActivationState || 'Unverified') : 'Unverified') : document.getElementById('modal-activation-status').textContent
   };
+
+  // Sync checkbox with activation state
+  if (updatedTicket.qcChecks.softWindows && updatedTicket.specs.windowsActivationState !== 'Activated') {
+    updatedTicket.specs.windowsActivationState = 'Activated';
+  } else if (!updatedTicket.qcChecks.softWindows && updatedTicket.specs.windowsActivationState === 'Activated') {
+    updatedTicket.specs.windowsActivationState = 'Not Activated';
+  }
 
   // Preserve existing event log from diagnostics
   if (existingTicket && existingTicket.diagnostics && existingTicket.diagnostics.eventLog) {
@@ -1493,6 +1402,8 @@ function setupSerialVerification() {
 // TESTING CLIENT PORTAL LOGIC
 // ==========================================================================
 let detectedSpecs = null;
+let detectedWinKey = '';
+let detectedWinStatus = '';
 let parsedTemps = null;
 let parsedCinebench = null;
 let parsedDiskSpeeds = null;
@@ -1523,28 +1434,7 @@ async function setupClientMode() {
       btn.classList.add('secondary-btn');
       btn.classList.remove('primary-pink-btn');
 
-      // Automap to competitor config
-      const comp = getCompetitorModel(detectedSpecs.cpu);
-      let matchedRival = appState.rivalBenchmarks.find(r => {
-        const rName = r.name.toLowerCase();
-        const rCpu = (r.cpu || '').toLowerCase();
-        const compName = comp.name.toLowerCase();
-        return compName.includes(rCpu) || rName.includes(compName) || compName.includes(rName);
-      });
 
-      if (!matchedRival) {
-        if (comp.name.includes("7600")) {
-          matchedRival = appState.rivalBenchmarks.find(r => r.id === "1");
-        } else if (comp.name.includes("14700")) {
-          matchedRival = appState.rivalBenchmarks.find(r => r.id === "2");
-        }
-      }
-
-      if (matchedRival) {
-        const select = document.getElementById('c-rival-select');
-        select.value = matchedRival.id;
-        updateClientRivalComparisonOutput();
-      }
 
       checkClientFormReady();
     } catch (err) {
@@ -1561,16 +1451,31 @@ async function setupClientMode() {
   // Windows Activation Check
   document.getElementById('btn-client-check-win').addEventListener('click', async () => {
     const winStatusBox = document.getElementById('client-win-status');
+    const winKeyContainer = document.getElementById('client-win-key-container');
+    const winKeyVal = document.getElementById('client-win-key');
+    
     winStatusBox.innerHTML = `Activation Status: <span class="badge">Running check...</span>`;
+    if (winKeyContainer) winKeyContainer.classList.add('hidden');
 
     const result = await ipcRenderer.invoke('sys:check-win');
     if (result.activated) {
       winStatusBox.innerHTML = `Activation Status: <span class="badge green">🛡️ Activated</span>`;
       winStatusBox.dataset.activated = "true";
+      detectedWinStatus = "Activated";
     } else {
       winStatusBox.innerHTML = `Activation Status: <span class="badge red">⚠️ Not Activated</span>`;
       winStatusBox.dataset.activated = "false";
+      detectedWinStatus = "Not Activated";
     }
+    
+    if (result.productKey) {
+      detectedWinKey = result.productKey;
+      if (winKeyVal) winKeyVal.textContent = result.productKey;
+      if (winKeyContainer) winKeyContainer.classList.remove('hidden');
+    } else {
+      detectedWinKey = '';
+    }
+    
     checkClientFormReady();
   });
 
@@ -1584,21 +1489,40 @@ async function setupClientMode() {
 
     const t = appState.tickets[index];
 
-    // Populate detected specs
-    if (detectedSpecs) {
+    // Ensure specs object exists
+    if (!t.specs) {
       t.specs = {
-        cpu: detectedSpecs.cpu,
-        igpu: detectedSpecs.igpu || 'None',
-        gpu: detectedSpecs.gpu,
-        ram: detectedSpecs.ram,
-        storage: detectedSpecs.storage
+        cpu: '',
+        igpu: 'None',
+        gpu: '',
+        ram: '',
+        storage: ''
       };
     }
+
+    // Populate detected specs
+    if (detectedSpecs) {
+      t.specs.cpu = detectedSpecs.cpu;
+      t.specs.igpu = detectedSpecs.igpu || 'None';
+      t.specs.gpu = detectedSpecs.dgpu || 'None';
+      t.specs.ram = detectedSpecs.ram;
+      t.specs.storage = detectedSpecs.storage;
+    }
+
+    t.specs.os = 'Windows';
+    t.specs.windowsKey = detectedWinKey || t.specs.windowsKey || '';
+    t.specs.windowsActivationState = detectedWinStatus || t.specs.windowsActivationState || '';
 
     // Windows activation update
     const winStatusBox = document.getElementById('client-win-status');
     if (winStatusBox.dataset.activated === "true") {
       t.qcChecks.softWindows = true;
+      t.specs.windowsActivationState = "Activated";
+    } else {
+      t.qcChecks.softWindows = false;
+      if (detectedWinStatus === "Not Activated") {
+        t.specs.windowsActivationState = "Not Activated";
+      }
     }
 
     // Populate diagnostics from inputs
@@ -1614,7 +1538,7 @@ async function setupClientMode() {
     t.diagnostics.furmark = parseFloat(document.getElementById('c-furmark-score').value) || null;
     t.diagnostics.ssdRead = parseFloat(document.getElementById('c-ssd-read').value) || null;
     t.diagnostics.ssdWrite = parseFloat(document.getElementById('c-ssd-write').value) || null;
-    t.diagnostics.rivalConfigId = document.getElementById('c-rival-select').value || "";
+    t.diagnostics.rivalConfigId = "";
 
     // Set QC check indicators
     if (t.diagnostics.cpuTempAvg !== null) {
@@ -1652,11 +1576,7 @@ async function setupClientMode() {
     }
   });
 
-  // Client comparison value sync event listeners
-  document.getElementById('c-rival-select').addEventListener('change', updateClientRivalComparisonOutput);
-  document.getElementById('c-cinebench-score').addEventListener('input', updateClientRivalComparisonOutput);
-  document.getElementById('c-ssd-read').addEventListener('input', updateClientRivalComparisonOutput);
-  document.getElementById('c-ssd-write').addEventListener('input', updateClientRivalComparisonOutput);
+  // Client comparison value sync event listeners removed (Rival comparison omitted)
 
   // Setup client temperature averaging calculations
   setupClientFormCalculations();
@@ -1833,63 +1753,7 @@ function populatePrintFields(ticket) {
   document.getElementById('print-score-read').textContent = (ticket.diagnostics.ssdRead || '--') + ' MB/s';
   document.getElementById('print-score-write').textContent = (ticket.diagnostics.ssdWrite || '--') + ' MB/s';
 
-  // Wi-Fi signal
-  document.getElementById('print-wifi-signal').textContent = (ticket.qcChecks.wifiRange || '--') + ' %';
-  document.getElementById('print-wifi-speed-val').textContent = (ticket.qcChecks.wifiSpeed || '--') + ' Mbps';
-
-  // Rival comparison delta mappings
-  let rivalId = ticket.diagnostics.rivalConfigId;
-  if (!rivalId && ticket.specs && ticket.specs.cpu && isI514thGen(ticket.specs.cpu)) {
-    const amdRival = appState.rivalBenchmarks.find(r => r.cpu && r.cpu.toLowerCase().includes('ryzen 5 7600') || r.id === '1');
-    if (amdRival) {
-      rivalId = amdRival.id;
-    }
-  }
-
-  const rival = appState.rivalBenchmarks.find(r => r.id === rivalId);
-  const rivalHeaderEl = document.getElementById('print-rival-header');
-  const rivalSpecsBox = document.getElementById('print-rival-specs-box');
-
-  if (rival) {
-    if (rivalHeaderEl) {
-      rivalHeaderEl.textContent = `Expected: ${rival.cpu || rival.name}`;
-    }
-    if (rivalSpecsBox) {
-      rivalSpecsBox.style.display = 'block';
-      const cpuEl = document.getElementById('print-rival-spec-cpu');
-      const gpuEl = document.getElementById('print-rival-spec-gpu');
-      const priceEl = document.getElementById('print-rival-spec-price');
-      if (cpuEl) cpuEl.textContent = rival.cpu || '--';
-      if (gpuEl) gpuEl.textContent = rival.gpu || '--';
-      if (priceEl) priceEl.textContent = rival.price || '--';
-    }
-
-    document.getElementById('print-rival-cb').textContent = rival.cinebenchR23 + ' pts';
-    document.getElementById('print-rival-read').textContent = rival.readSpeed + ' MB/s';
-    document.getElementById('print-rival-write').textContent = rival.writeSpeed + ' MB/s';
-
-    const getDiffStr = (curr, tgt) => {
-      if (!curr || !tgt) return '--';
-      const d = ((curr - tgt) / tgt) * 100;
-      return `${d >= 0 ? '+' : ''}${d.toFixed(1)}%`;
-    };
-    document.getElementById('print-delta-cb').textContent = getDiffStr(ticket.diagnostics.cinebench, rival.cinebenchR23);
-    document.getElementById('print-delta-read').textContent = getDiffStr(ticket.diagnostics.ssdRead, rival.readSpeed);
-    document.getElementById('print-delta-write').textContent = getDiffStr(ticket.diagnostics.ssdWrite, rival.writeSpeed);
-  } else {
-    if (rivalHeaderEl) {
-      rivalHeaderEl.textContent = 'Expected Competitor Config';
-    }
-    if (rivalSpecsBox) {
-      rivalSpecsBox.style.display = 'none';
-    }
-    document.getElementById('print-rival-cb').textContent = '--';
-    document.getElementById('print-rival-read').textContent = '--';
-    document.getElementById('print-rival-write').textContent = '--';
-    document.getElementById('print-delta-cb').textContent = '--';
-    document.getElementById('print-delta-read').textContent = '--';
-    document.getElementById('print-delta-write').textContent = '--';
-  }
+  // Wi-Fi signal and Rival comparison prints omitted
 }
 
 function triggerPrintReport(ticketId, shouldPrint = true) {
@@ -2231,58 +2095,7 @@ function setupEventListeners() {
       document.getElementById('modal-spec-ram').textContent = detected.ram || "Failed to detect";
       document.getElementById('modal-spec-storage').textContent = detected.storage || "Failed to detect";
 
-      // Identify rival competitor processor counterpart
-      const comp = getCompetitorModel(detected.cpu);
-
-      // Show loader on rival banner
-      const rivalBanner = document.getElementById('modal-rival-pulled-banner');
-      rivalBanner.classList.remove('hidden');
-      rivalBanner.innerHTML = `
-        <div style="display: flex; align-items: center; gap: 8px;">
-          <span style="font-size: 1.1rem; line-height: 1;" class="animate-spin">⏳</span>
-          <span>Locating competitor pricing & performance from the web...</span>
-        </div>
-      `;
-
-      // Fetch live price online
-      const livePrice = await getLiveCompetitorPrice(comp.name);
-
-      // Find matching benchmark in local database to use as fallback price & set matching select value
-      let matchedRival = appState.rivalBenchmarks.find(r => {
-        const rName = r.name.toLowerCase();
-        const rCpu = (r.cpu || '').toLowerCase();
-        const compName = comp.name.toLowerCase();
-        return compName.includes(rCpu) || rName.includes(compName) || compName.includes(rName);
-      });
-
-      if (!matchedRival) {
-        if (comp.name.includes("7600")) {
-          matchedRival = appState.rivalBenchmarks.find(r => r.id === "1");
-        } else if (comp.name.includes("14700")) {
-          matchedRival = appState.rivalBenchmarks.find(r => r.id === "2");
-        }
-      }
-
-      const finalPrice = livePrice || (matchedRival ? matchedRival.price : null) || "₹18,500";
-      const numericPrice = parsePriceNumeric(finalPrice);
-      
-      let ratioText = '';
-      if (numericPrice > 0) {
-        const ratio = (comp.cinebench / (numericPrice / 1000)).toFixed(2);
-        ratioText = `<br><span style="color: var(--primary-pink); font-weight: bold;">Price-Performance Ratio:</span> <strong>${ratio} Cinebench pts / ₹1,000 spent</strong>.`;
-      }
-
-      // Update banner with full competitor spec detail & ratio
-      rivalBanner.innerHTML = `
-        <strong>🌐 Live Competitor Match:</strong> For a similar budget, the rival <strong>${comp.name}</strong> (${comp.desc}) costs <strong>${finalPrice}</strong> and offers <strong>${comp.cinebench.toLocaleString()} pts</strong> in Cinebench R23. Ensure this build's price-to-performance remains optimal!${ratioText}
-      `;
-
-      // Set the select dropdown and trigger comparison output update
-      if (matchedRival) {
-        const select = document.getElementById('form-rival-select');
-        select.value = matchedRival.id;
-        updateRivalComparisonOutput();
-      }
+      // Competitor auto-detect comparison and banner updates omitted
     } catch (err) {
       console.error("Hardware spec detection failed in modal:", err);
       alert("Hardware specs detection failed: " + err.message);
@@ -2600,7 +2413,20 @@ function setupRealtimeListener() {
               document.getElementById('form-furmark-score').value = ticket.diagnostics.furmark || '';
               document.getElementById('form-ssd-read').value = ticket.diagnostics.ssdRead || '';
               document.getElementById('form-ssd-write').value = ticket.diagnostics.ssdWrite || '';
-              document.getElementById('form-rival-select').value = ticket.diagnostics.rivalConfigId || '';
+              // Windows activation update
+              const winKey = ticket.specs ? (ticket.specs.windowsKey || '') : '';
+              const winState = ticket.specs ? (ticket.specs.windowsActivationState || 'Unverified') : 'Unverified';
+              document.getElementById('modal-activation-os').textContent = 'Windows';
+              const statusBadge = document.getElementById('modal-activation-status');
+              if (statusBadge) {
+                statusBadge.textContent = winState;
+                statusBadge.className = `badge ${winState === 'Activated' ? 'green' : (winState === 'Not Activated' ? 'red' : '')}`;
+              }
+              const keyBadge = document.getElementById('modal-activation-key');
+              if (keyBadge) keyBadge.textContent = winKey || '--';
+              if (winState === 'Activated') {
+                document.getElementById('qc-soft-windows').checked = true;
+              }
 
               updateTempBar('modal-hud-cpu-temp-val', 'modal-hud-cpu-temp-bar', ticket.diagnostics.cpuTempAvg);
               updateTempBar('modal-hud-gpu-temp-val', 'modal-hud-gpu-temp-bar', ticket.diagnostics.gpuTempAvg);
@@ -2646,7 +2472,9 @@ function setupRealtimeListener() {
               });
             }
           } else if (currentMode === 'client') {
-            populateClientTicketSelect();
+            populateWelcomeTicketSelect();
+          } else if (currentMode === 'client-console') {
+            populateClientTicketSelect(document.getElementById('client-ticket-select').value);
             const clientSelect = document.getElementById('client-ticket-select');
             if (clientSelect && clientSelect.value === ticket.id) {
               handleClientTicketSelect();
@@ -3174,29 +3002,6 @@ async function executeDiagnosticsWorkflow(isModal) {
       ticket.diagnostics.ssdWrite = res.ssdWrite || null;
 
       if (!isModal) {
-        // Auto-match competitor config based on CPU specs
-        if (detectedSpecs && detectedSpecs.cpu) {
-          const comp = getCompetitorModel(detectedSpecs.cpu);
-          let matchedRival = appState.rivalBenchmarks.find(r => {
-            const rName = r.name.toLowerCase();
-            const rCpu = (r.cpu || '').toLowerCase();
-            const compName = comp.name.toLowerCase();
-            return compName.includes(rCpu) || rName.includes(compName) || compName.includes(rName);
-          });
-          if (!matchedRival) {
-            if (comp.name.includes("7600")) {
-              matchedRival = appState.rivalBenchmarks.find(r => r.id === "1");
-            } else if (comp.name.includes("14700")) {
-              matchedRival = appState.rivalBenchmarks.find(r => r.id === "2");
-            }
-          }
-          if (matchedRival) {
-            ticket.diagnostics.rivalConfigId = matchedRival.id;
-            const selectEl = document.getElementById('c-rival-select');
-            if (selectEl) selectEl.value = matchedRival.id;
-          }
-        }
-
         // Auto-check standard QC check fields on test pass
         if (res.ramPassed) {
           ticket.qcChecks.physCabinet = true;
@@ -3216,10 +3021,8 @@ async function executeDiagnosticsWorkflow(isModal) {
   }
 
   if (isModal) {
-    updateRivalComparisonOutput();
     updateModalDiagnosticsStatus();
   } else {
-    updateClientRivalComparisonOutput();
     checkClientFormReady();
   }
 }

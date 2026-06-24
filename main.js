@@ -333,21 +333,29 @@ ipcMain.handle('sys:detect-hw', () => {
   });
 });
 
-// IPC Handler: Verify Windows Activation State
+// IPC Handler: Verify Windows Activation State & Product Key
 ipcMain.handle('sys:check-win', () => {
   return new Promise((resolve) => {
     exec('cscript //nologo C:\\Windows\\System32\\slmgr.vbs /xpr', (err, stdout) => {
-      if (err) {
-        resolve({ activated: false, detail: "Error running activation tool." });
-        return;
-      }
-      const output = stdout.trim().toLowerCase();
-      // slmgr outputs: "The machine is permanently activated" or "Volume activation will expire..."
-      const isActivated = output.includes('permanently') || output.includes('activated') || output.includes('licensed');
-      resolve({ activated: isActivated, detail: stdout.trim() });
+      const output = (stdout || '').trim().toLowerCase();
+      const isActivated = !err && (output.includes('permanently') || output.includes('activated') || output.includes('licensed'));
+      
+      // Get the product key using PowerShell (check BIOS OA3x first, then registry fallback)
+      const keyCmd = `powershell -NoProfile -Command "$key = (Get-CimInstance SoftwareLicensingService).OA3xOriginalProductKey; if (-not $key) { $key = (Get-ItemProperty -Path 'HKLM:\\Software\\Microsoft\\Windows NT\\CurrentVersion\\SoftwareProtectionPlatform').BackupProductKeyDefault }; if ($key) { $key.Trim() } else { 'None' }"`;
+      exec(keyCmd, (keyErr, keyStdout) => {
+        let productKey = 'Not Found';
+        if (!keyErr && keyStdout) {
+          const trimmed = keyStdout.trim();
+          if (trimmed && trimmed !== 'None') {
+            productKey = trimmed;
+          }
+        }
+        resolve({ activated: isActivated, detail: stdout ? stdout.trim() : output, productKey: productKey });
+      });
     });
   });
 });
+
 
 // IPC Handler: Print Window Layout (A4 format)
 ipcMain.handle('sys:print', (event) => {

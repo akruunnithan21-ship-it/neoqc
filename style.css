@@ -11,9 +11,10 @@
     --text-dark: #0F172A;
     --text-light: #F8FAFC;
     --text-muted: #64748B;
+    --stat-text: #000000;
     
     /* Glassmorphism settings */
-    --glass-bg: rgba(255, 255, 255, 0.65);
+    --glass-bg: rgba(255, 255, 255, 0.45);
     --glass-border: rgba(255, 255, 255, 0.8);
     --glass-shadow: 0 8px 32px 0 rgba(15, 23, 42, 0.04);
     --card-shadow: 0 4px 20px 0 rgba(15, 23, 42, 0.03);
@@ -31,8 +32,9 @@
     --bg-gradient: linear-gradient(135deg, #0B0F19 0%, #151A26 100%);
     --text-dark: #F8FAFC;
     --text-muted: #94A3B8;
+    --stat-text: #ffffff;
     
-    --glass-bg: rgba(15, 23, 42, 0.65);
+    --glass-bg: rgba(15, 23, 42, 0.45);
     --glass-border: rgba(255, 255, 255, 0.08);
     --glass-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.25);
     --card-shadow: 0 4px 20px 0 rgba(0, 0, 0, 0.15);
@@ -191,11 +193,11 @@
   .glass-slab {
     background: var(--glass-bg);
     border: 1px solid var(--glass-border);
-    backdrop-filter: blur(14px);
-    -webkit-backdrop-filter: blur(14px);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
     border-radius: 16px;
     box-shadow: var(--glass-shadow);
-    transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.2s ease, border 0.3s ease, background 0.3s ease;
+    transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.25s ease, border 0.3s ease, background 0.3s ease;
   }
   
   /* Mode Selector Launch Screen */
@@ -763,32 +765,44 @@
   
   /* Modal Overlay dialogs */
   .modal-overlay {
-    display: none;
+    display: flex;
+    opacity: 0;
+    pointer-events: none;
     position: fixed;
     top: 0;
     left: 0;
     width: 100%;
     height: 100%;
-    background: rgba(15, 23, 42, 0.4);
-    backdrop-filter: blur(8px);
-    z-index: 10;
+    background: rgba(15, 23, 42, 0.3);
+    backdrop-filter: blur(0px);
+    z-index: 1000;
     justify-content: center;
     align-items: center;
+    transition: opacity 0.4s cubic-bezier(0.16, 1, 0.3, 1), backdrop-filter 0.4s cubic-bezier(0.16, 1, 0.3, 1);
   }
   
   .modal-overlay.active {
-    display: flex;
+    opacity: 1;
+    pointer-events: auto;
+    backdrop-filter: blur(12px);
   }
   
   .modal-card {
-    width: 90%;
-    max-width: 850px;
+    width: 95%;
+    max-width: 1150px;
     max-height: 90vh;
     display: flex;
     flex-direction: column;
-    border-radius: 20px;
+    border-radius: 24px;
     overflow: hidden;
-    animation: modal-enter 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    opacity: 0;
+    transform: scale(0.92) translateY(20px);
+    transition: transform 0.45s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .modal-overlay.active .modal-card {
+    opacity: 1;
+    transform: scale(1) translateY(0);
   }
 
   #ticket-form {
@@ -1749,11 +1763,13 @@
   input[type="number"]::-webkit-outer-spin-button,
   input[type="number"]::-webkit-inner-spin-button {
     -webkit-appearance: none;
+    appearance: none;
     margin: 0;
   }
   /* Hide Firefox number spinners */
   input[type="number"] {
     -moz-appearance: textfield;
+    appearance: textfield;
   }
 
   .form-group input[readonly] {
@@ -2565,39 +2581,61 @@ body.dark-mode .event-log-user {
   padding: 14px 18px;
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
-  transition: all 0.25s ease;
+  transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1), 
+              box-shadow 0.25s ease, 
+              border-color 0.25s ease;
   position: relative;
   overflow: hidden;
+  box-shadow: var(--card-shadow);
 }
 
 .stat-pill::before {
   content: '';
   position: absolute;
   top: 0; left: 0; right: 0;
-  height: 2px;
+  height: 2.5px;
   background: var(--primary-pink);
-  opacity: 0.6;
+  opacity: 0.85;
 }
 
 .stat-pill:nth-child(2)::before { background: #3b82f6; }
 .stat-pill:nth-child(3)::before { background: #10b981; }
 .stat-pill:nth-child(4)::before { background: #f59e0b; }
 
+/* Interactive Hover States matching Accent Colors */
+.stat-pill:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.06);
+}
+.stat-pill:nth-child(1):hover { border-color: rgba(231, 1, 78, 0.4); }
+.stat-pill:nth-child(2):hover { border-color: rgba(59, 130, 246, 0.4); }
+.stat-pill:nth-child(3):hover { border-color: rgba(16, 185, 129, 0.4); }
+.stat-pill:nth-child(4):hover { border-color: rgba(245, 158, 11, 0.4); }
+
+body.dark-mode .stat-pill:hover {
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.25);
+}
+body.dark-mode .stat-pill:nth-child(1):hover { border-color: rgba(231, 1, 78, 0.6); }
+body.dark-mode .stat-pill:nth-child(2):hover { border-color: rgba(59, 130, 246, 0.6); }
+body.dark-mode .stat-pill:nth-child(3):hover { border-color: rgba(16, 185, 129, 0.6); }
+body.dark-mode .stat-pill:nth-child(4):hover { border-color: rgba(245, 158, 11, 0.6); }
+
 .stat-pill-value {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 1.8rem;
+  font-family: 'Hanken Grotesk', sans-serif;
+  font-size: 2.2rem;
   font-weight: 800;
-  color: var(--text-dark);
-  line-height: 1;
+  color: var(--stat-text, #000000);
+  line-height: 1.1;
   margin-bottom: 4px;
 }
 
 .stat-pill-label {
-  font-size: 0.7rem;
+  font-family: 'Hanken Grotesk', sans-serif;
+  font-size: 0.82rem;
   font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--text-muted);
+  letter-spacing: 0.03em;
+  color: var(--stat-text, #000000);
 }
 
 /* ==========================================================================
@@ -2666,4 +2704,35 @@ body.dark-mode .card-type-badge {
 
 body.dark-mode .tech-chip {
   background: rgba(255,255,255,0.04);
+}
+
+/* Beautiful Custom Scrollbars */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(231, 1, 78, 0.2);
+  border-radius: 99px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  transition: background 0.3s ease;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(231, 1, 78, 0.45);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+body.dark-mode ::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
+}
+body.dark-mode ::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.28);
 }

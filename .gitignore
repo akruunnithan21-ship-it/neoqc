@@ -3,3 +3,9 @@ dist/
 *.log
 .DS_Store
 .env
+
+# Large diagnostic binaries
+assets/diagnostics/Cinebench/
+assets/diagnostics/FurMark/
+assets/diagnostics/LibreHardwareMonitor/
+assets/diagnostics/*.zip
