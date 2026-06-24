@@ -306,7 +306,9 @@ function populateWelcomeTicketSelect() {
 function formatDateShort(dateStr) {
   if (!dateStr) return '';
   const d = new Date(dateStr);
-  return `${d.getDate()}/${d.getMonth()+1} ${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`;
+  if (isNaN(d.getTime())) return '';
+  // Use UTC to prevent timezone shifting across different machines
+  return `${d.getUTCDate()}/${d.getUTCMonth()+1} ${String(d.getUTCHours()).padStart(2,'0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`;
 }
 
 // Render Dashboard Grid & Completed List
@@ -358,15 +360,23 @@ function renderDashboard() {
       card.innerHTML = `
         <div class="ticket-card-header">
           <span class="card-id">#${t.id.slice(-6)}</span>
-          <span class="card-priority-dot ${isUrgent ? 'urgent' : 'standard'}"></span>
+          <div style="display:flex;align-items:center;gap:6px;">
+            <span class="card-status-label ${t.status}">${statusText}</span>
+            <span class="card-status-dot ${t.status}"></span>
+          </div>
         </div>
         <h3 class="card-cust-name">${t.customerName}</h3>
-        <p class="card-tech-name">Assigned Tech: <strong>${t.technician || 'Unassigned'}</strong></p>
+        <div style="margin-bottom:14px;">
+          <span class="tech-chip">
+            <span class="tech-chip-dot"></span>
+            ${t.technician || 'Unassigned'}
+          </span>
+        </div>
         
         <div class="card-progress-section">
           <div class="card-progress-label">
-            <span>Assembly Status</span>
-            <span>${buildPct}%</span>
+            <span>Assembly</span>
+            <span style="font-family:'JetBrains Mono',monospace;font-weight:800;">${buildPct}%</span>
           </div>
           <div class="progress-bar-bg">
             <div class="progress-bar-fill build" style="width: ${buildPct}%"></div>
@@ -376,7 +386,7 @@ function renderDashboard() {
         <div class="card-progress-section">
           <div class="card-progress-label">
             <span>QC Testing</span>
-            <span>${qcPct}%</span>
+            <span style="font-family:'JetBrains Mono',monospace;font-weight:800;">${qcPct}%</span>
           </div>
           <div class="progress-bar-bg">
             <div class="progress-bar-fill qc" style="width: ${qcPct}%"></div>
@@ -390,8 +400,8 @@ function renderDashboard() {
         ` : ''}
 
         <div class="card-meta-footer">
-          <span>${t.type === 'build' ? '⚙️ Custom Build' : '🔧 Service Repair'}</span>
-          <span>📅 ${formatDateShort(t.deadline)}</span>
+          <span class="card-type-badge">${t.type === 'build' ? '⚙️ Build' : '🔧 Repair'}</span>
+          <span style="font-family:'JetBrains Mono',monospace;font-size:0.75rem;color:var(--text-muted);">📅 ${formatDateShort(t.deadline)}</span>
         </div>
       `;
 
@@ -449,6 +459,15 @@ function renderDashboard() {
   // Update counts
   document.getElementById('active-count').textContent = activeTickets.length;
   document.getElementById('completed-count').textContent = completedTickets.length;
+
+  // Update premium stats pills
+  const inQc = activeTickets.filter(t => t.status === 'qc_testing' || t.status === 'waiting_qc').length;
+  const urgentCount = activeTickets.filter(t => checkIsUrgent(t.deadline)).length;
+  const el = (id) => document.getElementById(id);
+  if (el('stat-active')) el('stat-active').textContent = activeTickets.length;
+  if (el('stat-completed')) el('stat-completed').textContent = completedTickets.length;
+  if (el('stat-qc')) el('stat-qc').textContent = inQc;
+  if (el('stat-urgent')) el('stat-urgent').textContent = urgentCount;
 }
 
 function calculateBuildPercentage(t) {
@@ -609,6 +628,9 @@ function openTicketModal(ticketId = null) {
       document.getElementById('btn-save-pdf').classList.remove('hidden');
       deleteBtn.classList.remove('hidden');
       updateModalDiagnosticsStatus();
+
+      // Render event log timeline
+      renderEventLog(ticket);
     }
   } else {
     title.textContent = "Create Service Ticket";
@@ -1028,6 +1050,8 @@ function setupRgbController() {
   const colorPicker = document.getElementById('rgb-color-picker');
   const presets = document.querySelectorAll('.preset-dot');
   const speedSlider = document.getElementById('rgb-speed-slider');
+  const brightnessSlider = document.getElementById('rgb-brightness-slider');
+  const brightnessLabel = document.getElementById('rgb-brightness-label');
   const applyBtn = document.getElementById('btn-apply-rgb-sync');
 
   const chFans = document.getElementById('rgb-ch-fans');
@@ -1079,7 +1103,10 @@ function setupRgbController() {
     const mode = modeSelect.value;
     const color = colorPicker.value;
     const speedVal = parseFloat(speedSlider.value);
+    const brightness = brightnessSlider ? parseInt(brightnessSlider.value) : 80;
     
+    if (brightnessLabel) brightnessLabel.textContent = brightness + '%';
+
     const speedDuration = (6 - speedVal) + "s";
     const fanSpeedDuration = (6 - speedVal) * 0.5 + "s";
 
@@ -1088,6 +1115,8 @@ function setupRgbController() {
       pcCase.style.setProperty('--rgb-color', color);
       pcCase.style.setProperty('--rgb-anim-duration', speedDuration);
       pcCase.style.setProperty('--fan-speed', fanSpeedDuration);
+      // Apply brightness as opacity filter on the pc case
+      pcCase.style.opacity = (brightness / 100).toFixed(2);
     }
 
     const elements = document.querySelectorAll('.rgb-element');
@@ -1117,9 +1146,10 @@ function setupRgbController() {
     // Debounce actual hardware RGB sync via SignalRGB to prevent process spamming
     if (rgbSyncTimeout) clearTimeout(rgbSyncTimeout);
     rgbSyncTimeout = setTimeout(async () => {
+      const brightness = brightnessSlider ? parseInt(brightnessSlider.value) : 80;
       const isInstalled = await ipcRenderer.invoke('sys:check-signalrgb');
       if (isInstalled) {
-        ipcRenderer.invoke('sys:apply-rgb', { mode, color });
+        ipcRenderer.invoke('sys:apply-rgb', { mode, color, brightness });
       }
     }, 250);
   }
@@ -1127,6 +1157,7 @@ function setupRgbController() {
   modeSelect.addEventListener('change', updateRgbPreview);
   colorPicker.addEventListener('input', updateRgbPreview);
   speedSlider.addEventListener('input', updateRgbPreview);
+  if (brightnessSlider) brightnessSlider.addEventListener('input', updateRgbPreview);
   [chFans, chRam, chCooler, chStrips].forEach(cb => {
     if (cb) cb.addEventListener('change', updateRgbPreview);
   });
@@ -1157,7 +1188,8 @@ function setupRgbController() {
     let nextState = false;
     
     if (isInstalled) {
-      const result = await ipcRenderer.invoke('sys:apply-rgb', { mode: modeSelect.value, color: colorPicker.value });
+      const brightness = brightnessSlider ? parseInt(brightnessSlider.value) : 80;
+      const result = await ipcRenderer.invoke('sys:apply-rgb', { mode: modeSelect.value, color: colorPicker.value, brightness });
       if (result && result.success) {
         appendConsoleLine('c-console-box', `[RGB CONTROLLER] Hardware sync applied via SignalRGB successfully!`);
         nextState = true;
@@ -1257,7 +1289,14 @@ async function handleTicketFormSubmit(e) {
   const ticketType = document.getElementById('form-ticket-type').value;
   const customerName = document.getElementById('form-customer-name').value;
   const deadlineVal = document.getElementById('form-deadline').value;
-  const deadline = deadlineVal ? new Date(deadlineVal).toISOString() : new Date().toISOString();
+  // Ensure deadline is saved as a clean UTC ISO string - append Z if not present
+  let deadline;
+  if (deadlineVal) {
+    const rawDate = new Date(deadlineVal + (deadlineVal.endsWith('Z') ? '' : ':00.000Z'));
+    deadline = isNaN(rawDate.getTime()) ? new Date(deadlineVal).toISOString() : rawDate.toISOString();
+  } else {
+    deadline = new Date().toISOString();
+  }
   const technician = document.getElementById('form-technician').value;
 
   const missingComponentsToggle = document.getElementById('form-missing-components-toggle').checked;
@@ -1369,6 +1408,46 @@ async function handleTicketFormSubmit(e) {
     ram: (detectedRamVal === '--' || detectedRamVal === 'Not detected') ? '' : detectedRamVal,
     storage: (detectedStorageVal === '--' || detectedStorageVal === 'Not detected') ? '' : detectedStorageVal
   };
+
+  // Preserve existing event log from diagnostics
+  if (existingTicket && existingTicket.diagnostics && existingTicket.diagnostics.eventLog) {
+    updatedTicket.diagnostics.eventLog = existingTicket.diagnostics.eventLog;
+  }
+
+  // === EVENT LOG ENTRIES ===
+  const techName = appState.settings.shopName || 'Admin';
+  if (!editingTicketId) {
+    // New ticket creation
+    addEventLog(updatedTicket, `Ticket created for ${customerName} (${ticketType === 'build' ? 'New PC Build' : 'Service Repair'})`, techName);
+  } else {
+    // Detect changes vs existing ticket
+    if (existingTicket) {
+      if (existingTicket.status !== updatedTicket.status) {
+        const oldLabel = getStatusLabelText(existingTicket.status);
+        const newLabel = getStatusLabelText(updatedTicket.status);
+        addEventLog(updatedTicket, `Status changed: "${oldLabel}" → "${newLabel}"`, techName);
+      }
+      if (existingTicket.technician !== updatedTicket.technician) {
+        addEventLog(updatedTicket, `Technician reassigned: "${existingTicket.technician || 'Unassigned'}" → "${updatedTicket.technician}"`, techName);
+      }
+      if (existingTicket.deadline !== updatedTicket.deadline) {
+        const oldDate = formatDateShort(existingTicket.deadline);
+        const newDate = formatDateShort(updatedTicket.deadline);
+        addEventLog(updatedTicket, `Deadline changed: ${oldDate} → ${newDate} UTC`, techName);
+      }
+      if (!existingTicket.missingComponentsToggle && updatedTicket.missingComponentsToggle && updatedTicket.missingComponents) {
+        addEventLog(updatedTicket, `Awaiting parts: "${updatedTicket.missingComponents}"`, techName);
+      } else if (existingTicket.missingComponentsToggle && !updatedTicket.missingComponentsToggle) {
+        addEventLog(updatedTicket, `Parts constraint resolved — all components received`, techName);
+      }
+      // Log diagnostic completion if data newly added
+      const oldDiagHasCb = existingTicket.diagnostics && existingTicket.diagnostics.cinebench;
+      const newDiagHasCb = updatedTicket.diagnostics && updatedTicket.diagnostics.cinebench;
+      if (!oldDiagHasCb && newDiagHasCb) {
+        addEventLog(updatedTicket, `Benchmark recorded: Cinebench R23 = ${updatedTicket.diagnostics.cinebench} pts`, techName);
+      }
+    }
+  }
 
   if (editingTicketId) {
     const index = appState.tickets.findIndex(t => t.id === editingTicketId);
@@ -1554,6 +1633,11 @@ async function setupClientMode() {
     if (isQcFull && t.diagnostics.cinebench) {
       t.status = 'completed';
       t.completedAt = new Date().toISOString();
+    }
+
+    // Add event log entry for client diagnostics submission
+    if (t.diagnostics.cinebench) {
+      addEventLog(t, `Client diagnostics submitted: Cinebench R23 = ${t.diagnostics.cinebench} pts, CPU Avg = ${t.diagnostics.cpuTempAvg}°C, GPU Avg = ${t.diagnostics.gpuTempAvg}°C`, 'Testing Client');
     }
 
     appState.tickets[index] = t;
@@ -3182,15 +3266,73 @@ function applyAccentColor(color) {
   }
 }
 
-// Format Date to YYYY-MM-DDTHH:MM
+// Format Date to YYYY-MM-DDTHH:MM (UTC-based to prevent timezone shifting)
 function formatDateTimeLocal(isoString) {
   if (!isoString) return '';
   try {
     const d = new Date(isoString);
     if (isNaN(d.getTime())) return '';
     const pad = (n) => String(n).padStart(2, '0');
-    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    // Use UTC methods to avoid local timezone offset shifting the date when displayed
+    return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}T${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
   } catch (e) {
     return '';
   }
+}
+
+// ==========================================================================
+// EVENT LOG SYSTEM
+// ==========================================================================
+// Creates a log entry object for the ticket event history
+function createEventLogEntry(event, user) {
+  return {
+    timestamp: new Date().toISOString(),
+    event,
+    user: user || 'System'
+  };
+}
+
+// Safely appends an event to a ticket's diagnostics.eventLog array
+function addEventLog(ticket, event, user) {
+  if (!ticket) return;
+  if (!ticket.diagnostics) ticket.diagnostics = {};
+  if (!ticket.diagnostics.eventLog || !Array.isArray(ticket.diagnostics.eventLog)) {
+    ticket.diagnostics.eventLog = [];
+  }
+  ticket.diagnostics.eventLog.push(createEventLogEntry(event, user));
+}
+
+// Renders the event log timeline in the admin modal
+function renderEventLog(ticket) {
+  const container = document.getElementById('modal-event-log-timeline');
+  if (!container) return;
+
+  const events = (ticket && ticket.diagnostics && Array.isArray(ticket.diagnostics.eventLog))
+    ? ticket.diagnostics.eventLog
+    : [];
+
+  if (events.length === 0) {
+    container.innerHTML = `<div class="event-log-empty">No events recorded yet. Activity will appear here when the ticket is updated.</div>`;
+    return;
+  }
+
+  // Render in reverse chronological order (newest first)
+  const sorted = [...events].reverse();
+  container.innerHTML = sorted.map((entry, i) => {
+    const d = new Date(entry.timestamp);
+    const timeStr = `${d.getUTCDate()}/${d.getUTCMonth()+1} ${String(d.getUTCHours()).padStart(2,'0')}:${String(d.getUTCMinutes()).padStart(2,'0')}`;
+    const isRecent = i === 0;
+    return `
+      <div class="event-log-item${isRecent ? ' event-log-recent' : ''}">
+        <div class="event-log-dot"></div>
+        <div class="event-log-content">
+          <div class="event-log-event">${entry.event}</div>
+          <div class="event-log-meta">
+            <span class="event-log-user">${entry.user || 'System'}</span>
+            <span class="event-log-time">${timeStr} UTC</span>
+          </div>
+        </div>
+      </div>
+    `;
+  }).join('');
 }

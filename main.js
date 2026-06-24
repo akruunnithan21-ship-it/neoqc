@@ -822,7 +822,7 @@ ipcMain.handle('sys:check-signalrgb', () => {
 });
 
 // IPC Handler: Apply RGB color/presets to SignalRGB via launcher URL protocol
-ipcMain.handle('sys:apply-rgb', (event, { mode, color }) => {
+ipcMain.handle('sys:apply-rgb', (event, { mode, color, brightness }) => {
   return new Promise((resolve) => {
     const launcherPath = path.join(process.env.LOCALAPPDATA, 'VortxEngine', 'SignalRgbLauncher.exe');
     if (!fs.existsSync(launcherPath)) {
@@ -831,23 +831,24 @@ ipcMain.handle('sys:apply-rgb', (event, { mode, color }) => {
     }
 
     let uri = '';
-    const hex = color.replace('#', '').toUpperCase();
+    const hex = (color || '#ffffff').replace('#', '').toUpperCase();
+    const brightnessVal = Math.min(100, Math.max(0, parseInt(brightness) || 80));
 
     if (mode === 'static') {
-      uri = `signalrgb://effect/apply/Solid%20Color?color=${hex}`;
+      uri = `signalrgb://effect/apply/Solid%20Color?color=${hex}&brightness=${brightnessVal}`;
     } else if (mode === 'rainbow') {
-      uri = `signalrgb://effect/apply/Rainbow`;
+      uri = `signalrgb://effect/apply/Rainbow?brightness=${brightnessVal}`;
     } else if (mode === 'breathing') {
-      uri = `signalrgb://effect/apply/Breathing?color=${hex}`;
+      uri = `signalrgb://effect/apply/Breathing?color=${hex}&brightness=${brightnessVal}`;
     } else if (mode === 'cycle') {
-      uri = `signalrgb://effect/apply/Color%20Cycle`;
+      uri = `signalrgb://effect/apply/Color%20Cycle?brightness=${brightnessVal}`;
     } else if (mode === 'off') {
-      uri = `signalrgb://effect/apply/Solid%20Color?color=000000`;
+      uri = `signalrgb://effect/apply/Solid%20Color?color=000000&brightness=0`;
     }
 
     if (uri) {
       // Execute the launcher with --url option and -silentlaunch- to avoid popping up the GUI
-      const cmd = `"${launcherPath}" --url "${uri}?-silentlaunch-"`;
+      const cmd = `"${launcherPath}" --url "${uri}&-silentlaunch-"`;
       exec(cmd, (err) => {
         if (err) {
           console.error("SignalRGB apply error:", err);

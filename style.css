@@ -2278,3 +2278,392 @@
     flex-shrink: 0 !important;
   }
 
+/* ==========================================================================
+   V1.0.4 PREMIUM AESTHETICS & NEW FEATURE STYLES
+   ========================================================================== */
+
+/* --- Enhanced Ticket Cards: Status Glow & Glassmorphism --- */
+.ticket-card {
+  cursor: pointer;
+  padding: 22px;
+  position: relative;
+  overflow: hidden;
+  transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1),
+              box-shadow 0.25s ease,
+              border-color 0.25s ease;
+}
+
+.ticket-card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, transparent, var(--primary-pink), transparent);
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+.ticket-card:hover::before {
+  opacity: 1;
+}
+
+.ticket-card:hover {
+  transform: translateY(-5px) scale(1.01);
+  box-shadow: 0 16px 40px rgba(231, 1, 78, 0.12), 0 4px 16px rgba(15, 23, 42, 0.06);
+  border-color: rgba(231, 1, 78, 0.25) !important;
+}
+
+/* Status glow dot in ticket card header */
+.card-status-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  position: relative;
+}
+
+.card-status-dot::after {
+  content: '';
+  position: absolute;
+  inset: -3px;
+  border-radius: 50%;
+  opacity: 0.4;
+  animation: statusPulse 2.5s ease infinite;
+}
+
+@keyframes statusPulse {
+  0%, 100% { transform: scale(1); opacity: 0.4; }
+  50% { transform: scale(1.6); opacity: 0; }
+}
+
+.card-status-dot.awaiting   { background: var(--status-awaiting); }
+.card-status-dot.awaiting::after { background: var(--status-awaiting); }
+.card-status-dot.building   { background: var(--status-building); }
+.card-status-dot.building::after { background: var(--status-building); }
+.card-status-dot.waiting_qc { background: #8B5CF6; }
+.card-status-dot.waiting_qc::after { background: #8B5CF6; }
+.card-status-dot.qc_testing { background: var(--status-testing); }
+.card-status-dot.qc_testing::after { background: var(--status-testing); }
+.card-status-dot.completed  { background: var(--status-completed); }
+.card-status-dot.completed::after { background: var(--status-completed); animation: none; }
+
+/* Status label text in card */
+.card-status-label {
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  padding: 2px 7px;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.card-status-label.awaiting   { color: var(--status-awaiting); background: rgba(245,158,11,0.1); }
+.card-status-label.building   { color: var(--status-building); background: rgba(59,130,246,0.1); }
+.card-status-label.waiting_qc { color: #8B5CF6; background: rgba(139,92,246,0.1); }
+.card-status-label.qc_testing { color: var(--status-testing); background: rgba(99,102,241,0.1); }
+.card-status-label.completed  { color: var(--status-completed); background: rgba(16,185,129,0.1); }
+
+/* Enhanced glowing progress bars */
+.progress-bar-fill.build {
+  background: linear-gradient(90deg, #2563eb, #3b82f6);
+  box-shadow: 0 0 8px rgba(59, 130, 246, 0.5);
+}
+
+.progress-bar-fill.qc {
+  background: linear-gradient(90deg, #5b21b6, #6366f1);
+  box-shadow: 0 0 8px rgba(99, 102, 241, 0.5);
+}
+
+.progress-bar-fill.completed {
+  background: linear-gradient(90deg, #059669, #10b981);
+  box-shadow: 0 0 8px rgba(16, 185, 129, 0.5);
+}
+
+/* Enhanced Archive Table */
+.archive-table {
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.archive-table thead tr th:first-child { border-radius: 8px 0 0 0; }
+.archive-table thead tr th:last-child  { border-radius: 0 8px 0 0; }
+
+.archive-table th {
+  background: rgba(231, 1, 78, 0.05);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding: 10px 16px;
+  color: var(--primary-pink);
+  font-weight: 800;
+}
+
+.archive-table tr:hover td {
+  background: rgba(231, 1, 78, 0.03) !important;
+}
+
+.archive-table tbody tr:last-child td:first-child { border-radius: 0 0 0 8px; }
+.archive-table tbody tr:last-child td:last-child  { border-radius: 0 0 8px 0; }
+
+/* ==========================================================================
+   EVENT LOG / ACTIVITY TIMELINE STYLES
+   ========================================================================== */
+
+.event-log-section {
+  border-top: 1px solid var(--glass-border);
+}
+
+.event-log-timeline {
+  position: relative;
+  max-height: 300px;
+  overflow-y: auto;
+  padding: 12px 0 4px 0;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(231,1,78,0.3) transparent;
+}
+
+.event-log-timeline::-webkit-scrollbar {
+  width: 4px;
+}
+
+.event-log-timeline::-webkit-scrollbar-thumb {
+  background: rgba(231,1,78,0.3);
+  border-radius: 4px;
+}
+
+.event-log-empty {
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  font-style: italic;
+  padding: 12px 0;
+  text-align: center;
+}
+
+.event-log-item {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+  padding: 10px 0;
+  position: relative;
+  border-left: 2px solid var(--glass-border);
+  margin-left: 8px;
+  padding-left: 20px;
+}
+
+.event-log-item:last-child {
+  border-left-color: transparent;
+}
+
+.event-log-dot {
+  position: absolute;
+  left: -6px;
+  top: 14px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--glass-border);
+  border: 2px solid var(--glass-bg);
+  flex-shrink: 0;
+}
+
+.event-log-item.event-log-recent .event-log-dot {
+  background: var(--primary-pink);
+  box-shadow: 0 0 8px rgba(231,1,78,0.5);
+}
+
+.event-log-item.event-log-recent {
+  border-left-color: rgba(231,1,78,0.3);
+}
+
+.event-log-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.event-log-event {
+  font-size: 0.83rem;
+  font-weight: 600;
+  color: var(--text-dark);
+  line-height: 1.4;
+  margin-bottom: 3px;
+}
+
+.event-log-item.event-log-recent .event-log-event {
+  color: var(--primary-pink);
+}
+
+.event-log-meta {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.event-log-user {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  background: rgba(15,23,42,0.05);
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+body.dark-mode .event-log-user {
+  background: rgba(255,255,255,0.06);
+}
+
+.event-log-time {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  font-family: 'JetBrains Mono', monospace;
+}
+
+/* ==========================================================================
+   PREMIUM ADMIN DASHBOARD & SECTION HEADERS
+   ========================================================================== */
+
+.section-title {
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.section-title .badge {
+  font-size: 0.72rem;
+  padding: 2px 8px;
+  border-radius: 12px;
+  background: var(--primary-pink);
+  color: #fff;
+  font-family: 'JetBrains Mono', monospace;
+  letter-spacing: 0;
+}
+
+/* Glowing stats summary banner */
+.stats-summary-bar {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+}
+
+.stat-pill {
+  flex: 1;
+  min-width: 120px;
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: 12px;
+  padding: 14px 18px;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  transition: all 0.25s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+.stat-pill::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 2px;
+  background: var(--primary-pink);
+  opacity: 0.6;
+}
+
+.stat-pill:nth-child(2)::before { background: #3b82f6; }
+.stat-pill:nth-child(3)::before { background: #10b981; }
+.stat-pill:nth-child(4)::before { background: #f59e0b; }
+
+.stat-pill-value {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 1.8rem;
+  font-weight: 800;
+  color: var(--text-dark);
+  line-height: 1;
+  margin-bottom: 4px;
+}
+
+.stat-pill-label {
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+}
+
+/* ==========================================================================
+   RGB BRIGHTNESS SLIDER STYLING
+   ========================================================================== */
+
+input[type=range]#rgb-brightness-slider {
+  accent-color: var(--primary-pink);
+}
+
+/* Enhanced form-group mini label */
+.form-group.mini label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* ==========================================================================
+   CARD TYPE BADGE IN CARD META FOOTER
+   ========================================================================== */
+
+.card-type-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 5px;
+  background: rgba(15,23,42,0.05);
+  color: var(--text-muted);
+}
+
+body.dark-mode .card-type-badge {
+  background: rgba(255,255,255,0.06);
+}
+
+/* ==========================================================================
+   TECHNICIAN AVATAR CHIP
+   ========================================================================== */
+
+.tech-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  background: rgba(15,23,42,0.04);
+  padding: 3px 8px;
+  border-radius: 20px;
+  border: 1px solid var(--glass-border);
+}
+
+.tech-chip-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--primary-pink);
+}
+
+body.dark-mode .tech-chip {
+  background: rgba(255,255,255,0.04);
+}
