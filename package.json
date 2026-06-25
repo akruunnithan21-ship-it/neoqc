@@ -1,6 +1,6 @@
 {
   "name": "neo-qc",
-  "version": "1.0.6",
+  "version": "1.0.7",
   "description": "PC Assembly Workflow & Quality Control Tracker for Neo Tokyo Kochi",
   "main": "main.js",
   "scripts": {
