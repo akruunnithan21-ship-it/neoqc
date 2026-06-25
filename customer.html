@@ -39,6 +39,10 @@
       padding: 24px;
     }
 
+    h1, h2, h3, h4 {
+      text-shadow: 0 0 10px rgba(255, 255, 255, 0.15), 0 0 2px rgba(255, 255, 255, 0.3);
+    }
+
     .container {
       max-width: 680px;
       width: 100%;
@@ -132,17 +136,34 @@
     .search-input {
       font-family: inherit;
       flex-grow: 1;
-      background: rgba(11, 15, 25, 0.5);
+      background: rgba(255, 255, 255, 0.04);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
       border: 1px solid var(--glass-border);
       padding: 12px 16px;
       border-radius: 10px;
       color: var(--text-light);
       outline: none;
       font-size: 0.95rem;
+      box-shadow: inset 0 1.5px 3px rgba(0, 0, 0, 0.2), 
+                  0 1px 1px rgba(255, 255, 255, 0.03);
+      transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    .search-input::placeholder {
+      color: rgba(255, 255, 255, 0.35);
+    }
+
+    .search-input:hover {
+      border-color: rgba(255, 255, 255, 0.18);
+      background: rgba(255, 255, 255, 0.07);
     }
 
     .search-input:focus {
       border-color: var(--primary-pink);
+      background: rgba(255, 255, 255, 0.08);
+      box-shadow: 0 0 12px rgba(231, 1, 78, 0.25),
+                  inset 0 1.5px 2px rgba(0, 0, 0, 0.2);
     }
 
     .btn {
@@ -374,17 +395,32 @@
 
     .form-group input {
       font-family: inherit;
-      background: rgba(255, 255, 255, 0.05);
+      background: rgba(255, 255, 255, 0.04);
       border: 1px solid var(--glass-border);
       padding: 8px 12px;
       border-radius: 8px;
       color: var(--text-light);
       outline: none;
       font-size: 0.85rem;
+      box-shadow: inset 0 1.5px 3px rgba(0, 0, 0, 0.2), 
+                  0 1px 1px rgba(255, 255, 255, 0.03);
+      transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    .form-group input::placeholder {
+      color: rgba(255, 255, 255, 0.35);
+    }
+
+    .form-group input:hover {
+      border-color: rgba(255, 255, 255, 0.18);
+      background: rgba(255, 255, 255, 0.07);
     }
 
     .form-group input:focus {
       border-color: var(--primary-pink);
+      background: rgba(255, 255, 255, 0.08);
+      box-shadow: 0 0 12px rgba(231, 1, 78, 0.25),
+                  inset 0 1.5px 2px rgba(0, 0, 0, 0.2);
     }
 
     .back-btn {

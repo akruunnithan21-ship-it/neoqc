@@ -73,6 +73,7 @@
   <div id="client-welcome-screen" class="screen">
     <header class="glass-slab navbar">
       <div class="nav-brand">
+        <button id="btn-welcome-show-settings" class="hamburger-btn" title="Open Settings Sidebar">☰</button>
         <svg class="brand-logo-svg" viewBox="0 0 100 100" style="width: 22px; height: 22px; vertical-align: middle; margin-right: 6px; color: var(--primary-pink);"><circle cx="50" cy="50" r="40" stroke="currentColor" stroke-width="10" fill="none" stroke-dasharray="78.776 5" stroke-dashoffset="60.332" /><path d="M 50,23 L 72,70 C 58,58 50,56 50,56 C 50,56 42,58 28,70 Z" fill="currentColor" /></svg>
         <span class="nav-title">NEO TOKYO // CLIENT PORTAL</span>
       </div>
@@ -116,14 +117,13 @@
     <!-- Navbar -->
     <header class="glass-slab navbar">
       <div class="nav-brand">
+        <button id="btn-show-settings" class="hamburger-btn" title="Open Settings Sidebar">☰</button>
         <svg class="brand-logo-svg" viewBox="0 0 100 100" style="width: 22px; height: 22px; vertical-align: middle; margin-right: 6px; color: var(--primary-pink);"><circle cx="50" cy="50" r="40" stroke="currentColor" stroke-width="10" fill="none" stroke-dasharray="78.776 5" stroke-dashoffset="60.332" /><path d="M 50,23 L 72,70 C 58,58 50,56 50,56 C 50,56 42,58 28,70 Z" fill="currentColor" /></svg>
         <span class="nav-title">NEO TOKYO // STAFF PORTAL</span>
       </div>
       <div class="nav-controls">
         <button id="btn-toggle-theme" class="icon-btn" title="Toggle Dark/Light Mode">🌓</button>
-        <button id="btn-show-settings" class="secondary-btn">⚙️ Settings</button>
         <button id="btn-new-ticket" class="primary-pink-btn">+ New Ticket</button>
-        <button id="btn-staff-exit" class="secondary-btn text-crimson">🚪 Switch Mode</button>
       </div>
     </header>
 
@@ -213,6 +213,7 @@
     <!-- Navbar -->
     <header class="glass-slab navbar">
       <div class="nav-brand">
+        <button id="btn-client-show-settings" class="hamburger-btn" title="Open Settings Sidebar">☰</button>
         <svg class="brand-logo-svg" viewBox="0 0 100 100" style="width: 22px; height: 22px; vertical-align: middle; margin-right: 6px; color: var(--primary-pink);"><circle cx="50" cy="50" r="40" stroke="currentColor" stroke-width="10" fill="none" stroke-dasharray="78.776 5" stroke-dashoffset="60.332" /><path d="M 50,23 L 72,70 C 58,58 50,56 50,56 C 50,56 42,58 28,70 Z" fill="currentColor" /></svg>
         <span class="nav-title">NEO TOKYO // TESTING CLIENT</span>
       </div>
@@ -698,12 +699,15 @@
                 <label class="checkbox-label"><input type="checkbox" id="qc-soft-drivers"> All System Drivers Downloaded</label>
                 <label class="checkbox-label"><input type="checkbox" id="qc-soft-bios"> BIOS Updated to Latest</label>
                 
-                <div id="modal-windows-activation-info" style="margin-top: 15px; padding: 12px; background: rgba(255,255,255,0.03); border: 1px solid var(--glass-border); border-radius: 10px; font-size: 0.82rem;">
-                  <div style="font-weight: 700; color: var(--primary-pink); margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.05em; font-size: 0.75rem;">🛡️ Windows License Tracker</div>
+                <div id="modal-windows-activation-info" style="margin-top: 12px; padding: 10px; background: rgba(255,255,255,0.02); border: 1px solid var(--glass-border); border-radius: 8px; font-size: 0.8rem;">
+                  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                    <span style="font-weight: 700; color: var(--primary-pink); text-transform: uppercase; letter-spacing: 0.05em; font-size: 0.7rem;">🛡️ Windows License Tracker</span>
+                    <button type="button" id="btn-admin-detect-license" style="background: rgba(231,1,78,0.1); border: 1px solid var(--primary-pink); color: var(--primary-pink); font-size: 0.7rem; padding: 2px 6px; border-radius: 4px; cursor: pointer; font-weight: 600; transition: all 0.2s;" onmouseover="this.style.background='var(--primary-pink)'; this.style.color='white';" onmouseout="this.style.background='rgba(231,1,78,0.1)'; this.style.color='var(--primary-pink)';">Auto-Detect</button>
+                  </div>
                   <div style="display: flex; flex-direction: column; gap: 4px;">
-                    <div><strong>Operating System:</strong> <span id="modal-activation-os">Windows</span></div>
+                    <span id="modal-activation-os" style="display: none;">Windows</span>
                     <div><strong>Activation State:</strong> <span id="modal-activation-status" class="badge">Unverified</span></div>
-                    <div style="margin-top: 4px;"><strong>Product Key Used:</strong> <span id="modal-activation-key" style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; word-break: break-all;">--</span></div>
+                    <div><strong>Product Key Used:</strong> <span id="modal-activation-key" style="font-family: 'JetBrains Mono', monospace; font-size: 0.78rem; word-break: break-all;">--</span></div>
                   </div>
                 </div>
               </div>
@@ -940,7 +944,7 @@
   <!-- SETTINGS MODAL -->
   <!-- SETTINGS MODAL -->
   <div id="settings-modal" class="modal-overlay">
-    <div class="glass-slab modal-card settings-card" style="max-width: 950px; width: 100%;">
+    <div class="glass-slab modal-card settings-card">
       <div class="modal-header">
         <h2>Application Settings</h2>
         <button id="btn-close-settings" class="close-btn">&times;</button>
@@ -968,6 +972,21 @@
                 <input type="text" id="settings-contact-info" placeholder="kochi@neotokyo.in">
               </div>
               <div class="form-group margin-top">
+                <label for="settings-default-tech">Default Assigned Technician</label>
+                <select id="settings-default-tech">
+                  <option value="">-- None (Unassigned) --</option>
+                </select>
+              </div>
+              <div class="form-group margin-top">
+                <label for="settings-sort-by">Default Dashboard Sort Order</label>
+                <select id="settings-sort-by">
+                  <option value="deadline">Sort by Deadline (Nearest First)</option>
+                  <option value="createdAt">Sort by Date Created (Newest First)</option>
+                  <option value="customerName">Sort by Customer Name (A-Z)</option>
+                  <option value="status">Sort by Ticket Status</option>
+                </select>
+              </div>
+              <div class="form-group margin-top">
                 <label for="settings-accent-color">Theme Accent Color</label>
                 <select id="settings-accent-color">
                   <option value="pink">Pink (Default)</option>
@@ -980,6 +999,10 @@
               <div class="form-group margin-top" style="display: flex; align-items: center; gap: 8px;">
                 <input type="checkbox" id="settings-sound-enabled" style="width: 18px; height: 18px; cursor: pointer;">
                 <label for="settings-sound-enabled" style="font-size: 0.9rem; cursor: pointer; font-weight: 600;">Enable Notification Sounds</label>
+              </div>
+              <div class="form-group margin-top" style="display: flex; align-items: center; gap: 8px;">
+                <input type="checkbox" id="settings-disable-qc-lock" style="width: 18px; height: 18px; cursor: pointer;">
+                <label for="settings-disable-qc-lock" style="font-size: 0.9rem; cursor: pointer; font-weight: 600;">Disable Strict QC Checklist Lock</label>
               </div>
             </div>
           </div>
@@ -1003,8 +1026,30 @@
                 <input type="range" id="settings-gpu-max-temp" min="50" max="95" value="80" style="width: 100%; cursor: pointer;">
               </div>
               <div class="form-group margin-top">
-                <label for="settings-min-ssd-speed">Minimum SSD Speed Requirement (MB/s)</label>
+                <label for="settings-min-ssd-speed">Minimum SSD Read Speed Requirement (MB/s)</label>
                 <input type="number" id="settings-min-ssd-speed" placeholder="3000">
+              </div>
+              <div class="form-group margin-top">
+                <label for="settings-min-ssd-write">Minimum SSD Write Speed Requirement (MB/s)</label>
+                <input type="number" id="settings-min-ssd-write" placeholder="2500">
+              </div>
+              <div class="form-group margin-top">
+                <label for="settings-min-cinebench">Minimum Cinebench R23 Score Requirement (pts)</label>
+                <input type="number" id="settings-min-cinebench" placeholder="10000">
+              </div>
+              <div class="form-group margin-top">
+                <label for="settings-min-furmark">Minimum FurMark Score Requirement (pts)</label>
+                <input type="number" id="settings-min-furmark" placeholder="5000">
+              </div>
+              <div class="form-group margin-top">
+                <label for="settings-default-test-duration">Default Stress Test Duration</label>
+                <select id="settings-default-test-duration">
+                  <option value="30">30 seconds (Fast)</option>
+                  <option value="60">60 seconds (Standard)</option>
+                  <option value="300">5 minutes (Burn-in)</option>
+                  <option value="600">10 minutes (Recommended)</option>
+                  <option value="1800">30 minutes (Extended Burn-in)</option>
+                </select>
               </div>
               <div class="form-group margin-top" style="display: flex; align-items: center; gap: 8px;">
                 <input type="checkbox" id="settings-auto-pdf" style="width: 18px; height: 18px; cursor: pointer;">
@@ -1028,20 +1073,35 @@
             </div>
 
             <!-- Supabase database settings -->
-            <div class="form-section margin-top">
-              <h3>☁️ Supabase Cloud Database Integration</h3>
-              <p class="panel-info-text">Connect all local shop systems together. Enter your Supabase connection parameters.</p>
-              <div class="form-group">
-                <label for="settings-supabase-url">Supabase Project URL</label>
-                <input type="text" id="settings-supabase-url" placeholder="https://xxxx.supabase.co">
+            <div class="form-section margin-top sensitive-config-card" id="admin-credentials-card">
+              <div class="card-header-locked" style="display: flex; justify-content: space-between; align-items: center;">
+                <h3>☁️ Cloud Database Configuration</h3>
+                <span class="badge red" id="admin-lock-badge">🔒 Locked</span>
               </div>
-              <div class="form-group margin-top">
-                <label for="settings-supabase-key">Supabase Public Anon Key</label>
-                <input type="password" id="settings-supabase-key" placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...">
+              <p class="panel-info-text">Supabase cloud settings are locked to prevent unauthorized tampering.</p>
+              
+              <!-- Lock screen overlay/state -->
+              <div id="admin-unlock-prompt" class="unlock-prompt-container" style="padding: 15px; display: flex; justify-content: center; align-items: center; background: rgba(15, 23, 42, 0.02); border: 1px dashed var(--glass-border); border-radius: 12px; margin-top: 12px;">
+                <button type="button" id="btn-unlock-admin" class="secondary-btn text-pink">🔑 Unlock Admin Configs</button>
               </div>
-              <div class="margin-top">
-                <button id="btn-test-db-connection" class="secondary-btn">Check Supabase Status</button>
-                <span id="db-connection-status" class="status-msg"></span>
+              
+              <!-- Sensitive inputs inside locked container (initially hidden/disabled) -->
+              <div id="admin-sensitive-fields" class="hidden sensitive-locked-overlay">
+                <div class="form-group margin-top">
+                  <label for="settings-supabase-url">Supabase Project URL</label>
+                  <input type="text" id="settings-supabase-url" placeholder="https://xxxx.supabase.co" disabled>
+                </div>
+                <div class="form-group margin-top">
+                  <label for="settings-supabase-key">Supabase Public Anon Key</label>
+                  <div style="display: flex; gap: 8px;">
+                    <input type="password" id="settings-supabase-key" placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." style="flex-grow: 1;" disabled>
+                    <button type="button" id="btn-toggle-key-visibility" class="secondary-btn" style="padding: 0 10px;" disabled>👁️</button>
+                  </div>
+                </div>
+                <div class="margin-top">
+                  <button type="button" id="btn-test-db-connection" class="secondary-btn" disabled>Check Supabase Status</button>
+                  <span id="db-connection-status" class="status-msg"></span>
+                </div>
               </div>
             </div>
 
@@ -1053,6 +1113,10 @@
                 <label for="settings-is-master" style="font-size: 0.9rem; cursor: pointer; font-weight: 600;">Enable Master Application Mode (Service & QC Dashboards)</label>
               </div>
               <p class="panel-info-text" style="margin-top: 4px; margin-left: 26px;">When disabled, the app operates in Standard Mode and boots directly into the Testing Client portal (hidden staff dashboards).</p>
+              <div class="form-group margin-top" style="display: flex; align-items: center; gap: 8px;">
+                <input type="checkbox" id="settings-auto-detect-hw" style="width: 18px; height: 18px; cursor: pointer;">
+                <label for="settings-auto-detect-hw" style="font-size: 0.9rem; cursor: pointer; font-weight: 600;">Auto-Detect System Specs on Ticket Creation</label>
+              </div>
             </div>
 
             <!-- Diagnostic Tools Paths -->
@@ -1078,6 +1142,13 @@
                 <div class="uploader-row">
                   <input type="text" id="settings-path-furmark" placeholder="C:\Diagnostics\FurMark.exe" style="flex-grow: 1;">
                   <button id="btn-select-path-furmark" class="secondary-btn" type="button">Browse</button>
+                </div>
+              </div>
+              <div class="form-group margin-top">
+                <label for="settings-path-ssd-utility">SSD Benchmark Tool Executable Path</label>
+                <div class="uploader-row">
+                  <input type="text" id="settings-path-ssd-utility" placeholder="C:\Diagnostics\CrystalDiskMark.exe" style="flex-grow: 1;">
+                  <button id="btn-select-path-ssd-utility" class="secondary-btn" type="button">Browse</button>
                 </div>
               </div>
             </div>
@@ -1109,6 +1180,18 @@
                 <input type="number" id="new-rival-read" placeholder="Read MB/s" style="flex: 1;">
                 <input type="number" id="new-rival-write" placeholder="Write MB/s" style="flex: 1;">
                 <button id="btn-add-rival" class="primary-pink-btn">Add Config</button>
+              </div>
+            </div>
+
+            <!-- Data Management & Backups -->
+            <div class="form-section margin-top">
+              <h3>💾 Data Management & Backups</h3>
+              <p class="panel-info-text">Export local ticket database to a file, restore from backup, or perform a complete factory reset.</p>
+              <div style="display: flex; gap: 10px; flex-wrap: wrap;" class="margin-top">
+                <button type="button" id="btn-settings-backup" class="secondary-btn">💾 Backup Database (JSON)</button>
+                <button type="button" id="btn-settings-restore" class="secondary-btn">📤 Restore Database (JSON)</button>
+                <input type="file" id="input-settings-restore-file" style="display: none;" accept=".json">
+                <button type="button" id="btn-settings-wipe" class="secondary-btn text-crimson">🚨 Wipe Local Cache & Reset</button>
               </div>
             </div>
           </div>
@@ -1292,23 +1375,21 @@
     <div class="glass-slab modal-card" style="max-width: 650px; width: 100%; padding: 30px; border-radius: 20px;">
       <div class="modal-header" style="border-bottom: 1px solid var(--glass-border); padding-bottom: 15px; margin-bottom: 20px;">
         <h2 style="font-family: 'Syncopate', sans-serif; font-size: 1.3rem; color: var(--primary-pink); letter-spacing: 0.05em; margin: 0;">NEO QC UPDATED</h2>
-        <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; font-weight: 700; background: rgba(231, 1, 78, 0.1); color: var(--primary-pink); padding: 4px 8px; border-radius: 4px;">v1.0.5a</span>
+        <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; font-weight: 700; background: rgba(231, 1, 78, 0.1); color: var(--primary-pink); padding: 4px 8px; border-radius: 4px;">v1.0.5.1</span>
       </div>
       <div class="modal-body" style="font-size: 0.92rem; line-height: 1.6; color: var(--text-dark); max-height: 420px; overflow-y: auto; padding-right: 5px;">
-        <p style="margin-top: 0;">An update has been installed. Here are the key improvements in NeoQC <strong>v1.0.5a</strong>:</p>
+        <p style="margin-top: 0;">An update has been installed. Here are the key improvements in NeoQC <strong>v1.0.5.1</strong>:</p>
         <ul style="padding-left: 20px; display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px;">
-          <li><strong>📋 Activity Log & Event History</strong>: Every ticket change (status, technician, deadline, diagnostics, parts) is now recorded in a chronological timeline visible in the admin edit modal.</li>
-          <li><strong>🕐 UTC Date Standardization</strong>: All dates are now stored and displayed in UTC. Dates will no longer shift between different time zones on different machines.</li>
-          <li><strong>💡 RGB Brightness Control</strong>: Added a Brightness slider (0–100%) to the RGB Sync Controller. Hardware is synced via SignalRGB with the brightness parameter.</li>
-          <li><strong>🎨 Premium Admin Dashboard UI</strong>: Ticket cards now display live status glow dots with pulse animation, technician chips, and type badges. Dashboard includes a new Stats Summary Bar.</li>
-          <li><strong>📊 Stats Summary Bar</strong>: Real-time counters at the top of the admin dashboard showing Active Builds, Completed, In QC, and Urgent tickets.</li>
-          <li><strong>✨ Glowing Progress Bars</strong>: Assembly and QC progress bars now glow with color-coded gradients for a premium feel.</li>
-          <li><strong>🔥 Enhanced Archive Table</strong>: Completed tickets table now has color-coded headers and hover accents matching the brand theme.</li>
-          <li><strong>🐛 Bug Fixes</strong>: Fixed event log preservation during ticket edits; fixed deadline UTC normalization; fixed brightness slider label sync.</li>
+          <li><strong>🔑 Windows License Tracker Auto-Detect</strong>: Added a compact Windows License Tracker next to the QC checklist in the Admin app, complete with a single-click Auto-Detect button.</li>
+          <li><strong>🛡️ Direct Checkbox Integration</strong>: Ticking Auto-Detect runs the licensing scan on the current machine and automatically checks the "Windows Activated" task if activated.</li>
+          <li><strong>🎨 Distinguishable Ticket Cards</strong>: Added status-colored indicator borders (Amber, Blue, Indigo, Green) to make tickets immediately recognizable at a glance.</li>
+          <li><strong>✨ Status Neon Hover Glows</strong>: Hovering over any ticket card now lights up the card with a matching status neon-glow background and shadow.</li>
+          <li><strong>🚨 Visual Urgency Indicators</strong>: Urgent tickets now display a soft red warning gradient backplate and border, pulsing red on hover.</li>
+          <li><strong>🚀 OTA Pre-Release Support</strong>: Future pre-releases (suffixes like `-a`, `-b`) are now fully supported for auto-updates.</li>
         </ul>
       </div>
       <div class="modal-footer" style="border-top: 1px solid var(--glass-border); padding-top: 15px; display: flex; justify-content: flex-end; margin-top: 20px;">
-        <button id="btn-close-changelog" class="primary-pink-btn" style="padding: 10px 24px; font-weight: 700; font-size: 0.95rem;">Launch NeoQC v1.0.5a 🚀</button>
+        <button id="btn-close-changelog" class="primary-pink-btn" style="padding: 10px 24px; font-weight: 700; font-size: 0.95rem;">Launch NeoQC v1.0.5.1 🚀</button>
       </div>
     </div>
   </div>

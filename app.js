@@ -106,13 +106,22 @@ async function loadDatabase() {
       pathHwInfo: "", 
       pathCinebench: "", 
       pathFurmark: "", 
+      pathSsdUtility: "",
       isMaster: false,
+      autoDetectHw: false,
       accentColor: "pink",
       cpuMaxTemp: 85,
       gpuMaxTemp: 80,
       minSsdSpeed: 3000,
+      minSsdWrite: 2500,
+      minCinebench: 10000,
+      minFurmark: 5000,
+      defaultTestDuration: "60",
       autoPdf: false,
       soundEnabled: true,
+      disableQcLock: false,
+      defaultTech: "",
+      sortBy: "deadline",
       shopName: "Neo Tokyo Kochi",
       contactInfo: "kochi@neotokyo.in"
     };
@@ -122,13 +131,22 @@ async function loadDatabase() {
     if (!appState.settings.pathHwInfo) appState.settings.pathHwInfo = "";
     if (!appState.settings.pathCinebench) appState.settings.pathCinebench = "";
     if (!appState.settings.pathFurmark) appState.settings.pathFurmark = "";
+    if (!appState.settings.pathSsdUtility) appState.settings.pathSsdUtility = "";
     if (appState.settings.isMaster === undefined) appState.settings.isMaster = false;
+    if (appState.settings.autoDetectHw === undefined) appState.settings.autoDetectHw = false;
     if (!appState.settings.accentColor) appState.settings.accentColor = "pink";
     if (appState.settings.cpuMaxTemp === undefined) appState.settings.cpuMaxTemp = 85;
     if (appState.settings.gpuMaxTemp === undefined) appState.settings.gpuMaxTemp = 80;
     if (appState.settings.minSsdSpeed === undefined) appState.settings.minSsdSpeed = 3000;
+    if (appState.settings.minSsdWrite === undefined) appState.settings.minSsdWrite = 2500;
+    if (appState.settings.minCinebench === undefined) appState.settings.minCinebench = 10000;
+    if (appState.settings.minFurmark === undefined) appState.settings.minFurmark = 5000;
+    if (appState.settings.defaultTestDuration === undefined) appState.settings.defaultTestDuration = "60";
     if (appState.settings.autoPdf === undefined) appState.settings.autoPdf = false;
     if (appState.settings.soundEnabled === undefined) appState.settings.soundEnabled = true;
+    if (appState.settings.disableQcLock === undefined) appState.settings.disableQcLock = false;
+    if (appState.settings.defaultTech === undefined) appState.settings.defaultTech = "";
+    if (appState.settings.sortBy === undefined) appState.settings.sortBy = "deadline";
     if (!appState.settings.shopName) appState.settings.shopName = "Neo Tokyo Kochi";
     if (!appState.settings.contactInfo) appState.settings.contactInfo = "kochi@neotokyo.in";
   }
@@ -320,6 +338,28 @@ function renderDashboard() {
     return matchesSearch && matchesStatus && matchesTech;
   });
 
+  // Sort Active Tickets dynamically
+  const sortBy = appState.settings.sortBy || 'deadline';
+  filteredActive.sort((a, b) => {
+    if (sortBy === 'deadline') {
+      const dateA = a.deadline ? new Date(a.deadline) : new Date('9999-12-31');
+      const dateB = b.deadline ? new Date(b.deadline) : new Date('9999-12-31');
+      return dateA - dateB;
+    } else if (sortBy === 'createdAt') {
+      const dateA = a.createdAt ? new Date(a.createdAt) : new Date(0);
+      const dateB = b.createdAt ? new Date(b.createdAt) : new Date(0);
+      return dateB - dateA;
+    } else if (sortBy === 'customerName') {
+      return (a.customerName || '').localeCompare(b.customerName || '');
+    } else if (sortBy === 'status') {
+      const statusWeight = { 'awaiting': 1, 'building': 2, 'waiting_qc': 3, 'qc_testing': 4 };
+      const weightA = statusWeight[a.status] || 99;
+      const weightB = statusWeight[b.status] || 99;
+      return weightA - weightB;
+    }
+    return 0;
+  });
+
   // Render Active Cards
   if (filteredActive.length === 0) {
     grid.innerHTML = `<div class="empty-state"><p>No active builds matching filters.</p></div>`;
@@ -334,7 +374,7 @@ function renderDashboard() {
       const statusText = getStatusLabelText(t.status);
 
       const card = document.createElement('div');
-      card.className = `glass-slab ticket-card`;
+      card.className = `glass-slab ticket-card ${t.status} ${isUrgent ? 'urgent' : ''}`;
       card.innerHTML = `
         <div class="ticket-card-header">
           <span class="card-id">#${t.id.slice(-6)}</span>
@@ -640,7 +680,22 @@ function openTicketModal(ticketId = null) {
     document.getElementById('btn-save-pdf').classList.add('hidden');
     deleteBtn.classList.add('hidden');
     updateModalDiagnosticsStatus();
+
+    // Set default technician
+    populateTechnicianDropdowns();
+    document.getElementById('form-technician').value = appState.settings.defaultTech || '';
+
+    // Auto-detect system specs if option is enabled
+    if (appState.settings.autoDetectHw) {
+      setTimeout(() => {
+        const btn = document.getElementById('btn-modal-detect-hw');
+        if (btn) btn.click();
+      }, 50);
+    }
   }
+
+  // Validate diagnostics thresholds to update input border styles (red/green)
+  validateDiagnosticsThresholds();
 
   modal.classList.add('active');
 }
@@ -653,7 +708,9 @@ function updateFormLockStates(buildPct) {
   const diagSect = document.getElementById('diagnostics-section');
   const serialsSect = document.getElementById('serials-section');
 
-  if (buildPct < 100) {
+  const lockStrict = !appState.settings.disableQcLock;
+
+  if (buildPct < 100 && lockStrict) {
     qcSect.classList.add('locked');
     diagSect.classList.add('locked');
     serialsSect.classList.add('locked');
@@ -662,6 +719,47 @@ function updateFormLockStates(buildPct) {
     diagSect.classList.remove('locked');
     serialsSect.classList.remove('locked');
   }
+}
+
+function validateDiagnosticsThresholds() {
+  const cpuMax = parseInt(appState.settings.cpuMaxTemp) || 85;
+  const gpuMax = parseInt(appState.settings.gpuMaxTemp) || 80;
+  const ssdReadMin = parseInt(appState.settings.minSsdSpeed) || 3000;
+  const ssdWriteMin = parseInt(appState.settings.minSsdWrite) || 2500;
+  const cbMin = parseInt(appState.settings.minCinebench) || 10000;
+  const fmMin = parseInt(appState.settings.minFurmark) || 5000;
+
+  const validateField = (elementId, isGreaterOrEqual, thresholdVal) => {
+    const el = document.getElementById(elementId);
+    if (!el) return;
+    const val = parseFloat(el.value);
+    el.classList.remove('diag-pass', 'diag-fail');
+    if (el.value.trim() === '') return;
+    if (isNaN(val)) {
+      el.classList.add('diag-fail');
+      return;
+    }
+    const passes = isGreaterOrEqual ? (val >= thresholdVal) : (val <= thresholdVal);
+    if (passes) {
+      el.classList.add('diag-pass');
+    } else {
+      el.classList.add('diag-fail');
+    }
+  };
+
+  validateField('form-cpu-temp-max', false, cpuMax);
+  validateField('form-gpu-temp-max', false, gpuMax);
+  validateField('form-cinebench-score', true, cbMin);
+  validateField('form-furmark-score', true, fmMin);
+  validateField('form-ssd-read', true, ssdReadMin);
+  validateField('form-ssd-write', true, ssdWriteMin);
+
+  validateField('c-cpu-temp-max', false, cpuMax);
+  validateField('c-gpu-temp-max', false, gpuMax);
+  validateField('c-cinebench-score', true, cbMin);
+  validateField('c-furmark-score', true, fmMin);
+  validateField('c-ssd-read', true, ssdReadMin);
+  validateField('c-ssd-write', true, ssdWriteMin);
 }
 
 function updateModalDiagnosticsStatus() {
@@ -706,6 +804,7 @@ function setupFormCalculations() {
       cpuAvg.value = '';
     }
     updateModalDiagnosticsStatus();
+    validateDiagnosticsThresholds();
   };
   cpuMin.addEventListener('input', calcCpuAvg);
   cpuMax.addEventListener('input', calcCpuAvg);
@@ -723,6 +822,7 @@ function setupFormCalculations() {
       gpuAvg.value = '';
     }
     updateModalDiagnosticsStatus();
+    validateDiagnosticsThresholds();
   };
   gpuMin.addEventListener('input', calcGpuAvg);
   gpuMax.addEventListener('input', calcGpuAvg);
@@ -730,6 +830,20 @@ function setupFormCalculations() {
   // Cinebench input trigger
   document.getElementById('form-cinebench-score').addEventListener('input', () => {
     updateModalDiagnosticsStatus();
+    validateDiagnosticsThresholds();
+  });
+
+  // Watch other diagnostics fields
+  const diagFields = [
+    'form-furmark-score',
+    'form-ssd-read',
+    'form-ssd-write'
+  ];
+  diagFields.forEach(id => {
+    const el = document.getElementById(id);
+    if (el) {
+      el.addEventListener('input', validateDiagnosticsThresholds);
+    }
   });
 }
 
@@ -875,6 +989,7 @@ function handleClientTicketSelect() {
       Cinebench R23: <strong style="color: ${hasCb ? 'var(--status-completed)' : 'inherit'}">${hasCb ? 'Completed (' + ticket.diagnostics.cinebench + ' pts)' : '[Idle]'}</strong> | 
       FurMark: <strong style="color: ${hasTemps ? 'var(--status-completed)' : 'inherit'}">${hasTemps ? 'Completed' : '[Idle]'}</strong>
     `;
+    validateDiagnosticsThresholds();
   }
 }
 
@@ -891,6 +1006,7 @@ function setupClientFormCalculations() {
     } else {
       cpuAvg.value = '';
     }
+    validateDiagnosticsThresholds();
   };
   cpuMin.addEventListener('input', calcCpuAvg);
   cpuMax.addEventListener('input', calcCpuAvg);
@@ -907,9 +1023,24 @@ function setupClientFormCalculations() {
     } else {
       gpuAvg.value = '';
     }
+    validateDiagnosticsThresholds();
   };
   gpuMin.addEventListener('input', calcGpuAvg);
   gpuMax.addEventListener('input', calcGpuAvg);
+
+  // Watch other client diagnostics fields
+  const clientDiagFields = [
+    'c-cinebench-score',
+    'c-furmark-score',
+    'c-ssd-read',
+    'c-ssd-write'
+  ];
+  clientDiagFields.forEach(id => {
+    const el = document.getElementById(id);
+    if (el) {
+      el.addEventListener('input', validateDiagnosticsThresholds);
+    }
+  });
 }
 
 function setPortButtonState(btnId, isPassed) {
@@ -1789,8 +1920,78 @@ async function triggerSavePdf(ticketId) {
 // ==========================================================================
 // SETTINGS SCREEN ACTIONS
 // ==========================================================================
+let isAdminUnlocked = false;
+
+function resetAdminLockState() {
+  isAdminUnlocked = false;
+  
+  const lockBadge = document.getElementById('admin-lock-badge');
+  const unlockPrompt = document.getElementById('admin-unlock-prompt');
+  const sensitiveFields = document.getElementById('admin-sensitive-fields');
+  
+  if (lockBadge) {
+    lockBadge.textContent = "🔒 Locked";
+    lockBadge.className = "badge red";
+  }
+  if (unlockPrompt) unlockPrompt.classList.remove('hidden');
+  if (sensitiveFields) sensitiveFields.classList.add('hidden');
+  
+  const inputsToDisable = [
+    'settings-supabase-url',
+    'settings-supabase-key',
+    'btn-toggle-key-visibility',
+    'btn-test-db-connection'
+  ];
+  inputsToDisable.forEach(id => {
+    const el = document.getElementById(id);
+    if (el) {
+      el.setAttribute('disabled', 'true');
+    }
+  });
+
+  const keyInput = document.getElementById('settings-supabase-key');
+  if (keyInput) keyInput.type = 'password';
+  const toggleBtn = document.getElementById('btn-toggle-key-visibility');
+  if (toggleBtn) toggleBtn.textContent = '👁️';
+}
+
+function unlockAdminSettings() {
+  const passcode = prompt("Enter administrator password to edit database configurations:");
+  if (passcode === 'neoadmin') {
+    isAdminUnlocked = true;
+    
+    const lockBadge = document.getElementById('admin-lock-badge');
+    const unlockPrompt = document.getElementById('admin-unlock-prompt');
+    const sensitiveFields = document.getElementById('admin-sensitive-fields');
+    
+    if (lockBadge) {
+      lockBadge.textContent = "🔓 Unlocked";
+      lockBadge.className = "badge green";
+    }
+    if (unlockPrompt) unlockPrompt.classList.add('hidden');
+    if (sensitiveFields) sensitiveFields.classList.remove('hidden');
+    
+    const inputsToEnable = [
+      'settings-supabase-url',
+      'settings-supabase-key',
+      'btn-toggle-key-visibility',
+      'btn-test-db-connection'
+    ];
+    inputsToEnable.forEach(id => {
+      const el = document.getElementById(id);
+      if (el) {
+        el.removeAttribute('disabled');
+      }
+    });
+    alert("Admin Settings Unlocked.");
+  } else {
+    alert("Incorrect passcode. Access Denied.");
+  }
+}
+
 function openSettingsModal() {
   const modal = document.getElementById('settings-modal');
+  resetAdminLockState();
   
   // Render technicians
   const techList = document.getElementById('settings-tech-list');
@@ -1830,13 +2031,28 @@ function openSettingsModal() {
   document.getElementById('settings-path-hwinfo').value = appState.settings.pathHwInfo || '';
   document.getElementById('settings-path-cinebench').value = appState.settings.pathCinebench || '';
   document.getElementById('settings-path-furmark').value = appState.settings.pathFurmark || '';
+  document.getElementById('settings-path-ssd-utility').value = appState.settings.pathSsdUtility || '';
   document.getElementById('settings-is-master').checked = !!appState.settings.isMaster;
+  document.getElementById('settings-auto-detect-hw').checked = !!appState.settings.autoDetectHw;
 
   // Populate new general settings
   document.getElementById('settings-shop-name').value = appState.settings.shopName || '';
   document.getElementById('settings-contact-info').value = appState.settings.contactInfo || '';
   document.getElementById('settings-accent-color').value = appState.settings.accentColor || 'pink';
   document.getElementById('settings-sound-enabled').checked = !!appState.settings.soundEnabled;
+  document.getElementById('settings-disable-qc-lock').checked = !!appState.settings.disableQcLock;
+
+  // Populate default technician select list inside settings
+  const techSelect = document.getElementById('settings-default-tech');
+  techSelect.innerHTML = '<option value="">-- None (Unassigned) --</option>';
+  appState.technicians.forEach(tech => {
+    const opt = document.createElement('option');
+    opt.value = tech;
+    opt.textContent = tech;
+    techSelect.appendChild(opt);
+  });
+  techSelect.value = appState.settings.defaultTech || '';
+  document.getElementById('settings-sort-by').value = appState.settings.sortBy || 'deadline';
 
   // Populate thresholds
   document.getElementById('settings-cpu-max-temp').value = appState.settings.cpuMaxTemp || 85;
@@ -1844,6 +2060,10 @@ function openSettingsModal() {
   document.getElementById('settings-gpu-max-temp').value = appState.settings.gpuMaxTemp || 80;
   document.getElementById('settings-gpu-max-temp-val').textContent = (appState.settings.gpuMaxTemp || 80) + '°C';
   document.getElementById('settings-min-ssd-speed').value = appState.settings.minSsdSpeed || 3000;
+  document.getElementById('settings-min-ssd-write').value = appState.settings.minSsdWrite || 2500;
+  document.getElementById('settings-min-cinebench').value = appState.settings.minCinebench || 10000;
+  document.getElementById('settings-min-furmark').value = appState.settings.minFurmark || 5000;
+  document.getElementById('settings-default-test-duration').value = appState.settings.defaultTestDuration || '60';
   document.getElementById('settings-auto-pdf').checked = !!appState.settings.autoPdf;
 
   // Reset active tab in settings modal
@@ -1861,16 +2081,26 @@ async function handleSaveSettings() {
   appState.settings.pathHwInfo = document.getElementById('settings-path-hwinfo').value.trim();
   appState.settings.pathCinebench = document.getElementById('settings-path-cinebench').value.trim();
   appState.settings.pathFurmark = document.getElementById('settings-path-furmark').value.trim();
+  appState.settings.pathSsdUtility = document.getElementById('settings-path-ssd-utility').value.trim();
   appState.settings.isMaster = document.getElementById('settings-is-master').checked;
+  appState.settings.autoDetectHw = document.getElementById('settings-auto-detect-hw').checked;
 
   // Save new settings
   appState.settings.shopName = document.getElementById('settings-shop-name').value.trim();
   appState.settings.contactInfo = document.getElementById('settings-contact-info').value.trim();
   appState.settings.accentColor = document.getElementById('settings-accent-color').value;
   appState.settings.soundEnabled = document.getElementById('settings-sound-enabled').checked;
-  appState.settings.cpuMaxTemp = parseInt(document.getElementById('settings-cpu-max-temp').value);
-  appState.settings.gpuMaxTemp = parseInt(document.getElementById('settings-gpu-max-temp').value);
+  appState.settings.disableQcLock = document.getElementById('settings-disable-qc-lock').checked;
+  appState.settings.defaultTech = document.getElementById('settings-default-tech').value;
+  appState.settings.sortBy = document.getElementById('settings-sort-by').value;
+
+  appState.settings.cpuMaxTemp = parseInt(document.getElementById('settings-cpu-max-temp').value) || 85;
+  appState.settings.gpuMaxTemp = parseInt(document.getElementById('settings-gpu-max-temp').value) || 80;
   appState.settings.minSsdSpeed = parseInt(document.getElementById('settings-min-ssd-speed').value) || 3000;
+  appState.settings.minSsdWrite = parseInt(document.getElementById('settings-min-ssd-write').value) || 2500;
+  appState.settings.minCinebench = parseInt(document.getElementById('settings-min-cinebench').value) || 10000;
+  appState.settings.minFurmark = parseInt(document.getElementById('settings-min-furmark').value) || 5000;
+  appState.settings.defaultTestDuration = document.getElementById('settings-default-test-duration').value;
   appState.settings.autoPdf = document.getElementById('settings-auto-pdf').checked;
 
   applyAccentColor(appState.settings.accentColor);
@@ -1878,6 +2108,12 @@ async function handleSaveSettings() {
   await saveDatabase();
   document.getElementById('settings-modal').classList.remove('active');
   
+  if (currentMode === 'staff') {
+    renderDashboard();
+  } else if (currentMode === 'client' || currentMode === 'client-console') {
+    handleClientTicketSelect();
+  }
+
   if (!appState.settings.isMaster) {
     switchScreen('client');
   } else {
@@ -1959,6 +2195,29 @@ function setupEventListeners() {
     document.getElementById('settings-modal').classList.remove('active');
   });
   document.getElementById('btn-save-settings').addEventListener('click', handleSaveSettings);
+
+  // Admin password unlock listener
+  const btnUnlockAdmin = document.getElementById('btn-unlock-admin');
+  if (btnUnlockAdmin) {
+    btnUnlockAdmin.addEventListener('click', unlockAdminSettings);
+  }
+
+  // Admin database key visibility toggle
+  const btnToggleVisibility = document.getElementById('btn-toggle-key-visibility');
+  if (btnToggleVisibility) {
+    btnToggleVisibility.addEventListener('click', () => {
+      const keyInput = document.getElementById('settings-supabase-key');
+      if (keyInput) {
+        if (keyInput.type === 'password') {
+          keyInput.type = 'text';
+          btnToggleVisibility.textContent = '🙈';
+        } else {
+          keyInput.type = 'password';
+          btnToggleVisibility.textContent = '👁️';
+        }
+      }
+    });
+  }
   document.getElementById('btn-reseed-data').addEventListener('click', async () => {
     if (confirm("This will overwrite your current tickets with mock demo data. Proceed?")) {
       seedMockTickets();
@@ -2143,10 +2402,7 @@ function setupEventListeners() {
     switchScreen('selector');
   });
 
-  // Staff exit
-  document.getElementById('btn-staff-exit').addEventListener('click', () => {
-    switchScreen('selector');
-  });
+  // Staff exit - removed as Switch Mode is not accessible from Staff Portal anymore
   document.getElementById('btn-client-refresh').addEventListener('click', () => {
     const currentId = document.getElementById('client-ticket-select').value;
     populateClientTicketSelect(currentId);
@@ -2168,6 +2424,40 @@ function setupEventListeners() {
     }
   });
 
+  // Admin Quality Control Checklist - Windows Activation License Auto-Detect
+  const btnAdminDetect = document.getElementById('btn-admin-detect-license');
+  if (btnAdminDetect) {
+    btnAdminDetect.addEventListener('click', async () => {
+      btnAdminDetect.textContent = 'Scanning...';
+      btnAdminDetect.disabled = true;
+      try {
+        const result = await ipcRenderer.invoke('sys:check-win');
+        const winState = result.activated ? 'Activated' : 'Not Activated';
+        const winKey = result.productKey || '--';
+        
+        const statusBadge = document.getElementById('modal-activation-status');
+        if (statusBadge) {
+          statusBadge.textContent = winState;
+          statusBadge.className = `badge ${result.activated ? 'green' : 'red'}`;
+        }
+        
+        const keyBadge = document.getElementById('modal-activation-key');
+        if (keyBadge) {
+          keyBadge.textContent = winKey;
+        }
+        
+        if (result.activated) {
+          document.getElementById('qc-soft-windows').checked = true;
+        }
+      } catch (e) {
+        console.error('Error auto-detecting Windows license:', e);
+      } finally {
+        btnAdminDetect.textContent = 'Auto-Detect';
+        btnAdminDetect.disabled = false;
+      }
+    });
+  }
+
   // Modal automated diagnostics run button
   document.getElementById('btn-modal-run-diagnostics').addEventListener('click', async () => {
     await executeDiagnosticsWorkflow(true);
@@ -2185,6 +2475,118 @@ function setupEventListeners() {
   setupPathBrowser('btn-select-path-hwinfo', 'settings-path-hwinfo');
   setupPathBrowser('btn-select-path-cinebench', 'settings-path-cinebench');
   setupPathBrowser('btn-select-path-furmark', 'settings-path-furmark');
+  setupPathBrowser('btn-select-path-ssd-utility', 'settings-path-ssd-utility');
+
+  // Welcome, Client settings triggers
+  document.getElementById('btn-client-show-settings').addEventListener('click', openSettingsModal);
+  const welcomeShowSettings = document.getElementById('btn-welcome-show-settings');
+  if (welcomeShowSettings) {
+    welcomeShowSettings.addEventListener('click', openSettingsModal);
+  }
+
+  // Backup Database (JSON) export
+  document.getElementById('btn-settings-backup').addEventListener('click', () => {
+    try {
+      const blob = new Blob([JSON.stringify(appState, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `neoqc_backup_${Date.now()}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      alert("Failed to export backup: " + err.message);
+    }
+  });
+
+  // Restore Database (JSON) upload reader
+  const btnRestore = document.getElementById('btn-settings-restore');
+  const restoreFileInput = document.getElementById('input-settings-restore-file');
+  if (btnRestore && restoreFileInput) {
+    btnRestore.addEventListener('click', () => {
+      restoreFileInput.click();
+    });
+    restoreFileInput.addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      
+      const reader = new FileReader();
+      reader.onload = async (event) => {
+        try {
+          const parsed = JSON.parse(event.target.result);
+          if (parsed && typeof parsed === 'object') {
+            if (confirm("Are you sure you want to restore this backup? This will overwrite your current local database data.")) {
+              // Ensure critical fields exist
+              if (!parsed.tickets) parsed.tickets = [];
+              if (!parsed.technicians) parsed.technicians = ["Adhil", "Amal", "Ananthakrishnan", "Athul"];
+              if (!parsed.rivalBenchmarks) parsed.rivalBenchmarks = [];
+              if (!parsed.settings) parsed.settings = appState.settings;
+              
+              appState = parsed;
+              await saveDatabase();
+              renderDashboard();
+              alert("Database restored successfully!");
+              openSettingsModal(); // Refresh modal
+            }
+          } else {
+            alert("Invalid backup file structure.");
+          }
+        } catch (err) {
+          alert("Error parsing backup JSON: " + err.message);
+        }
+      };
+      reader.readAsText(file);
+      restoreFileInput.value = '';
+    });
+  }
+
+  // Wipe Database reset
+  const btnWipe = document.getElementById('btn-settings-wipe');
+  if (btnWipe) {
+    btnWipe.addEventListener('click', async () => {
+      if (confirm("🚨 WARNING: This will delete ALL tickets, custom technicians, and settings. Are you absolutely sure?")) {
+        appState = {
+          tickets: [],
+          technicians: ["Adhil", "Amal", "Ananthakrishnan", "Athul"],
+          rivalBenchmarks: [
+            { id: "1", name: "Ryzen 5 7600 + RTX 4060", cpu: "Ryzen 5 7600", gpu: "RTX 4060", cinebenchR23: 13800, readSpeed: 5000, writeSpeed: 4000, price: "₹18,500 (~$210)" },
+            { id: "2", name: "Intel i7-14700K + RTX 4070 Ti", cpu: "Core i7-14700K", gpu: "RTX 4070 Ti Super", cinebenchR23: 35000, readSpeed: 7000, writeSpeed: 6000, price: "₹68,000 (~$820)" }
+          ],
+          settings: { 
+            supabaseUrl: "https://ggsxkhenzdhaachubrsc.supabase.co", 
+            supabaseAnonKey: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imdnc3hraGVuemRoYWFjaHVicnNjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE3MTEwNjEsImV4cCI6MjA5NzI4NzA2MX0.bDhUK-qJSgcBEcNdEdOaZGg5vsUF6jH2gbSRQaMhjBo", 
+            pathHwInfo: "", 
+            pathCinebench: "", 
+            pathFurmark: "", 
+            pathSsdUtility: "",
+            isMaster: false,
+            autoDetectHw: false,
+            accentColor: "pink",
+            cpuMaxTemp: 85,
+            gpuMaxTemp: 80,
+            minSsdSpeed: 3000,
+            minSsdWrite: 2500,
+            minCinebench: 10000,
+            minFurmark: 5000,
+            defaultTestDuration: "60",
+            autoPdf: false,
+            soundEnabled: true,
+            disableQcLock: false,
+            defaultTech: "",
+            sortBy: "deadline",
+            shopName: "Neo Tokyo Kochi",
+            contactInfo: "kochi@neotokyo.in"
+          }
+        };
+        await saveDatabase();
+        renderDashboard();
+        alert("Database has been factory reset.");
+        openSettingsModal();
+      }
+    });
+  }
 
   // Filters and search fields triggers
   document.getElementById('search-input').addEventListener('input', renderDashboard);
