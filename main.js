@@ -164,9 +164,10 @@ app.whenReady().then(() => {
     log.error("Error reading app-config.json in main process:", e);
   }
   
-  autoUpdater.allowPrerelease = false;
   autoUpdater.channel = updateChannel;
-  log.info(`Setting autoUpdater channel to: ${updateChannel} (allowPrerelease: false)`);
+  autoUpdater.allowPrerelease = false;
+  autoUpdater.allowDowngrade = false;
+  log.info(`Setting autoUpdater channel to: ${updateChannel} (allowPrerelease: false, allowDowngrade: false)`);
 
   // Auto-updater event logging
   autoUpdater.on('checking-for-update', () => {
