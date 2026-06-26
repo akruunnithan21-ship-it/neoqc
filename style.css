@@ -1999,15 +1999,15 @@
   .port-item-btn {
     background: var(--glass-bg);
     border: 1px solid var(--glass-border);
-    border-radius: 10px;
-    padding: 10px 4px;
+    border-radius: 8px;
+    padding: 12px 6px;
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 6px;
+    gap: 8px;
     cursor: pointer;
-    transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
     user-select: none;
     text-align: center;
     position: relative;
@@ -2017,46 +2017,44 @@
   .port-item-btn:hover {
     border-color: var(--primary-pink);
     transform: translateY(-2px);
-    box-shadow: 0 4px 12px rgba(231, 1, 78, 0.08);
+    box-shadow: 0 4px 15px rgba(231, 1, 78, 0.15);
   }
 
   .port-item-btn .port-icon {
-    font-size: 1.25rem;
+    font-size: 1.4rem;
+    transition: transform 0.25s;
+  }
+
+  .port-item-btn:hover .port-icon {
+    transform: scale(1.15);
   }
 
   .port-item-btn .port-name {
-    font-size: 0.7rem;
+    font-size: 0.68rem;
     font-weight: 700;
     color: var(--text-dark);
     text-transform: uppercase;
-    letter-spacing: 0.02em;
+    letter-spacing: 0.05em;
   }
 
   .port-item-btn .port-indicator {
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: var(--text-muted);
-    transition: all 0.2s ease;
+    display: none !important; /* Hide old circular indicators entirely */
   }
 
   /* Checked/Passed port states */
   .port-item-btn.passed {
-    background: rgba(16, 185, 129, 0.06);
-    border-color: var(--status-completed);
+    background: rgba(16, 185, 129, 0.12) !important;
+    border-color: #10b981 !important;
+    box-shadow: 0 0 12px rgba(16, 185, 129, 0.25) !important;
   }
 
   body.dark-mode .port-item-btn.passed {
-    background: rgba(16, 185, 129, 0.1);
+    background: rgba(16, 185, 129, 0.15) !important;
   }
 
   .port-item-btn.passed .port-name {
-    color: var(--status-completed);
-  }
-
-  .port-item-btn.passed .port-indicator {
-    background: var(--status-completed);
-    box-shadow: 0 0 6px var(--status-completed);
+    color: #10b981 !important;
+    text-shadow: 0 0 4px rgba(16, 185, 129, 0.2);
   }
 
   /* RGB Sync Preview Strip */
@@ -2730,6 +2728,20 @@ body.dark-mode .ticket-card.urgent {
 
 .event-log-section {
   border-top: 1px solid var(--glass-border);
+  transition: all 0.3s ease-in-out;
+}
+
+.event-log-section .section-header-row {
+  cursor: pointer;
+  user-select: none;
+  padding: 4px 12px;
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: 4px;
+  transition: background 0.2s ease-in-out;
+}
+
+.event-log-section .section-header-row:hover {
+  background: rgba(231, 1, 78, 0.05);
 }
 
 .event-log-timeline {
@@ -2739,6 +2751,17 @@ body.dark-mode .ticket-card.urgent {
   padding: 12px 0 4px 0;
   scrollbar-width: thin;
   scrollbar-color: rgba(231,1,78,0.3) transparent;
+  transition: max-height 0.4s cubic-bezier(0.4, 0, 0.2, 1), padding 0.4s ease, opacity 0.3s ease;
+  opacity: 1;
+}
+
+.event-log-section.collapsed .event-log-timeline {
+  max-height: 0;
+  padding-top: 0 !important;
+  padding-bottom: 0 !important;
+  opacity: 0;
+  overflow: hidden;
+  pointer-events: none;
 }
 
 .event-log-timeline::-webkit-scrollbar {
@@ -3066,4 +3089,47 @@ body.dark-mode ::-webkit-scrollbar-thumb {
 }
 body.dark-mode ::-webkit-scrollbar-thumb:hover {
   background: rgba(255, 255, 255, 0.28);
+}
+
+/* Autocomplete Dropdown Styles */
+.autocomplete-container {
+  position: relative;
+}
+.autocomplete-list {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 1000;
+  max-height: 200px;
+  overflow-y: auto;
+  background: rgba(30, 27, 38, 0.98);
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--glass-border);
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+}
+.autocomplete-item {
+  padding: 8px 12px;
+  cursor: pointer;
+  font-size: 0.8rem;
+  color: var(--text-dark);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+  transition: all 0.15s ease;
+}
+.autocomplete-item:hover, .autocomplete-item.active {
+  background: rgba(231, 1, 78, 0.15);
+  color: var(--primary-pink);
+}
+.autocomplete-item:last-child {
+  border-bottom: none;
+}
+
+/* scan items and device list style */
+.port-device-list {
+  animation: slideDown 0.2s ease-out;
+}
+@keyframes slideDown {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
 }

@@ -23,6 +23,12 @@ $tools = @(
         url = "https://installer.maxon.net/cinebench/CinebenchR23.zip"
         destFolder = "Cinebench"
         checkFile = "Cinebench.exe"
+    },
+    @{
+        name = "OpenRGB"
+        url = "https://codeberg.org/OpenRGB/OpenRGB/releases/download/release_0.9/OpenRGB_0.9_Windows_64_b5f46e3.zip"
+        destFolder = "OpenRGB"
+        checkFile = "OpenRGB.exe"
     }
 )
 

@@ -268,7 +268,7 @@ ipcMain.handle('file:read-text', (event, filePath) => {
 // IPC Handler: Auto-Detect System Specs via native Windows PowerShell commands (Dependency-Free!)
 ipcMain.handle('sys:detect-hw', () => {
   return new Promise((resolve) => {
-    const hwSpecs = { cpu: '', gpu: '', ram: '', storage: '' };
+    const hwSpecs = { cpu: '', gpu: '', ram: '', storage: '', motherboard: '' };
 
     // Get CPU Name
     exec('powershell -Command "(Get-CimInstance Win32_Processor).Name"', (err, stdout) => {
@@ -312,22 +312,27 @@ ipcMain.handle('sys:detect-hw', () => {
         hwSpecs.igpu = igpu;
         hwSpecs.dgpu = dgpu;
 
-        // Get RAM capacity (Summed and converted to GB)
-        exec('powershell -Command "[Math]::Round((Get-CimInstance Win32_PhysicalMemory | Measure-Object -Property Capacity -Sum).Sum / 1GB)"', (err, stdout) => {
-          if (!err && stdout) hwSpecs.ram = stdout.trim() + " GB DDR" + (stdout.trim() > 16 ? "4/DDR5" : "");
+        // Get Motherboard Product
+        exec('powershell -Command "(Get-CimInstance Win32_BaseBoard).Product"', (mbErr, mbStdout) => {
+          if (!mbErr && mbStdout) hwSpecs.motherboard = mbStdout.trim();
 
-          // Get primary SSD/Disk friendly name
-          exec('powershell -Command "(Get-PhysicalDisk | Where-Object MediaType -eq \'SSD\' | Select-Object -First 1).FriendlyName"', (err, stdout) => {
-            if (!err && stdout && stdout.trim()) {
-              hwSpecs.storage = stdout.trim() + " (SSD)";
-            } else {
-              exec('powershell -Command "(Get-PhysicalDisk | Select-Object -First 1).FriendlyName"', (err, stdout) => {
-                if (!err && stdout) hwSpecs.storage = stdout.trim();
-                resolve(hwSpecs);
-              });
-              return;
-            }
-            resolve(hwSpecs);
+          // Get RAM capacity (Summed and converted to GB)
+          exec('powershell -Command "[Math]::Round((Get-CimInstance Win32_PhysicalMemory | Measure-Object -Property Capacity -Sum).Sum / 1GB)"', (err, stdout) => {
+            if (!err && stdout) hwSpecs.ram = stdout.trim() + " GB DDR" + (stdout.trim() > 16 ? "4/DDR5" : "");
+
+            // Get primary SSD/Disk friendly name
+            exec('powershell -Command "(Get-PhysicalDisk | Where-Object MediaType -eq \'SSD\' | Select-Object -First 1).FriendlyName"', (err, stdout) => {
+              if (!err && stdout && stdout.trim()) {
+                hwSpecs.storage = stdout.trim() + " (SSD)";
+              } else {
+                exec('powershell -Command "(Get-PhysicalDisk | Select-Object -First 1).FriendlyName"', (err, stdout) => {
+                  if (!err && stdout) hwSpecs.storage = stdout.trim();
+                  resolve(hwSpecs);
+                });
+                return;
+              }
+              resolve(hwSpecs);
+            });
           });
         });
       });
@@ -768,11 +773,8 @@ ipcMain.handle('sys:check-port-hardware', async (event, portType) => {
 
   try {
     if (portType === 'rgb') {
-      return new Promise((resolve) => {
-        const launcherPath = path.join(process.env.LOCALAPPDATA, 'VortxEngine', 'SignalRgbLauncher.exe');
-        const hasSyncSoftware = fs.existsSync(launcherPath);
-        resolve({ passed: hasSyncSoftware, hasSyncSoftware });
-      });
+      const openRgbPath = findOpenRgbExecutable();
+      return await listOpenRgbDevices(openRgbPath);
     }
 
     return new Promise((resolve) => {
@@ -825,102 +827,114 @@ function estimateCinebenchScore(cpuName, isSingleCore) {
   }
 }
 
-// IPC Handler: Check if SignalRGB is installed
-ipcMain.handle('sys:check-signalrgb', () => {
-  const launcherPath = path.join(process.env.LOCALAPPDATA, 'VortxEngine', 'SignalRgbLauncher.exe');
-  return fs.existsSync(launcherPath);
-});
+// Helper: Find OpenRGB Executable path
+function findOpenRgbExecutable() {
+  const diagnosticsPath = app.isPackaged 
+    ? path.join(process.resourcesPath, 'app.asar.unpacked', 'assets', 'diagnostics')
+    : path.join(__dirname, 'assets', 'diagnostics');
+  const bundledOpenRgb = path.join(diagnosticsPath, 'OpenRGB', 'OpenRGB.exe');
+  const bundledOpenRgbNested = path.join(diagnosticsPath, 'OpenRGB', 'OpenRGB Windows 64-bit', 'OpenRGB.exe');
+  
+  const openRgbCommon = [
+    bundledOpenRgb,
+    bundledOpenRgbNested,
+    path.join(process.env.PROGRAMFILES || 'C:\\Program Files', 'OpenRGB', 'OpenRGB.exe'),
+    path.join(process.env['PROGRAMFILES(X86)'] || 'C:\\Program Files (x86)', 'OpenRGB', 'OpenRGB.exe'),
+    path.join(app.getPath('userData'), 'OpenRGB', 'OpenRGB.exe'),
+    path.join(app.getPath('userData'), 'OpenRGB.exe'),
+    'C:\\OpenRGB\\OpenRGB.exe'
+  ];
 
-// IPC Handler: Apply RGB color/presets to SignalRGB via launcher URL protocol
-ipcMain.handle('sys:apply-rgb', (event, { mode, color, brightness }) => {
+  for (const p of openRgbCommon) {
+    if (fs.existsSync(p)) return p;
+  }
+  return '';
+}
+
+// Helper: Parse OpenRGB Devices
+function listOpenRgbDevices(openRgbPath) {
   return new Promise((resolve) => {
-    const launcherPath = path.join(process.env.LOCALAPPDATA, 'VortxEngine', 'SignalRgbLauncher.exe');
-    if (!fs.existsSync(launcherPath)) {
-      resolve({ success: false, error: 'SignalRGB not installed' });
+    if (!openRgbPath) {
+      resolve({ passed: false, devices: [], count: 0 });
       return;
     }
-
-    let uri = '';
-    const hex = (color || '#ffffff').replace('#', '').toUpperCase();
-    const brightnessVal = Math.min(100, Math.max(0, parseInt(brightness) || 80));
-
-    if (mode === 'static') {
-      uri = `signalrgb://effect/apply/Solid%20Color?color=${hex}&brightness=${brightnessVal}`;
-    } else if (mode === 'rainbow') {
-      uri = `signalrgb://effect/apply/Rainbow?brightness=${brightnessVal}`;
-    } else if (mode === 'breathing') {
-      uri = `signalrgb://effect/apply/Breathing?color=${hex}&brightness=${brightnessVal}`;
-    } else if (mode === 'cycle') {
-      uri = `signalrgb://effect/apply/Color%20Cycle?brightness=${brightnessVal}`;
-    } else if (mode === 'off') {
-      uri = `signalrgb://effect/apply/Solid%20Color?color=000000&brightness=0`;
-    }
-
-    if (uri) {
-      // Execute the launcher with --url option and -silentlaunch- to avoid popping up the GUI
-      const cmd = `"${launcherPath}" --url "${uri}&-silentlaunch-"`;
-      exec(cmd, (err) => {
-        if (err) {
-          console.error("SignalRGB apply error:", err);
-          resolve({ success: false, error: err.message });
-        } else {
-          resolve({ success: true });
+    exec(`"${openRgbPath}" --list-devices`, (err, stdout) => {
+      if (err || !stdout) {
+        resolve({ passed: false, devices: [], count: 0 });
+        return;
+      }
+      
+      const devices = [];
+      const lines = stdout.split(/\r?\n/);
+      for (const line of lines) {
+        const match = line.match(/Device\s+\d+:\s*(.+)/i);
+        if (match) {
+          devices.push(match[1].trim());
         }
+      }
+      resolve({
+        passed: devices.length > 0,
+        devices: devices,
+        count: devices.length
       });
-    } else {
-      resolve({ success: false, error: 'Invalid mode' });
-    }
+    });
   });
+}
+
+// IPC Handler: List local RGB devices via OpenRGB CLI
+ipcMain.handle('rgb:list-devices', async () => {
+  const openRgbPath = findOpenRgbExecutable();
+  return await listOpenRgbDevices(openRgbPath);
 });
 
-const https = require('https');
-// IPC Handler: Download and run SignalRGB installer
-ipcMain.handle('sys:download-install-signalrgb', async (event) => {
-  const installerUrl = 'https://www.signalrgb.com/download/Install%20SignalRGB.exe';
-  const tempInstallerPath = path.join(os.tmpdir(), 'Install_SignalRGB.exe');
+// IPC Handler: Apply colors or effects via OpenRGB CLI
+ipcMain.handle('rgb:set-color', async (event, { mode, color, brightness }) => {
+  const openRgbPath = findOpenRgbExecutable();
+  if (!openRgbPath) {
+    return { success: false, error: 'OpenRGB not found' };
+  }
+
+  let hex = (color || '#ffffff').replace('#', '');
+  if (hex.length === 3) {
+    hex = hex.split('').map(c => c + c).join('');
+  }
   
-  event.sender.send('sys:diag-log', "[RGB] Downloading SignalRGB installer from official website...");
+  // Scale color based on brightness
+  const b = Math.min(100, Math.max(0, parseInt(brightness) || 100)) / 100;
+  let redVal = Math.round(parseInt(hex.substring(0, 2), 16) * b);
+  let greenVal = Math.round(parseInt(hex.substring(2, 4), 16) * b);
+  let blueVal = Math.round(parseInt(hex.substring(4, 6), 16) * b);
+  
+  const scaledHex = [redVal, greenVal, blueVal]
+    .map(c => String(c.toString(16)).padStart(2, '0'))
+    .join('')
+    .toUpperCase();
+
+  let args = '';
+  if (mode === 'static') {
+    args = `-m static -c ${scaledHex}`;
+  } else if (mode === 'breathing') {
+    args = `-m breathing -c ${scaledHex}`;
+  } else if (mode === 'rainbow') {
+    args = `-m rainbow`;
+  } else if (mode === 'off') {
+    args = `-m static -c 000000`;
+  } else {
+    args = `-m static -c ${scaledHex}`;
+  }
+
+  const cmd = `"${openRgbPath}" ${args}`;
+  console.log(`Executing OpenRGB Command: ${cmd}`);
   
   return new Promise((resolve) => {
-    const file = fs.createWriteStream(tempInstallerPath);
-    
-    function download(urlToGet) {
-      https.get(urlToGet, {
-        headers: { 'User-Agent': 'Mozilla/5.0' }
-      }, (response) => {
-        if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
-          download(response.headers.location);
-          return;
-        }
-        
-        if (response.statusCode !== 200) {
-          resolve({ success: false, error: `Download failed with HTTP ${response.statusCode}` });
-          return;
-        }
-        
-        response.pipe(file);
-        
-        file.on('finish', () => {
-          file.close();
-          event.sender.send('sys:diag-log', "[RGB] Download completed. Launching SignalRGB installation wizard...");
-          
-          // Execute installer
-          exec(`"${tempInstallerPath}"`, (err) => {
-            if (err) {
-              console.error("Installer execution error:", err);
-              resolve({ success: false, error: err.message });
-            } else {
-              resolve({ success: true });
-            }
-          });
-        });
-      }).on('error', (err) => {
-        fs.unlink(tempInstallerPath, () => {});
+    exec(cmd, (err) => {
+      if (err) {
+        console.error("OpenRGB apply error:", err);
         resolve({ success: false, error: err.message });
-      });
-    }
-    
-    download(installerUrl);
+      } else {
+        resolve({ success: true });
+      }
+    });
   });
 });
 

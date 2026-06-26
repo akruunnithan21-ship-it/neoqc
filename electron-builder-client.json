@@ -12,8 +12,10 @@
   "nsis": {
     "oneClick": false,
     "allowToChangeInstallationDirectory": true,
-    "deleteAppDataOnUninstall": true,
-    "artifactName": "NeoQC-Client-Setup-${version}.${ext}"
+    "deleteAppDataOnUninstall": true
+  },
+  "portable": {
+    "artifactName": "NeoQC.exe"
   },
   "publish": {
     "provider": "github",
@@ -25,6 +27,6 @@
     "assets/diagnostics/**"
   ],
   "directories": {
-    "output": "dist"
+    "output": "C:/Users/Aladeen/Desktop/final build"
   }
 }

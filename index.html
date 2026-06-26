@@ -228,26 +228,57 @@
         <h2>Target PC Diagnostic Panel</h2>
         <p class="card-subtitle">Connect this PC to an active ticket to run automated benchmarks and thermal analysis.</p>
         
-        <!-- Ticket Association -->
-        <div class="form-group">
-          <label for="client-ticket-select">Select Active Build / Service Ticket:</label>
-          <select id="client-ticket-select" class="large-select">
-            <option value="">-- Choose Ticket --</option>
-          </select>
+        <!-- Ticket Association Redesigned -->
+        <div class="ticket-association-panel" style="background: rgba(231,1,78,0.04); border: 1px solid rgba(231,1,78,0.15); padding: 14px; border-radius: 12px; margin-bottom: 20px;">
+          <label style="font-weight: 700; color: var(--primary-pink); display: block; margin-bottom: 8px; font-size: 0.82rem; text-transform: uppercase; letter-spacing: 0.05em;">🔗 Connect to Active Ticket</label>
+          <div style="display: flex; gap: 12px; align-items: center;">
+            <input type="text" id="client-ticket-input" placeholder="Type Ticket ID (e.g. #AB12CD)" class="large-select" style="flex-grow: 1; padding: 8px 12px; background: rgba(0,0,0,0.25); border: 1px solid var(--glass-border); color: white; border-radius: 6px; font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; outline: none; transition: border-color 0.2s;" onfocus="this.style.borderColor='var(--primary-pink)'" onblur="this.style.borderColor='var(--glass-border)'">
+            <span style="color: var(--text-muted); font-size: 0.75rem; font-weight: 700;">OR</span>
+            <select id="client-ticket-select" class="large-select" style="flex-grow: 1; padding: 8px 12px; border-radius: 6px; background: rgba(0,0,0,0.25); border: 1px solid var(--glass-border); color: white; font-size: 0.85rem; outline: none; transition: border-color 0.2s;" onfocus="this.style.borderColor='var(--primary-pink)'" onblur="this.style.borderColor='var(--glass-border)'">
+              <option value="">-- Choose Ticket --</option>
+            </select>
+          </div>
         </div>
 
         <div class="client-grid-row">
-          <!-- Hardware specs auto detect -->
+          <!-- Hardware specs auto detect Redesigned -->
           <div class="client-panel">
-            <h3>1. Target Specifications</h3>
-            <button id="btn-client-detect-hw" class="primary-pink-btn full-width">🔍 Auto-Detect System Specs</button>
-            <div class="specs-readout">
-              <div class="spec-item"><span class="spec-label">CPU:</span> <span id="c-spec-cpu" class="spec-val font-mono">Not detected</span></div>
-              <div class="spec-item"><span class="spec-label">iGPU:</span> <span id="c-spec-igpu" class="spec-val font-mono">Not detected</span></div>
-              <div class="spec-item"><span class="spec-label">dGPU:</span> <span id="c-spec-gpu" class="spec-val font-mono">Not detected</span></div>
-              <div class="spec-item"><span class="spec-label">RAM:</span> <span id="c-spec-ram" class="spec-val font-mono">Not detected</span></div>
-              <div class="spec-item"><span class="spec-label">SSD:</span> <span id="c-spec-storage" class="spec-val font-mono">Not detected</span></div>
+            <h3>1. Specification Verification</h3>
+            
+            <div class="specs-comparison-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+              <!-- Target Specs -->
+              <div class="spec-column target-specs" style="background: rgba(255,255,255,0.02); border: 1px solid var(--glass-border); padding: 10px; border-radius: 8px;">
+                <h4 style="font-size: 0.7rem; color: var(--primary-pink); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 8px; margin-top: 0;">📋 Target Specs</h4>
+                <div class="specs-readout" style="display: flex; flex-direction: column; gap: 6px;">
+                  <div class="spec-item"><span class="spec-label">Mobo:</span> <span id="c-target-mobo" class="spec-val font-mono" style="font-size: 0.72rem; color: var(--text-dark); word-break: break-all;">--</span></div>
+                  <div class="spec-item"><span class="spec-label">CPU:</span> <span id="c-target-cpu" class="spec-val font-mono" style="font-size: 0.72rem; color: var(--text-dark); word-break: break-all;">--</span></div>
+                  <div class="spec-item"><span class="spec-label">GPU:</span> <span id="c-target-gpu" class="spec-val font-mono" style="font-size: 0.72rem; color: var(--text-dark); word-break: break-all;">--</span></div>
+                  <div class="spec-item"><span class="spec-label">RAM:</span> <span id="c-target-ram" class="spec-val font-mono" style="font-size: 0.72rem; color: var(--text-dark); word-break: break-all;">--</span></div>
+                  <div class="spec-item"><span class="spec-label">SSD:</span> <span id="c-target-storage" class="spec-val font-mono" style="font-size: 0.72rem; color: var(--text-dark); word-break: break-all;">--</span></div>
+                  <div class="spec-item"><span class="spec-label">Cooler:</span> <span id="c-target-cooler" class="spec-val font-mono" style="font-size: 0.72rem; color: var(--text-dark); word-break: break-all;">--</span></div>
+                  <div class="spec-item"><span class="spec-label">PSU:</span> <span id="c-target-psu" class="spec-val font-mono" style="font-size: 0.72rem; color: var(--text-dark); word-break: break-all;">--</span></div>
+                  <div class="spec-item"><span class="spec-label">Case:</span> <span id="c-target-case" class="spec-val font-mono" style="font-size: 0.72rem; color: var(--text-dark); word-break: break-all;">--</span></div>
+                </div>
+              </div>
+              <!-- Detected Specs -->
+              <div class="spec-column detected-specs" style="background: rgba(255,255,255,0.02); border: 1px solid var(--glass-border); padding: 10px; border-radius: 8px;">
+                <h4 style="font-size: 0.7rem; color: #10b981; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 8px; margin-top: 0;">🔍 Detected Specs</h4>
+                <div class="specs-readout" style="display: flex; flex-direction: column; gap: 6px;">
+                  <div class="spec-item"><span class="spec-label">Mobo:</span> <span id="c-spec-mobo" class="spec-val font-mono" style="font-size: 0.72rem; color: var(--text-dark); word-break: break-all;">Not detected</span></div>
+                  <div class="spec-item"><span class="spec-label">CPU:</span> <span id="c-spec-cpu" class="spec-val font-mono" style="font-size: 0.72rem; color: var(--text-dark); word-break: break-all;">Not detected</span></div>
+                  <div class="spec-item"><span class="spec-label">GPU:</span> <span id="c-spec-gpu" class="spec-val font-mono" style="font-size: 0.72rem; color: var(--text-dark); word-break: break-all;">Not detected</span></div>
+                  <div class="spec-item"><span class="spec-label">RAM:</span> <span id="c-spec-ram" class="spec-val font-mono" style="font-size: 0.72rem; color: var(--text-dark); word-break: break-all;">Not detected</span></div>
+                  <div class="spec-item"><span class="spec-label">SSD:</span> <span id="c-spec-storage" class="spec-val font-mono" style="font-size: 0.72rem; color: var(--text-dark); word-break: break-all;">Not detected</span></div>
+                  <div class="spec-item" style="display: flex; align-items: center; justify-content: space-between;"><span class="spec-label">Cooler:</span> <label style="font-size:0.68rem; display:flex; align-items:center; gap:2px; cursor:pointer; color: var(--text-dark);"><input type="checkbox" id="c-verify-cooler"> Verified</label></div>
+                  <div class="spec-item" style="display: flex; align-items: center; justify-content: space-between;"><span class="spec-label">PSU:</span> <label style="font-size:0.68rem; display:flex; align-items:center; gap:2px; cursor:pointer; color: var(--text-dark);"><input type="checkbox" id="c-verify-psu"> Verified</label></div>
+                  <div class="spec-item" style="display: flex; align-items: center; justify-content: space-between;"><span class="spec-label">Case:</span> <label style="font-size:0.68rem; display:flex; align-items:center; gap:2px; cursor:pointer; color: var(--text-dark);"><input type="checkbox" id="c-verify-case"> Verified</label></div>
+                </div>
+              </div>
             </div>
+            
+            <button id="btn-client-detect-hw" class="primary-pink-btn full-width margin-top">🔍 Auto-Detect Local Specs</button>
+            <div id="specs-match-status" class="margin-top hidden" style="text-align: center; font-size: 0.75rem; font-weight: bold; padding: 6px; border-radius: 6px; border: 1px dashed transparent;"></div>
+
             <button id="btn-client-check-win" class="secondary-btn full-width margin-top">🛡️ Check Windows Activation State</button>
             <div id="client-win-status" class="win-activation-status margin-top">
               <span>Activation Status</span>
@@ -260,121 +291,74 @@
 
             <!-- Port & RGB Sync Verification Checker -->
             <div class="port-rgb-checker-section margin-top">
-              <h4 style="color: var(--primary-pink); font-size: 0.82rem; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 12px; display: flex; align-items: center; gap: 6px;">🔌 Port & RGB Sync Verification</h4>
+              <h4 style="color: var(--primary-pink); font-size: 0.82rem; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 12px; display: flex; align-items: center; gap: 6px;">🔌 Port Verification &amp; RGB Sync</h4>
               
-              <!-- Interactive Visual Ports Grid -->
-              <div class="ports-grid">
-                <div class="port-item-btn" id="btn-port-usb" data-checked="false">
-                  <span class="port-icon">🔌</span>
-                  <span class="port-name">USB Ports</span>
-                  <span class="port-indicator"></span>
-                </div>
-                <div class="port-item-btn" id="btn-port-video" data-checked="false">
-                  <span class="port-icon">🖥️</span>
-                  <span class="port-name">HDMI / DP</span>
-                  <span class="port-indicator"></span>
-                </div>
-                <div class="port-item-btn" id="btn-port-audio" data-checked="false">
-                  <span class="port-icon">🎧</span>
-                  <span class="port-name">Audio Jacks</span>
-                  <span class="port-indicator"></span>
-                </div>
-                <div class="port-item-btn" id="btn-port-rgb" data-checked="false">
-                  <span class="port-icon">🌈</span>
-                  <span class="port-name">RGB Synced</span>
-                  <span class="port-indicator"></span>
-                </div>
-              </div>
-
-              <!-- Collapsible Hardware Connections Details -->
-              <div id="c-port-details-container" class="port-details-container hidden margin-top">
-                <div class="port-details-header">🔌 Detected Connections Details</div>
-                <div id="c-port-details-list" class="port-details-list"></div>
-              </div>
-              
-              <!-- Interactive RGB Sync Controller Card -->
-              <div class="rgb-control-card margin-top">
-                <h4 style="color: var(--primary-pink); font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 10px; display: flex; align-items: center; gap: 6px;">🌈 Live ARGB Sync & Controller Test</h4>
-                
-                <div class="rgb-controller-wrapper">
-                  <!-- CSS/HTML PC Chassis Mockup -->
-                  <div class="pc-chassis-preview">
-                    <div class="pc-case">
-                      <!-- Rear Fan -->
-                      <div class="pc-fan fan-rear rgb-element" id="rgb-fan-rear">
-                        <div class="fan-blades"></div>
-                      </div>
-                      <!-- Front Fans -->
-                      <div class="front-fans-column">
-                        <div class="pc-fan fan-front rgb-element" id="rgb-fan-front-1"><div class="fan-blades"></div></div>
-                        <div class="pc-fan fan-front rgb-element" id="rgb-fan-front-2"><div class="fan-blades"></div></div>
-                        <div class="pc-fan fan-front rgb-element" id="rgb-fan-front-3"><div class="fan-blades"></div></div>
-                      </div>
-                      <!-- CPU Cooler -->
-                      <div class="pc-cpu-cooler rgb-element" id="rgb-cpu-cooler">
-                        <div class="cooler-pump"></div>
-                      </div>
-                      <!-- RAM modules -->
-                      <div class="pc-ram-strips">
-                        <div class="pc-ram rgb-element" id="rgb-ram-1"></div>
-                        <div class="pc-ram rgb-element" id="rgb-ram-2"></div>
-                      </div>
-                      <!-- GPU Glow -->
-                      <div class="pc-gpu rgb-element" id="rgb-gpu-glow"></div>
-                      <!-- LED strip -->
-                      <div class="pc-led-strip rgb-element" id="rgb-led-strip"></div>
+              <div style="display: flex; flex-direction: column; gap: 12px;">
+                <!-- USB Ports Scanner -->
+                <div class="glass-slab scan-item-card" style="background: rgba(255,255,255,0.02); border: 1px solid var(--glass-border); padding: 10px; border-radius: 8px;">
+                  <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <span style="font-weight: 700; font-size: 0.8rem; color: var(--text-dark);"><span style="margin-right:6px;">🔌</span>USB Ports</span>
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                      <button type="button" id="btn-scan-usb" class="secondary-btn" style="padding: 4px 8px; font-size: 0.72rem;">Scan Ports</button>
+                      <span id="badge-port-usb" class="badge red">Pending</span>
                     </div>
                   </div>
+                  <div id="list-port-usb" class="port-device-list hidden" style="font-size: 0.7rem; color: var(--text-muted); margin-top: 8px; font-family: 'JetBrains Mono', monospace; background: rgba(0,0,0,0.15); padding: 6px 10px; border-radius: 6px; max-height: 80px; overflow-y: auto;"></div>
+                </div>
 
-                  <!-- Controller inputs -->
-                  <div class="rgb-controls">
-                    <div class="form-group mini">
-                      <label>Effect Mode</label>
-                      <select id="rgb-mode-select" class="rgb-select">
-                        <option value="rainbow">Rainbow Flow</option>
-                        <option value="static">Static Color</option>
-                        <option value="breathing">Breathing</option>
-                        <option value="cycle">Color Cycle</option>
-                        <option value="off">Off (Disable)</option>
-                      </select>
+                <!-- Video Outputs Scanner -->
+                <div class="glass-slab scan-item-card" style="background: rgba(255,255,255,0.02); border: 1px solid var(--glass-border); padding: 10px; border-radius: 8px;">
+                  <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <span style="font-weight: 700; font-size: 0.8rem; color: var(--text-dark);"><span style="margin-right:6px;">🖥️</span>Video Outputs (HDMI / DP)</span>
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                      <button type="button" id="btn-scan-video" class="secondary-btn" style="padding: 4px 8px; font-size: 0.72rem;">Scan Displays</button>
+                      <span id="badge-port-video" class="badge red">Pending</span>
                     </div>
-                    <div class="form-group mini" id="rgb-color-group" style="display: none;">
-                      <label>Custom Color</label>
-                      <div class="rgb-color-picker-row">
-                        <input type="color" id="rgb-color-picker" value="#e7014e">
-                        <div class="rgb-presets">
-                          <span class="preset-dot" style="background: #ff0000;" data-color="#ff0000"></span>
-                          <span class="preset-dot" style="background: #00ff00;" data-color="#00ff00"></span>
-                          <span class="preset-dot" style="background: #0000ff;" data-color="#0000ff"></span>
-                          <span class="preset-dot" style="background: #e7014e;" data-color="#e7014e"></span>
-                          <span class="preset-dot" style="background: #a855f7;" data-color="#a855f7"></span>
-                          <span class="preset-dot" style="background: #eab308;" data-color="#eab308"></span>
-                        </div>
+                  </div>
+                  <div id="list-port-video" class="port-device-list hidden" style="font-size: 0.7rem; color: var(--text-muted); margin-top: 8px; font-family: 'JetBrains Mono', monospace; background: rgba(0,0,0,0.15); padding: 6px 10px; border-radius: 6px; max-height: 80px; overflow-y: auto;"></div>
+                </div>
+
+                <!-- Audio Jacks Scanner -->
+                <div class="glass-slab scan-item-card" style="background: rgba(255,255,255,0.02); border: 1px solid var(--glass-border); padding: 10px; border-radius: 8px;">
+                  <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <span style="font-weight: 700; font-size: 0.8rem; color: var(--text-dark);"><span style="margin-right:6px;">🎧</span>Audio Jacks</span>
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                      <button type="button" id="btn-scan-audio" class="secondary-btn" style="padding: 4px 8px; font-size: 0.72rem;">Scan Audio</button>
+                      <span id="badge-port-audio" class="badge red">Pending</span>
+                    </div>
+                  </div>
+                  <div id="list-port-audio" class="port-device-list hidden" style="font-size: 0.7rem; color: var(--text-muted); margin-top: 8px; font-family: 'JetBrains Mono', monospace; background: rgba(0,0,0,0.15); padding: 6px 10px; border-radius: 6px; max-height: 80px; overflow-y: auto;"></div>
+                </div>
+
+                <!-- RGB Devices Scanner -->
+                <div class="glass-slab scan-item-card" style="background: rgba(255,255,255,0.02); border: 1px solid var(--glass-border); padding: 10px; border-radius: 8px;">
+                  <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <span style="font-weight: 700; font-size: 0.8rem; color: var(--text-dark);"><span style="margin-right:6px;">🌈</span>OpenRGB Controller</span>
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                      <button type="button" id="btn-scan-rgb" class="secondary-btn" style="padding: 4px 8px; font-size: 0.72rem;">Scan RGB</button>
+                      <span id="badge-port-rgb" class="badge red">Pending</span>
+                    </div>
+                  </div>
+                  <div id="list-port-rgb" class="port-device-list hidden" style="font-size: 0.7rem; color: var(--text-muted); margin-top: 8px; font-family: 'JetBrains Mono', monospace; background: rgba(0,0,0,0.15); padding: 6px 10px; border-radius: 6px; max-height: 80px; overflow-y: auto;"></div>
+
+                  <!-- OpenRGB Actions Panel -->
+                  <div id="openrgb-control-panel" class="hidden" style="margin-top: 10px; border-top: 1px solid var(--glass-border); padding-top: 10px;">
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                      <div class="form-group mini">
+                        <label style="font-size:0.75rem; color: var(--text-muted);">Effect Mode</label>
+                        <select id="openrgb-mode" style="width: 100%; padding: 4px; font-size: 0.75rem; border-radius: 4px; border: 1px solid var(--glass-border); background: var(--glass-bg); color: var(--text-dark);">
+                          <option value="static">Static Color</option>
+                          <option value="breathing">Breathing</option>
+                          <option value="rainbow">Rainbow / Cycle</option>
+                          <option value="off">Off</option>
+                        </select>
+                      </div>
+                      <div class="form-group mini" id="openrgb-color-group">
+                        <label style="font-size:0.75rem; color: var(--text-muted);">Select Color</label>
+                        <input type="color" id="openrgb-color-picker" value="#e7014e" style="width: 100%; height: 26px; padding: 0; border: none; border-radius: 4px; cursor: pointer;">
                       </div>
                     </div>
-                    <div class="form-group mini">
-                      <label>Sync Channels</label>
-                      <div class="rgb-channels-grid">
-                        <label class="channel-cb"><input type="checkbox" id="rgb-ch-fans" checked> Fans</label>
-                        <label class="channel-cb"><input type="checkbox" id="rgb-ch-ram" checked> RAM</label>
-                        <label class="channel-cb"><input type="checkbox" id="rgb-ch-cooler" checked> Cooler</label>
-                        <label class="channel-cb"><input type="checkbox" id="rgb-ch-strips" checked> LED Strip</label>
-                      </div>
-                    </div>
-                    <div class="form-group mini">
-                      <label>Sync Speed</label>
-                      <input type="range" id="rgb-speed-slider" min="1" max="5" value="3" style="width: 100%;">
-                    </div>
-                    <div class="form-group mini">
-                      <label>Brightness <span id="rgb-brightness-label" style="font-weight:700; color: var(--primary-pink);">80%</span></label>
-                      <input type="range" id="rgb-brightness-slider" min="0" max="100" value="80" style="width: 100%;">
-                    </div>
-                    <button type="button" id="btn-apply-rgb-sync" class="secondary-btn full-width margin-top" style="padding: 6px; font-size: 0.8rem; font-weight: bold;">Apply & Sync Hardware</button>
-                    
-                    <div id="signalrgb-install-container" class="margin-top hidden" style="border: 1px solid var(--primary-pink); background: rgba(231,1,78,0.1); border-radius: 8px; padding: 10px; text-align: center;">
-                      <p style="font-size: 0.72rem; margin-bottom: 6px; color: var(--text-light); line-height: 1.3;">SignalRGB is required for native lighting control but was not detected.</p>
-                      <button type="button" id="btn-download-signalrgb" class="primary-pink-btn" style="padding: 4px 10px; font-size: 0.7rem; width: 100%;">Download & Install SignalRGB</button>
-                    </div>
+                    <button type="button" id="btn-apply-openrgb" class="primary-pink-btn full-width" style="padding: 6px; font-size: 0.75rem; margin-top: 8px; font-weight: bold;">Apply Lighting Effect</button>
                   </div>
                 </div>
               </div>
@@ -609,6 +593,58 @@
                   <input type="checkbox" id="form-missing-components-toggle">
                   <input type="text" id="form-missing-components" disabled placeholder="Specify missing parts (e.g. RAM, GPU)">
                 </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- TARGET BUILD SPECIFICATIONS -->
+          <div class="form-section margin-top">
+            <h3>⚙️ Target Build Specifications</h3>
+            <p class="panel-info-text">Enter the target components for this build. Autocomplete search suggestions will appear as you type.</p>
+            <div class="form-grid-2">
+              <div class="form-group autocomplete-container">
+                <label for="form-spec-mobo">Motherboard *</label>
+                <input type="text" id="form-spec-mobo" required placeholder="Search or type Motherboard Model...">
+                <div id="autocomplete-mobo" class="autocomplete-list"></div>
+              </div>
+              <div class="form-group autocomplete-container">
+                <label for="form-spec-cpu">Processor (CPU) *</label>
+                <input type="text" id="form-spec-cpu" required placeholder="Search or type CPU Model...">
+                <div id="autocomplete-cpu" class="autocomplete-list"></div>
+              </div>
+              <div class="form-group autocomplete-container">
+                <label for="form-spec-gpu">Graphics Card (GPU) *</label>
+                <input type="text" id="form-spec-gpu" required placeholder="Search or type GPU Model (or Integrated)...">
+                <div id="autocomplete-gpu" class="autocomplete-list"></div>
+              </div>
+              <div class="form-group autocomplete-container">
+                <label for="form-spec-ram">Memory (RAM) *</label>
+                <input type="text" id="form-spec-ram" required placeholder="Search or type RAM Model & Size...">
+                <div id="autocomplete-ram" class="autocomplete-list"></div>
+              </div>
+              <div class="form-group autocomplete-container">
+                <label for="form-spec-storage">SSD / Storage *</label>
+                <input type="text" id="form-spec-storage" required placeholder="Search or type Storage Model...">
+                <div id="autocomplete-storage" class="autocomplete-list"></div>
+              </div>
+              <div class="form-group" style="grid-column: span 2;">
+                <label>CPU Cooler Type &amp; Model *</label>
+                <div style="display: flex; gap: 16px; align-items: center; margin-bottom: 8px;">
+                  <label class="radio-label"><input type="radio" name="form-spec-cooler-type" value="stock" checked> Stock Cooler</label>
+                  <label class="radio-label"><input type="radio" name="form-spec-cooler-type" value="air"> Air Cooler</label>
+                  <label class="radio-label"><input type="radio" name="form-spec-cooler-type" value="aio"> AIO Liquid Cooler</label>
+                </div>
+                <input type="text" id="form-spec-cooler-model" class="hidden" placeholder="Enter Cooler Model name...">
+              </div>
+              <div class="form-group autocomplete-container">
+                <label for="form-spec-psu">Power Supply (PSU) *</label>
+                <input type="text" id="form-spec-psu" required placeholder="Search or type PSU Model...">
+                <div id="autocomplete-psu" class="autocomplete-list"></div>
+              </div>
+              <div class="form-group autocomplete-container">
+                <label for="form-spec-case">Case / Cabinet *</label>
+                <input type="text" id="form-spec-case" required placeholder="Search or type Cabinet Model...">
+                <div id="autocomplete-case" class="autocomplete-list"></div>
               </div>
             </div>
           </div>
@@ -885,6 +921,8 @@
 
           </div>
 
+
+
           <!-- SERIAL NUMBERS & INVOICE REFERENCE -->
           <div id="serials-section" class="form-section margin-top locked">
             <div class="locked-overlay"></div>
@@ -918,9 +956,9 @@
         </div>
 
         <!-- ACTIVITY LOG / EVENT HISTORY TIMELINE -->
-        <div class="form-section margin-top event-log-section">
-          <div class="section-header-row">
-            <h3>📋 Activity Log &amp; Event History</h3>
+        <div class="form-section margin-top event-log-section collapsed">
+          <div class="section-header-row" id="event-log-header">
+            <h3 id="event-log-heading">📋 Activity Log &amp; Event History</h3>
             <span class="badge" style="background: rgba(231,1,78,0.15); color: var(--primary-pink); border: 1px solid rgba(231,1,78,0.3);">Chronological</span>
           </div>
           <div id="modal-event-log-timeline" class="event-log-timeline">
@@ -1375,21 +1413,20 @@
     <div class="glass-slab modal-card" style="max-width: 650px; width: 100%; padding: 30px; border-radius: 20px;">
       <div class="modal-header" style="border-bottom: 1px solid var(--glass-border); padding-bottom: 15px; margin-bottom: 20px;">
         <h2 style="font-family: 'Syncopate', sans-serif; font-size: 1.3rem; color: var(--primary-pink); letter-spacing: 0.05em; margin: 0;">NEO QC UPDATED</h2>
-        <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; font-weight: 700; background: rgba(231, 1, 78, 0.1); color: var(--primary-pink); padding: 4px 8px; border-radius: 4px;">v1.0.5.1</span>
+        <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; font-weight: 700; background: rgba(231, 1, 78, 0.1); color: var(--primary-pink); padding: 4px 8px; border-radius: 4px;">v1.1.0</span>
       </div>
       <div class="modal-body" style="font-size: 0.92rem; line-height: 1.6; color: var(--text-dark); max-height: 420px; overflow-y: auto; padding-right: 5px;">
-        <p style="margin-top: 0;">An update has been installed. Here are the key improvements in NeoQC <strong>v1.0.5.1</strong>:</p>
+        <p style="margin-top: 0;">An update has been installed. Here are the key improvements in NeoQC <strong>v1.1.0</strong>:</p>
         <ul style="padding-left: 20px; display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px;">
-          <li><strong>🔑 Windows License Tracker Auto-Detect</strong>: Added a compact Windows License Tracker next to the QC checklist in the Admin app, complete with a single-click Auto-Detect button.</li>
-          <li><strong>🛡️ Direct Checkbox Integration</strong>: Ticking Auto-Detect runs the licensing scan on the current machine and automatically checks the "Windows Activated" task if activated.</li>
-          <li><strong>🎨 Distinguishable Ticket Cards</strong>: Added status-colored indicator borders (Amber, Blue, Indigo, Green) to make tickets immediately recognizable at a glance.</li>
-          <li><strong>✨ Status Neon Hover Glows</strong>: Hovering over any ticket card now lights up the card with a matching status neon-glow background and shadow.</li>
-          <li><strong>🚨 Visual Urgency Indicators</strong>: Urgent tickets now display a soft red warning gradient backplate and border, pulsing red on hover.</li>
-          <li><strong>🚀 OTA Pre-Release Support</strong>: Future pre-releases (suffixes like `-a`, `-b`) are now fully supported for auto-updates.</li>
+          <li><strong>📋 Collapsible Activity Log Tray</strong>: Space-saving minimizable log tray in Ticket Edit Modal, contractible to reclaim workspace.</li>
+          <li><strong>🌡️ Real-Time Telemetry Sync</strong>: Real-time display slots showing Min, Max, and Avg CPU/GPU temperatures streamed from client machines.</li>
+          <li><strong>🔌 Real-Time Port Checker Matrix</strong>: Dedicated validation grid showing specific statuses (USB, Display, Audio, RGB) linked in real-time.</li>
+          <li><strong>📱 Redesigned Client Extension Mode</strong>: Brand new client layout designed as a physical extension of active tickets with manual port toggles.</li>
+          <li><strong>🌈 SignalRGB Installer &amp; Fallback</strong>: Wrap SignalRGB installer in elevated PowerShell to bypass Windows UAC permission limits, and integrate OpenRGB CLI fallback sync.</li>
         </ul>
       </div>
       <div class="modal-footer" style="border-top: 1px solid var(--glass-border); padding-top: 15px; display: flex; justify-content: flex-end; margin-top: 20px;">
-        <button id="btn-close-changelog" class="primary-pink-btn" style="padding: 10px 24px; font-weight: 700; font-size: 0.95rem;">Launch NeoQC v1.0.5.1 🚀</button>
+        <button id="btn-close-changelog" class="primary-pink-btn" style="padding: 10px 24px; font-weight: 700; font-size: 0.95rem;">Launch NeoQC v1.1.0 🚀</button>
       </div>
     </div>
   </div>

@@ -23,6 +23,11 @@ const TOOLS = [
     name: 'CinebenchR23',
     url: 'https://installer.maxon.net/cinebench/CinebenchR23.zip',
     destFolder: 'Cinebench'
+  },
+  {
+    name: 'OpenRGB',
+    url: 'https://codeberg.org/OpenRGB/OpenRGB/releases/download/release_0.9/OpenRGB_0.9_Windows_64_b5f46e3.zip',
+    destFolder: 'OpenRGB'
   }
 ];
 
@@ -93,9 +98,16 @@ async function start() {
     const outDir = path.join(DIAGNOSTICS_DIR, tool.destFolder);
     
     // Check if tool already exists
-    const checkFile = tool.name === 'CinebenchR23' 
-      ? path.join(outDir, 'Cinebench.exe')
-      : (tool.name === 'FurMark' ? path.join(outDir, 'FurMark.exe') : path.join(outDir, 'LibreHardwareMonitorLib.dll'));
+    let checkFile = '';
+    if (tool.name === 'CinebenchR23') {
+      checkFile = path.join(outDir, 'Cinebench.exe');
+    } else if (tool.name === 'FurMark') {
+      checkFile = path.join(outDir, 'FurMark_win64', 'furmark.exe');
+    } else if (tool.name === 'OpenRGB') {
+      checkFile = path.join(outDir, 'OpenRGB.exe');
+    } else {
+      checkFile = path.join(outDir, 'LibreHardwareMonitorLib.dll');
+    }
       
     if (fs.existsSync(checkFile)) {
       console.log(`${tool.name} already exists. Skipping download.`);
