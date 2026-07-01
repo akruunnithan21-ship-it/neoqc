@@ -78,6 +78,35 @@
     vertical-align: middle;
   }
 
+  .update-status-pill {
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--text-secondary, #999);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    -webkit-app-region: no-drag;
+    white-space: nowrap;
+  }
+
+  .update-status-pill.is-available,
+  .update-status-pill.is-downloading {
+    color: var(--primary-pink);
+    border-color: var(--primary-pink);
+  }
+
+  .update-status-pill.is-ready {
+    color: #4ade80;
+    border-color: #4ade80;
+  }
+
+  .update-status-pill.is-error {
+    color: #f87171;
+    border-color: #f87171;
+  }
+
   .titlebar-controls {
     display: flex;
     gap: 6px;
@@ -214,23 +243,80 @@
     background-size: cover;
     position: relative;
   }
+
+  #splash-screen.active {
+    display: flex;
+  }
+
+  #splash-screen {
+    justify-content: center;
+    align-items: center;
+    height: calc(100vh - 32px);
+    overflow: hidden;
+    background: url('japanese_vector_bg.png') no-repeat center center;
+    background-size: cover;
+    position: relative;
+  }
+
+  .splash-content {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    position: relative;
+  }
+
+  .splash-logo-ring {
+    position: relative;
+    width: 88px;
+    height: 88px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 18px;
+  }
+
+  .splash-logo-svg {
+    width: 48px;
+    height: 48px;
+    animation: pulse-glow-pink 3s infinite;
+  }
+
+  .splash-spin-ring {
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    border: 2px solid rgba(231, 1, 78, 0.15);
+    border-top-color: var(--primary-pink);
+  }
+
+  .splash-status-text {
+    margin-top: 18px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    letter-spacing: 0.05em;
+  }
   
   .mode-selector-card {
     position: relative;
-    padding: 45px 30px;
+    padding: 45px 35px;
     max-width: 580px;
     width: 90%;
     text-align: center;
     border-radius: 24px;
-    background: rgba(255, 255, 255, 0.72) !important;
-    border: 1px solid rgba(255, 255, 255, 0.8) !important;
-    box-shadow: 0 20px 50px rgba(15, 23, 42, 0.1);
+    background: rgba(255, 255, 255, 0.65) !important;
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid rgba(255, 255, 255, 0.6) !important;
+    box-shadow: 0 20px 50px rgba(15, 23, 42, 0.08), 0 0 40px rgba(231, 1, 78, 0.03);
+    z-index: 1; /* Place above ambient glows */
   }
   
   body.dark-mode .mode-selector-card {
-    background: rgba(11, 15, 25, 0.75) !important;
-    border-color: rgba(255, 255, 255, 0.1) !important;
-    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.3);
+    background: rgba(11, 15, 25, 0.65) !important;
+    border-color: rgba(255, 255, 255, 0.08) !important;
+    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.25), 0 0 40px rgba(231, 1, 78, 0.1);
   }
 
   /* Traditional Hanko Stamp Accent */
@@ -335,23 +421,72 @@
   
   .mode-btn {
     border: 1px solid var(--glass-border);
-    background: rgba(255, 255, 255, 0.4);
-    border-radius: 16px;
-    padding: 24px 16px;
+    background: var(--glass-bg);
+    border-radius: 20px;
+    padding: 30px 24px;
     cursor: pointer;
     text-align: left;
-    transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+    transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    display: flex;
+    flex-direction: column;
+    position: relative;
+    overflow: hidden;
   }
   
-  .mode-btn:hover {
-    transform: translateY(-4px);
-    box-shadow: var(--glass-shadow);
-    border-color: var(--primary-pink);
+  /* Grid pattern effect inside button */
+  .mode-btn::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(rgba(255, 255, 255, 0.02) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
+    background-size: 8px 8px;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+    pointer-events: none;
   }
   
+  .mode-btn:hover::before {
+    opacity: 1;
+  }
+
+  .mode-btn.primary-pink:hover {
+    transform: translateY(-6px);
+    box-shadow: 0 15px 30px rgba(231, 1, 78, 0.18), 0 0 15px rgba(231, 1, 78, 0.1);
+    border-color: var(--primary-pink) !important;
+  }
+  
+  .mode-btn.primary-pink:hover .mode-icon {
+    transform: scale(1.15) rotate(-5deg);
+    filter: drop-shadow(0 0 8px var(--primary-pink));
+  }
+
+  .mode-btn.primary-pink:hover .mode-title {
+    color: var(--primary-pink);
+  }
+
+  .mode-btn.dark-slate:hover {
+    transform: translateY(-6px);
+    box-shadow: 0 15px 30px rgba(0, 240, 255, 0.18), 0 0 15px rgba(0, 240, 255, 0.1);
+    border-color: #00f0ff !important;
+  }
+
+  .mode-btn.dark-slate:hover .mode-icon {
+    transform: scale(1.15) rotate(5deg);
+    filter: drop-shadow(0 0 8px #00f0ff);
+  }
+
+  .mode-btn.dark-slate:hover .mode-title {
+    color: #00f0ff;
+  }
+
   .mode-icon {
-    font-size: 2rem;
-    margin-bottom: 12px;
+    font-size: 2.2rem;
+    margin-bottom: 16px;
+    transition: transform 0.3s ease, filter 0.3s ease;
   }
   
   .mode-title {
@@ -359,12 +494,15 @@
     font-family: 'Space Grotesk', sans-serif;
     font-weight: 700;
     margin-bottom: 6px;
+    transition: color 0.3s ease;
   }
   
   .mode-text {
     font-size: 0.85rem;
     color: var(--text-muted);
     line-height: 1.35;
+    position: relative;
+    z-index: 2;
   }
   
   /* Buttons styling */
@@ -3101,20 +3239,54 @@ body.dark-mode ::-webkit-scrollbar-thumb:hover {
   left: 0;
   right: 0;
   z-index: 1000;
-  max-height: 200px;
+  max-height: 180px;
   overflow-y: auto;
-  background: rgba(30, 27, 38, 0.98);
+  background: var(--bg-color);
   backdrop-filter: blur(12px);
-  border: 1px solid var(--glass-border);
-  border-radius: 6px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+  border: 1px solid rgba(15, 23, 42, 0.12); /* Soft grey border, removes bright white outline */
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(15, 23, 42, 0.08);
 }
+
+body.dark-mode .autocomplete-list {
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35);
+}
+
+/* Highly visible scrollbar settings specifically for autocomplete */
+.autocomplete-list::-webkit-scrollbar {
+  width: 6px;
+  display: block;
+}
+.autocomplete-list::-webkit-scrollbar-track {
+  background: rgba(15, 23, 42, 0.03);
+  border-radius: 8px;
+}
+body.dark-mode .autocomplete-list::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.02);
+}
+.autocomplete-list::-webkit-scrollbar-thumb {
+  background: rgba(15, 23, 42, 0.25) !important;
+  border-radius: 99px;
+  border: none;
+  background-clip: unset;
+}
+.autocomplete-list::-webkit-scrollbar-thumb:hover {
+  background: rgba(15, 23, 42, 0.4) !important;
+}
+body.dark-mode .autocomplete-list::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.25) !important;
+}
+body.dark-mode .autocomplete-list::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.4) !important;
+}
+
 .autocomplete-item {
   padding: 8px 12px;
   cursor: pointer;
   font-size: 0.8rem;
   color: var(--text-dark);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+  border-bottom: none;
   transition: all 0.15s ease;
 }
 .autocomplete-item:hover, .autocomplete-item.active {
@@ -3132,4 +3304,32 @@ body.dark-mode ::-webkit-scrollbar-thumb:hover {
 @keyframes slideDown {
   from { opacity: 0; transform: translateY(-4px); }
   to { opacity: 1; transform: translateY(0); }
+}
+
+/* Ambient Background Blur Glow Spheres */
+.ambient-glow {
+  position: absolute;
+  width: 350px;
+  height: 350px;
+  border-radius: 50%;
+  filter: blur(120px);
+  opacity: 0.16;
+  z-index: 0;
+  pointer-events: none;
+  animation: floatGlow 14s infinite alternate ease-in-out;
+}
+.pink-glow {
+  background: var(--primary-pink);
+  top: 15%;
+  left: 15%;
+}
+.blue-glow {
+  background: #00f0ff;
+  bottom: 15%;
+  right: 15%;
+  animation-delay: -7s;
+}
+@keyframes floatGlow {
+  0% { transform: translate(0, 0) scale(1); }
+  100% { transform: translate(60px, 40px) scale(1.25); }
 }

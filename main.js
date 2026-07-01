@@ -150,45 +150,54 @@ app.whenReady().then(() => {
   initDb();
   createWindow();
 
-  // Determine channel based on app-config.json
-  let updateChannel = 'client';
-  try {
-    const configPath = path.join(__dirname, 'app-config.json');
-    if (fs.existsSync(configPath)) {
-      const cfg = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-      if (cfg.mode === 'admin') {
-        updateChannel = 'admin';
-      }
-    }
-  } catch (e) {
-    log.error("Error reading app-config.json in main process:", e);
-  }
-  
-  autoUpdater.channel = updateChannel;
+  // The app now ships as a single unified build (electron-builder.json publishes
+  // only to the default "latest" channel), so we no longer branch the update
+  // channel off app-config.json's mode. Doing so previously left machines built
+  // from the old separate admin/client configs permanently pinned to "admin" or
+  // "client" channels that nothing publishes to anymore, silently breaking OTA.
   autoUpdater.allowPrerelease = false;
   autoUpdater.allowDowngrade = false;
-  log.info(`Setting autoUpdater channel to: ${updateChannel} (allowPrerelease: false, allowDowngrade: false)`);
+  log.info('Using default autoUpdater channel "latest" (allowPrerelease: false, allowDowngrade: false)');
 
-  // Auto-updater event logging
+  // Auto-updater event logging + renderer status feed
+  const sendUpdateStatus = (status, data) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('update:status', { status, ...data });
+    }
+  };
+
   autoUpdater.on('checking-for-update', () => {
     log.info('Checking for update...');
+    sendUpdateStatus('checking');
   });
   autoUpdater.on('update-available', (info) => {
     log.info(`Update available: Version ${info.version}`);
+    sendUpdateStatus('available', { version: info.version });
   });
   autoUpdater.on('update-not-available', (info) => {
     log.info('Update not available.');
+    sendUpdateStatus('not-available');
   });
   autoUpdater.on('error', (err) => {
     log.error('Error in auto-updater:', err);
+    // Don't show the error pill for "no release found" — this just means no
+    // GitHub release has been published yet, which is normal during development.
+    // Only surface real errors (network down, signature mismatch, etc.).
+    const msg = err.message || '';
+    const isNoRelease = msg.includes('404') || msg.includes('ERR_CONNECTION') || msg.includes('Cannot find latest');
+    if (!isNoRelease) {
+      sendUpdateStatus('error', { message: msg });
+    }
   });
   autoUpdater.on('download-progress', (progressObj) => {
     log.info(`Download speed: ${Math.round(progressObj.bytesPerSecond / 1024)} KB/s - Downloaded ${Math.round(progressObj.percent)}% (${progressObj.transferred}/${progressObj.total} bytes)`);
+    sendUpdateStatus('downloading', { percent: Math.round(progressObj.percent) });
   });
 
   // Prompt user to install update when ready
   autoUpdater.on('update-downloaded', (info) => {
     log.info(`Update version ${info.version} downloaded successfully.`);
+    sendUpdateStatus('downloaded', { version: info.version });
     dialog.showMessageBox({
       type: 'info',
       title: 'Update Ready',

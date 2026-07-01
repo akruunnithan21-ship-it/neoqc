@@ -11,12 +11,13 @@ let componentDB = {
   ram: [],
   storage: [],
   psu: [],
-  case: []
+  case: [],
+  cooler: []
 };
 let fuseInstances = {};
 
 function loadComponentDatabase() {
-  const categories = ['cpu', 'gpu', 'motherboard', 'ram', 'storage', 'psu', 'case'];
+  const categories = ['cpu', 'gpu', 'motherboard', 'ram', 'storage', 'psu', 'case', 'cooler'];
   categories.forEach(cat => {
     const file = path.join(__dirname, 'assets', 'component-data', `${cat}.json`);
     try {
@@ -45,7 +46,8 @@ function setupSpecsAutocomplete() {
     { inputId: 'form-spec-ram', listId: 'autocomplete-ram', category: 'ram' },
     { inputId: 'form-spec-storage', listId: 'autocomplete-storage', category: 'storage' },
     { inputId: 'form-spec-psu', listId: 'autocomplete-psu', category: 'psu' },
-    { inputId: 'form-spec-case', listId: 'autocomplete-case', category: 'case' }
+    { inputId: 'form-spec-case', listId: 'autocomplete-case', category: 'case' },
+    { inputId: 'form-spec-cooler-model', listId: 'autocomplete-cooler', category: 'cooler' }
   ];
 
   fields.forEach(field => {
@@ -67,7 +69,7 @@ function setupSpecsAutocomplete() {
         return;
       }
 
-      const results = fuse.search(val).slice(0, 5);
+      const results = fuse.search(val).slice(0, 10);
       if (results.length === 0) {
         list.classList.add('hidden');
         return;
@@ -115,29 +117,55 @@ let editingTicketId = null;
 // ==========================================================================
 // INITIALIZATION
 // ==========================================================================
+function setSplashStatus(text) {
+  const el = document.getElementById('splash-status-text');
+  if (el) el.textContent = text;
+}
+
 document.addEventListener('DOMContentLoaded', async () => {
+  // Record when boot started so we can enforce a minimum splash display time
+  const bootStart = Date.now();
+
   await loadDatabase();
+  setSplashStatus('Preparing workspace…');
   setupEventListeners();
   setupSpecsAutocomplete();
   updateTimeDisplay();
   setInterval(updateTimeDisplay, 60000);
 
   // Navigate to initial screen based on app-config.json or settings
-  let bootMode = 'client';
+  let bootMode = 'selector';
+
+  if (appState.settings) {
+    if (appState.settings.lockAdminMode === true) {
+      bootMode = 'staff';
+    } else if (appState.settings.isMaster === false) {
+      bootMode = 'client';
+    }
+  }
+
   try {
     const configPath = path.join(__dirname, 'app-config.json');
     if (fs.existsSync(configPath)) {
       const cfg = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
       if (cfg.mode === 'admin') {
         bootMode = 'staff';
+      } else if (cfg.mode === 'client') {
+        bootMode = 'client';
+      } else if (cfg.mode === 'selector') {
+        bootMode = 'selector';
       }
     }
   } catch (e) {
     console.error("Error reading app-config.json:", e);
   }
 
-  if (bootMode !== 'staff') {
-    bootMode = 'client';
+  // Hold splash for at least 1800ms so the animation is actually visible.
+  // If boot took longer than that already, we switch immediately.
+  const elapsed = Date.now() - bootStart;
+  const minSplash = 1800;
+  if (elapsed < minSplash) {
+    await new Promise(resolve => setTimeout(resolve, minSplash - elapsed));
   }
 
   switchScreen(bootMode);
@@ -145,6 +173,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
 // Load DB from local Electron AppData Storage
 async function loadDatabase() {
+  setSplashStatus('Loading local database…');
   const dbData = await ipcRenderer.invoke('db:read');
   if (dbData) {
     appState = dbData;
@@ -201,8 +230,9 @@ async function loadDatabase() {
       pathCinebench: "", 
       pathFurmark: "", 
       pathSsdUtility: "",
-      isMaster: false,
+      isMaster: true,
       autoDetectHw: false,
+      lockAdminMode: false,
       accentColor: "pink",
       cpuMaxTemp: 85,
       gpuMaxTemp: 80,
@@ -226,8 +256,9 @@ async function loadDatabase() {
     if (!appState.settings.pathCinebench) appState.settings.pathCinebench = "";
     if (!appState.settings.pathFurmark) appState.settings.pathFurmark = "";
     if (!appState.settings.pathSsdUtility) appState.settings.pathSsdUtility = "";
-    if (appState.settings.isMaster === undefined) appState.settings.isMaster = false;
+    if (appState.settings.isMaster === undefined) appState.settings.isMaster = true;
     if (appState.settings.autoDetectHw === undefined) appState.settings.autoDetectHw = false;
+    if (appState.settings.lockAdminMode === undefined) appState.settings.lockAdminMode = false;
     if (!appState.settings.accentColor) appState.settings.accentColor = "pink";
     if (appState.settings.cpuMaxTemp === undefined) appState.settings.cpuMaxTemp = 85;
     if (appState.settings.gpuMaxTemp === undefined) appState.settings.gpuMaxTemp = 80;
@@ -245,7 +276,8 @@ async function loadDatabase() {
     if (!appState.settings.contactInfo) appState.settings.contactInfo = "kochi@neotokyo.in";
   }
   applyAccentColor(appState.settings.accentColor);
-  
+
+  setSplashStatus('Connecting to cloud sync…');
   initSupabase();
 
   // Seed beautiful mock tickets if db is empty to showcase the UI immediately!
@@ -259,6 +291,7 @@ async function loadDatabase() {
     }
   }
   
+  setSplashStatus('Syncing tickets…');
   await syncFromCloud();
 
   // Version check and Changelog Modal trigger
@@ -295,6 +328,16 @@ function switchScreen(mode, selectedId = null) {
     document.getElementById('staff-screen').classList.add('active');
     populateTechnicianDropdowns();
     renderDashboard();
+    
+    // Hide or show exit button depending on lockAdminMode
+    const staffExitBtn = document.getElementById('btn-staff-exit');
+    if (staffExitBtn) {
+      if (appState.settings.lockAdminMode) {
+        staffExitBtn.classList.add('hidden');
+      } else {
+        staffExitBtn.classList.remove('hidden');
+      }
+    }
   } else if (mode === 'client') {
     document.getElementById('client-welcome-screen').classList.add('active');
     populateWelcomeTicketSelect();
@@ -1176,8 +1219,6 @@ function handleClientTicketSelect() {
     FurMark: <strong style="color: ${hasTemps ? 'var(--status-completed)' : 'inherit'}">${hasTemps ? 'Completed' : '[Idle]'}</strong>
   `;
   validateDiagnosticsThresholds();
-}
-  }
 }
 
 function setupClientFormCalculations() {
@@ -2072,7 +2113,9 @@ function resetAdminLockState() {
     'settings-supabase-url',
     'settings-supabase-key',
     'btn-toggle-key-visibility',
-    'btn-test-db-connection'
+    'btn-test-db-connection',
+    'settings-is-master',
+    'settings-lock-admin'
   ];
   inputsToDisable.forEach(id => {
     const el = document.getElementById(id);
@@ -2107,7 +2150,9 @@ function unlockAdminSettings() {
       'settings-supabase-url',
       'settings-supabase-key',
       'btn-toggle-key-visibility',
-      'btn-test-db-connection'
+      'btn-test-db-connection',
+      'settings-is-master',
+      'settings-lock-admin'
     ];
     inputsToEnable.forEach(id => {
       const el = document.getElementById(id);
@@ -2166,6 +2211,7 @@ function openSettingsModal() {
   document.getElementById('settings-path-ssd-utility').value = appState.settings.pathSsdUtility || '';
   document.getElementById('settings-is-master').checked = !!appState.settings.isMaster;
   document.getElementById('settings-auto-detect-hw').checked = !!appState.settings.autoDetectHw;
+  document.getElementById('settings-lock-admin').checked = !!appState.settings.lockAdminMode;
 
   // Populate new general settings
   document.getElementById('settings-shop-name').value = appState.settings.shopName || '';
@@ -2216,6 +2262,7 @@ async function handleSaveSettings() {
   appState.settings.pathSsdUtility = document.getElementById('settings-path-ssd-utility').value.trim();
   appState.settings.isMaster = document.getElementById('settings-is-master').checked;
   appState.settings.autoDetectHw = document.getElementById('settings-auto-detect-hw').checked;
+  appState.settings.lockAdminMode = document.getElementById('settings-lock-admin').checked;
 
   // Save new settings
   appState.settings.shopName = document.getElementById('settings-shop-name').value.trim();
@@ -2574,7 +2621,14 @@ function setupEventListeners() {
     switchScreen('selector');
   });
 
-  // Staff exit - removed as Switch Mode is not accessible from Staff Portal anymore
+  // Staff exit
+  const staffExit = document.getElementById('btn-staff-exit');
+  if (staffExit) {
+    staffExit.addEventListener('click', () => {
+      switchScreen('selector');
+    });
+  }
+
   document.getElementById('btn-client-refresh').addEventListener('click', () => {
     const currentId = document.getElementById('client-ticket-select').value;
     populateClientTicketSelect(currentId);
@@ -3369,6 +3423,44 @@ function updateTempBar(valId, barId, tempVal) {
     }
   }
 }
+
+// OTA update status pill (driven by autoUpdater events forwarded from main.js)
+ipcRenderer.on('update:status', (event, data) => {
+  const pill = document.getElementById('update-status-pill');
+  if (!pill) return;
+
+  pill.classList.remove('is-available', 'is-downloading', 'is-ready', 'is-error');
+  switch (data.status) {
+    case 'checking':
+      pill.style.display = 'inline-block';
+      pill.textContent = 'Checking for updates…';
+      break;
+    case 'available':
+      pill.style.display = 'inline-block';
+      pill.classList.add('is-available');
+      pill.textContent = `Update v${data.version} found`;
+      break;
+    case 'downloading':
+      pill.style.display = 'inline-block';
+      pill.classList.add('is-downloading');
+      pill.textContent = `Downloading update… ${data.percent || 0}%`;
+      break;
+    case 'downloaded':
+      pill.style.display = 'inline-block';
+      pill.classList.add('is-ready');
+      pill.textContent = `Update v${data.version} ready — restart to install`;
+      break;
+    case 'error':
+      pill.style.display = 'inline-block';
+      pill.classList.add('is-error');
+      pill.textContent = 'Update check failed';
+      break;
+    case 'not-available':
+    default:
+      pill.style.display = 'none';
+      break;
+  }
+});
 
 // IPC Receivers for Real-time metrics
 ipcRenderer.on('sys:diag-log', (event, text) => {

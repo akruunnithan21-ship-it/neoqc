@@ -17,6 +17,7 @@
     <div class="titlebar-drag-area">
       <svg class="titlebar-logo-svg" viewBox="0 0 100 100"><circle cx="50" cy="50" r="40" stroke="currentColor" stroke-width="10" fill="none" stroke-dasharray="78.776 5" stroke-dashoffset="60.332" /><path d="M 50,23 L 72,70 C 58,58 50,56 50,56 C 50,56 42,58 28,70 Z" fill="currentColor" /></svg>
       <span class="titlebar-text">NEO TOKYO // QC & Diagnostics Lab Portal</span>
+      <span id="update-status-pill" class="update-status-pill" style="display:none;"></span>
     </div>
     <div class="titlebar-controls">
       <button id="win-btn-minimize" class="titlebar-btn minimize" title="Minimize">—</button>
@@ -28,8 +29,38 @@
   <!-- BACKGROUND BLUEPRINT DOTS -->
   <div class="blueprint-dots"></div>
 
+  <!-- SPLASH / BOOT SCREEN -->
+  <div id="splash-screen" class="screen active">
+    <div class="ambient-glow pink-glow"></div>
+    <div class="ambient-glow blue-glow"></div>
+    <div class="splash-content">
+      <div class="hanko-stamp">ネオ東京</div>
+      <div class="splash-logo-ring">
+        <svg class="splash-logo-svg" viewBox="0 0 100 100">
+          <defs>
+            <linearGradient id="splash-logo-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stop-color="#ff1a75" />
+              <stop offset="50%" stop-color="#e7014e" />
+              <stop offset="100%" stop-color="#b3003b" />
+            </linearGradient>
+          </defs>
+          <circle cx="50" cy="50" r="40" stroke="url(#splash-logo-grad)" stroke-width="10" fill="none" stroke-dasharray="78.776 5" stroke-dashoffset="60.332" />
+          <path d="M 50,23 L 72,70 C 58,58 50,56 50,56 C 50,56 42,58 28,70 Z" fill="url(#splash-logo-grad)" />
+        </svg>
+        <div class="splash-spin-ring animate-spin"></div>
+      </div>
+      <h1 class="logo-title">NEO TOKYO</h1>
+      <p class="logo-tagline">ACCELERATING YOUR INFRA</p>
+      <p class="logo-subtitle">QUALITY CONTROL LAB SYSTEM</p>
+      <p id="splash-status-text" class="splash-status-text">Starting up…</p>
+    </div>
+  </div>
+
   <!-- LAUNCH MODE SELECTION SCREEN -->
-  <div id="mode-selector-screen" class="screen active">
+  <div id="mode-selector-screen" class="screen">
+    <!-- Ambient glow backdrops -->
+    <div class="ambient-glow pink-glow"></div>
+    <div class="ambient-glow blue-glow"></div>
     <div class="glass-slab mode-selector-card">
       <div class="brand-header">
         <div class="hanko-stamp">ネオ東京</div>
@@ -122,6 +153,7 @@
         <span class="nav-title">NEO TOKYO // STAFF PORTAL</span>
       </div>
       <div class="nav-controls">
+        <button id="btn-staff-exit" class="secondary-btn text-crimson" style="margin-right: 10px;">🚪 Switch Mode</button>
         <button id="btn-toggle-theme" class="icon-btn" title="Toggle Dark/Light Mode">🌓</button>
         <button id="btn-new-ticket" class="primary-pink-btn">+ New Ticket</button>
       </div>
@@ -627,14 +659,15 @@
                 <input type="text" id="form-spec-storage" required placeholder="Search or type Storage Model...">
                 <div id="autocomplete-storage" class="autocomplete-list"></div>
               </div>
-              <div class="form-group" style="grid-column: span 2;">
+              <div class="form-group autocomplete-container" style="grid-column: span 2;">
                 <label>CPU Cooler Type &amp; Model *</label>
                 <div style="display: flex; gap: 16px; align-items: center; margin-bottom: 8px;">
                   <label class="radio-label"><input type="radio" name="form-spec-cooler-type" value="stock" checked> Stock Cooler</label>
                   <label class="radio-label"><input type="radio" name="form-spec-cooler-type" value="air"> Air Cooler</label>
                   <label class="radio-label"><input type="radio" name="form-spec-cooler-type" value="aio"> AIO Liquid Cooler</label>
                 </div>
-                <input type="text" id="form-spec-cooler-model" class="hidden" placeholder="Enter Cooler Model name...">
+                <input type="text" id="form-spec-cooler-model" class="hidden" placeholder="Search or type Cooler Model...">
+                <div id="autocomplete-cooler" class="autocomplete-list"></div>
               </div>
               <div class="form-group autocomplete-container">
                 <label for="form-spec-psu">Power Supply (PSU) *</label>
@@ -1140,6 +1173,19 @@
                   <button type="button" id="btn-test-db-connection" class="secondary-btn" disabled>Check Supabase Status</button>
                   <span id="db-connection-status" class="status-msg"></span>
                 </div>
+                <div style="border-top: 1px dashed var(--glass-border); margin: 16px 0; padding-top: 16px;">
+                  <h4 style="font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--primary-pink); margin-bottom: 10px;">Portal Lock Configurations</h4>
+                  <div class="form-group" style="display: flex; align-items: center; gap: 8px;">
+                    <input type="checkbox" id="settings-is-master" style="width: 18px; height: 18px; cursor: pointer;" disabled>
+                    <label for="settings-is-master" style="font-size: 0.9rem; cursor: pointer; font-weight: 600;">Enable Master Application Mode (Service & QC Dashboards)</label>
+                  </div>
+                  <p class="panel-info-text" style="margin-top: 4px; margin-left: 26px; margin-bottom: 12px;">When disabled, the app operates in Standard Mode and boots directly into the Testing Client portal (hidden staff dashboards).</p>
+                  <div class="form-group" style="display: flex; align-items: center; gap: 8px;">
+                    <input type="checkbox" id="settings-lock-admin" style="width: 18px; height: 18px; cursor: pointer;" disabled>
+                    <label for="settings-lock-admin" style="font-size: 0.9rem; cursor: pointer; font-weight: 600;">Always Lock to Staff/Admin Mode on Startup (Disables Mode Switcher)</label>
+                  </div>
+                  <p class="panel-info-text" style="margin-top: 4px; margin-left: 26px;">When enabled, the app boots directly into the Staff Portal and disables returning to the Mode Selector (useful for admin terminals).</p>
+                </div>
               </div>
             </div>
 
@@ -1147,11 +1193,6 @@
             <div class="form-section margin-top">
               <h3>🖥️ Application Configurations</h3>
               <div class="form-group" style="display: flex; align-items: center; gap: 8px;">
-                <input type="checkbox" id="settings-is-master" style="width: 18px; height: 18px; cursor: pointer;">
-                <label for="settings-is-master" style="font-size: 0.9rem; cursor: pointer; font-weight: 600;">Enable Master Application Mode (Service & QC Dashboards)</label>
-              </div>
-              <p class="panel-info-text" style="margin-top: 4px; margin-left: 26px;">When disabled, the app operates in Standard Mode and boots directly into the Testing Client portal (hidden staff dashboards).</p>
-              <div class="form-group margin-top" style="display: flex; align-items: center; gap: 8px;">
                 <input type="checkbox" id="settings-auto-detect-hw" style="width: 18px; height: 18px; cursor: pointer;">
                 <label for="settings-auto-detect-hw" style="font-size: 0.9rem; cursor: pointer; font-weight: 600;">Auto-Detect System Specs on Ticket Creation</label>
               </div>
