@@ -534,6 +534,35 @@
               </div>
             </div>
 
+            <!-- SSD Health Card -->
+            <div id="c-ssd-health-card" class="ssd-health-card hidden margin-top">
+              <div class="ssd-health-header">
+                <span class="ssd-health-title">💿 SSD Health</span>
+                <span id="c-ssd-health-badge" class="ssd-health-badge">—</span>
+              </div>
+              <div class="ssd-health-body">
+                <div class="ssd-health-row">
+                  <span class="ssd-health-label">Drive</span>
+                  <span id="c-ssd-health-model" class="ssd-health-val font-mono">—</span>
+                </div>
+                <div class="ssd-health-row">
+                  <span class="ssd-health-label">Type</span>
+                  <span id="c-ssd-health-type" class="ssd-health-val">—</span>
+                </div>
+                <div class="ssd-health-row">
+                  <span class="ssd-health-label">Life Remaining</span>
+                  <span id="c-ssd-health-life" class="ssd-health-val">—</span>
+                </div>
+                <div class="ssd-health-row">
+                  <span class="ssd-health-label">Power-On Hours</span>
+                  <span id="c-ssd-health-hours" class="ssd-health-val">—</span>
+                </div>
+                <div class="ssd-health-bar-bg">
+                  <div id="c-ssd-health-bar" class="ssd-health-bar-fill" style="width: 0%"></div>
+                </div>
+              </div>
+            </div>
+
             <!-- Benchmarks & Comparisons Row -->
             <div class="form-grid-2 margin-top" style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
               <div class="form-group">
@@ -571,6 +600,7 @@
           <button id="btn-client-submit" class="primary-pink-btn large-btn" disabled>💾 Sync & Save</button>
           <button id="btn-client-export" class="secondary-btn large-btn">💾 Export Offline Config File (.json)</button>
         </div>
+        <div id="client-sync-status" class="client-sync-status hidden"></div>
       </div>
     </div>
   </div>
@@ -925,6 +955,35 @@
                       <span class="unit-label">MB/s</span>
                     </div>
                   </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- SSD Health Card (admin modal) -->
+            <div id="modal-ssd-health-card" class="ssd-health-card hidden margin-top">
+              <div class="ssd-health-header">
+                <span class="ssd-health-title">💿 SSD Health</span>
+                <span id="modal-ssd-health-badge" class="ssd-health-badge">—</span>
+              </div>
+              <div class="ssd-health-body">
+                <div class="ssd-health-row">
+                  <span class="ssd-health-label">Drive</span>
+                  <span id="modal-ssd-health-model" class="ssd-health-val font-mono">—</span>
+                </div>
+                <div class="ssd-health-row">
+                  <span class="ssd-health-label">Type</span>
+                  <span id="modal-ssd-health-type" class="ssd-health-val">—</span>
+                </div>
+                <div class="ssd-health-row">
+                  <span class="ssd-health-label">Life Remaining</span>
+                  <span id="modal-ssd-health-life" class="ssd-health-val">—</span>
+                </div>
+                <div class="ssd-health-row">
+                  <span class="ssd-health-label">Power-On Hours</span>
+                  <span id="modal-ssd-health-hours" class="ssd-health-val">—</span>
+                </div>
+                <div class="ssd-health-bar-bg">
+                  <div id="modal-ssd-health-bar" class="ssd-health-bar-fill" style="width: 0%"></div>
                 </div>
               </div>
             </div>

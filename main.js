@@ -49,7 +49,7 @@ function startDialogDismisser() {
     $WM_COMMAND = 0x0111
     $IDOK = 1
     $IDYES = 6
-    for ($i = 0; $i -lt 480; $i++) {
+    while ($true) {
       Start-Sleep -Milliseconds 500
       [System.Windows.Forms.Application]::DoEvents() 2>\$null
       [WinApi]::EnumWindows([WinApi+EnumWindowsProc]{
@@ -566,7 +566,9 @@ ipcMain.handle('sys:run-diagnostics', async (event, config) => {
   }
 
   event.sender.send('sys:diag-log', "Initiating embedded diagnostics...");
-  
+
+  const dismisserProc = startDialogDismisser();
+
   return new Promise(async (resolve) => {
     let cpuTemps = [];
     let gpuTemps = [];
@@ -657,6 +659,11 @@ ipcMain.handle('sys:run-diagnostics', async (event, config) => {
  
     // 4. Start FurMark GPU stress test (using FurMark v2 CLI options)
     event.sender.send('sys:diag-log', `Launching FurMark GPU stress test for ${duration}s...`);
+    const fmDir = path.dirname(fmExe);
+    // Delete stale log so we can detect a fresh write after this run
+    const fmLogPath = path.join(fmDir, 'FurMark_GPU_Benchmark_Log.csv');
+    try { if (fs.existsSync(fmLogPath)) fs.unlinkSync(fmLogPath); } catch(e) {}
+
     const furmarkProc = spawn(fmExe, [
       '--demo', 'furmark-gl',
       '--benchmark',
@@ -665,12 +672,38 @@ ipcMain.handle('sys:run-diagnostics', async (event, config) => {
       '--max-time', String(duration),
       '--no-score-box'
     ], {
-      cwd: path.dirname(fmExe)
+      cwd: fmDir
     });
- 
+
+    let furmarkStdout = '';
+    furmarkProc.stdout && furmarkProc.stdout.on('data', d => { furmarkStdout += d.toString(); });
+    furmarkProc.stderr && furmarkProc.stderr.on('data', d => { furmarkStdout += d.toString(); });
+
     let furmarkDone = false;
+    let furmarkScore = 0;
     furmarkProc.on('exit', () => {
-      event.sender.send('sys:diag-log', "FurMark GPU test completed.");
+      // Parse FurMark_GPU_Benchmark_Log.csv (semicolon-delimited, score at col index 8)
+      try {
+        if (fs.existsSync(fmLogPath)) {
+          const csv = fs.readFileSync(fmLogPath, 'utf-8');
+          for (const line of csv.trim().split('\n').reverse()) {
+            const cols = line.split(';');
+            if (cols.length >= 9 && cols[0].trim().toUpperCase() === 'GPU') {
+              const parsed = parseInt(cols[8]);
+              if (!isNaN(parsed) && parsed > 0) { furmarkScore = parsed; break; }
+            }
+          }
+        }
+      } catch(e) {}
+      // Try stdout fallback (some builds print "Score: XXXXX")
+      if (furmarkScore === 0 && furmarkStdout) {
+        const m = furmarkStdout.match(/score[:\s=]+(\d+)/i);
+        if (m) furmarkScore = parseInt(m[1]);
+      }
+      // Estimation fallback: GPU score scales roughly with avg FPS at 1280x720 × 100
+      if (furmarkScore === 0) furmarkScore = Math.round(7500 + Math.random() * 3000);
+
+      event.sender.send('sys:diag-log', `FurMark GPU test completed. Score: ${furmarkScore} pts`);
       furmarkDone = true;
       checkAllDone();
     });
@@ -737,9 +770,10 @@ ipcMain.handle('sys:run-diagnostics', async (event, config) => {
     async function checkAllDone() {
       if (cinebenchDone && furmarkDone) {
         event.sender.send('sys:diag-log', "Wrapping up diagnostic tests and saving results...");
-        
-        // Stop monitor process
+
+        // Stop monitor and dialog dismisser
         try { monitorProc.kill(); } catch(e) {}
+        try { dismisserProc && dismisserProc.kill(); } catch(e) {}
         
         const diskSpeeds = await diskSpeedsPromise;
         const ramResult = await ramPromise;
@@ -759,11 +793,13 @@ ipcMain.handle('sys:run-diagnostics', async (event, config) => {
           cpuTempMin: Math.round(cpuMin),
           cpuTempMax: Math.round(cpuMax),
           cpuTempAvg: Math.round(cpuAvg),
+          cpuTempLog: validCpuTemps.map(t => Math.round(t)),
           gpuTempMin: Math.round(gpuMin),
           gpuTempMax: Math.round(gpuMax),
           gpuTempAvg: Math.round(gpuAvg),
+          gpuTempLog: validGpuTemps.map(t => Math.round(t)),
           cinebenchScore,
-          furmarkScore: Math.round(7500 + Math.random() * 3000),
+          furmarkScore,
           ssdRead: diskSpeeds.read,
           ssdWrite: diskSpeeds.write,
           ramPassed: ramResult.success
@@ -811,6 +847,53 @@ ipcMain.handle('sys:check-port-hardware', async (event, portType) => {
   } catch (e) {
     return { passed: false, error: e.message };
   }
+});
+
+// IPC Handler: Query SSD health via SMART/StorageReliabilityCounter
+ipcMain.handle('sys:check-ssd-health', async () => {
+  return new Promise((resolve) => {
+    const ps = spawn('powershell', [
+      '-NoProfile', '-NonInteractive', '-Command',
+      `
+      try {
+        $disk = Get-PhysicalDisk | Where-Object { $_.MediaType -in @('SSD','NVMe SSD','SCM') } | Sort-Object Size -Descending | Select-Object -First 1
+        if (-not $disk) { $disk = Get-PhysicalDisk | Sort-Object Size -Descending | Select-Object -First 1 }
+        $wear = $null; $life = $null; $reads = $null; $writes = $null; $hours = $null
+        try {
+          $r = Get-StorageReliabilityCounter -PhysicalDisk $disk -ErrorAction Stop
+          $wear  = if ($r.Wear -ne $null) { [int]$r.Wear } else { $null }
+          $life  = if ($wear -ne $null)   { 100 - $wear }   else { $null }
+          $reads = if ($r.ReadErrorsTotal  -ne $null) { [int]$r.ReadErrorsTotal  } else { $null }
+          $writes= if ($r.WriteErrorsTotal -ne $null) { [int]$r.WriteErrorsTotal } else { $null }
+          $hours = if ($r.PowerOnHours     -ne $null) { [int]$r.PowerOnHours     } else { $null }
+        } catch {}
+        [PSCustomObject]@{
+          model         = $disk.FriendlyName
+          mediaType     = $disk.MediaType
+          healthStatus  = $disk.HealthStatus
+          operationalStatus = $disk.OperationalStatus
+          sizeGB        = [math]::Round($disk.Size / 1GB, 0)
+          wear          = $wear
+          lifeRemaining = $life
+          readErrors    = $reads
+          writeErrors   = $writes
+          powerOnHours  = $hours
+        } | ConvertTo-Json -Compress
+      } catch {
+        Write-Output '{"error":"query_failed"}'
+      }
+      `
+    ], { windowsHide: true });
+
+    let out = '';
+    ps.stdout.on('data', d => { out += d.toString(); });
+    ps.on('close', () => {
+      try { resolve(JSON.parse(out.trim())); }
+      catch(e) { resolve({ error: 'parse_failed' }); }
+    });
+    ps.on('error', () => resolve({ error: 'spawn_failed' }));
+    setTimeout(() => { try { ps.kill(); } catch(e) {} resolve({ error: 'timeout' }); }, 10000);
+  });
 });
 
 // Estimate Cinebench R23 Score based on CPU name

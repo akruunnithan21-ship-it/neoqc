@@ -1877,13 +1877,34 @@ async function setupClientMode() {
     t.updatedAt = new Date().toISOString();
     appState.tickets[index] = t;
     await saveDatabase();
-    await syncTicketToCloud(t);
-    alert("Diagnostic data successfully uploaded to database!");
-    
-    if (appState.settings.isMaster) {
-      switchScreen('selector');
+
+    // Show sync-in-progress state — block navigation until confirmed
+    const submitBtn = document.getElementById('btn-client-submit');
+    const syncStatus = document.getElementById('client-sync-status');
+    if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = '⏳ Syncing to cloud...'; }
+    if (syncStatus) { syncStatus.textContent = '⏳ Uploading diagnostic data to cloud — please wait...'; syncStatus.className = 'client-sync-status syncing'; syncStatus.classList.remove('hidden'); }
+
+    let syncOk = false;
+    try {
+      await syncTicketToCloud(t);
+      syncOk = true;
+    } catch(e) {
+      syncOk = false;
+    }
+
+    if (syncOk) {
+      if (syncStatus) { syncStatus.textContent = '✓ All data synced to cloud successfully. Safe to close or uninstall.'; syncStatus.className = 'client-sync-status success'; }
+      if (submitBtn) { submitBtn.textContent = '✓ Synced'; }
+      setTimeout(() => {
+        if (appState.settings.isMaster) {
+          switchScreen('selector');
+        } else {
+          switchScreen('client');
+        }
+      }, 1800);
     } else {
-      switchScreen('client');
+      if (syncStatus) { syncStatus.textContent = '✕ Cloud sync failed — data saved locally. Retry or check your network connection.'; syncStatus.className = 'client-sync-status error'; }
+      if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = '🔄 Retry Sync'; }
     }
   });
 
@@ -1990,8 +2011,11 @@ function getHwInfoStats(content) {
 function checkClientFormReady() {
   const ticketId = document.getElementById('client-ticket-select').value;
   const submitBtn = document.getElementById('btn-client-submit');
+  const syncStatus = document.getElementById('client-sync-status');
   if (ticketId) {
     submitBtn.removeAttribute('disabled');
+    submitBtn.textContent = '💾 Sync & Save';
+    if (syncStatus) syncStatus.classList.add('hidden');
   } else {
     submitBtn.setAttribute('disabled', 'true');
   }
@@ -3514,6 +3538,11 @@ async function executeDiagnosticsWorkflow(isModal) {
   if (ssdVal) ssdVal.textContent = 'Testing...';
   if (ssdBar) ssdBar.style.width = '20%';
 
+  // Hide SSD health card from any previous run
+  const healthCardId = isModal ? 'modal-ssd-health-card' : 'c-ssd-health-card';
+  const prevHealthCard = document.getElementById(healthCardId);
+  if (prevHealthCard) prevHealthCard.classList.add('hidden');
+
   const durationSelectId = isModal ? 'modal-duration-select' : 'client-duration-select';
   const durationSelectEl = document.getElementById(durationSelectId);
   const duration = durationSelectEl ? parseInt(durationSelectEl.value) : 60;
@@ -3603,14 +3632,31 @@ async function executeDiagnosticsWorkflow(isModal) {
   }
 
   appendConsoleLine(boxId, `[SYS] All stress tests completed successfully.`);
-  appendConsoleLine(boxId, `[SYS] CPU package average temperature: ${res.cpuTempAvg}°C.`);
-  appendConsoleLine(boxId, `[SYS] GPU package average temperature: ${res.gpuTempAvg}°C.`);
-  appendConsoleLine(boxId, `[SYS] SSD speed read: ${res.ssdRead} MB/s, write: ${res.ssdWrite} MB/s.`);
-  appendConsoleLine(boxId, `[SYS] RAM test status: ${res.ramPassed ? "PASSED" : "FAILED"}.`);
+  appendConsoleLine(boxId, `[SYS] CPU avg ${res.cpuTempAvg}°C (min ${res.cpuTempMin}°C / max ${res.cpuTempMax}°C) over ${(res.cpuTempLog || []).length} samples.`);
+  appendConsoleLine(boxId, `[SYS] GPU avg ${res.gpuTempAvg}°C (min ${res.gpuTempMin}°C / max ${res.gpuTempMax}°C) over ${(res.gpuTempLog || []).length} samples.`);
+  appendConsoleLine(boxId, `[SYS] Cinebench R23: ${res.cinebenchScore} pts | FurMark: ${res.furmarkScore} pts.`);
+  appendConsoleLine(boxId, `[SYS] SSD — Read: ${res.ssdRead} MB/s, Write: ${res.ssdWrite} MB/s.`);
+  appendConsoleLine(boxId, `[SYS] RAM stress test: ${res.ramPassed ? "PASSED ✓" : "FAILED ✗"}.`);
+
+  // Query SSD health
+  appendConsoleLine(boxId, `[SYS] Querying SSD health via SMART data...`);
+  let ssdHealth = null;
+  try {
+    ssdHealth = await ipcRenderer.invoke('sys:check-ssd-health');
+    if (ssdHealth && !ssdHealth.error) {
+      renderSsdHealthCard(isModal ? 'modal' : 'c', ssdHealth);
+      const lifeStr = ssdHealth.lifeRemaining != null ? `${ssdHealth.lifeRemaining}% life remaining` : 'life data N/A';
+      appendConsoleLine(boxId, `[SYS] SSD: ${ssdHealth.model || 'Unknown'} — ${ssdHealth.healthStatus || 'Unknown'} — ${lifeStr}.`);
+    } else {
+      appendConsoleLine(boxId, `[SYS] SSD health query returned no SMART data (drive may not support it).`);
+    }
+  } catch(e) {
+    appendConsoleLine(boxId, `[SYS] SSD health query failed: ${e.message}`);
+  }
 
   // Auto-Save Diagnostics back into the loaded ticket
-  const ticketId = isModal 
-    ? (document.getElementById('form-ticket-id').value || editingTicketId) 
+  const ticketId = isModal
+    ? (document.getElementById('form-ticket-id').value || editingTicketId)
     : document.getElementById('client-ticket-select').value;
 
   if (ticketId) {
@@ -3620,16 +3666,18 @@ async function executeDiagnosticsWorkflow(isModal) {
       ticket.diagnostics.cpuTempMin = res.cpuTempMin || null;
       ticket.diagnostics.cpuTempMax = res.cpuTempMax || null;
       ticket.diagnostics.cpuTempAvg = res.cpuTempAvg || null;
+      ticket.diagnostics.cpuTempLog = res.cpuTempLog || null;
       ticket.diagnostics.gpuTempMin = res.gpuTempMin || null;
       ticket.diagnostics.gpuTempMax = res.gpuTempMax || null;
       ticket.diagnostics.gpuTempAvg = res.gpuTempAvg || null;
+      ticket.diagnostics.gpuTempLog = res.gpuTempLog || null;
       ticket.diagnostics.cinebench = res.cinebenchScore || null;
       ticket.diagnostics.furmark = res.furmarkScore || null;
       ticket.diagnostics.ssdRead = res.ssdRead || null;
       ticket.diagnostics.ssdWrite = res.ssdWrite || null;
+      if (ssdHealth && !ssdHealth.error) ticket.diagnostics.ssdHealth = ssdHealth;
 
       if (!isModal) {
-        // Auto-check standard QC check fields on test pass
         if (res.ramPassed) {
           ticket.qcChecks.physCabinet = true;
           ticket.qcChecks.softDrivers = true;
@@ -3652,6 +3700,39 @@ async function executeDiagnosticsWorkflow(isModal) {
     updateModalDiagnosticsStatus();
   } else {
     checkClientFormReady();
+  }
+}
+
+function renderSsdHealthCard(prefix, h) {
+  const card  = document.getElementById(prefix + '-ssd-health-card');
+  const badge = document.getElementById(prefix + '-ssd-health-badge');
+  const model = document.getElementById(prefix + '-ssd-health-model');
+  const type  = document.getElementById(prefix + '-ssd-health-type');
+  const life  = document.getElementById(prefix + '-ssd-health-life');
+  const hours = document.getElementById(prefix + '-ssd-health-hours');
+  const bar   = document.getElementById(prefix + '-ssd-health-bar');
+  if (!card) return;
+
+  card.classList.remove('hidden');
+
+  const healthStatus = (h.healthStatus || 'Unknown').toLowerCase();
+  const lifeRemaining = h.lifeRemaining;
+
+  let tier = 'healthy';
+  if (healthStatus.includes('warning') || (lifeRemaining != null && lifeRemaining < 30)) tier = 'warning';
+  if (healthStatus.includes('unhealthy') || healthStatus.includes('failed') || (lifeRemaining != null && lifeRemaining < 10)) tier = 'critical';
+
+  const badgeLabels = { healthy: '✓ Healthy', warning: '⚠ Warning', critical: '✕ Critical' };
+  if (badge) { badge.textContent = badgeLabels[tier]; badge.className = `ssd-health-badge ${tier}`; }
+  if (model) model.textContent = h.model || 'Unknown Drive';
+  if (type)  type.textContent  = h.mediaType || 'SSD';
+  if (life)  life.textContent  = lifeRemaining != null ? `${lifeRemaining}%` : 'N/A (no SMART)';
+  if (hours) hours.textContent = h.powerOnHours != null ? `${h.powerOnHours.toLocaleString()} hrs` : 'N/A';
+
+  const barPct = lifeRemaining != null ? Math.max(0, Math.min(100, lifeRemaining)) : 0;
+  if (bar) {
+    bar.style.width = `${barPct}%`;
+    bar.className = `ssd-health-bar-fill${tier !== 'healthy' ? ' ' + tier : ''}`;
   }
 }
 

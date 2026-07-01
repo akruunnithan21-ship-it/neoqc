@@ -2181,6 +2181,125 @@
   }
 
   /* ==========================================================================
+     SSD HEALTH CARD
+  ========================================================================== */
+
+  .ssd-health-card {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid var(--glass-border);
+    border-radius: 10px;
+    padding: 12px 16px;
+  }
+
+  .ssd-health-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 10px;
+  }
+
+  .ssd-health-title {
+    font-size: 0.78rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-secondary);
+  }
+
+  .ssd-health-badge {
+    font-size: 0.72rem;
+    font-weight: 700;
+    padding: 2px 10px;
+    border-radius: 999px;
+    letter-spacing: 0.04em;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.1);
+    color: var(--text-muted);
+  }
+
+  .ssd-health-badge.healthy {
+    background: rgba(74, 222, 128, 0.12);
+    border-color: rgba(74, 222, 128, 0.35);
+    color: #4ade80;
+  }
+
+  .ssd-health-badge.warning {
+    background: rgba(251, 191, 36, 0.12);
+    border-color: rgba(251, 191, 36, 0.35);
+    color: #fbbf24;
+  }
+
+  .ssd-health-badge.critical {
+    background: rgba(248, 113, 113, 0.12);
+    border-color: rgba(248, 113, 113, 0.35);
+    color: #f87171;
+  }
+
+  .ssd-health-body {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .ssd-health-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 0.8rem;
+  }
+
+  .ssd-health-label {
+    color: var(--text-muted);
+    font-size: 0.75rem;
+  }
+
+  .ssd-health-val {
+    font-weight: 600;
+    color: var(--text-primary);
+    font-size: 0.8rem;
+    text-align: right;
+    max-width: 65%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .ssd-health-bar-bg {
+    height: 5px;
+    background: rgba(255,255,255,0.06);
+    border-radius: 3px;
+    margin-top: 8px;
+    overflow: hidden;
+  }
+
+  .ssd-health-bar-fill {
+    height: 100%;
+    border-radius: 3px;
+    background: #4ade80;
+    transition: width 0.6s ease, background 0.4s;
+  }
+
+  .ssd-health-bar-fill.warning { background: #fbbf24; }
+  .ssd-health-bar-fill.critical { background: #f87171; }
+
+  /* Client sync status strip */
+  .client-sync-status {
+    text-align: center;
+    font-size: 0.82rem;
+    font-family: 'JetBrains Mono', monospace;
+    padding: 8px 14px;
+    border-radius: 8px;
+    margin-top: 8px;
+    border: 1px solid var(--glass-border);
+    background: rgba(255,255,255,0.03);
+    color: var(--text-secondary);
+  }
+
+  .client-sync-status.syncing { color: var(--primary-pink); border-color: rgba(231,1,78,0.3); }
+  .client-sync-status.success { color: #4ade80; border-color: rgba(74,222,128,0.3); }
+  .client-sync-status.error   { color: #f87171; border-color: rgba(248,113,113,0.3); }
+
+  /* ==========================================================================
      PORTS & RGB CHECKER GRID
      ========================================================================== */
   .ports-grid {
