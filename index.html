@@ -583,6 +583,13 @@
         <button id="btn-close-ticket-modal" class="close-btn">&times;</button>
       </div>
       
+      <!-- Conflict banner: shown when another device saves this ticket while the form is open -->
+      <div id="ticket-conflict-banner" class="hidden ticket-conflict-banner">
+        <span>⚠ This ticket was updated by another device.</span>
+        <button type="button" id="btn-reload-conflict-form" class="conflict-reload-btn">Reload form</button>
+        <button type="button" id="btn-dismiss-conflict-banner" class="conflict-dismiss-btn">✕</button>
+      </div>
+
       <form id="ticket-form">
         <!-- Hidden values -->
         <input type="hidden" id="form-ticket-id">

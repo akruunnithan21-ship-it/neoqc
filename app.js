@@ -680,6 +680,7 @@ function isI514thGen(cpuStr) {
 
 function openTicketModal(ticketId = null) {
   editingTicketId = ticketId;
+  hideConflictBanner();
   const modal = document.getElementById('ticket-modal');
   const form = document.getElementById('ticket-form');
   form.reset();
@@ -1418,6 +1419,7 @@ function setupPortsChecker() {
           
           appendConsoleLine('c-console-box', `[SYS] Scan completed for ${scan.name}. Status: ${passed ? 'PASSED' : 'PENDING'}`);
           
+          ticket.updatedAt = new Date().toISOString();
           appState.tickets[index] = ticket;
           await saveDatabase();
           await syncTicketToCloud(ticket);
@@ -1648,6 +1650,8 @@ async function handleTicketFormSubmit(e) {
     }
   }
 
+  updatedTicket.updatedAt = new Date().toISOString();
+
   if (editingTicketId) {
     const index = appState.tickets.findIndex(t => t.id === editingTicketId);
     appState.tickets[index] = updatedTicket;
@@ -1658,6 +1662,8 @@ async function handleTicketFormSubmit(e) {
   await saveDatabase();
   await syncTicketToCloud(updatedTicket);
   document.getElementById('ticket-modal').classList.remove('active');
+  editingTicketId = null;
+  hideConflictBanner();
   renderDashboard();
 }
 
@@ -1868,6 +1874,7 @@ async function setupClientMode() {
       addEventLog(t, `Client diagnostics submitted: Cinebench R23 = ${t.diagnostics.cinebench} pts, CPU Avg = ${t.diagnostics.cpuTempAvg}°C, GPU Avg = ${t.diagnostics.gpuTempAvg}°C`, 'Testing Client');
     }
 
+    t.updatedAt = new Date().toISOString();
     appState.tickets[index] = t;
     await saveDatabase();
     await syncTicketToCloud(t);
@@ -2539,10 +2546,18 @@ function setupEventListeners() {
   document.getElementById('btn-new-ticket').addEventListener('click', () => openTicketModal());
   document.getElementById('btn-close-ticket-modal').addEventListener('click', () => {
     document.getElementById('ticket-modal').classList.remove('active');
+    editingTicketId = null;
+    hideConflictBanner();
   });
   document.getElementById('btn-cancel-ticket').addEventListener('click', () => {
     document.getElementById('ticket-modal').classList.remove('active');
+    editingTicketId = null;
+    hideConflictBanner();
   });
+  document.getElementById('btn-reload-conflict-form').addEventListener('click', () => {
+    if (editingTicketId) openTicketModal(editingTicketId);
+  });
+  document.getElementById('btn-dismiss-conflict-banner').addEventListener('click', hideConflictBanner);
   document.getElementById('btn-delete-ticket').addEventListener('click', async () => {
     if (editingTicketId && confirm("Are you sure you want to delete this ticket?")) {
       const idToDelete = editingTicketId;
@@ -2840,6 +2855,16 @@ function setupEventListeners() {
 // ==========================================================================
 let supabaseClient = null;
 
+function showConflictBanner() {
+  const banner = document.getElementById('ticket-conflict-banner');
+  if (banner) banner.classList.remove('hidden');
+}
+
+function hideConflictBanner() {
+  const banner = document.getElementById('ticket-conflict-banner');
+  if (banner) banner.classList.add('hidden');
+}
+
 function initSupabase() {
   if (window.supabase && appState.settings.supabaseUrl && appState.settings.supabaseAnonKey) {
     try {
@@ -2868,6 +2893,7 @@ async function syncTicketToCloud(ticket) {
       .upsert({
         id: ticket.id,
         created_at: ticket.createdAt,
+        updated_at: ticket.updatedAt || new Date().toISOString(),
         type: ticket.type,
         customer_name: ticket.customerName,
         deadline: ticket.deadline,
@@ -2930,6 +2956,7 @@ async function syncFromCloud() {
         const ticket = {
           id: dbRow.id,
           createdAt: dbRow.created_at,
+          updatedAt: dbRow.updated_at || dbRow.created_at,
           type: dbRow.type,
           customerName: dbRow.customer_name,
           deadline: dbRow.deadline,
@@ -2949,8 +2976,12 @@ async function syncFromCloud() {
         if (index === -1) {
           appState.tickets.push(ticket);
         } else {
-          // Sync overwrite from cloud
-          appState.tickets[index] = ticket;
+          // Only overwrite local if cloud version is same age or newer
+          const localTs = appState.tickets[index].updatedAt || appState.tickets[index].createdAt || '';
+          const cloudTs = ticket.updatedAt || ticket.createdAt || '';
+          if (cloudTs >= localTs) {
+            appState.tickets[index] = ticket;
+          }
         }
       });
       
@@ -2998,6 +3029,7 @@ function setupRealtimeListener() {
           const ticket = {
             id: dbRow.id,
             createdAt: dbRow.created_at,
+            updatedAt: dbRow.updated_at || dbRow.created_at,
             type: dbRow.type,
             customerName: dbRow.customer_name,
             deadline: dbRow.deadline,
@@ -3020,87 +3052,13 @@ function setupRealtimeListener() {
             appState.tickets[index] = ticket;
           }
           await saveDatabase();
-          
+
           if (currentMode === 'staff') {
             renderDashboard();
-            // If editing this ticket right now, dynamically update form fields in real-time
+            // If this ticket is currently open in the modal, show a banner instead of
+            // clobbering whatever the technician is typing right now.
             if (editingTicketId === ticket.id && document.getElementById('ticket-modal').classList.contains('active')) {
-              document.getElementById('modal-spec-cpu').textContent = ticket.specs ? (ticket.specs.cpu || '--') : '--';
-              document.getElementById('modal-spec-igpu').textContent = ticket.specs ? (ticket.specs.igpu || '--') : '--';
-              document.getElementById('modal-spec-gpu').textContent = ticket.specs ? (ticket.specs.gpu || '--') : '--';
-              document.getElementById('modal-spec-ram').textContent = ticket.specs ? (ticket.specs.ram || '--') : '--';
-              document.getElementById('modal-spec-storage').textContent = ticket.specs ? (ticket.specs.storage || '--') : '--';
-              
-              document.getElementById('form-cpu-temp-min').value = ticket.diagnostics.cpuTempMin || '';
-              document.getElementById('form-cpu-temp-max').value = ticket.diagnostics.cpuTempMax || '';
-              document.getElementById('form-cpu-temp-avg').value = ticket.diagnostics.cpuTempAvg || '';
-              document.getElementById('form-gpu-temp-min').value = ticket.diagnostics.gpuTempMin || '';
-              document.getElementById('form-gpu-temp-max').value = ticket.diagnostics.gpuTempMax || '';
-              document.getElementById('form-gpu-temp-avg').value = ticket.diagnostics.gpuTempAvg || '';
-              document.getElementById('form-cinebench-score').value = ticket.diagnostics.cinebench || '';
-              document.getElementById('form-furmark-score').value = ticket.diagnostics.furmark || '';
-              document.getElementById('form-ssd-read').value = ticket.diagnostics.ssdRead || '';
-              document.getElementById('form-ssd-write').value = ticket.diagnostics.ssdWrite || '';
-
-              // Update Client App Telemetry & Port Sync Slots in real-time removed (redundant telemetry sections deleted in v1.0.9)
-
-              // Windows activation update
-              const winKey = ticket.specs ? (ticket.specs.windowsKey || '') : '';
-              const winState = ticket.specs ? (ticket.specs.windowsActivationState || 'Unverified') : 'Unverified';
-              document.getElementById('modal-activation-os').textContent = 'Windows';
-              const statusBadge = document.getElementById('modal-activation-status');
-              if (statusBadge) {
-                statusBadge.textContent = winState;
-                statusBadge.className = `badge ${winState === 'Activated' ? 'green' : (winState === 'Not Activated' ? 'red' : '')}`;
-              }
-              const keyBadge = document.getElementById('modal-activation-key');
-              if (keyBadge) keyBadge.textContent = winKey || '--';
-              if (winState === 'Activated') {
-                document.getElementById('qc-soft-windows').checked = true;
-              }
-
-              updateTempBar('modal-hud-cpu-temp-val', 'modal-hud-cpu-temp-bar', ticket.diagnostics.cpuTempAvg);
-              updateTempBar('modal-hud-gpu-temp-val', 'modal-hud-gpu-temp-bar', ticket.diagnostics.gpuTempAvg);
-              
-              const mVal = document.getElementById('modal-hud-ram-val');
-              const mBar = document.getElementById('modal-hud-ram-bar');
-              const mDesc = document.getElementById('modal-hud-ram-desc');
-              if (ticket.diagnostics.cinebench) {
-                if (mVal) mVal.textContent = '100%';
-                if (mBar) mBar.style.width = '100%';
-                if (mDesc) mDesc.textContent = 'RAM test passed successfully.';
-              }
-              
-              const ssdVal = document.getElementById('modal-hud-ssd-val');
-              const ssdBar = document.getElementById('modal-hud-ssd-bar');
-              if (ticket.diagnostics.ssdRead) {
-                if (ssdVal) ssdVal.textContent = `${ticket.diagnostics.ssdRead} R / ${ticket.diagnostics.ssdWrite} W MB/s`;
-                if (ssdBar) ssdBar.style.width = '100%';
-              }
-              
-              const statusBox = document.getElementById('modal-diagnostics-status');
-              if (ticket.diagnostics.cinebench) {
-                if (statusBox) {
-                  statusBox.innerHTML = `
-                    Cinebench R23: <strong style="color: var(--status-completed)">Completed (${ticket.diagnostics.cinebench} pts)</strong> | 
-                    FurMark: <strong style="color: var(--status-completed)">Completed</strong> | 
-                    RAM: <strong style="color: var(--status-completed)">Passed</strong>
-                  `;
-                }
-              }
-
-              const fieldsToFlash = [
-                'form-cpu-temp-min', 'form-cpu-temp-max', 'form-cpu-temp-avg',
-                'form-gpu-temp-min', 'form-gpu-temp-max', 'form-gpu-temp-avg',
-                'form-cinebench-score', 'form-furmark-score', 'form-ssd-read', 'form-ssd-write'
-              ];
-              fieldsToFlash.forEach(id => {
-                const el = document.getElementById(id);
-                if (el) {
-                  el.classList.add('flash-success');
-                  setTimeout(() => el.classList.remove('flash-success'), 1500);
-                }
-              });
+              showConflictBanner();
             }
           } else if (currentMode === 'client') {
             populateWelcomeTicketSelect();
@@ -3683,6 +3641,7 @@ async function executeDiagnosticsWorkflow(isModal) {
         }
       }
 
+      ticket.updatedAt = new Date().toISOString();
       appState.tickets[ticketIndex] = ticket;
       await saveDatabase();
       await syncTicketToCloud(ticket);

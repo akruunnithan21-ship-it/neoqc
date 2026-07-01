@@ -2124,6 +2124,62 @@
     animation: flash-green-dark 1.5s ease-out;
   }
 
+  /* Conflict banner — shown when another device saves the open ticket */
+  .ticket-conflict-banner {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: rgba(234, 179, 8, 0.12);
+    border: 1px solid rgba(234, 179, 8, 0.4);
+    border-radius: 8px;
+    padding: 8px 14px;
+    margin-bottom: 14px;
+    font-size: 0.82rem;
+    color: #ca8a04;
+  }
+
+  body.dark-mode .ticket-conflict-banner {
+    background: rgba(234, 179, 8, 0.08);
+    border-color: rgba(234, 179, 8, 0.3);
+    color: #fbbf24;
+  }
+
+  .ticket-conflict-banner span {
+    flex: 1;
+    font-weight: 500;
+  }
+
+  .conflict-reload-btn {
+    background: rgba(234, 179, 8, 0.2);
+    border: 1px solid rgba(234, 179, 8, 0.5);
+    color: inherit;
+    border-radius: 5px;
+    padding: 3px 10px;
+    font-size: 0.8rem;
+    cursor: pointer;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+
+  .conflict-reload-btn:hover {
+    background: rgba(234, 179, 8, 0.35);
+  }
+
+  .conflict-dismiss-btn {
+    background: transparent;
+    border: none;
+    color: inherit;
+    cursor: pointer;
+    font-size: 0.9rem;
+    opacity: 0.6;
+    padding: 0 2px;
+    line-height: 1;
+  }
+
+  .conflict-dismiss-btn:hover {
+    opacity: 1;
+  }
+
   /* ==========================================================================
      PORTS & RGB CHECKER GRID
      ========================================================================== */
