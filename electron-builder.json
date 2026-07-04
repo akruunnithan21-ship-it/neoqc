@@ -1,0 +1,31 @@
+{
+  "appId": "com.neotokyo.neoqc",
+  "productName": "NeoQC",
+  "win": {
+    "target": [
+      "nsis",
+      "portable"
+    ],
+    "icon": "assets/icon.ico",
+    "requestedExecutionLevel": "requireAdministrator"
+  },
+  "nsis": {
+    "oneClick": false,
+    "allowToChangeInstallationDirectory": true,
+    "deleteAppDataOnUninstall": true
+  },
+  "portable": {
+    "artifactName": "NeoQC.exe"
+  },
+  "publish": {
+    "provider": "github",
+    "owner": "akruunnithan21-ship-it",
+    "repo": "neoqc"
+  },
+  "asarUnpack": [
+    "assets/diagnostics/**"
+  ],
+  "directories": {
+    "output": "C:/Users/Aladeen/Desktop/final build"
+  }
+}

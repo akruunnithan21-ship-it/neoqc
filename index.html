@@ -1079,53 +1079,68 @@
   </div>
 
   <!-- SETTINGS MODAL -->
-  <!-- SETTINGS MODAL -->
   <div id="settings-modal" class="modal-overlay">
     <div class="glass-slab modal-card settings-card">
-      <div class="modal-header">
-        <h2>Application Settings</h2>
-        <button id="btn-close-settings" class="close-btn">&times;</button>
-      </div>
-      <div class="modal-body settings-layout">
-        <!-- Sidebar Navigation -->
-        <div class="settings-sidebar">
-          <button class="settings-tab-btn active" data-tab="tab-general" type="button">⚙️ General Settings</button>
-          <button class="settings-tab-btn" data-tab="tab-thresholds" type="button">📊 QC & Thresholds</button>
-          <button class="settings-tab-btn" data-tab="tab-advanced" type="button">🛠️ App Base Settings</button>
+
+      <!-- Settings Header -->
+      <div class="settings-header">
+        <div class="settings-header-left">
+          <span class="settings-header-eyebrow">NEO QC</span>
+          <h2 class="settings-header-title">Application Settings</h2>
         </div>
-        
-        <!-- Tabs Content Container -->
-        <div class="settings-content" style="flex-grow: 1; overflow-y: auto; max-height: 520px; padding-right: 8px;">
-          <!-- Tab: General Settings -->
+        <div class="settings-header-right">
+          <span id="settings-app-version" class="settings-version-badge">v1.1.0</span>
+          <button id="btn-close-settings" class="close-btn">&times;</button>
+        </div>
+      </div>
+
+      <!-- Layout: sidebar + content -->
+      <div class="modal-body settings-layout">
+
+        <!-- Sidebar Navigation -->
+        <nav class="settings-sidebar">
+          <button class="settings-tab-btn active" data-tab="tab-general" type="button">
+            <svg class="stb-icon" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 012.287.947c.379 1.561 2.6 1.561 2.978 0a1.533 1.533 0 012.287-.947c1.372.836 2.942-.734 2.106-2.106a1.533 1.533 0 01.947-2.287c1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.287-.947zM10 13a3 3 0 100-6 3 3 0 000 6z" clip-rule="evenodd"/></svg>
+            <span class="stb-label">General</span>
+          </button>
+          <button class="settings-tab-btn" data-tab="tab-thresholds" type="button">
+            <svg class="stb-icon" viewBox="0 0 20 20" fill="currentColor"><path d="M2 11a1 1 0 011-1h2a1 1 0 011 1v5a1 1 0 01-1 1H3a1 1 0 01-1-1v-5zM8 7a1 1 0 011-1h2a1 1 0 011 1v9a1 1 0 01-1 1H9a1 1 0 01-1-1V7zM14 4a1 1 0 011-1h2a1 1 0 011 1v12a1 1 0 01-1 1h-2a1 1 0 01-1-1V4z"/></svg>
+            <span class="stb-label">QC &amp; Testing</span>
+          </button>
+          <button class="settings-tab-btn" data-tab="tab-portal" type="button">
+            <svg class="stb-icon" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM4.332 8.027a6.012 6.012 0 011.912-2.706C6.512 5.73 6.974 6 7.5 6A1.5 1.5 0 019 7.5V8a2 2 0 004 0 2 2 0 011.523-1.943A5.977 5.977 0 0116 10c0 .34-.028.675-.083 1H15a2 2 0 00-2 2v2.197A5.973 5.973 0 0110 16v-2a2 2 0 00-2-2 2 2 0 01-2-2 2 2 0 00-1.668-1.973z" clip-rule="evenodd"/></svg>
+            <span class="stb-label">Dashboard Portal</span>
+          </button>
+          <div class="settings-sidebar-divider"></div>
+          <button class="settings-tab-btn" data-tab="tab-advanced" type="button">
+            <svg class="stb-icon" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M3 5a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM3 10a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM3 15a1 1 0 011-1h6a1 1 0 110 2H4a1 1 0 01-1-1z" clip-rule="evenodd"/></svg>
+            <span class="stb-label">System</span>
+          </button>
+        </nav>
+
+        <!-- Tab Content -->
+        <div class="settings-content">
+
+          <!-- ══ TAB: GENERAL ══ -->
           <div id="tab-general" class="settings-tab-content">
-            <div class="form-section">
-              <h3>⚙️ General Settings</h3>
-              <div class="form-group margin-top">
-                <label for="settings-shop-name">Shop Name</label>
-                <input type="text" id="settings-shop-name" placeholder="Neo Tokyo Kochi">
+
+            <div class="settings-section">
+              <div class="settings-section-title">Shop Identity</div>
+              <div class="settings-field">
+                <label class="settings-label" for="settings-shop-name">Shop Name</label>
+                <input type="text" id="settings-shop-name" class="settings-input" placeholder="Neo Tokyo Kochi">
               </div>
-              <div class="form-group margin-top">
-                <label for="settings-contact-info">Contact Information</label>
-                <input type="text" id="settings-contact-info" placeholder="kochi@neotokyo.in">
+              <div class="settings-field">
+                <label class="settings-label" for="settings-contact-info">Contact / Email</label>
+                <input type="text" id="settings-contact-info" class="settings-input" placeholder="kochi@neotokyo.in">
               </div>
-              <div class="form-group margin-top">
-                <label for="settings-default-tech">Default Assigned Technician</label>
-                <select id="settings-default-tech">
-                  <option value="">-- None (Unassigned) --</option>
-                </select>
-              </div>
-              <div class="form-group margin-top">
-                <label for="settings-sort-by">Default Dashboard Sort Order</label>
-                <select id="settings-sort-by">
-                  <option value="deadline">Sort by Deadline (Nearest First)</option>
-                  <option value="createdAt">Sort by Date Created (Newest First)</option>
-                  <option value="customerName">Sort by Customer Name (A-Z)</option>
-                  <option value="status">Sort by Ticket Status</option>
-                </select>
-              </div>
-              <div class="form-group margin-top">
-                <label for="settings-accent-color">Theme Accent Color</label>
-                <select id="settings-accent-color">
+            </div>
+
+            <div class="settings-section">
+              <div class="settings-section-title">Appearance</div>
+              <div class="settings-field">
+                <label class="settings-label" for="settings-accent-color">Theme Accent Color</label>
+                <select id="settings-accent-color" class="settings-select">
                   <option value="pink">Pink (Default)</option>
                   <option value="purple">Purple</option>
                   <option value="cyan">Cyan</option>
@@ -1133,217 +1148,308 @@
                   <option value="green">Green</option>
                 </select>
               </div>
-              <div class="form-group margin-top" style="display: flex; align-items: center; gap: 8px;">
-                <input type="checkbox" id="settings-sound-enabled" style="width: 18px; height: 18px; cursor: pointer;">
-                <label for="settings-sound-enabled" style="font-size: 0.9rem; cursor: pointer; font-weight: 600;">Enable Notification Sounds</label>
-              </div>
-              <div class="form-group margin-top" style="display: flex; align-items: center; gap: 8px;">
-                <input type="checkbox" id="settings-disable-qc-lock" style="width: 18px; height: 18px; cursor: pointer;">
-                <label for="settings-disable-qc-lock" style="font-size: 0.9rem; cursor: pointer; font-weight: 600;">Disable Strict QC Checklist Lock</label>
-              </div>
-            </div>
-          </div>
-          
-          <!-- Tab: QC & Testing Thresholds -->
-          <div id="tab-thresholds" class="settings-tab-content hidden">
-            <div class="form-section">
-              <h3>📊 QC & Testing Thresholds</h3>
-              <div class="form-group margin-top">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
-                  <label for="settings-cpu-max-temp">CPU Max Temperature Safety Limit</label>
-                  <span id="settings-cpu-max-temp-val" style="font-weight: 700; color: var(--primary-pink);">85°C</span>
-                </div>
-                <input type="range" id="settings-cpu-max-temp" min="60" max="100" value="85" style="width: 100%; cursor: pointer;">
-              </div>
-              <div class="form-group margin-top">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
-                  <label for="settings-gpu-max-temp">GPU Max Temperature Safety Limit</label>
-                  <span id="settings-gpu-max-temp-val" style="font-weight: 700; color: var(--primary-pink);">80°C</span>
-                </div>
-                <input type="range" id="settings-gpu-max-temp" min="50" max="95" value="80" style="width: 100%; cursor: pointer;">
-              </div>
-              <div class="form-group margin-top">
-                <label for="settings-min-ssd-speed">Minimum SSD Read Speed Requirement (MB/s)</label>
-                <input type="number" id="settings-min-ssd-speed" placeholder="3000">
-              </div>
-              <div class="form-group margin-top">
-                <label for="settings-min-ssd-write">Minimum SSD Write Speed Requirement (MB/s)</label>
-                <input type="number" id="settings-min-ssd-write" placeholder="2500">
-              </div>
-              <div class="form-group margin-top">
-                <label for="settings-min-cinebench">Minimum Cinebench R23 Score Requirement (pts)</label>
-                <input type="number" id="settings-min-cinebench" placeholder="10000">
-              </div>
-              <div class="form-group margin-top">
-                <label for="settings-min-furmark">Minimum FurMark Score Requirement (pts)</label>
-                <input type="number" id="settings-min-furmark" placeholder="5000">
-              </div>
-              <div class="form-group margin-top">
-                <label for="settings-default-test-duration">Default Stress Test Duration</label>
-                <select id="settings-default-test-duration">
-                  <option value="30">30 seconds (Fast)</option>
-                  <option value="60">60 seconds (Standard)</option>
-                  <option value="300">5 minutes (Burn-in)</option>
-                  <option value="600">10 minutes (Recommended)</option>
-                  <option value="1800">30 minutes (Extended Burn-in)</option>
+              <div class="settings-field">
+                <label class="settings-label" for="settings-sort-by">Dashboard Sort Order</label>
+                <select id="settings-sort-by" class="settings-select">
+                  <option value="deadline">Deadline — Nearest First</option>
+                  <option value="createdAt">Date Created — Newest First</option>
+                  <option value="customerName">Customer Name — A to Z</option>
+                  <option value="status">Ticket Status</option>
                 </select>
               </div>
-              <div class="form-group margin-top" style="display: flex; align-items: center; gap: 8px;">
-                <input type="checkbox" id="settings-auto-pdf" style="width: 18px; height: 18px; cursor: pointer;">
-                <label for="settings-auto-pdf" style="font-size: 0.9rem; cursor: pointer; font-weight: 600;">Auto-Generate PDF Report on Completion</label>
-              </div>
-            </div>
-          </div>
-          
-          <!-- Tab: App Base Settings (Advanced) -->
-          <div id="tab-advanced" class="settings-tab-content hidden">
-            <!-- Technician Config -->
-            <div class="form-section">
-              <h3>👥 Technician Directory</h3>
-              <div class="tech-settings-row">
-                <input type="text" id="settings-add-tech-name" placeholder="Enter new technician name">
-                <button id="btn-settings-add-tech" class="primary-pink-btn">+ Add Tech</button>
-              </div>
-              <ul id="settings-tech-list" class="settings-list margin-top">
-                <!-- Tech list dynamically injected -->
-              </ul>
             </div>
 
-            <!-- Supabase database settings -->
-            <div class="form-section margin-top sensitive-config-card" id="admin-credentials-card">
-              <div class="card-header-locked" style="display: flex; justify-content: space-between; align-items: center;">
-                <h3>☁️ Cloud Database Configuration</h3>
+            <div class="settings-section">
+              <div class="settings-section-title">Workflow Defaults</div>
+              <div class="settings-field">
+                <label class="settings-label" for="settings-default-tech">Default Assigned Technician</label>
+                <select id="settings-default-tech" class="settings-select">
+                  <option value="">— None (Unassigned) —</option>
+                </select>
+              </div>
+              <label class="settings-toggle-row">
+                <div class="settings-toggle-info">
+                  <span class="settings-toggle-label">Notification Sounds</span>
+                  <span class="settings-toggle-desc">Play audio cues on ticket events</span>
+                </div>
+                <div class="toggle-switch">
+                  <input type="checkbox" id="settings-sound-enabled">
+                  <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                </div>
+              </label>
+              <label class="settings-toggle-row">
+                <div class="settings-toggle-info">
+                  <span class="settings-toggle-label">Disable Strict QC Lock</span>
+                  <span class="settings-toggle-desc">Allow completing tickets without finishing every checklist item</span>
+                </div>
+                <div class="toggle-switch">
+                  <input type="checkbox" id="settings-disable-qc-lock">
+                  <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                </div>
+              </label>
+              <label class="settings-toggle-row">
+                <div class="settings-toggle-info">
+                  <span class="settings-toggle-label">Auto-Detect System Specs</span>
+                  <span class="settings-toggle-desc">Pre-fill hardware specs on new ticket creation</span>
+                </div>
+                <div class="toggle-switch">
+                  <input type="checkbox" id="settings-auto-detect-hw">
+                  <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                </div>
+              </label>
+            </div>
+
+          </div>
+
+          <!-- ══ TAB: QC & TESTING ══ -->
+          <div id="tab-thresholds" class="settings-tab-content hidden">
+
+            <div class="settings-section">
+              <div class="settings-section-title">Temperature Safety Limits</div>
+              <p class="settings-section-desc">Tickets will show a FAIL badge if peak temperature exceeds these values during stress testing.</p>
+              <div class="settings-field">
+                <div class="settings-slider-header">
+                  <label class="settings-label" for="settings-cpu-max-temp">CPU Max Temperature</label>
+                  <span id="settings-cpu-max-temp-val" class="settings-slider-val">85°C</span>
+                </div>
+                <input type="range" id="settings-cpu-max-temp" class="settings-slider" min="60" max="100" value="85">
+                <div class="settings-slider-ticks"><span>60°C</span><span>80°C</span><span>100°C</span></div>
+              </div>
+              <div class="settings-field">
+                <div class="settings-slider-header">
+                  <label class="settings-label" for="settings-gpu-max-temp">GPU Max Temperature</label>
+                  <span id="settings-gpu-max-temp-val" class="settings-slider-val">80°C</span>
+                </div>
+                <input type="range" id="settings-gpu-max-temp" class="settings-slider" min="50" max="95" value="80">
+                <div class="settings-slider-ticks"><span>50°C</span><span>72°C</span><span>95°C</span></div>
+              </div>
+            </div>
+
+            <div class="settings-section">
+              <div class="settings-section-title">Benchmark Pass Thresholds</div>
+              <p class="settings-section-desc">Minimum scores required for a ticket to receive a PASS verdict on the QC report.</p>
+              <div class="settings-field-grid">
+                <div class="settings-field">
+                  <label class="settings-label" for="settings-min-cinebench">Cinebench R23 (pts)</label>
+                  <input type="number" id="settings-min-cinebench" class="settings-input" placeholder="10000">
+                </div>
+                <div class="settings-field">
+                  <label class="settings-label" for="settings-min-furmark">FurMark Score (pts)</label>
+                  <input type="number" id="settings-min-furmark" class="settings-input" placeholder="5000">
+                </div>
+                <div class="settings-field">
+                  <label class="settings-label" for="settings-min-ssd-speed">SSD Read Speed (MB/s)</label>
+                  <input type="number" id="settings-min-ssd-speed" class="settings-input" placeholder="3000">
+                </div>
+                <div class="settings-field">
+                  <label class="settings-label" for="settings-min-ssd-write">SSD Write Speed (MB/s)</label>
+                  <input type="number" id="settings-min-ssd-write" class="settings-input" placeholder="2500">
+                </div>
+              </div>
+            </div>
+
+            <div class="settings-section">
+              <div class="settings-section-title">Test Configuration</div>
+              <div class="settings-field">
+                <label class="settings-label" for="settings-default-test-duration">Default Stress Test Duration</label>
+                <select id="settings-default-test-duration" class="settings-select">
+                  <option value="30">30 seconds — Fast check</option>
+                  <option value="60">60 seconds — Standard</option>
+                  <option value="300">5 minutes — Burn-in</option>
+                  <option value="600">10 minutes — Recommended</option>
+                  <option value="1800">30 minutes — Extended burn-in</option>
+                </select>
+              </div>
+              <label class="settings-toggle-row">
+                <div class="settings-toggle-info">
+                  <span class="settings-toggle-label">Auto-Generate PDF on Completion</span>
+                  <span class="settings-toggle-desc">Automatically export a QC report PDF when a ticket is marked complete</span>
+                </div>
+                <div class="toggle-switch">
+                  <input type="checkbox" id="settings-auto-pdf">
+                  <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                </div>
+              </label>
+            </div>
+
+            <div class="settings-section">
+              <div class="settings-section-title">Rival Benchmark Database</div>
+              <p class="settings-section-desc">Reference configs used to compare customer builds against market equivalents.</p>
+              <div class="table-container">
+                <table class="settings-table">
+                  <thead>
+                    <tr>
+                      <th>Config Name</th><th>Price</th><th>Cinebench R23</th><th>SSD Read</th><th>SSD Write</th><th></th>
+                    </tr>
+                  </thead>
+                  <tbody id="settings-rivals-table-body"></tbody>
+                </table>
+              </div>
+              <div class="add-rival-form-row margin-top">
+                <input type="text" id="new-rival-name" class="settings-input" placeholder="Ryzen 5 7600 + RTX 4060" style="flex:2">
+                <input type="text" id="new-rival-price" class="settings-input" placeholder="₹18,500" style="flex:1">
+                <input type="number" id="new-rival-cb" class="settings-input" placeholder="CB pts" style="flex:1">
+                <input type="number" id="new-rival-read" class="settings-input" placeholder="Read" style="flex:1">
+                <input type="number" id="new-rival-write" class="settings-input" placeholder="Write" style="flex:1">
+                <button id="btn-add-rival" class="primary-pink-btn">Add</button>
+              </div>
+            </div>
+
+          </div>
+
+          <!-- ══ TAB: DASHBOARD PORTAL ══ -->
+          <div id="tab-portal" class="settings-tab-content hidden">
+
+            <div class="settings-section">
+              <div class="settings-section-title">Staff Access PIN</div>
+              <p class="settings-section-desc">This PIN is shown only in admin mode. Staff use it to unlock the full builds dashboard at the tracker portal. Share it only with authorised staff.</p>
+              <div class="settings-field">
+                <label class="settings-label" for="settings-dashboard-pin">Dashboard Staff PIN</label>
+                <div class="settings-input-action-row">
+                  <input type="password" id="settings-dashboard-pin" class="settings-input settings-pin-input" value="9374" autocomplete="off" spellcheck="false">
+                  <button type="button" id="btn-toggle-pin-visibility" class="secondary-btn settings-action-btn" title="Show / Hide PIN">👁</button>
+                  <button type="button" id="btn-copy-dashboard-pin" class="secondary-btn settings-action-btn" title="Copy PIN">Copy</button>
+                </div>
+                <p class="settings-field-note">After changing the PIN here, also update <code>SALES_PIN</code> in <code>dashboard/app.js</code> and redeploy the dashboard.</p>
+              </div>
+            </div>
+
+            <div class="settings-section">
+              <div class="settings-section-title">Urgency Display</div>
+              <div class="settings-field">
+                <label class="settings-label" for="settings-urgent-hours">Flag ticket as Urgent within (hours of deadline)</label>
+                <input type="number" id="settings-urgent-hours" class="settings-input" placeholder="48" min="1" max="168" style="max-width:120px">
+                <p class="settings-field-note">Tickets due within this window get an amber urgent indicator on the dashboard.</p>
+              </div>
+            </div>
+
+            <div class="settings-section">
+              <div class="settings-section-title">Portal Deployment</div>
+              <p class="settings-section-desc">The customer-facing build tracker lives in the <code>dashboard/</code> folder. Deploy it for free on Vercel or Netlify — drag the folder onto their dashboard, and it's live.</p>
+              <div class="settings-portal-steps">
+                <div class="settings-portal-step"><span class="portal-step-num">1</span><span>Go to <strong>vercel.com</strong> or <strong>netlify.com</strong> and sign in.</span></div>
+                <div class="settings-portal-step"><span class="portal-step-num">2</span><span>Drag the <code>dashboard/</code> folder onto the deploy area.</span></div>
+                <div class="settings-portal-step"><span class="portal-step-num">3</span><span>Copy the URL it gives you and share it with staff and customers.</span></div>
+                <div class="settings-portal-step"><span class="portal-step-num">4</span><span>Customers enter their 6-char ticket code. Staff use the PIN above.</span></div>
+              </div>
+            </div>
+
+          </div>
+
+          <!-- ══ TAB: SYSTEM ══ -->
+          <div id="tab-advanced" class="settings-tab-content hidden">
+
+            <div class="settings-section">
+              <div class="settings-section-title">Technician Directory</div>
+              <div class="tech-settings-row">
+                <input type="text" id="settings-add-tech-name" class="settings-input" placeholder="Add technician name…">
+                <button id="btn-settings-add-tech" class="primary-pink-btn">+ Add</button>
+              </div>
+              <ul id="settings-tech-list" class="settings-list margin-top"></ul>
+            </div>
+
+            <div class="settings-section sensitive-config-card" id="admin-credentials-card">
+              <div class="settings-section-title-row">
+                <div class="settings-section-title">Cloud Database</div>
                 <span class="badge red" id="admin-lock-badge">🔒 Locked</span>
               </div>
-              <p class="panel-info-text">Supabase cloud settings are locked to prevent unauthorized tampering.</p>
-              
-              <!-- Lock screen overlay/state -->
-              <div id="admin-unlock-prompt" class="unlock-prompt-container" style="padding: 15px; display: flex; justify-content: center; align-items: center; background: rgba(15, 23, 42, 0.02); border: 1px dashed var(--glass-border); border-radius: 12px; margin-top: 12px;">
-                <button type="button" id="btn-unlock-admin" class="secondary-btn text-pink">🔑 Unlock Admin Configs</button>
+              <p class="settings-section-desc">Supabase credentials are admin-locked to prevent accidental changes.</p>
+              <div id="admin-unlock-prompt" class="unlock-prompt-container">
+                <button type="button" id="btn-unlock-admin" class="secondary-btn text-pink">🔑 Unlock Admin Credentials</button>
               </div>
-              
-              <!-- Sensitive inputs inside locked container (initially hidden/disabled) -->
               <div id="admin-sensitive-fields" class="hidden sensitive-locked-overlay">
-                <div class="form-group margin-top">
-                  <label for="settings-supabase-url">Supabase Project URL</label>
-                  <input type="text" id="settings-supabase-url" placeholder="https://xxxx.supabase.co" disabled>
+                <div class="settings-field margin-top">
+                  <label class="settings-label" for="settings-supabase-url">Supabase Project URL</label>
+                  <input type="text" id="settings-supabase-url" class="settings-input" placeholder="https://xxxx.supabase.co" disabled>
                 </div>
-                <div class="form-group margin-top">
-                  <label for="settings-supabase-key">Supabase Public Anon Key</label>
-                  <div style="display: flex; gap: 8px;">
-                    <input type="password" id="settings-supabase-key" placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." style="flex-grow: 1;" disabled>
-                    <button type="button" id="btn-toggle-key-visibility" class="secondary-btn" style="padding: 0 10px;" disabled>👁️</button>
+                <div class="settings-field margin-top">
+                  <label class="settings-label" for="settings-supabase-key">Supabase Public Anon Key</label>
+                  <div class="settings-input-action-row">
+                    <input type="password" id="settings-supabase-key" class="settings-input" placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9…" disabled>
+                    <button type="button" id="btn-toggle-key-visibility" class="secondary-btn settings-action-btn" disabled>👁</button>
                   </div>
                 </div>
                 <div class="margin-top">
-                  <button type="button" id="btn-test-db-connection" class="secondary-btn" disabled>Check Supabase Status</button>
+                  <button type="button" id="btn-test-db-connection" class="secondary-btn" disabled>Check Supabase Connection</button>
                   <span id="db-connection-status" class="status-msg"></span>
                 </div>
-                <div style="border-top: 1px dashed var(--glass-border); margin: 16px 0; padding-top: 16px;">
-                  <h4 style="font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--primary-pink); margin-bottom: 10px;">Portal Lock Configurations</h4>
-                  <div class="form-group" style="display: flex; align-items: center; gap: 8px;">
-                    <input type="checkbox" id="settings-is-master" style="width: 18px; height: 18px; cursor: pointer;" disabled>
-                    <label for="settings-is-master" style="font-size: 0.9rem; cursor: pointer; font-weight: 600;">Enable Master Application Mode (Service & QC Dashboards)</label>
-                  </div>
-                  <p class="panel-info-text" style="margin-top: 4px; margin-left: 26px; margin-bottom: 12px;">When disabled, the app operates in Standard Mode and boots directly into the Testing Client portal (hidden staff dashboards).</p>
-                  <div class="form-group" style="display: flex; align-items: center; gap: 8px;">
-                    <input type="checkbox" id="settings-lock-admin" style="width: 18px; height: 18px; cursor: pointer;" disabled>
-                    <label for="settings-lock-admin" style="font-size: 0.9rem; cursor: pointer; font-weight: 600;">Always Lock to Staff/Admin Mode on Startup (Disables Mode Switcher)</label>
-                  </div>
-                  <p class="panel-info-text" style="margin-top: 4px; margin-left: 26px;">When enabled, the app boots directly into the Staff Portal and disables returning to the Mode Selector (useful for admin terminals).</p>
+                <div class="settings-subsection-divider">
+                  <span class="settings-subsection-label">App Mode Lock</span>
                 </div>
+                <label class="settings-toggle-row">
+                  <div class="settings-toggle-info">
+                    <span class="settings-toggle-label">Master Application Mode</span>
+                    <span class="settings-toggle-desc">Show full staff dashboards. When off, boots directly into Client Testing mode.</span>
+                  </div>
+                  <div class="toggle-switch">
+                    <input type="checkbox" id="settings-is-master" disabled>
+                    <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                  </div>
+                </label>
+                <label class="settings-toggle-row">
+                  <div class="settings-toggle-info">
+                    <span class="settings-toggle-label">Lock to Admin Mode on Startup</span>
+                    <span class="settings-toggle-desc">Boots directly to the Staff Portal and disables the Mode Selector (for dedicated admin terminals).</span>
+                  </div>
+                  <div class="toggle-switch">
+                    <input type="checkbox" id="settings-lock-admin" disabled>
+                    <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                  </div>
+                </label>
               </div>
             </div>
 
-            <!-- Application Configuration -->
-            <div class="form-section margin-top">
-              <h3>🖥️ Application Configurations</h3>
-              <div class="form-group" style="display: flex; align-items: center; gap: 8px;">
-                <input type="checkbox" id="settings-auto-detect-hw" style="width: 18px; height: 18px; cursor: pointer;">
-                <label for="settings-auto-detect-hw" style="font-size: 0.9rem; cursor: pointer; font-weight: 600;">Auto-Detect System Specs on Ticket Creation</label>
-              </div>
-            </div>
-
-            <!-- Diagnostic Tools Paths -->
-            <div class="form-section margin-top">
-              <h3>🛠️ Diagnostic Tools Paths (External Path Config)</h3>
-              <p class="panel-info-text">Configure folders or executable paths for testing tools. Enter "mock" or leave blank to simulate diagnostic runs.</p>
-              <div class="form-group">
-                <label for="settings-path-hwinfo">HWiNFO64 Executable Path</label>
+            <div class="settings-section">
+              <div class="settings-section-title">Diagnostic Tool Paths</div>
+              <p class="settings-section-desc">Leave blank to use the bundled inbuilt tools. Set a custom path only if you want to override with a different version.</p>
+              <div class="settings-field">
+                <label class="settings-label" for="settings-path-cinebench">Cinebench R23 Executable</label>
                 <div class="uploader-row">
-                  <input type="text" id="settings-path-hwinfo" placeholder="C:\Diagnostics\HWiNFO64.exe" style="flex-grow: 1;">
-                  <button id="btn-select-path-hwinfo" class="secondary-btn" type="button">Browse</button>
-                </div>
-              </div>
-              <div class="form-group margin-top">
-                <label for="settings-path-cinebench">Cinebench R23 Executable Path</label>
-                <div class="uploader-row">
-                  <input type="text" id="settings-path-cinebench" placeholder="C:\Diagnostics\Cinebench.exe" style="flex-grow: 1;">
+                  <input type="text" id="settings-path-cinebench" class="settings-input" placeholder="Leave blank — uses bundled Cinebench">
                   <button id="btn-select-path-cinebench" class="secondary-btn" type="button">Browse</button>
                 </div>
               </div>
-              <div class="form-group margin-top">
-                <label for="settings-path-furmark">FurMark Executable Path</label>
+              <div class="settings-field margin-top">
+                <label class="settings-label" for="settings-path-furmark">FurMark Executable</label>
                 <div class="uploader-row">
-                  <input type="text" id="settings-path-furmark" placeholder="C:\Diagnostics\FurMark.exe" style="flex-grow: 1;">
+                  <input type="text" id="settings-path-furmark" class="settings-input" placeholder="Leave blank — uses bundled FurMark">
                   <button id="btn-select-path-furmark" class="secondary-btn" type="button">Browse</button>
                 </div>
               </div>
-              <div class="form-group margin-top">
-                <label for="settings-path-ssd-utility">SSD Benchmark Tool Executable Path</label>
+              <div class="settings-field margin-top">
+                <label class="settings-label" for="settings-path-hwinfo">HWiNFO64 Executable (optional)</label>
                 <div class="uploader-row">
-                  <input type="text" id="settings-path-ssd-utility" placeholder="C:\Diagnostics\CrystalDiskMark.exe" style="flex-grow: 1;">
+                  <input type="text" id="settings-path-hwinfo" class="settings-input" placeholder="C:\Tools\HWiNFO64.exe">
+                  <button id="btn-select-path-hwinfo" class="secondary-btn" type="button">Browse</button>
+                </div>
+              </div>
+              <div class="settings-field margin-top">
+                <label class="settings-label" for="settings-path-ssd-utility">SSD Utility (optional)</label>
+                <div class="uploader-row">
+                  <input type="text" id="settings-path-ssd-utility" class="settings-input" placeholder="C:\Tools\CrystalDiskMark.exe">
                   <button id="btn-select-path-ssd-utility" class="secondary-btn" type="button">Browse</button>
                 </div>
               </div>
             </div>
 
-            <!-- Rival Configurations -->
-            <div class="form-section margin-top">
-              <h3>📊 Rival Benchmarks Database</h3>
-              <div class="table-container">
-                <table class="settings-table">
-                  <thead>
-                    <tr>
-                      <th>Config Name</th>
-                      <th>Price</th>
-                      <th>Cinebench R23 Expected</th>
-                      <th>SSD Read (MB/s)</th>
-                      <th>SSD Write (MB/s)</th>
-                      <th>Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody id="settings-rivals-table-body">
-                    <!-- Injected dynamically -->
-                  </tbody>
-                </table>
-              </div>
-              <div class="add-rival-form-row margin-top">
-                <input type="text" id="new-rival-name" placeholder="Ryzen 5 7600 + RTX 4060" style="flex: 2;">
-                <input type="text" id="new-rival-price" placeholder="Price (e.g. ₹18,500)" style="flex: 1;">
-                <input type="number" id="new-rival-cb" placeholder="CB Score" style="flex: 1;">
-                <input type="number" id="new-rival-read" placeholder="Read MB/s" style="flex: 1;">
-                <input type="number" id="new-rival-write" placeholder="Write MB/s" style="flex: 1;">
-                <button id="btn-add-rival" class="primary-pink-btn">Add Config</button>
+            <div class="settings-section">
+              <div class="settings-section-title">Data Management</div>
+              <p class="settings-section-desc">Export a full JSON backup, restore from a previous backup, or wipe local data entirely.</p>
+              <div class="settings-action-buttons">
+                <button type="button" id="btn-settings-backup" class="secondary-btn">Backup (JSON)</button>
+                <button type="button" id="btn-settings-restore" class="secondary-btn">Restore (JSON)</button>
+                <input type="file" id="input-settings-restore-file" style="display:none" accept=".json">
+                <button type="button" id="btn-reseed-data" class="secondary-btn text-pink">Reseed Demo Data</button>
+                <button type="button" id="btn-settings-wipe" class="secondary-btn text-crimson">Wipe &amp; Reset</button>
               </div>
             </div>
 
-            <!-- Data Management & Backups -->
-            <div class="form-section margin-top">
-              <h3>💾 Data Management & Backups</h3>
-              <p class="panel-info-text">Export local ticket database to a file, restore from backup, or perform a complete factory reset.</p>
-              <div style="display: flex; gap: 10px; flex-wrap: wrap;" class="margin-top">
-                <button type="button" id="btn-settings-backup" class="secondary-btn">💾 Backup Database (JSON)</button>
-                <button type="button" id="btn-settings-restore" class="secondary-btn">📤 Restore Database (JSON)</button>
-                <input type="file" id="input-settings-restore-file" style="display: none;" accept=".json">
-                <button type="button" id="btn-settings-wipe" class="secondary-btn text-crimson">🚨 Wipe Local Cache & Reset</button>
-              </div>
-            </div>
           </div>
         </div>
       </div>
+
       <div class="modal-footer">
-        <button id="btn-reseed-data" class="secondary-btn text-pink">🔄 Reseed Demo Data</button>
+        <span class="settings-footer-hint">Changes take effect immediately on save.</span>
         <button id="btn-save-settings" class="primary-pink-btn">Save Settings</button>
       </div>
     </div>
@@ -1351,168 +1457,210 @@
 
   <!-- PRINTABLE QC REPORT TEMPLATE (Hidden from normal view, displays during print) -->
   <div id="print-report-container" class="print-only">
+
+    <!-- ── HEADER ── -->
     <div class="print-header">
       <div class="print-logo-section">
-        <div style="display: flex; align-items: center; gap: 8px;">
-          <svg viewBox="0 0 100 100" style="width: 28px; height: 28px; fill: none; stroke: black; stroke-width: 10; display: inline-block; vertical-align: middle;"><circle cx="50" cy="50" r="40" stroke="black" stroke-width="10" fill="none" stroke-dasharray="78.776 5" stroke-dashoffset="60.332" /><path d="M 50,23 L 72,70 C 58,58 50,56 50,56 C 50,56 42,58 28,70 Z" fill="black" /></svg>
-          <h1 style="margin: 0; font-family: 'Syncopate', sans-serif; font-weight: 700; font-size: 20px; letter-spacing: 0.05em; line-height: 1;">NEO TOKYO</h1>
+        <div style="display:flex;align-items:center;gap:8px;">
+          <svg viewBox="0 0 100 100" style="width:30px;height:30px;fill:none;stroke:#000;stroke-width:10;flex-shrink:0;"><circle cx="50" cy="50" r="40" stroke="#000" stroke-width="10" fill="none" stroke-dasharray="78.776 5" stroke-dashoffset="60.332"/><path d="M 50,23 L 72,70 C 58,58 50,56 50,56 C 50,56 42,58 28,70 Z" fill="#000"/></svg>
+          <h1 style="margin:0;font-family:'Syncopate',sans-serif;font-weight:700;font-size:20pt;letter-spacing:0.05em;line-height:1;">NEO TOKYO</h1>
         </div>
-        <p style="margin: 4px 0 0 0; font-size: 10px; color: #555; text-transform: uppercase; letter-spacing: 0.1em;">Service, Assembly & Quality Assurance Department</p>
+        <p style="margin:3px 0 1px 0;font-size:8pt;color:#444;text-transform:uppercase;letter-spacing:0.1em;">Service, Assembly &amp; Quality Assurance Department</p>
+        <p id="print-shop-contact" style="margin:0;font-size:8pt;color:#666;"></p>
       </div>
       <div class="print-meta-section">
-        <p><strong>Ticket ID:</strong> <span id="print-ticket-id">--</span></p>
-        <p><strong>Date:</strong> <span id="print-date">--</span></p>
+        <div class="print-cert-label">QUALITY CONTROL CERTIFICATE</div>
+        <p><strong>Ticket ID:</strong> #<span id="print-ticket-id">--</span></p>
+        <p><strong>Build Type:</strong> <span id="print-build-type">--</span></p>
+        <p><strong>Report Date:</strong> <span id="print-date">--</span></p>
         <p><strong>Technician:</strong> <span id="print-tech">--</span></p>
       </div>
     </div>
 
-    <hr class="print-divider">
-
-    <div class="print-section">
-      <h3>Customer Information</h3>
-      <table class="print-table-fields">
-        <tr>
-          <td><strong>Customer Name:</strong></td>
-          <td id="print-customer-name">--</td>
-          <td><strong>Job Status:</strong></td>
-          <td>COMPLETED & VERIFIED (QC PASS)</td>
-        </tr>
-      </table>
+    <!-- ── VERDICT BANNER ── -->
+    <div id="print-verdict-banner" class="print-verdict-banner">
+      <span id="print-verdict-icon" style="font-size:18pt;margin-right:10px;">✓</span>
+      <span id="print-verdict-text" style="font-size:13pt;font-weight:700;letter-spacing:0.08em;">ALL QUALITY CHECKS PASSED</span>
     </div>
 
+    <hr class="print-divider">
+
+    <!-- ── CUSTOMER & WINDOWS INFO (two columns) ── -->
+    <div class="print-two-col print-section">
+      <div>
+        <h3>Customer &amp; Job Details</h3>
+        <table class="print-table-fields">
+          <tr><td><strong>Customer Name</strong></td><td id="print-customer-name">--</td></tr>
+          <tr><td><strong>Job Type</strong></td><td id="print-job-type">--</td></tr>
+          <tr><td><strong>Job Status</strong></td><td id="print-status">--</td></tr>
+          <tr><td><strong>Date Created</strong></td><td id="print-created-at">--</td></tr>
+          <tr><td><strong>Deadline</strong></td><td id="print-deadline">--</td></tr>
+          <tr><td><strong>Completed On</strong></td><td id="print-completed-at">--</td></tr>
+        </table>
+      </div>
+      <div>
+        <h3>Windows Activation</h3>
+        <table class="print-table-fields">
+          <tr><td><strong>Operating System</strong></td><td>Windows</td></tr>
+          <tr><td><strong>Activation Status</strong></td><td id="print-win-status">--</td></tr>
+          <tr><td><strong>Product Key</strong></td><td id="print-win-key" style="font-family:monospace;font-size:7.5pt;word-break:break-all;">--</td></tr>
+        </table>
+      </div>
+    </div>
+
+    <!-- ── HARDWARE SPECIFICATIONS ── -->
     <div class="print-section">
       <h3>System Hardware Specifications</h3>
       <table class="print-spec-table">
         <thead>
-          <tr>
-            <th>Component</th>
-            <th>Installed hardware Configuration</th>
-            <th>Verified Serial Number</th>
-          </tr>
+          <tr><th>Component</th><th>Installed Configuration</th><th>Serial / Asset Number</th></tr>
         </thead>
         <tbody>
-          <tr>
-            <td><strong>Processor (CPU)</strong></td>
-            <td id="print-spec-cpu">--</td>
-            <td>N/A</td>
-          </tr>
-          <tr>
-            <td><strong>Integrated GPU (iGPU)</strong></td>
-            <td id="print-spec-igpu">--</td>
-            <td>N/A</td>
-          </tr>
-          <tr>
-            <td><strong>Discrete GPU (dGPU)</strong></td>
-            <td id="print-spec-gpu">--</td>
-            <td id="print-serial-gpu">--</td>
-          </tr>
-          <tr>
-            <td><strong>System Memory (RAM)</strong></td>
-            <td id="print-spec-ram">--</td>
-            <td id="print-serial-ram">--</td>
-          </tr>
-          <tr>
-            <td><strong>Solid State Drive (SSD)</strong></td>
-            <td id="print-spec-storage">--</td>
-            <td id="print-serial-ssd">--</td>
-          </tr>
-          <tr>
-            <td><strong>Chassis / Cabinet</strong></td>
-            <td>Neo Tokyo Custom Design</td>
-            <td id="print-serial-cabinet">--</td>
-          </tr>
+          <tr><td><strong>Processor (CPU)</strong></td><td id="print-spec-cpu">--</td><td>—</td></tr>
+          <tr><td><strong>Integrated Graphics (iGPU)</strong></td><td id="print-spec-igpu">--</td><td>—</td></tr>
+          <tr><td><strong>Discrete GPU</strong></td><td id="print-spec-gpu">--</td><td id="print-serial-gpu">—</td></tr>
+          <tr><td><strong>System Memory (RAM)</strong></td><td id="print-spec-ram">--</td><td id="print-serial-ram">—</td></tr>
+          <tr><td><strong>Solid State Drive (SSD)</strong></td><td id="print-spec-storage">--</td><td id="print-serial-ssd">—</td></tr>
+          <tr><td><strong>Motherboard</strong></td><td id="print-spec-mobo">--</td><td id="print-serial-mobo">—</td></tr>
+          <tr><td><strong>CPU Cooler</strong></td><td id="print-spec-cooler">--</td><td>—</td></tr>
+          <tr><td><strong>Power Supply (PSU)</strong></td><td id="print-spec-psu">--</td><td>—</td></tr>
+          <tr><td><strong>Chassis / Cabinet</strong></td><td id="print-spec-case">--</td><td id="print-serial-cabinet">—</td></tr>
         </tbody>
       </table>
-    </div>
-
-    <div class="print-section">
-      <h3>Quality Assurance & Hardware Tests Checklist</h3>
-      <div id="print-checklist-container" class="print-checklist-grid">
-        <div class="print-chk-item">✔️ Physical Condition Clean & Checked</div>
-        <div class="print-chk-item">✔️ Motherboard Socket & CPU Pins Checked</div>
-        <div class="print-chk-item">✔️ RAM Modules Correctly Installed</div>
-        <div class="print-chk-item">✔️ CPU Cooler / AIO Thermal Assembly Secured</div>
-        <div class="print-chk-item">✔️ Structural Cables Organized & Zip-tied</div>
-        <div class="print-chk-item">✔️ Windows OS Installed & Fully Licensed</div>
-        <div class="print-chk-item">✔️ System Hardware Drivers Updated</div>
-        <div class="print-chk-item">✔️ Motherboard BIOS Updated</div>
-        <div class="print-chk-item">✔️ Front/Rear USB Ports Functional</div>
-        <div class="print-chk-item">✔️ HDMI & DisplayPort Output Verified</div>
-        <div class="print-chk-item">✔️ Audio Port Sound Jack Checked</div>
-        <div class="print-chk-item">✔️ Wi-Fi Antenna Mounted & Calibrated</div>
+      <div id="print-missing-parts" class="hidden" style="margin-top:6px;font-size:8pt;padding:4px 8px;border-left:3px solid #888;background:#f9f9f9;">
+        <strong>⚠ Outstanding Parts at Handoff:</strong> <span id="print-missing-parts-text"></span>
       </div>
     </div>
 
+    <!-- ── QC CHECKLIST ── -->
     <div class="print-section">
-      <h3>Diagnostic, Thermal & Benchmark Metrics</h3>
+      <h3>Quality Assurance &amp; Hardware Verification Checklist</h3>
+      <div id="print-checklist-container" class="print-checklist-grid"></div>
+    </div>
+
+    <!-- ── THERMAL & STRESS TEST RESULTS ── -->
+    <div class="print-section">
+      <h3>Thermal &amp; Stress Test Results</h3>
       <table class="print-metric-table">
         <thead>
-          <tr>
-            <th>Test Parameters</th>
-            <th>Minimum Logged</th>
-            <th>Maximum Logged</th>
-            <th>Averaged Real-Load</th>
-          </tr>
+          <tr><th>Test</th><th>Min</th><th>Avg (Real Load)</th><th>Max</th><th>Threshold</th><th>Result</th></tr>
         </thead>
         <tbody>
           <tr>
-            <td><strong>CPU Temperatures (during Cinebench load)</strong></td>
-            <td id="print-cpu-min">-- °C</td>
-            <td id="print-cpu-max">-- °C</td>
-            <td id="print-cpu-avg">-- °C</td>
+            <td><strong>CPU Temperature — Cinebench R23 Load</strong></td>
+            <td id="print-cpu-min">--</td>
+            <td id="print-cpu-avg">--</td>
+            <td id="print-cpu-max">--</td>
+            <td id="print-cpu-thresh">≤ 85 °C</td>
+            <td id="print-cpu-result">--</td>
           </tr>
           <tr>
-            <td><strong>GPU Temperatures (during Furmark load)</strong></td>
-            <td id="print-gpu-min">-- °C</td>
-            <td id="print-gpu-max">-- °C</td>
-            <td id="print-gpu-avg">-- °C</td>
+            <td><strong>GPU Temperature — FurMark Stress Load</strong></td>
+            <td id="print-gpu-min">--</td>
+            <td id="print-gpu-avg">--</td>
+            <td id="print-gpu-max">--</td>
+            <td id="print-gpu-thresh">≤ 80 °C</td>
+            <td id="print-gpu-result">--</td>
+          </tr>
+          <tr>
+            <td><strong>RAM Stress Test (80% Allocation)</strong></td>
+            <td colspan="3" id="print-ram-detail">--</td>
+            <td>Must Pass</td>
+            <td id="print-ram-result">--</td>
           </tr>
         </tbody>
       </table>
+      <div id="print-sparklines" class="print-sparklines hidden">
+        <div class="print-sparkline-row">
+          <span class="print-sparkline-label">CPU °C over test duration →</span>
+          <span id="print-cpu-sparkline"></span>
+        </div>
+        <div class="print-sparkline-row">
+          <span class="print-sparkline-label">GPU °C over test duration →</span>
+          <span id="print-gpu-sparkline"></span>
+        </div>
+      </div>
+    </div>
 
-      <table class="print-bench-table margin-top">
+    <!-- ── BENCHMARK PERFORMANCE ── -->
+    <div class="print-section">
+      <h3>Performance Benchmark Results</h3>
+      <table class="print-bench-table">
         <thead>
-          <tr>
-            <th>Benchmark Target</th>
-            <th>Neo Tokyo Build Score</th>
-          </tr>
+          <tr><th>Benchmark</th><th>Score Achieved</th><th>Min. Threshold</th><th>Result</th></tr>
         </thead>
         <tbody>
           <tr>
-            <td><strong>Cinebench R23 Score</strong></td>
+            <td><strong>Cinebench R23 — CPU Multi/Single Core</strong></td>
             <td id="print-score-cb">-- pts</td>
+            <td id="print-thresh-cb">≥ 10,000 pts</td>
+            <td id="print-result-cb">--</td>
           </tr>
           <tr>
-            <td><strong>FurMark GPU Score</strong></td>
+            <td><strong>FurMark — GPU Stress Benchmark</strong></td>
             <td id="print-score-fm">-- pts</td>
+            <td id="print-thresh-fm">≥ 5,000 pts</td>
+            <td id="print-result-fm">--</td>
           </tr>
           <tr>
             <td><strong>SSD Sequential Read Speed</strong></td>
             <td id="print-score-read">-- MB/s</td>
+            <td id="print-thresh-read">≥ 3,000 MB/s</td>
+            <td id="print-result-read">--</td>
           </tr>
           <tr>
             <td><strong>SSD Sequential Write Speed</strong></td>
             <td id="print-score-write">-- MB/s</td>
+            <td id="print-thresh-write">≥ 2,500 MB/s</td>
+            <td id="print-result-write">--</td>
           </tr>
         </tbody>
       </table>
-
-
     </div>
 
+    <!-- ── SSD HEALTH ── -->
+    <div id="print-ssd-health-section" class="print-section hidden">
+      <h3>SSD Drive Health Report (S.M.A.R.T. Data)</h3>
+      <table class="print-table-fields">
+        <tr>
+          <td><strong>Drive Model</strong></td><td id="print-ssd-model">--</td>
+          <td><strong>Media Type</strong></td><td id="print-ssd-type">--</td>
+        </tr>
+        <tr>
+          <td><strong>Health Status</strong></td><td id="print-ssd-health">--</td>
+          <td><strong>Estimated Life Remaining</strong></td><td id="print-ssd-life">--</td>
+        </tr>
+        <tr>
+          <td><strong>Power-On Hours</strong></td><td id="print-ssd-hours">--</td>
+          <td><strong>Capacity</strong></td><td id="print-ssd-size">--</td>
+        </tr>
+      </table>
+    </div>
 
+    <!-- ── ACTIVITY LOG ── -->
+    <div id="print-event-log-section" class="print-section hidden">
+      <h3>Build &amp; Service Activity Log</h3>
+      <table class="print-event-table">
+        <thead><tr><th>Timestamp (UTC)</th><th>Event</th><th>By</th></tr></thead>
+        <tbody id="print-event-log-body"></tbody>
+      </table>
+    </div>
 
+    <!-- ── FOOTER ── -->
     <div class="print-footer">
       <div class="signature-line">
-        <br><br>
+        <br>
         <p>______________________________________</p>
         <p><strong>Technician Signature</strong></p>
-        <p>Neo Tokyo Kochi QA Lab</p>
+        <p id="print-footer-tech" style="color:#333;"></p>
+        <p id="print-footer-contact" style="font-size:7.5pt;color:#666;margin-top:2px;"></p>
       </div>
       <div class="stamp-section">
-        <div class="stamp-box">QC APPROVED</div>
+        <div id="print-stamp-box" class="stamp-box">QC APPROVED</div>
+        <p style="font-size:7pt;color:#888;margin-top:4px;text-align:center;">Certified by Neo Tokyo QA Department</p>
       </div>
     </div>
+
   </div>
 
   <!-- CHANGELOG / OTA UPDATE MODAL -->
