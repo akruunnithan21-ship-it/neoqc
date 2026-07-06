@@ -3668,6 +3668,18 @@ ipcRenderer.on('update:status', (event, data) => {
   }
 });
 
+// Pill click: download when update found, install when downloaded
+document.addEventListener('click', (e) => {
+  const pill = e.target.closest('#update-status-pill');
+  if (!pill) return;
+  if (pill.classList.contains('is-available')) {
+    pill.textContent = 'Starting download…';
+    ipcRenderer.send('update:download');
+  } else if (pill.classList.contains('is-ready')) {
+    ipcRenderer.send('update:install');
+  }
+});
+
 // IPC Receivers for Real-time metrics
 ipcRenderer.on('sys:diag-log', (event, text) => {
   let modifiedText = text;

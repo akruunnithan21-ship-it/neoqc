@@ -157,7 +157,8 @@ app.whenReady().then(() => {
   // "client" channels that nothing publishes to anymore, silently breaking OTA.
   autoUpdater.allowPrerelease = false;
   autoUpdater.allowDowngrade = false;
-  log.info('Using default autoUpdater channel "latest" (allowPrerelease: false, allowDowngrade: false)');
+  autoUpdater.autoDownload = false;
+  log.info('Using default autoUpdater channel "latest" (allowPrerelease: false, allowDowngrade: false, autoDownload: false)');
 
   // Auto-updater event logging + renderer status feed
   const sendUpdateStatus = (status, data) => {
@@ -215,8 +216,18 @@ app.whenReady().then(() => {
     });
   });
 
-  // Check for updates and notify the user
-  autoUpdater.checkForUpdatesAndNotify();
+  // Manual update controls triggered by pill click in renderer
+  ipcMain.on('update:download', () => {
+    log.info('User triggered update download via pill.');
+    autoUpdater.downloadUpdate();
+  });
+  ipcMain.on('update:install', () => {
+    log.info('User triggered quit-and-install via pill.');
+    autoUpdater.quitAndInstall();
+  });
+
+  // Check for updates (autoDownload is false — pill click triggers the download)
+  autoUpdater.checkForUpdates();
 
   app.on('activate', function () {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
