@@ -1,0 +1,406 @@
+// ══════════════════════════════════════════════════════════
+//  Neo Tokyo Kochi — Build Tracker Dashboard
+//  Reads live from the same Supabase project as the Electron app.
+// ══════════════════════════════════════════════════════════
+
+// ── CONFIG — update these if credentials change ──────────
+const SUPABASE_URL  = 'https://ggsxkhenzdhaachubrsc.supabase.co';
+const SUPABASE_KEY  = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imdnc3hraGVuemRoYWFjaHVicnNjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE3MTEwNjEsImV4cCI6MjA5NzI4NzA2MX0.bDhUK-qJSgcBEcNdEdOaZGg5vsUF6jH2gbSRQaMhjBo';
+
+// Change this PIN to whatever the staff password should be.
+// Anyone who knows the URL + this PIN can view all tickets.
+const SALES_PIN = '9374';
+// ─────────────────────────────────────────────────────────
+
+// Status ordering used for the customer stepper
+const STATUS_STEPS = [
+  { key: 'awaiting',   label: 'Awaiting\nParts',     icon: '📦' },
+  { key: 'building',   label: 'In\nAssembly',         icon: '🔧' },
+  { key: 'waiting_qc', label: 'Awaiting\nQC',         icon: '⏳' },
+  { key: 'qc_testing', label: 'QC &\nTesting',        icon: '⚡' },
+  { key: 'completed',  label: 'Ready for\nHandoff',   icon: '✓'  },
+];
+
+const STATUS_LABELS = {
+  awaiting:   'Awaiting Components',
+  building:   'In Assembly',
+  waiting_qc: 'Awaiting QC',
+  qc_testing: 'QC & Testing',
+  completed:  'Completed',
+};
+
+// ── Init ──────────────────────────────────────────────────
+let db = null;
+let realtimeChannel = null;
+let allTickets = [];
+
+function initSupabase() {
+  if (!window.supabase) return null;
+  return window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+}
+
+// ── Routing ───────────────────────────────────────────────
+function getView() {
+  return new URLSearchParams(location.search).get('view') || 'customer';
+}
+
+function activateView(name) {
+  document.getElementById('view-customer').classList.toggle('hidden', name !== 'customer');
+  document.getElementById('view-sales').classList.toggle('hidden', name !== 'sales');
+  document.getElementById('nav-customer').classList.toggle('active', name === 'customer');
+  document.getElementById('nav-sales').classList.toggle('active', name === 'sales');
+}
+
+// ═══════════════════════════════════════════════════════════
+//  CUSTOMER VIEW
+// ═══════════════════════════════════════════════════════════
+
+function initCustomerView() {
+  const input   = document.getElementById('ticket-code-input');
+  const btnLook = document.getElementById('btn-lookup');
+
+  btnLook.addEventListener('click', doLookup);
+  input.addEventListener('keydown', e => { if (e.key === 'Enter') doLookup(); });
+  input.addEventListener('input', () => {
+    input.value = input.value.toUpperCase();
+    hideError();
+  });
+}
+
+async function doLookup() {
+  const raw  = document.getElementById('ticket-code-input').value.trim().toUpperCase();
+  if (raw.length < 4) { showError('Please enter at least 4 characters of your ticket code.'); return; }
+
+  showLoading(true);
+  hideError();
+
+  try {
+    const { data, error } = await db
+      .from('tickets')
+      .select('id, customer_name, status, type, technician, created_at, deadline, completed_at, diagnostics')
+      .filter('id', 'ilike', `%${raw.toLowerCase()}`)
+      .limit(1);
+
+    if (error) throw error;
+    if (!data || data.length === 0) { showError('No ticket found for that code. Please double-check and try again.'); return; }
+
+    renderStatusCard(data[0]);
+    subscribeToTicket(data[0].id);
+  } catch (err) {
+    console.error('Lookup error:', err);
+    showError('Could not connect to the server. Please try again in a moment.');
+  } finally {
+    showLoading(false);
+  }
+}
+
+function renderStatusCard(row) {
+  const card = document.getElementById('status-card');
+  card.classList.remove('hidden');
+
+  const shortId    = row.id.slice(-6).toUpperCase();
+  const statusIdx  = STATUS_STEPS.findIndex(s => s.key === row.status);
+  const statusLabel = STATUS_LABELS[row.status] || row.status || 'Unknown';
+  const isComplete  = row.status === 'completed';
+
+  // QC result — look inside diagnostics JSONB
+  const diag = row.diagnostics || {};
+  const qcPassed = isComplete
+    ? (diag.cinebench || diag.furmark || diag.ssdRead)
+      ? (
+          (diag.cpuTempMax == null || diag.cpuTempMax <= 85) &&
+          (diag.gpuTempMax == null || diag.gpuTempMax <= 80)
+        )
+      : null
+    : null;
+
+  card.innerHTML = `
+    <div class="sc-header">
+      <div>
+        <div class="sc-customer">${escHtml(row.customer_name)}</div>
+        <div class="sc-id">Ticket #${shortId}</div>
+      </div>
+      <span class="status-badge ${row.status || 'unknown'}">${escHtml(statusLabel)}</span>
+    </div>
+
+    <div class="sc-meta">
+      <div class="sc-meta-item">
+        <div class="label">Technician</div>
+        <div class="value">${escHtml(row.technician || 'Unassigned')}</div>
+      </div>
+      <div class="sc-meta-item">
+        <div class="label">Build Type</div>
+        <div class="value">${row.type === 'build' ? 'New PC Build' : row.type === 'repair' ? 'Service Repair' : escHtml(row.type || '--')}</div>
+      </div>
+      <div class="sc-meta-item">
+        <div class="label">Received On</div>
+        <div class="value">${fmtDate(row.created_at)}</div>
+      </div>
+      <div class="sc-meta-item">
+        <div class="label">${isComplete ? 'Completed On' : 'Target Ready By'}</div>
+        <div class="value">${fmtDate(isComplete ? row.completed_at : row.deadline)}</div>
+      </div>
+    </div>
+
+    <div class="stepper">
+      ${STATUS_STEPS.map((step, i) => {
+        const allDone = row.status === 'completed';
+        const cls = (allDone || i < statusIdx) ? 'done' : i === statusIdx ? 'active' : '';
+        const circleContent = (allDone || i < statusIdx) ? '✓' : i + 1;
+        return `<div class="step ${cls}">
+          <div class="step-circle">${circleContent}</div>
+          <div class="step-label">${step.label.replace('\n', '<br>')}</div>
+        </div>`;
+      }).join('')}
+    </div>
+
+    ${qcPassed === true ? `<div class="sc-qc pass">✓ &nbsp;Quality checks passed — this system is cleared for handoff.</div>` : ''}
+    ${qcPassed === false ? `<div class="sc-qc fail">✗ &nbsp;Some quality checks failed — the technician is reviewing the system.</div>` : ''}
+  `;
+}
+
+// Realtime — keep the customer's card up-to-date while they watch
+function subscribeToTicket(ticketId) {
+  if (realtimeChannel) { db.removeChannel(realtimeChannel); }
+  realtimeChannel = db
+    .channel(`ticket-${ticketId}`)
+    .on('postgres_changes', {
+      event:  '*',
+      schema: 'public',
+      table:  'tickets',
+      filter: `id=eq.${ticketId}`,
+    }, payload => {
+      if (payload.new) renderStatusCard(payload.new);
+    })
+    .subscribe();
+}
+
+function showError(msg) {
+  const el = document.getElementById('lookup-error');
+  document.getElementById('lookup-error-text').textContent = msg;
+  el.classList.remove('hidden');
+  document.getElementById('status-card').classList.add('hidden');
+}
+function hideError() {
+  document.getElementById('lookup-error').classList.add('hidden');
+}
+
+// ═══════════════════════════════════════════════════════════
+//  SALES VIEW
+// ═══════════════════════════════════════════════════════════
+
+const SESSION_KEY = 'ntk_sales_unlocked';
+
+function initSalesView() {
+  document.getElementById('btn-pin-submit').addEventListener('click', tryPin);
+  document.getElementById('pin-input').addEventListener('keydown', e => { if (e.key === 'Enter') tryPin(); });
+  document.getElementById('pin-input').addEventListener('input', () => {
+    document.getElementById('pin-error').classList.add('hidden');
+  });
+
+  document.getElementById('btn-logout').addEventListener('click', logout);
+  document.getElementById('filter-status').addEventListener('change', renderTable);
+  document.getElementById('filter-search').addEventListener('input', renderTable);
+
+  // Check if already unlocked this session
+  if (sessionStorage.getItem(SESSION_KEY) === '1') {
+    unlockSales();
+  }
+}
+
+function tryPin() {
+  const val = document.getElementById('pin-input').value;
+  if (val === SALES_PIN) {
+    sessionStorage.setItem(SESSION_KEY, '1');
+    unlockSales();
+  } else {
+    document.getElementById('pin-error').classList.remove('hidden');
+    document.getElementById('pin-input').value = '';
+    document.getElementById('pin-input').focus();
+  }
+}
+
+async function unlockSales() {
+  document.getElementById('pin-gate').classList.add('hidden');
+  document.getElementById('sales-content').classList.remove('hidden');
+  await loadAllTickets();
+  subscribeSales();
+}
+
+function logout() {
+  sessionStorage.removeItem(SESSION_KEY);
+  document.getElementById('sales-content').classList.add('hidden');
+  document.getElementById('pin-gate').classList.remove('hidden');
+  document.getElementById('pin-input').value = '';
+  if (realtimeChannel) { db.removeChannel(realtimeChannel); realtimeChannel = null; }
+  allTickets = [];
+}
+
+async function loadAllTickets() {
+  showLoading(true);
+  try {
+    const { data, error } = await db
+      .from('tickets')
+      .select('id, customer_name, status, type, technician, created_at, deadline, completed_at, diagnostics, updated_at')
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+    allTickets = data || [];
+    renderTable();
+    updateLiveIndicator(true);
+  } catch (err) {
+    console.error('Sales load error:', err);
+    updateLiveIndicator(false);
+  } finally {
+    showLoading(false);
+  }
+}
+
+function subscribeSales() {
+  if (realtimeChannel) { db.removeChannel(realtimeChannel); }
+  realtimeChannel = db
+    .channel('sales-all-tickets')
+    .on('postgres_changes', {
+      event:  '*',
+      schema: 'public',
+      table:  'tickets',
+    }, payload => {
+      const { eventType, new: row, old } = payload;
+      if (eventType === 'INSERT') {
+        allTickets.unshift(row);
+      } else if (eventType === 'UPDATE') {
+        const idx = allTickets.findIndex(t => t.id === row.id);
+        if (idx !== -1) allTickets[idx] = row; else allTickets.unshift(row);
+      } else if (eventType === 'DELETE') {
+        allTickets = allTickets.filter(t => t.id !== old.id);
+      }
+      renderTable();
+    })
+    .subscribe(status => {
+      updateLiveIndicator(status === 'SUBSCRIBED');
+    });
+}
+
+function renderTable() {
+  const statusFilter = document.getElementById('filter-status').value;
+  const searchQuery  = document.getElementById('filter-search').value.toLowerCase().trim();
+
+  let rows = allTickets.filter(t => {
+    const matchStatus = statusFilter === 'all' || t.status === statusFilter;
+    const matchSearch = !searchQuery
+      || (t.customer_name || '').toLowerCase().includes(searchQuery)
+      || (t.technician    || '').toLowerCase().includes(searchQuery)
+      || t.id.includes(searchQuery.toLowerCase());
+    return matchStatus && matchSearch;
+  });
+
+  // Stats
+  const urgent = allTickets.filter(t => t.status !== 'completed' && isUrgent(t.deadline));
+  const done   = allTickets.filter(t => t.status === 'completed');
+  document.getElementById('stat-total').textContent  = `${allTickets.length} Ticket${allTickets.length !== 1 ? 's' : ''}`;
+  document.getElementById('stat-urgent').textContent = `${urgent.length} Urgent`;
+  document.getElementById('stat-done').textContent   = `${done.length} Done`;
+
+  const tbody = document.getElementById('sales-body');
+  const noMsg = document.getElementById('no-tickets');
+
+  if (rows.length === 0) {
+    tbody.innerHTML = '';
+    noMsg.classList.remove('hidden');
+    return;
+  }
+  noMsg.classList.add('hidden');
+
+  tbody.innerHTML = rows.map(t => {
+    const shortId     = t.id.slice(-6).toUpperCase();
+    const statusLabel = STATUS_LABELS[t.status] || t.status || '—';
+    const deadlineCls = isUrgent(t.deadline) ? 'urgent' : isPast(t.deadline) && t.status !== 'completed' ? 'past' : '';
+    const qcHtml      = qcBadge(t);
+
+    return `<tr>
+      <td class="cell-id">#${shortId}</td>
+      <td class="cell-customer">${escHtml(t.customer_name || '—')}</td>
+      <td class="cell-type">${t.type === 'build' ? 'Build' : t.type === 'repair' ? 'Repair' : escHtml(t.type || '—')}</td>
+      <td><span class="status-badge ${t.status || 'unknown'}">${escHtml(statusLabel)}</span></td>
+      <td class="cell-tech">${escHtml(t.technician || 'Unassigned')}</td>
+      <td class="cell-deadline ${deadlineCls}">${fmtDate(t.status === 'completed' ? t.completed_at : t.deadline)}</td>
+      <td>${qcHtml}</td>
+    </tr>`;
+  }).join('');
+}
+
+function qcBadge(t) {
+  if (t.status !== 'completed') return '<span class="qc-badge na">—</span>';
+  const d = t.diagnostics || {};
+  const hasData = d.cpuTempMax != null || d.cinebench != null || d.furmark != null;
+  if (!hasData) return '<span class="qc-badge na">Pending</span>';
+  const pass =
+    (d.cpuTempMax == null || d.cpuTempMax <= 85) &&
+    (d.gpuTempMax == null || d.gpuTempMax <= 80) &&
+    (d.ramStress == null  || d.ramStress === 'passed' || d.ramStress === true);
+  return pass
+    ? '<span class="qc-badge pass">✓ PASS</span>'
+    : '<span class="qc-badge fail">✗ FAIL</span>';
+}
+
+function updateLiveIndicator(online) {
+  const el = document.getElementById('live-indicator');
+  if (!el) return;
+  el.classList.toggle('offline', !online);
+  el.innerHTML = online
+    ? '<span class="live-dot"></span>LIVE'
+    : '<span class="live-dot"></span>OFFLINE';
+}
+
+// ═══════════════════════════════════════════════════════════
+//  HELPERS
+// ═══════════════════════════════════════════════════════════
+
+function fmtDate(iso) {
+  if (!iso) return '—';
+  try {
+    return new Date(iso).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+  } catch { return '—'; }
+}
+
+function isUrgent(deadline) {
+  if (!deadline) return false;
+  const diff = new Date(deadline) - new Date();
+  return diff > 0 && diff < 2 * 24 * 60 * 60 * 1000; // within 48 hours
+}
+
+function isPast(deadline) {
+  if (!deadline) return false;
+  return new Date(deadline) < new Date();
+}
+
+function escHtml(str) {
+  if (!str) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function showLoading(show) {
+  document.getElementById('loading-overlay').classList.toggle('hidden', !show);
+}
+
+// ═══════════════════════════════════════════════════════════
+//  BOOT
+// ═══════════════════════════════════════════════════════════
+
+document.addEventListener('DOMContentLoaded', () => {
+  db = initSupabase();
+  if (!db) {
+    document.body.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100vh;font-family:sans-serif;color:#e91e8c;">Supabase library failed to load. Check your internet connection.</div>';
+    return;
+  }
+
+  const view = getView();
+  activateView(view);
+
+  initCustomerView();
+  initSalesView();
+});

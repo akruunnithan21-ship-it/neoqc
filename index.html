@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Neo Tokyo Kochi — Build Tracker</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&family=Syncopate:wght@700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- TOP NAV -->
+  <nav class="topbar">
+    <a class="topbar-brand" href="?view=customer">
+      <svg viewBox="0 0 100 100" width="22" height="22" fill="none" stroke="currentColor" stroke-width="10" style="flex-shrink:0;color:var(--pink)">
+        <circle cx="50" cy="50" r="40" stroke-dasharray="78.776 5" stroke-dashoffset="60.332"/>
+        <path d="M50,23 L72,70 C58,58 50,56 50,56 C50,56 42,58 28,70 Z" fill="currentColor" stroke="none"/>
+      </svg>
+      <span class="brand-name">NEO TOKYO</span>
+    </a>
+    <div class="topbar-links">
+      <a href="?view=customer" class="nav-link" id="nav-customer">Track Order</a>
+      <a href="?view=sales"    class="nav-link" id="nav-sales">Staff View</a>
+    </div>
+  </nav>
+
+  <!-- ───────────────────────────────── CUSTOMER VIEW ─── -->
+  <main id="view-customer" class="view">
+    <div class="hero">
+      <h1 class="hero-title">Track Your Build</h1>
+      <p class="hero-sub">Enter the 6-character code from your receipt to see live build status.</p>
+    </div>
+
+    <div class="lookup-card glass">
+      <div class="lookup-row">
+        <input id="ticket-code-input"
+               class="lookup-input"
+               maxlength="6"
+               placeholder="e.g.  A1B2C3"
+               autocomplete="off"
+               spellcheck="false">
+        <button id="btn-lookup" class="btn-primary">Track →</button>
+      </div>
+      <p class="lookup-hint">The ticket code is printed on your order receipt from Neo Tokyo Kochi.</p>
+    </div>
+
+    <div id="lookup-error" class="error-box hidden">
+      <span id="lookup-error-text">No ticket found. Double-check the code and try again.</span>
+    </div>
+
+    <div id="status-card" class="status-card glass hidden">
+      <!-- Populated by JS -->
+    </div>
+  </main>
+
+  <!-- ───────────────────────────────── SALES VIEW ─── -->
+  <main id="view-sales" class="view hidden">
+
+    <!-- PIN gate -->
+    <div id="pin-gate" class="pin-gate glass">
+      <div class="pin-icon">🔐</div>
+      <h2 class="pin-title">Staff Access</h2>
+      <p class="pin-sub">Enter the staff PIN to view all builds.</p>
+      <div class="pin-row">
+        <input id="pin-input" type="password" class="pin-input" placeholder="PIN" maxlength="8" autocomplete="off">
+        <button id="btn-pin-submit" class="btn-primary">Enter</button>
+      </div>
+      <p id="pin-error" class="pin-error hidden">Incorrect PIN. Please try again.</p>
+    </div>
+
+    <!-- Full dashboard (shown after PIN) -->
+    <div id="sales-content" class="sales-content hidden">
+      <div class="sales-toolbar">
+        <div class="toolbar-left">
+          <h2 class="sales-title">All Builds</h2>
+          <div id="live-indicator" class="live-indicator">
+            <span class="live-dot"></span>LIVE
+          </div>
+        </div>
+        <div class="toolbar-right">
+          <input id="filter-search" class="filter-input" placeholder="Search customer or technician…">
+          <select id="filter-status" class="filter-select">
+            <option value="all">All Statuses</option>
+            <option value="awaiting">Awaiting Components</option>
+            <option value="building">In Assembly</option>
+            <option value="waiting_qc">Awaiting QC</option>
+            <option value="qc_testing">QC &amp; Testing</option>
+            <option value="completed">Completed</option>
+          </select>
+          <button id="btn-logout" class="btn-ghost" title="Lock">Lock ⌐</button>
+        </div>
+      </div>
+
+      <div class="stats-row">
+        <div class="stat-chip" id="stat-total">— Tickets</div>
+        <div class="stat-chip urgent" id="stat-urgent">— Urgent</div>
+        <div class="stat-chip done"   id="stat-done">— Done</div>
+      </div>
+
+      <div class="table-wrapper">
+        <table id="sales-table">
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Customer</th>
+              <th>Type</th>
+              <th>Status</th>
+              <th>Technician</th>
+              <th>Deadline</th>
+              <th>QC</th>
+            </tr>
+          </thead>
+          <tbody id="sales-body"></tbody>
+        </table>
+      </div>
+      <p id="no-tickets" class="no-tickets hidden">No tickets match the current filter.</p>
+    </div>
+
+  </main>
+
+  <!-- LOADING RING -->
+  <div id="loading-overlay" class="loading-overlay hidden">
+    <div class="loading-ring"></div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="app.js"></script>
+</body>
+</html>
