@@ -2464,10 +2464,15 @@ function openSettingsModal() {
   const urgentEl = document.getElementById('settings-urgent-hours');
   if (urgentEl) urgentEl.value = appState.settings.urgentHours || 48;
 
-  // App version
+  // App version — header badge + sidebar label
   const verEl = document.getElementById('settings-app-version');
-  if (verEl && window.require) {
-    try { verEl.textContent = 'v' + window.require('electron').remote?.app?.getVersion?.(); } catch(_) {}
+  const sideVerEl = document.getElementById('settings-sidebar-ver');
+  if (window.require) {
+    try {
+      const ver = 'v' + window.require('electron').remote?.app?.getVersion?.();
+      if (verEl) verEl.textContent = ver;
+      if (sideVerEl) sideVerEl.textContent = ver;
+    } catch(_) {}
   }
 
   // Reset active tab in settings modal
