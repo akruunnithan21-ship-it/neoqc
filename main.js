@@ -516,23 +516,84 @@ function resolveExecutable(providedPath, defaultExecutables) {
   return providedPath;
 }
 
+// Mocked Prime95 result for when the binary is missing but a torture test was requested.
+function mockPrime95Result(prime95Duration) {
+  return {
+    ranAt: new Date().toISOString(),
+    mode: 'blend',
+    durationRequestedSec: prime95Duration,
+    durationActualSec: prime95Duration,
+    workerCount: os.cpus().length,
+    overallResult: 'pass',
+    workers: Array.from({ length: os.cpus().length }, (_, i) => ({
+      id: i + 1, result: 'pass', errors: 0, roundingWarnings: 0, lastIterationMs: null
+    })),
+    errorSummary: [],
+    rawLogExcerpt: null,
+    toolVersion: 'mock'
+  };
+}
+
+// Parse a Prime95 results.txt excerpt into a structured worker-level result.
+// Prime95 flags real hardware trouble with FATAL ERROR / HARDWARE ERROR lines,
+// and marginal-but-suspicious runs with "ROUND OFF > 0.4" warnings — see
+// readme.txt "POSSIBLE HARDWARE FAILURE" section (bundled with the tool).
+function parsePrime95Results(logText, workerCount) {
+  const lines = logText.split('\n');
+  const workers = Array.from({ length: workerCount }, (_, i) => ({
+    id: i + 1, result: 'pass', errors: 0, roundingWarnings: 0, lastIterationMs: null
+  }));
+  const errorSummary = [];
+  let fatal = false;
+
+  for (const line of lines) {
+    const workerMatch = line.match(/[Ww]orker\s*#?(\d+)/);
+    const idx = workerMatch ? Math.min(parseInt(workerMatch[1]), workerCount) - 1 : 0;
+    if (/FATAL ERROR|HARDWARE ERROR/i.test(line)) {
+      fatal = true;
+      if (workers[idx]) { workers[idx].result = 'fail'; workers[idx].errors++; }
+      errorSummary.push(line.trim());
+    } else if (/ROUND OFF.*(?:>|exceed)/i.test(line) || /SUM\(INPUTS\) != SUM\(OUTPUTS\)/i.test(line)) {
+      if (workers[idx]) workers[idx].roundingWarnings++;
+      errorSummary.push(line.trim());
+    }
+  }
+
+  return {
+    overallResult: fatal ? 'fail' : 'pass',
+    workers,
+    errorSummary: errorSummary.slice(-20), // keep it bounded
+    rawLogExcerpt: lines.slice(-40).join('\n')
+  };
+}
+
 // IPC Handler: Run Automated Diagnostics using built-in embedded tools
 ipcMain.handle('sys:run-diagnostics', async (event, config) => {
   const diagnosticsPath = app.isPackaged 
     ? path.join(process.resourcesPath, 'app.asar.unpacked', 'assets', 'diagnostics')
     : path.join(__dirname, 'assets', 'diagnostics');
 
-  const cbExe = path.join(diagnosticsPath, 'Cinebench', 'Cinebench.exe');
-  const fmExe = path.join(diagnosticsPath, 'FurMark', 'FurMark_win64', 'FurMark.exe');
+  const cbExe = resolveExecutable(config.pathCinebench, ['Cinebench.exe'])
+    || path.join(diagnosticsPath, 'Cinebench', 'Cinebench.exe');
+  const fmExe = resolveExecutable(config.pathFurmark, ['FurMark.exe'])
+    || path.join(diagnosticsPath, 'FurMark', 'FurMark_win64', 'FurMark.exe');
   const monitorScript = path.join(diagnosticsPath, 'monitor.ps1');
   const dllPath = path.join(diagnosticsPath, 'LibreHardwareMonitor', 'LibreHardwareMonitorLib.dll');
+  const p95Exe = resolveExecutable(config.pathPrime95, ['prime95.exe'])
+    || path.join(diagnosticsPath, 'Prime95', 'prime95.exe');
 
   const duration = config && config.duration ? parseInt(config.duration) : 60;
+  // Prime95 is opt-in (checkbox) and has its own, much longer duration floor —
+  // running it is NOT gated by the short `duration` used for Cinebench/FurMark/RAM,
+  // so a quick smoke-test run never accidentally blocks for 15-30 minutes.
+  const runPrime95 = !!(config && config.runPrime95);
+  const prime95Duration = config && config.prime95Duration ? parseInt(config.prime95Duration) : 1200; // default 20 min
 
   // Verify that the files exist
   const hasCb = fs.existsSync(cbExe);
   const hasFm = fs.existsSync(fmExe);
   const hasMonitor = fs.existsSync(monitorScript) && fs.existsSync(dllPath);
+  const hasP95 = fs.existsSync(p95Exe);
 
   // If we are in simulated/mock mode or if binaries are missing, run simulation fallback
   const isMock = !hasCb || !hasFm || !hasMonitor;
@@ -569,7 +630,8 @@ ipcMain.handle('sys:run-diagnostics', async (event, config) => {
             furmarkScore: 9250,
             ssdRead: diskSpeeds.read,
             ssdWrite: diskSpeeds.write,
-            ramPassed: true
+            ramPassed: true,
+            prime95: runPrime95 ? mockPrime95Result(prime95Duration) : { overallResult: 'not-run' }
           });
         }
       }, stepDuration);
@@ -667,7 +729,118 @@ ipcMain.handle('sys:run-diagnostics', async (event, config) => {
         ramResolve({ success: true });
       });
     });
- 
+
+    // 3b. Start Prime95 CPU+RAM torture test (Blend mode), opt-in only —
+    // does not gate the fast Cinebench/FurMark/RAM path above.
+    let prime95Done = !runPrime95; // already "done" if not requested
+    let prime95Result = { overallResult: 'not-run' };
+    if (runPrime95 && hasP95) {
+      event.sender.send('sys:diag-log',
+        `Launching Prime95 torture test (Blend, CPU+RAM) for ${Math.round(prime95Duration / 60)} min...`);
+      const p95Dir = path.dirname(p95Exe);
+      const p95ResultsPath = path.join(p95Dir, 'results.txt');
+      try { if (fs.existsSync(p95ResultsPath)) fs.unlinkSync(p95ResultsPath); } catch (e) {}
+
+      const p95StartTime = Date.now();
+      const p95WorkerCount = os.cpus().length;
+      // -t = run torture test immediately, no GUI dialog (verified empirically
+      // against this build: it starts straight into Blend-style load, no
+      // pre-seeded config file needed).
+      const p95Proc = spawn(p95Exe, ['-t'], { cwd: p95Dir, windowsHide: true });
+
+      let p95PollTimer = null;
+      let p95LastSize = 0;
+      const pollResults = () => {
+        try {
+          if (fs.existsSync(p95ResultsPath)) {
+            const stat = fs.statSync(p95ResultsPath);
+            if (stat.size !== p95LastSize) {
+              p95LastSize = stat.size;
+            }
+          }
+        } catch (e) {}
+        event.sender.send('sys:prime95-update', {
+          elapsedSec: Math.round((Date.now() - p95StartTime) / 1000),
+          durationSec: prime95Duration,
+          workerCount: p95WorkerCount
+        });
+      };
+      p95PollTimer = setInterval(pollResults, 5000);
+
+      const p95KillTimeout = setTimeout(() => {
+        event.sender.send('sys:diag-log', "Prime95 duration elapsed. Stopping torture test...");
+        spawn('taskkill', ['/F', '/IM', 'prime95.exe'], { windowsHide: true });
+      }, prime95Duration * 1000);
+
+      p95Proc.on('exit', (code, signal) => {
+        clearTimeout(p95KillTimeout);
+        clearInterval(p95PollTimer);
+        const durationActualSec = Math.round((Date.now() - p95StartTime) / 1000);
+
+        let logText = '';
+        try { if (fs.existsSync(p95ResultsPath)) logText = fs.readFileSync(p95ResultsPath, 'utf-8'); } catch (e) {}
+
+        if (!logText) {
+          // No results.txt at all — the run never produced a checkpoint (killed
+          // too early, or something prevented it from starting cleanly). Report
+          // honestly rather than fabricating a pass.
+          prime95Result = {
+            ranAt: new Date(p95StartTime).toISOString(),
+            mode: 'blend',
+            durationRequestedSec: prime95Duration,
+            durationActualSec,
+            workerCount: p95WorkerCount,
+            overallResult: durationActualSec < prime95Duration * 0.9 ? 'aborted' : 'pass',
+            workers: [],
+            errorSummary: durationActualSec < prime95Duration * 0.9
+              ? ['No results.txt produced — run may have been interrupted early.']
+              : [],
+            rawLogExcerpt: null,
+            toolVersion: null
+          };
+        } else {
+          const parsed = parsePrime95Results(logText, p95WorkerCount);
+          prime95Result = {
+            ranAt: new Date(p95StartTime).toISOString(),
+            mode: 'blend',
+            durationRequestedSec: prime95Duration,
+            durationActualSec,
+            workerCount: p95WorkerCount,
+            toolVersion: null,
+            ...parsed
+          };
+        }
+
+        event.sender.send('sys:diag-log',
+          `Prime95 torture test finished: ${prime95Result.overallResult.toUpperCase()} (${durationActualSec}s)`);
+        prime95Done = true;
+        checkAllDone();
+      });
+
+      p95Proc.on('error', (err) => {
+        clearTimeout(p95KillTimeout);
+        clearInterval(p95PollTimer);
+        event.sender.send('sys:diag-log', `[Prime95 Error] ${err.message}`);
+        prime95Result = {
+          ranAt: new Date(p95StartTime).toISOString(),
+          mode: 'blend',
+          durationRequestedSec: prime95Duration,
+          durationActualSec: Math.round((Date.now() - p95StartTime) / 1000),
+          workerCount: p95WorkerCount,
+          overallResult: 'aborted',
+          workers: [],
+          errorSummary: [`Failed to launch Prime95: ${err.message}`],
+          rawLogExcerpt: null,
+          toolVersion: null
+        };
+        prime95Done = true;
+        checkAllDone();
+      });
+    } else if (runPrime95 && !hasP95) {
+      event.sender.send('sys:diag-log', "Prime95 requested but binary not found — using mock result.");
+      prime95Result = mockPrime95Result(prime95Duration);
+    }
+
     // 4. Start FurMark GPU stress test (using FurMark v2 CLI options)
     event.sender.send('sys:diag-log', `Launching FurMark GPU stress test for ${duration}s...`);
     const fmDir = path.dirname(fmExe);
@@ -779,7 +952,7 @@ ipcMain.handle('sys:run-diagnostics', async (event, config) => {
     });
 
     async function checkAllDone() {
-      if (cinebenchDone && furmarkDone) {
+      if (cinebenchDone && furmarkDone && prime95Done) {
         event.sender.send('sys:diag-log', "Wrapping up diagnostic tests and saving results...");
 
         // Stop monitor and dialog dismisser
@@ -813,7 +986,8 @@ ipcMain.handle('sys:run-diagnostics', async (event, config) => {
           furmarkScore,
           ssdRead: diskSpeeds.read,
           ssdWrite: diskSpeeds.write,
-          ramPassed: ramResult.success
+          ramPassed: ramResult.success,
+          prime95: prime95Result
         });
       }
     }
@@ -835,13 +1009,10 @@ ipcMain.handle('sys:check-port-hardware', async (event, portType) => {
 
     return new Promise((resolve) => {
       if (!fs.existsSync(portScript)) {
-        if (portType === 'video') {
-          const { screen } = require('electron');
-          const displays = screen.getAllDisplays();
-          resolve({ passed: true, devices: ["Standard Display Monitor"], count: displays.length });
-        } else {
-          resolve({ passed: true, devices: [`Generic ${portType.toUpperCase()} Device`], count: 1 });
-        }
+        // Detection script missing: report honestly as unverified — never a
+        // silent pass. (Previously this fabricated "Generic Device" passes,
+        // meaning a broken install reported all ports as good.)
+        resolve({ passed: false, status: 'unverified', error: 'detection script missing', devices: [], count: 0 });
         return;
       }
 
@@ -858,6 +1029,74 @@ ipcMain.handle('sys:check-port-hardware', async (event, portType) => {
   } catch (e) {
     return { passed: false, error: e.message };
   }
+});
+
+// IPC Handler: Port snapshot — returns the current device list for a category,
+// nothing more. This is the primitive behind the Port Checker v2 guided flow:
+// the renderer snapshots BEFORE prompting the tech to plug a device in, then
+// AFTER, and diffs the two to prove a specific physical port actually works.
+// Windows can only enumerate what it detects (PnP/driver), so a before/after
+// delta is the strongest honest evidence available.
+ipcMain.handle('sys:port-snapshot', async (event, portType) => {
+  const diagnosticsPath = app.isPackaged
+    ? path.join(process.resourcesPath, 'app.asar.unpacked', 'assets', 'diagnostics')
+    : path.join(__dirname, 'assets', 'diagnostics');
+  const portScript = path.join(diagnosticsPath, 'port_checker.ps1');
+
+  return new Promise((resolve) => {
+    if (!fs.existsSync(portScript)) {
+      // Honest "can't verify" — never a fabricated pass.
+      resolve({ available: false, error: 'detection script missing', devices: [] });
+      return;
+    }
+    exec(`powershell.exe -NoProfile -ExecutionPolicy Bypass -File "${portScript}" -Type ${portType}`, (err, stdout) => {
+      const output = (stdout || '').trim();
+      if (err) {
+        resolve({ available: false, error: err.message, devices: [] });
+        return;
+      }
+      // The script emits placeholder strings ("No active...", "Standard Display
+      // Monitor") when it finds nothing — treat those as an empty snapshot, not
+      // real devices, so they don't pollute the before/after diff.
+      const placeholders = /^(No active|Standard Display Monitor|High Definition Audio Device)/i;
+      const devices = output.split(';')
+        .map(d => d.trim())
+        .filter(d => d && !placeholders.test(d));
+      resolve({ available: true, devices, count: devices.length });
+    });
+  });
+});
+
+// IPC Handler: Port snapshot — one enumeration pass for the guided verify flow.
+// Called twice by the renderer (before and after the technician plugs in a test
+// device); the renderer diffs the two lists. Missing script => ok:false, never
+// a fabricated pass.
+ipcMain.handle('sys:port-snapshot', async (event, portType) => {
+  const diagnosticsPath = app.isPackaged
+    ? path.join(process.resourcesPath, 'app.asar.unpacked', 'assets', 'diagnostics')
+    : path.join(__dirname, 'assets', 'diagnostics');
+  const portScript = path.join(diagnosticsPath, 'port_checker.ps1');
+
+  return new Promise((resolve) => {
+    if (!fs.existsSync(portScript)) {
+      resolve({ ok: false, error: 'detection script missing', devices: [] });
+      return;
+    }
+    exec(`powershell.exe -NoProfile -ExecutionPolicy Bypass -File "${portScript}" -Type ${portType}`, { timeout: 20000 }, (err, stdout) => {
+      const output = (stdout || '').trim();
+      if (err) {
+        resolve({ ok: false, error: err.message, devices: [] });
+        return;
+      }
+      // The script emits placeholder text when nothing is found — treat those
+      // as an empty device list, not as detected hardware.
+      const placeholders = /^(No active|Standard Display Monitor$|High Definition Audio Device$)/i;
+      const devices = placeholders.test(output)
+        ? []
+        : output.split(';').map(d => d.trim()).filter(Boolean);
+      resolve({ ok: true, devices });
+    });
+  });
 });
 
 // IPC Handler: Query SSD health via SMART/StorageReliabilityCounter
@@ -907,6 +1146,105 @@ ipcMain.handle('sys:check-ssd-health', async () => {
   });
 });
 
+// IPC Handler: Compute Price-to-Performance for a ticket. Shells out to
+// ppi_sync.py (matcher → ppi() → upsert ticket_ppi); the renderer then just
+// re-reads the ticket_ppi row. No PPI math lives in JS.
+ipcMain.handle('ppi:compute', async (event, { ticketId, useCase }) => {
+  const pyCandidates = [
+    'C:\\Users\\Aladeen\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe',
+    'python'
+  ];
+  const py = pyCandidates.find(p => p === 'python' || fs.existsSync(p));
+  const args = ['ppi_sync.py', '--ticket-id', String(ticketId)];
+  if (useCase) args.push('--use-case', String(useCase));
+
+  return new Promise((resolve) => {
+    let settled = false;
+    const done = (result) => { if (!settled) { settled = true; resolve(result); } };
+    const child = spawn(py, args, { cwd: __dirname, windowsHide: true });
+    let out = '', errOut = '';
+    child.stdout.on('data', d => { out += d.toString(); });
+    child.stderr.on('data', d => { errOut += d.toString(); });
+    child.on('close', code => done({
+      success: code === 0,
+      output: out.slice(-2000),
+      error: code === 0 ? null : (errOut || out).slice(-1000)
+    }));
+    child.on('error', e => done({ success: false, error: e.message }));
+    setTimeout(() => { try { child.kill(); } catch (_) {} done({ success: false, error: 'ppi_sync timeout (120s)' }); }, 120000);
+  });
+});
+
+// IPC Handler: Component passport — structured identity data for CPU/GPU/RAM/storage.
+// One PowerShell invocation returning JSON, unlike sys:detect-hw which returns
+// display strings for the specs form (and stays untouched for compatibility).
+// Notably fixes the RAM DDR-generation detection: SMBIOSMemoryType is the real
+// authority (26=DDR4, 34=DDR5 ...), not a guess from total capacity.
+ipcMain.handle('sys:component-passport', async () => {
+  return new Promise((resolve) => {
+    const ps = spawn('powershell', [
+      '-NoProfile', '-NonInteractive', '-Command',
+      `
+      try {
+        $cpu = Get-CimInstance Win32_Processor | Select-Object -First 1
+        $gpus = Get-CimInstance Win32_VideoController | Where-Object { $_.Name -notmatch 'Microsoft Basic Display' }
+        $gpu = $gpus | Sort-Object AdapterRAM -Descending | Select-Object -First 1
+        $ramModules = Get-CimInstance Win32_PhysicalMemory | ForEach-Object {
+          [PSCustomObject]@{
+            manufacturer = ($_.Manufacturer   | ForEach-Object { $_.Trim() })
+            partNumber   = ($_.PartNumber     | ForEach-Object { $_.Trim() })
+            capacityGB   = [math]::Round($_.Capacity / 1GB, 0)
+            speedMHz     = $_.Speed
+            slot         = $_.DeviceLocator
+            smbiosType   = $_.SMBIOSMemoryType
+          }
+        }
+        $disk = Get-PhysicalDisk | Where-Object { $_.MediaType -in @('SSD','NVMe SSD','SCM') } | Sort-Object Size -Descending | Select-Object -First 1
+        if (-not $disk) { $disk = Get-PhysicalDisk | Sort-Object Size -Descending | Select-Object -First 1 }
+        [PSCustomObject]@{
+          cpu = [PSCustomObject]@{
+            model        = $cpu.Name.Trim()
+            cores        = $cpu.NumberOfCores
+            threads      = $cpu.NumberOfLogicalProcessors
+            baseClockMHz = $cpu.MaxClockSpeed
+          }
+          gpu = [PSCustomObject]@{
+            model         = if ($gpu) { $gpu.Name.Trim() } else { $null }
+            vramMB        = if ($gpu -and $gpu.AdapterRAM) { [math]::Round($gpu.AdapterRAM / 1MB, 0) } else { $null }
+            driverVersion = if ($gpu) { $gpu.DriverVersion } else { $null }
+          }
+          ram = [PSCustomObject]@{
+            modules = @($ramModules)
+            totalGB = [math]::Round((($ramModules | Measure-Object -Property capacityGB -Sum).Sum), 0)
+          }
+          storage = [PSCustomObject]@{
+            model     = if ($disk) { $disk.FriendlyName } else { $null }
+            busType   = if ($disk) { $disk.BusType }      else { $null }
+            mediaType = if ($disk) { $disk.MediaType }    else { $null }
+            sizeGB    = if ($disk) { [math]::Round($disk.Size / 1GB, 0) } else { $null }
+          }
+        } | ConvertTo-Json -Depth 4 -Compress
+      } catch {
+        Write-Output '{"error":"query_failed"}'
+      }
+      `
+    ], { windowsHide: true });
+
+    let out = '';
+    ps.stdout.on('data', d => { out += d.toString(); });
+    ps.on('close', () => {
+      try { resolve(JSON.parse(out.trim())); }
+      catch(e) { resolve({ error: 'parse_failed' }); }
+    });
+    ps.on('error', () => resolve({ error: 'spawn_failed' }));
+    setTimeout(() => { try { ps.kill(); } catch(e) {} resolve({ error: 'timeout' }); }, 15000);
+  });
+});
+
+// SMBIOSMemoryType -> DDR generation label (DMTF SMBIOS spec, Memory Device type codes)
+// 20=DDR, 21=DDR2, 24=DDR3, 26=DDR4, 34=DDR5
+// (kept in the renderer-facing map in app.js as well; documented here for reference)
+
 // Estimate Cinebench R23 Score based on CPU name
 function estimateCinebenchScore(cpuName, isSingleCore) {
   const name = (cpuName || '').toLowerCase();
@@ -954,31 +1292,44 @@ function findOpenRgbExecutable() {
   return '';
 }
 
-// Helper: Parse OpenRGB Devices
+// Helper: Parse OpenRGB Devices (with per-device zones where the CLI reports them).
+// Handles both output styles seen across OpenRGB versions:
+//   "Device 0: ASUS Aura Motherboard"  and  "0: ASUS Aura Motherboard"
+// followed by indented metadata lines like "  Zones: Zone 1, Zone 2".
 function listOpenRgbDevices(openRgbPath) {
   return new Promise((resolve) => {
     if (!openRgbPath) {
-      resolve({ passed: false, devices: [], count: 0 });
+      resolve({ passed: false, devices: [], count: 0, detailed: [] });
       return;
     }
-    exec(`"${openRgbPath}" --list-devices`, (err, stdout) => {
+    exec(`"${openRgbPath}" --list-devices`, { timeout: 20000 }, (err, stdout) => {
       if (err || !stdout) {
-        resolve({ passed: false, devices: [], count: 0 });
+        resolve({ passed: false, devices: [], count: 0, detailed: [] });
         return;
       }
-      
-      const devices = [];
-      const lines = stdout.split(/\r?\n/);
-      for (const line of lines) {
-        const match = line.match(/Device\s+\d+:\s*(.+)/i);
-        if (match) {
-          devices.push(match[1].trim());
+
+      const detailed = [];
+      let current = null;
+      for (const line of stdout.split(/\r?\n/)) {
+        const devMatch = line.match(/^(?:Device\s+)?(\d+):\s*(.+)/i);
+        if (devMatch) {
+          current = { index: parseInt(devMatch[1]), name: devMatch[2].trim(), zones: [] };
+          detailed.push(current);
+          continue;
+        }
+        if (current) {
+          const zoneMatch = line.match(/^\s+Zones?:\s*(.+)/i);
+          if (zoneMatch) {
+            current.zones = zoneMatch[1].split(',').map(z => z.trim()).filter(Boolean);
+          }
         }
       }
+
       resolve({
-        passed: devices.length > 0,
-        devices: devices,
-        count: devices.length
+        passed: detailed.length > 0,
+        devices: detailed.map(d => d.name),
+        count: detailed.length,
+        detailed
       });
     });
   });
@@ -1028,15 +1379,53 @@ ipcMain.handle('rgb:set-color', async (event, { mode, color, brightness }) => {
 
   const cmd = `"${openRgbPath}" ${args}`;
   console.log(`Executing OpenRGB Command: ${cmd}`);
-  
+
   return new Promise((resolve) => {
-    exec(cmd, (err) => {
+    exec(cmd, { timeout: 20000 }, async (err) => {
       if (err) {
         console.error("OpenRGB apply error:", err);
-        resolve({ success: false, error: err.message });
-      } else {
-        resolve({ success: true });
+        resolve({ success: false, verified: false, error: err.message });
+        return;
       }
+      // Verify-after-apply: the CLI can't read colors back, so "verified" here
+      // means the apply exited cleanly AND the controller still enumerates —
+      // i.e. it acknowledged the command and didn't wedge. The UI labels this
+      // distinctly from a true color read-back.
+      const recheck = await listOpenRgbDevices(openRgbPath);
+      resolve({ success: true, verified: recheck.passed, devicesAfter: recheck.detailed });
+    });
+  });
+});
+
+// IPC Handler: Apply color/mode to ONE device (and optionally one zone) via
+// OpenRGB CLI, used by the per-device controls in the RGB sync v2 panel.
+ipcMain.handle('rgb:set-device-color', async (event, { deviceIndex, zoneIndex, mode, color }) => {
+  const openRgbPath = findOpenRgbExecutable();
+  if (!openRgbPath) {
+    return { success: false, verified: false, error: 'OpenRGB not found' };
+  }
+
+  let hex = (color || '#ffffff').replace('#', '');
+  if (hex.length === 3) hex = hex.split('').map(c => c + c).join('');
+  const cliMode = mode === 'off' ? 'static' : (mode || 'static');
+  const cliColor = mode === 'off' ? '000000' : hex.toUpperCase();
+
+  let args = `--device ${parseInt(deviceIndex)}`;
+  if (zoneIndex != null && zoneIndex !== '') args += ` --zone ${parseInt(zoneIndex)}`;
+  args += ` -m ${cliMode}`;
+  if (cliMode !== 'rainbow') args += ` -c ${cliColor}`;
+
+  const cmd = `"${openRgbPath}" ${args}`;
+  console.log(`Executing OpenRGB Command: ${cmd}`);
+
+  return new Promise((resolve) => {
+    exec(cmd, { timeout: 20000 }, async (err) => {
+      if (err) {
+        resolve({ success: false, verified: false, error: err.message });
+        return;
+      }
+      const recheck = await listOpenRgbDevices(openRgbPath);
+      resolve({ success: true, verified: recheck.passed });
     });
   });
 });

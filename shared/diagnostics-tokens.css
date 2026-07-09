@@ -1,0 +1,186 @@
+/*
+  Neo QC — shared diagnostics design tokens.
+  Single source of truth for the benchmarking/stress-test section's colors,
+  status states, and card layout, consumed identically by the Electron app
+  (style.css) and the customer dashboard (dashboard/style.css).
+
+  Reconciliation note: --primary-pink here matches the brand logo mark
+  (#E7014E, the admin app's value) — the dashboard's independently-coded
+  --pink (#e91e8c) is superseded by this file wherever diagnostics UI is
+  rendered. Non-diagnostics UI in either app is untouched by this file.
+*/
+
+:root {
+  --dr-primary-pink: #E7014E;
+  --dr-secondary-pink: #E70077;
+
+  /* Status colors — used for pass/warn/fail/unverified across every
+     diagnostics/passport/port/RGB/PPI panel. */
+  --dr-status-pass: #10B981;
+  --dr-status-pass-bg: rgba(16, 185, 129, 0.12);
+  --dr-status-warn: #F59E0B;
+  --dr-status-warn-bg: rgba(245, 158, 11, 0.12);
+  --dr-status-fail: #EF4444;
+  --dr-status-fail-bg: rgba(239, 68, 68, 0.12);
+  --dr-status-unverified: #64748B;
+  --dr-status-unverified-bg: rgba(100, 116, 139, 0.12);
+  --dr-status-neutral: #3B82F6;
+  --dr-status-neutral-bg: rgba(59, 130, 246, 0.12);
+
+  --dr-card-radius: 14px;
+  --dr-card-gap: 12px;
+  --dr-card-padding: 16px;
+
+  --dr-text: #0F172A;
+  --dr-text-muted: #64748B;
+  --dr-border: rgba(15, 23, 42, 0.08);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --dr-text: #F1F5F9;
+    --dr-text-muted: #94A3B8;
+    --dr-border: rgba(255, 255, 255, 0.08);
+  }
+}
+:root[data-theme="dark"] {
+  --dr-text: #F1F5F9;
+  --dr-text-muted: #94A3B8;
+  --dr-border: rgba(255, 255, 255, 0.08);
+}
+:root[data-theme="light"] {
+  --dr-text: #0F172A;
+  --dr-text-muted: #64748B;
+  --dr-border: rgba(15, 23, 42, 0.08);
+}
+
+/* ─── Layout primitives ──────────────────────────────────────────────── */
+
+.dr-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: var(--dr-card-gap);
+}
+
+.dr-card {
+  border-radius: var(--dr-card-radius);
+  border: 1px solid var(--dr-border);
+  padding: var(--dr-card-padding);
+  color: var(--dr-text);
+}
+
+.dr-card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  margin-bottom: 10px;
+}
+
+.dr-card-title {
+  flex: 1;
+}
+
+.dr-muted {
+  color: var(--dr-text-muted);
+  font-size: 0.85em;
+}
+
+.dr-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 0;
+  font-size: 0.9em;
+}
+
+.dr-row-label {
+  color: var(--dr-text-muted);
+}
+
+.dr-row-value {
+  font-family: 'JetBrains Mono', monospace;
+  text-align: right;
+}
+
+/* ─── Status pills ───────────────────────────────────────────────────── */
+
+.dr-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 0.78em;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.dr-pill .dr-icon { width: 13px; height: 13px; }
+
+.dr-pill.dr-status-pass       { color: var(--dr-status-pass);       background: var(--dr-status-pass-bg); }
+.dr-pill.dr-status-warn       { color: var(--dr-status-warn);       background: var(--dr-status-warn-bg); }
+.dr-pill.dr-status-fail       { color: var(--dr-status-fail);       background: var(--dr-status-fail-bg); }
+.dr-pill.dr-status-unverified { color: var(--dr-status-unverified); background: var(--dr-status-unverified-bg); }
+.dr-pill.dr-status-neutral    { color: var(--dr-status-neutral);    background: var(--dr-status-neutral-bg); }
+
+/* Icon-wrapper coloring, used outside pills (e.g. card headers) */
+.dr-icon-wrap.dr-status-pass       { color: var(--dr-status-pass); }
+.dr-icon-wrap.dr-status-warn       { color: var(--dr-status-warn); }
+.dr-icon-wrap.dr-status-fail       { color: var(--dr-status-fail); }
+.dr-icon-wrap.dr-status-unverified { color: var(--dr-status-unverified); }
+.dr-icon-wrap.dr-status-neutral    { color: var(--dr-status-neutral); }
+
+.dr-icon {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  vertical-align: middle;
+}
+
+/* ─── Worker/component list rows (Prime95, port devices, RGB zones) ───── */
+
+.dr-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 8px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.82em;
+}
+
+.dr-list-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: rgba(127, 127, 127, 0.06);
+}
+
+.dr-empty-state {
+  color: var(--dr-text-muted);
+  font-size: 0.85em;
+  font-style: italic;
+  padding: 12px 0;
+  text-align: center;
+}
+
+/* ─── PPI panel ──────────────────────────────────────────────────────── */
+
+.dr-ppi-index {
+  font-size: 2.2em;
+  font-weight: 700;
+  font-family: 'JetBrains Mono', monospace;
+  line-height: 1;
+}
+
+.dr-ppi-flag {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 6px 0;
+  font-size: 0.88em;
+}

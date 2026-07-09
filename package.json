@@ -1,11 +1,12 @@
 {
   "name": "neo-qc",
-  "version": "1.1.2",
+  "version": "1.2.0",
   "description": "PC Assembly Workflow & Quality Control Tracker for Neo Tokyo Kochi",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "build": "node build-helper.js selector && electron-builder --config electron-builder.json"
+    "build": "node build-helper.js selector && electron-builder --config electron-builder.json",
+    "sync-shared": "node sync-shared.js"
   },
   "keywords": [
     "pc",

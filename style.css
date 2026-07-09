@@ -234,14 +234,25 @@
     display: flex;
   }
 
+  /* Minimal aesthetic backdrop: soft brand-pink and cool-blue radials over a
+     clean vertical wash. Replaces the busy japanese_vector_bg.png wallpaper. */
   #mode-selector-screen {
     justify-content: center;
     align-items: center;
     height: calc(100vh - 32px); /* Offset for sticky custom titlebar */
     overflow: hidden;
-    background: url('japanese_vector_bg.png') no-repeat center center;
-    background-size: cover;
+    background:
+      radial-gradient(900px 620px at 12% 8%, rgba(231, 1, 78, 0.07), transparent 62%),
+      radial-gradient(820px 620px at 88% 92%, rgba(59, 130, 246, 0.06), transparent 62%),
+      linear-gradient(180deg, #FAFBFC 0%, #F2F4F8 100%);
     position: relative;
+  }
+
+  body.dark-mode #mode-selector-screen {
+    background:
+      radial-gradient(900px 620px at 12% 8%, rgba(231, 1, 78, 0.13), transparent 62%),
+      radial-gradient(820px 620px at 88% 92%, rgba(59, 130, 246, 0.09), transparent 62%),
+      linear-gradient(180deg, #0A0E17 0%, #060910 100%);
   }
 
   #splash-screen.active {
@@ -253,9 +264,41 @@
     align-items: center;
     height: calc(100vh - 32px);
     overflow: hidden;
-    background: url('japanese_vector_bg.png') no-repeat center center;
-    background-size: cover;
+    background:
+      radial-gradient(900px 620px at 12% 8%, rgba(231, 1, 78, 0.07), transparent 62%),
+      radial-gradient(820px 620px at 88% 92%, rgba(59, 130, 246, 0.06), transparent 62%),
+      linear-gradient(180deg, #FAFBFC 0%, #F2F4F8 100%);
     position: relative;
+    transition: opacity 0.45s ease;
+  }
+
+  body.dark-mode #splash-screen {
+    background:
+      radial-gradient(900px 620px at 12% 8%, rgba(231, 1, 78, 0.13), transparent 62%),
+      radial-gradient(820px 620px at 88% 92%, rgba(59, 130, 246, 0.09), transparent 62%),
+      linear-gradient(180deg, #0A0E17 0%, #060910 100%);
+  }
+
+  #splash-screen.splash-fade-out {
+    opacity: 0;
+  }
+
+  /* Staged entrance: each splash element rises in sequence so the longer
+     hold time reads as choreography, not a stall. */
+  .splash-content > * {
+    opacity: 0;
+    animation: splash-rise 0.9s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  }
+  .splash-content .hanko-stamp        { animation-delay: 1.15s; }
+  .splash-content .splash-logo-ring   { animation-delay: 0.10s; }
+  .splash-content .logo-title         { animation-delay: 0.40s; }
+  .splash-content .logo-tagline       { animation-delay: 0.62s; }
+  .splash-content .logo-subtitle      { animation-delay: 0.80s; }
+  .splash-content .splash-status-text { animation-delay: 1.00s; }
+
+  @keyframes splash-rise {
+    from { opacity: 0; transform: translateY(14px); }
+    to   { opacity: 1; transform: translateY(0); }
   }
 
   .splash-content {

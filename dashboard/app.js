@@ -85,6 +85,7 @@ async function doLookup() {
     if (!data || data.length === 0) { showError('No ticket found for that code. Please double-check and try again.'); return; }
 
     renderStatusCard(data[0]);
+    appendPpiSection(data[0].id);
     subscribeToTicket(data[0].id);
   } catch (err) {
     console.error('Lookup error:', err);
@@ -156,7 +157,52 @@ function renderStatusCard(row) {
 
     ${qcPassed === true ? `<div class="sc-qc pass">✓ &nbsp;Quality checks passed — this system is cleared for handoff.</div>` : ''}
     ${qcPassed === false ? `<div class="sc-qc fail">✗ &nbsp;Some quality checks failed — the technician is reviewing the system.</div>` : ''}
+    ${renderDiagnosticsDetail(diag)}
   `;
+}
+
+// Rich diagnostics detail — same shared render functions the technician app
+// uses, so the customer sees identical data (component passports, Prime95
+// torture-test results). Renders nothing for tickets without the new fields.
+function renderDiagnosticsDetail(diag) {
+  const R = window.NeoQcDiagnosticsRender;
+  if (!R || !diag) return '';
+  let html = '';
+  if (diag.componentPassport) {
+    html += `<div class="sc-diag-section"><div class="sc-diag-title">Component Health Passport</div>${R.renderPassportGrid(diag.componentPassport)}</div>`;
+  }
+  if (diag.prime95 && diag.prime95.overallResult && diag.prime95.overallResult !== 'not-run') {
+    html += `<div class="sc-diag-section"><div class="sc-diag-title">Stability Torture Test</div>${R.renderPrime95Panel(diag.prime95)}</div>`;
+  }
+  if (diag.portCheckV2 && diag.portCheckV2.categories) {
+    html += `<div class="sc-diag-section"><div class="sc-diag-title">Port Verification</div>${R.renderPortCheckPanel(diag.portCheckV2)}</div>`;
+  }
+  if (diag.rgbSyncV2 && diag.rgbSyncV2.controllerFound) {
+    html += `<div class="sc-diag-section"><div class="sc-diag-title">RGB Lighting</div>${R.renderRgbSyncPanel(diag.rgbSyncV2)}</div>`;
+  }
+  return html;
+}
+
+// Price-to-Performance — reads the precomputed ticket_ppi row (written by
+// ppi_sync.py on the staff side) and appends it to the status card. Same
+// shared renderPpiPanel the technician app uses, so both show identical data.
+async function appendPpiSection(ticketId) {
+  const R = window.NeoQcDiagnosticsRender;
+  if (!R || !ticketId) return;
+  try {
+    const { data, error } = await db
+      .from('ticket_ppi').select('*').eq('ticket_id', ticketId).maybeSingle();
+    if (error || !data) return;
+    const card = document.getElementById('status-card');
+    if (!card) return;
+    card.querySelectorAll('.sc-ppi-section').forEach(el => el.remove()); // no dupes on realtime refresh
+    const div = document.createElement('div');
+    div.className = 'sc-diag-section sc-ppi-section';
+    div.innerHTML = `<div class="sc-diag-title">Price-to-Performance</div>` + R.renderPpiPanel(data);
+    card.appendChild(div);
+  } catch (e) {
+    console.error('PPI section failed:', e);
+  }
 }
 
 // Realtime — keep the customer's card up-to-date while they watch
@@ -170,7 +216,10 @@ function subscribeToTicket(ticketId) {
       table:  'tickets',
       filter: `id=eq.${ticketId}`,
     }, payload => {
-      if (payload.new) renderStatusCard(payload.new);
+      if (payload.new) {
+        renderStatusCard(payload.new);
+        appendPpiSection(payload.new.id); // re-attach after full card re-render
+      }
     })
     .subscribe();
 }

@@ -8,4 +8,14 @@ dist/
 assets/diagnostics/Cinebench/
 assets/diagnostics/FurMark/
 assets/diagnostics/LibreHardwareMonitor/
+assets/diagnostics/Prime95/
 assets/diagnostics/*.zip
+
+# NOTE: dashboard/shared/ IS committed — GitHub Pages serves the dashboard
+# straight from this repo, so the synced copy must live in git. After editing
+# shared/, run `npm run sync-shared` and commit both copies.
+
+# Local scratch / generated
+output/
+__pycache__/
+.claude/

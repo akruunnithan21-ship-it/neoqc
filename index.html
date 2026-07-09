@@ -9,6 +9,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Syncopate:wght@700&family=Hanken+Grotesk:ital,wght@0,100..900;1,100..900&family=JetBrains+Mono:ital,wght@0,100..800;1,100..800&family=Space+Grotesk:wght@300..700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="shared/diagnostics-tokens.css">
 </head>
 <body class="light-mode">
   
@@ -321,60 +322,59 @@
               <span id="client-win-key" style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; font-weight: 700; color: var(--text-dark);">--</span>
             </div>
 
-            <!-- Port & RGB Sync Verification Checker -->
+            <!-- Port & RGB Sync Verification Checker (v2 — guided verify flow) -->
             <div class="port-rgb-checker-section margin-top">
-              <h4 style="color: var(--primary-pink); font-size: 0.82rem; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 12px; display: flex; align-items: center; gap: 6px;">🔌 Port Verification &amp; RGB Sync</h4>
-              
+              <h4 style="color: var(--primary-pink); font-size: 0.82rem; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 12px; display: flex; align-items: center; gap: 6px;"><span class="dr-inline-icon" data-icon="port"></span>Port Verification &amp; RGB Sync</h4>
+
               <div style="display: flex; flex-direction: column; gap: 12px;">
-                <!-- USB Ports Scanner -->
-                <div class="glass-slab scan-item-card" style="background: rgba(255,255,255,0.02); border: 1px solid var(--glass-border); padding: 10px; border-radius: 8px;">
-                  <div style="display: flex; justify-content: space-between; align-items: center;">
-                    <span style="font-weight: 700; font-size: 0.8rem; color: var(--text-dark);"><span style="margin-right:6px;">🔌</span>USB Ports</span>
-                    <div style="display: flex; align-items: center; gap: 10px;">
-                      <button type="button" id="btn-scan-usb" class="secondary-btn" style="padding: 4px 8px; font-size: 0.72rem;">Scan Ports</button>
-                      <span id="badge-port-usb" class="badge red">Pending</span>
-                    </div>
+                <!-- USB / Video / Audio guided verification cards -->
+                <div class="dr-card scan-item-card" data-port-card="usb">
+                  <div class="dr-card-header">
+                    <span class="dr-inline-icon" data-icon="port"></span>
+                    <span class="dr-card-title" style="font-size: 0.85rem;">USB Ports</span>
+                    <span id="badge-port-usb" class="dr-pill dr-status-unverified">Not checked</span>
+                    <button type="button" id="btn-scan-usb" class="secondary-btn" style="padding: 4px 10px; font-size: 0.72rem;">Start Check</button>
                   </div>
-                  <div id="list-port-usb" class="port-device-list hidden" style="font-size: 0.7rem; color: var(--text-muted); margin-top: 8px; font-family: 'JetBrains Mono', monospace; background: rgba(0,0,0,0.15); padding: 6px 10px; border-radius: 6px; max-height: 80px; overflow-y: auto;"></div>
+                  <div id="hint-port-usb" class="dr-muted hidden" style="margin-bottom: 6px;"></div>
+                  <div id="list-port-usb" class="dr-list hidden"></div>
                 </div>
 
-                <!-- Video Outputs Scanner -->
-                <div class="glass-slab scan-item-card" style="background: rgba(255,255,255,0.02); border: 1px solid var(--glass-border); padding: 10px; border-radius: 8px;">
-                  <div style="display: flex; justify-content: space-between; align-items: center;">
-                    <span style="font-weight: 700; font-size: 0.8rem; color: var(--text-dark);"><span style="margin-right:6px;">🖥️</span>Video Outputs (HDMI / DP)</span>
-                    <div style="display: flex; align-items: center; gap: 10px;">
-                      <button type="button" id="btn-scan-video" class="secondary-btn" style="padding: 4px 8px; font-size: 0.72rem;">Scan Displays</button>
-                      <span id="badge-port-video" class="badge red">Pending</span>
-                    </div>
+                <div class="dr-card scan-item-card" data-port-card="video">
+                  <div class="dr-card-header">
+                    <span class="dr-inline-icon" data-icon="gpu"></span>
+                    <span class="dr-card-title" style="font-size: 0.85rem;">Video Outputs (HDMI / DP)</span>
+                    <span id="badge-port-video" class="dr-pill dr-status-unverified">Not checked</span>
+                    <button type="button" id="btn-scan-video" class="secondary-btn" style="padding: 4px 10px; font-size: 0.72rem;">Start Check</button>
                   </div>
-                  <div id="list-port-video" class="port-device-list hidden" style="font-size: 0.7rem; color: var(--text-muted); margin-top: 8px; font-family: 'JetBrains Mono', monospace; background: rgba(0,0,0,0.15); padding: 6px 10px; border-radius: 6px; max-height: 80px; overflow-y: auto;"></div>
+                  <div id="hint-port-video" class="dr-muted hidden" style="margin-bottom: 6px;"></div>
+                  <div id="list-port-video" class="dr-list hidden"></div>
                 </div>
 
-                <!-- Audio Jacks Scanner -->
-                <div class="glass-slab scan-item-card" style="background: rgba(255,255,255,0.02); border: 1px solid var(--glass-border); padding: 10px; border-radius: 8px;">
-                  <div style="display: flex; justify-content: space-between; align-items: center;">
-                    <span style="font-weight: 700; font-size: 0.8rem; color: var(--text-dark);"><span style="margin-right:6px;">🎧</span>Audio Jacks</span>
-                    <div style="display: flex; align-items: center; gap: 10px;">
-                      <button type="button" id="btn-scan-audio" class="secondary-btn" style="padding: 4px 8px; font-size: 0.72rem;">Scan Audio</button>
-                      <span id="badge-port-audio" class="badge red">Pending</span>
-                    </div>
+                <div class="dr-card scan-item-card" data-port-card="audio">
+                  <div class="dr-card-header">
+                    <span class="dr-inline-icon" data-icon="unverified"></span>
+                    <span class="dr-card-title" style="font-size: 0.85rem;">Audio Jacks</span>
+                    <span id="badge-port-audio" class="dr-pill dr-status-unverified">Not checked</span>
+                    <button type="button" id="btn-scan-audio" class="secondary-btn" style="padding: 4px 10px; font-size: 0.72rem;">Start Check</button>
                   </div>
-                  <div id="list-port-audio" class="port-device-list hidden" style="font-size: 0.7rem; color: var(--text-muted); margin-top: 8px; font-family: 'JetBrains Mono', monospace; background: rgba(0,0,0,0.15); padding: 6px 10px; border-radius: 6px; max-height: 80px; overflow-y: auto;"></div>
+                  <div id="hint-port-audio" class="dr-muted hidden" style="margin-bottom: 6px;"></div>
+                  <div id="list-port-audio" class="dr-list hidden"></div>
                 </div>
 
-                <!-- RGB Devices Scanner -->
-                <div class="glass-slab scan-item-card" style="background: rgba(255,255,255,0.02); border: 1px solid var(--glass-border); padding: 10px; border-radius: 8px;">
-                  <div style="display: flex; justify-content: space-between; align-items: center;">
-                    <span style="font-weight: 700; font-size: 0.8rem; color: var(--text-dark);"><span style="margin-right:6px;">🌈</span>OpenRGB Controller</span>
-                    <div style="display: flex; align-items: center; gap: 10px;">
-                      <button type="button" id="btn-scan-rgb" class="secondary-btn" style="padding: 4px 8px; font-size: 0.72rem;">Scan RGB</button>
-                      <span id="badge-port-rgb" class="badge red">Pending</span>
-                    </div>
+                <!-- RGB Sync v2 — per-device / per-zone control -->
+                <div class="dr-card scan-item-card" data-port-card="rgb">
+                  <div class="dr-card-header">
+                    <span class="dr-inline-icon" data-icon="rgb"></span>
+                    <span class="dr-card-title" style="font-size: 0.85rem;">RGB Sync (OpenRGB)</span>
+                    <span id="badge-port-rgb" class="dr-pill dr-status-unverified">Not checked</span>
+                    <button type="button" id="btn-scan-rgb" class="secondary-btn" style="padding: 4px 10px; font-size: 0.72rem;">Detect Devices</button>
                   </div>
-                  <div id="list-port-rgb" class="port-device-list hidden" style="font-size: 0.7rem; color: var(--text-muted); margin-top: 8px; font-family: 'JetBrains Mono', monospace; background: rgba(0,0,0,0.15); padding: 6px 10px; border-radius: 6px; max-height: 80px; overflow-y: auto;"></div>
+                  <div id="list-port-rgb" class="dr-list hidden"></div>
+                  <div id="openrgb-device-list" style="margin-top: 8px;"></div>
 
-                  <!-- OpenRGB Actions Panel -->
-                  <div id="openrgb-control-panel" class="hidden" style="margin-top: 10px; border-top: 1px solid var(--glass-border); padding-top: 10px;">
+                  <!-- Global effect controls (all devices at once) -->
+                  <div id="openrgb-control-panel" class="hidden" style="margin-top: 10px; border-top: 1px solid var(--dr-border); padding-top: 10px;">
+                    <div class="dr-muted" style="margin-bottom: 6px;">Apply to all devices:</div>
                     <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
                       <div class="form-group mini">
                         <label style="font-size:0.75rem; color: var(--text-muted);">Effect Mode</label>
@@ -391,6 +391,7 @@
                       </div>
                     </div>
                     <button type="button" id="btn-apply-openrgb" class="primary-pink-btn full-width" style="padding: 6px; font-size: 0.75rem; margin-top: 8px; font-weight: bold;">Apply Lighting Effect</button>
+                    <div id="openrgb-apply-status" class="dr-muted" style="margin-top: 6px;"></div>
                   </div>
                 </div>
               </div>
@@ -404,7 +405,7 @@
             <!-- Automated Stress Test in Client Portal -->
             <div class="diagnostics-auto-run-card" style="background: rgba(231, 1, 78, 0.03); border: 1px dashed rgba(231, 1, 78, 0.2); padding: 12px; border-radius: 8px; margin-bottom: 16px; display: flex; flex-direction: column; gap: 8px; margin-top: 10px;">
               <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
-                <label style="color: var(--primary-pink); font-weight: 700; margin-bottom: 0;">🚀 Automated Benchmarks</label>
+                <label style="color: var(--primary-pink); font-weight: 700; margin-bottom: 0; display: inline-flex; align-items: center; gap: 6px;"><span class="dr-inline-icon" data-icon="torture"></span>Automated Benchmarks</label>
                 <div style="display: flex; align-items: center; gap: 8px;">
                   <select id="client-usecase-select" style="padding: 4px 8px; font-size: 0.8rem; border-radius: 4px; border: 1px solid var(--glass-border); background: var(--glass-bg); color: var(--text-dark); outline: none;">
                     <option value="gaming">Gaming Use (Single-Core)</option>
@@ -422,7 +423,20 @@
               <div id="c-diagnostics-status" class="font-mono" style="font-size: 0.75rem; color: var(--text-muted); line-height: 1.4;">
                 Cinebench R23: [Idle] | FurMark: [Idle] | RAM: [Idle]
               </div>
+              <div style="display: flex; align-items: center; gap: 8px; padding-top: 6px; border-top: 1px solid var(--glass-border); margin-top: 4px;">
+                <label style="display: flex; align-items: center; gap: 6px; font-size: 0.8rem; margin-bottom: 0; cursor: pointer;">
+                  <input type="checkbox" id="c-prime95-enable">
+                  Include Prime95 torture test (CPU + RAM, Blend mode)
+                </label>
+                <select id="c-prime95-duration-select" style="padding: 4px 8px; font-size: 0.8rem; border-radius: 4px; border: 1px solid var(--glass-border); background: var(--glass-bg); color: var(--text-dark); outline: none;">
+                  <option value="900">15 min (Minimum)</option>
+                  <option value="1200" selected>20 min (Recommended)</option>
+                  <option value="1800">30 min (Thorough)</option>
+                </select>
+              </div>
             </div>
+            <div id="c-prime95-panel"></div>
+            <div id="c-passport-grid" class="margin-top"></div>
 
             <!-- telemetry hud grid -->
             <div class="telemetry-hud-grid">
@@ -824,12 +838,12 @@
 
           <div id="diagnostics-section" class="form-section margin-top locked">
             <div class="locked-overlay"></div>
-            <h3>🔥 System Thermal & Benchmark Results</h3>
+            <h3><span class="dr-inline-icon" data-icon="thermometer"></span> System Thermal &amp; Benchmark Results</h3>
             
             <!-- Automated Stress Test in Modal -->
             <div class="diagnostics-auto-run-card" style="background: rgba(231, 1, 78, 0.03); border: 1px dashed rgba(231, 1, 78, 0.2); padding: 12px; border-radius: 8px; margin-bottom: 16px; display: flex; flex-direction: column; gap: 8px;">
               <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
-                <label style="color: var(--primary-pink); font-weight: 700; margin-bottom: 0;">🚀 Automated Benchmarks</label>
+                <label style="color: var(--primary-pink); font-weight: 700; margin-bottom: 0; display: inline-flex; align-items: center; gap: 6px;"><span class="dr-inline-icon" data-icon="torture"></span>Automated Benchmarks</label>
                 <div style="display: flex; align-items: center; gap: 8px;">
                   <select id="modal-usecase-select" style="padding: 4px 8px; font-size: 0.8rem; border-radius: 4px; border: 1px solid var(--glass-border); background: var(--glass-bg); color: var(--text-dark); outline: none;">
                     <option value="gaming">Gaming Use (Single-Core)</option>
@@ -847,7 +861,27 @@
               <div id="modal-diagnostics-status" class="font-mono" style="font-size: 0.75rem; color: var(--text-muted); line-height: 1.4;">
                 Cinebench R23: [Idle] | FurMark: [Idle] | RAM: [Idle]
               </div>
+              <div style="display: flex; align-items: center; gap: 8px; padding-top: 6px; border-top: 1px solid var(--glass-border); margin-top: 4px;">
+                <label style="display: flex; align-items: center; gap: 6px; font-size: 0.8rem; margin-bottom: 0; cursor: pointer;">
+                  <input type="checkbox" id="modal-prime95-enable">
+                  Include Prime95 torture test (CPU + RAM, Blend mode)
+                </label>
+                <select id="modal-prime95-duration-select" style="padding: 4px 8px; font-size: 0.8rem; border-radius: 4px; border: 1px solid var(--glass-border); background: var(--glass-bg); color: var(--text-dark); outline: none;">
+                  <option value="900">15 min (Minimum)</option>
+                  <option value="1200" selected>20 min (Recommended)</option>
+                  <option value="1800">30 min (Thorough)</option>
+                </select>
+              </div>
             </div>
+            <div id="modal-prime95-panel"></div>
+            <div id="modal-passport-grid" class="margin-top"></div>
+
+            <!-- Price-to-Performance (reads precomputed ticket_ppi; Compute shells to ppi_sync.py) -->
+            <div style="display:flex; align-items:center; justify-content:space-between; margin-top:14px; margin-bottom:8px;">
+              <h4 style="color: var(--primary-pink); font-size: 0.82rem; text-transform: uppercase; letter-spacing: 0.05em; margin: 0; display:flex; align-items:center; gap:6px;"><span class="dr-inline-icon" data-icon="price-tag"></span>Price-to-Performance</h4>
+              <button type="button" id="btn-compute-ppi" class="secondary-btn" style="padding: 4px 10px; font-size: 0.72rem;">Compute Price-Performance</button>
+            </div>
+            <div id="modal-ppi-panel"></div>
 
             <!-- telemetry hud grid -->
             <div class="telemetry-hud-grid">
@@ -1419,6 +1453,13 @@
                 </div>
               </div>
               <div class="settings-field margin-top">
+                <label class="settings-label" for="settings-path-prime95">Prime95 Executable</label>
+                <div class="uploader-row">
+                  <input type="text" id="settings-path-prime95" class="settings-input" placeholder="Leave blank — uses bundled Prime95">
+                  <button id="btn-select-path-prime95" class="secondary-btn" type="button">Browse</button>
+                </div>
+              </div>
+              <div class="settings-field margin-top">
                 <label class="settings-label" for="settings-path-hwinfo">HWiNFO64 Executable (optional)</label>
                 <div class="uploader-row">
                   <input type="text" id="settings-path-hwinfo" class="settings-input" placeholder="C:\Tools\HWiNFO64.exe">
@@ -1639,6 +1680,47 @@
       </table>
     </div>
 
+    <!-- ── PRIME95 TORTURE TEST ── -->
+    <div id="print-prime95-section" class="print-section hidden">
+      <h3>Stability Torture Test (Prime95 Blend — CPU + RAM)</h3>
+      <table class="print-table-fields">
+        <tr>
+          <td><strong>Result</strong></td><td id="print-p95-result">--</td>
+          <td><strong>Duration</strong></td><td id="print-p95-duration">--</td>
+        </tr>
+        <tr>
+          <td><strong>Workers</strong></td><td id="print-p95-workers">--</td>
+          <td><strong>Errors / Warnings</strong></td><td id="print-p95-errors">--</td>
+        </tr>
+      </table>
+      <div id="print-p95-error-lines" style="font-size:7.5pt;color:#333;"></div>
+    </div>
+
+    <!-- ── COMPONENT PASSPORT ── -->
+    <div id="print-passport-section" class="print-section hidden">
+      <h3>Component Health Passport</h3>
+      <table class="print-event-table">
+        <thead><tr><th>Component</th><th>Identity</th><th>Status</th></tr></thead>
+        <tbody id="print-passport-body"></tbody>
+      </table>
+    </div>
+
+    <!-- ── PRICE-TO-PERFORMANCE ── -->
+    <div id="print-ppi-section" class="print-section hidden">
+      <h3>Price-to-Performance Analysis</h3>
+      <table class="print-table-fields">
+        <tr>
+          <td><strong>PPI Index</strong></td><td id="print-ppi-index">--</td>
+          <td><strong>Use-Case Fit</strong></td><td id="print-ppi-fit">--</td>
+        </tr>
+        <tr>
+          <td><strong>Evaluated For</strong></td><td id="print-ppi-usecases" colspan="3">--</td>
+        </tr>
+      </table>
+      <div id="print-ppi-flags" style="font-size:7.5pt;color:#333;"></div>
+      <p style="font-size:6.5pt;color:#888;margin-top:3px;">Reference scores from PassMark&reg; (passmark.com). Prices from pcstudio.in. Your results may vary.</p>
+    </div>
+
     <!-- ── ACTIVITY LOG ── -->
     <div id="print-event-log-section" class="print-section hidden">
       <h3>Build &amp; Service Activity Log</h3>
@@ -1670,25 +1752,29 @@
     <div class="glass-slab modal-card" style="max-width: 650px; width: 100%; padding: 30px; border-radius: 20px;">
       <div class="modal-header" style="border-bottom: 1px solid var(--glass-border); padding-bottom: 15px; margin-bottom: 20px;">
         <h2 style="font-family: 'Syncopate', sans-serif; font-size: 1.3rem; color: var(--primary-pink); letter-spacing: 0.05em; margin: 0;">NEO QC UPDATED</h2>
-        <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; font-weight: 700; background: rgba(231, 1, 78, 0.1); color: var(--primary-pink); padding: 4px 8px; border-radius: 4px;">v1.1.0</span>
+        <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; font-weight: 700; background: rgba(231, 1, 78, 0.1); color: var(--primary-pink); padding: 4px 8px; border-radius: 4px;">v1.2.0</span>
       </div>
       <div class="modal-body" style="font-size: 0.92rem; line-height: 1.6; color: var(--text-dark); max-height: 420px; overflow-y: auto; padding-right: 5px;">
-        <p style="margin-top: 0;">An update has been installed. Here are the key improvements in NeoQC <strong>v1.1.0</strong>:</p>
+        <p style="margin-top: 0;">An update has been installed. Here are the key improvements in NeoQC <strong>v1.2.0</strong> — the Benchmarking &amp; Stress-Test Overhaul:</p>
         <ul style="padding-left: 20px; display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px;">
-          <li><strong>📋 Collapsible Activity Log Tray</strong>: Space-saving minimizable log tray in Ticket Edit Modal, contractible to reclaim workspace.</li>
-          <li><strong>🌡️ Real-Time Telemetry Sync</strong>: Real-time display slots showing Min, Max, and Avg CPU/GPU temperatures streamed from client machines.</li>
-          <li><strong>🔌 Real-Time Port Checker Matrix</strong>: Dedicated validation grid showing specific statuses (USB, Display, Audio, RGB) linked in real-time.</li>
-          <li><strong>📱 Redesigned Client Extension Mode</strong>: Brand new client layout designed as a physical extension of active tickets with manual port toggles.</li>
-          <li><strong>🌈 SignalRGB Installer &amp; Fallback</strong>: Wrap SignalRGB installer in elevated PowerShell to bypass Windows UAC permission limits, and integrate OpenRGB CLI fallback sync.</li>
+          <li><strong>Prime95 Torture Testing</strong>: Real CPU + RAM Blend-mode torture test baked in, with per-worker pass/fail, error counts, and its own report section.</li>
+          <li><strong>Component Health Passports</strong>: Full identity + health cards for CPU / GPU / RAM / Storage — real DDR generation detection, per-module RAM detail, NVMe/SATA interface, SSD wear &amp; power-on hours.</li>
+          <li><strong>Price-to-Performance Index</strong>: One-click PPI for every build — 0-100 index, use-case fit score, bottleneck flags, and same-price alternatives, powered by live pcstudio.in prices + PassMark reference scores.</li>
+          <li><strong>Port Checker v2</strong>: Guided plug-in verification with before/after device detection — honest pass / fail / unverified results, no more silent passes.</li>
+          <li><strong>RGB Sync v2</strong>: Per-device, per-zone OpenRGB control with verify-after-apply feedback.</li>
+          <li><strong>Customer Dashboard Parity</strong>: The customer-facing dashboard now shows the same passports, torture-test results, and PPI analysis as the staff app — one shared render engine.</li>
+          <li><strong>Refined Startup</strong>: Choreographed splash sequence and a cleaner, minimal landing backdrop.</li>
         </ul>
       </div>
       <div class="modal-footer" style="border-top: 1px solid var(--glass-border); padding-top: 15px; display: flex; justify-content: flex-end; margin-top: 20px;">
-        <button id="btn-close-changelog" class="primary-pink-btn" style="padding: 10px 24px; font-weight: 700; font-size: 0.95rem;">Launch NeoQC v1.1.0 🚀</button>
+        <button id="btn-close-changelog" class="primary-pink-btn" style="padding: 10px 24px; font-weight: 700; font-size: 0.95rem;">Launch NeoQC v1.2.0</button>
       </div>
     </div>
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="shared/icons.js"></script>
+  <script src="shared/diagnostics-render.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

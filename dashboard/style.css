@@ -316,6 +316,18 @@ body {
 .sc-qc.fail { background: var(--red-dim);   border: 1px solid rgba(239,68,68,0.25);  color: #fca5a5; }
 .sc-qc.hidden { display: none; }
 
+/* Rich diagnostics sections (shared render module output) */
+.sc-diag-section { margin-top: 20px; }
+.sc-diag-title {
+  font-family: 'Syncopate', sans-serif;
+  font-size: 0.7rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 10px;
+}
+.sc-diag-section .dr-card { background: var(--glass); }
+
 /* ══════════════════════════════════════════════════════
    SALES VIEW
    ══════════════════════════════════════════════════════ */

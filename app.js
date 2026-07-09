@@ -107,7 +107,8 @@ let appState = {
     supabaseAnonKey: "",
     pathHwInfo: "",
     pathCinebench: "",
-    pathFurmark: ""
+    pathFurmark: "",
+    pathPrime95: ""
   }
 };
 
@@ -129,6 +130,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   await loadDatabase();
   setSplashStatus('Preparing workspace…');
   setupEventListeners();
+  injectInlineIcons();
   setupSpecsAutocomplete();
   updateTimeDisplay();
   setInterval(updateTimeDisplay, 60000);
@@ -160,12 +162,19 @@ document.addEventListener('DOMContentLoaded', async () => {
     console.error("Error reading app-config.json:", e);
   }
 
-  // Hold splash for at least 1800ms so the animation is actually visible.
-  // If boot took longer than that already, we switch immediately.
+  // Hold splash for at least 4200ms so the staged entrance animation plays
+  // out fully. If boot took longer than that already, we switch immediately.
   const elapsed = Date.now() - bootStart;
-  const minSplash = 1800;
+  const minSplash = 4200;
   if (elapsed < minSplash) {
     await new Promise(resolve => setTimeout(resolve, minSplash - elapsed));
+  }
+
+  // Gentle fade-out before handing over to the landing screen
+  const splashEl = document.getElementById('splash-screen');
+  if (splashEl) {
+    splashEl.classList.add('splash-fade-out');
+    await new Promise(resolve => setTimeout(resolve, 450));
   }
 
   switchScreen(bootMode);
@@ -227,8 +236,9 @@ async function loadDatabase() {
       supabaseUrl: "https://ggsxkhenzdhaachubrsc.supabase.co", 
       supabaseAnonKey: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imdnc3hraGVuemRoYWFjaHVicnNjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE3MTEwNjEsImV4cCI6MjA5NzI4NzA2MX0.bDhUK-qJSgcBEcNdEdOaZGg5vsUF6jH2gbSRQaMhjBo", 
       pathHwInfo: "", 
-      pathCinebench: "", 
-      pathFurmark: "", 
+      pathCinebench: "",
+      pathFurmark: "",
+      pathPrime95: "",
       pathSsdUtility: "",
       isMaster: true,
       autoDetectHw: false,
@@ -255,6 +265,7 @@ async function loadDatabase() {
     if (!appState.settings.pathHwInfo) appState.settings.pathHwInfo = "";
     if (!appState.settings.pathCinebench) appState.settings.pathCinebench = "";
     if (!appState.settings.pathFurmark) appState.settings.pathFurmark = "";
+    if (!appState.settings.pathPrime95) appState.settings.pathPrime95 = "";
     if (!appState.settings.pathSsdUtility) appState.settings.pathSsdUtility = "";
     if (appState.settings.isMaster === undefined) appState.settings.isMaster = true;
     if (appState.settings.autoDetectHw === undefined) appState.settings.autoDetectHw = false;
@@ -845,11 +856,20 @@ function openTicketModal(ticketId = null) {
 
       // Render event log timeline
       renderEventLog(ticket);
+
+      // Saved diagnostics panels (passport / Prime95) + precomputed PPI
+      renderSavedDiagnosticsPanels(ticket);
+      loadAndRenderPpi(ticket.id);
     }
   } else {
     title.textContent = "Create Service Ticket";
     document.getElementById('form-ticket-id').value = '';
     document.getElementById('form-created-at').value = '';
+
+    // Clear diagnostics panels from any previously opened ticket
+    renderSavedDiagnosticsPanels(null);
+    const ppiPanel = document.getElementById('modal-ppi-panel');
+    if (ppiPanel && window.NeoQcDiagnosticsRender) ppiPanel.innerHTML = window.NeoQcDiagnosticsRender.renderPpiPanel(null);
     
     // Reset specs
     document.getElementById('modal-spec-cpu').textContent = '--';
@@ -1313,10 +1333,161 @@ function updatePortDetailsDisplay(category, devices) {
   }
 }
 
+// Replace every <span class="dr-inline-icon" data-icon="name"> placeholder with
+// the shared SVG icon set (shared/icons.js) — static HTML can't call JS, so
+// icons are injected once at startup.
+function injectInlineIcons() {
+  if (!window.NeoQcIcons) return;
+  document.querySelectorAll('[data-icon]').forEach(el => {
+    el.innerHTML = window.NeoQcIcons.iconSvg(el.getAttribute('data-icon'));
+  });
+}
+
+// Update a port-card status pill (dr-pill classes from shared/diagnostics-tokens.css)
+function setPortPill(type, status, label) {
+  const badge = document.getElementById(`badge-port-${type}`);
+  if (!badge) return;
+  badge.className = `dr-pill dr-status-${status}`;
+  badge.textContent = label;
+}
+
+// Persist a portCheckV2 category result into the selected ticket + qcChecks
+async function savePortCheckResult(type, categoryResult) {
+  const ticketId = document.getElementById('client-ticket-select').value;
+  if (!ticketId) return;
+  const index = appState.tickets.findIndex(t => t.id === ticketId);
+  if (index === -1) return;
+  const ticket = appState.tickets[index];
+
+  if (!ticket.diagnostics) ticket.diagnostics = {};
+  if (!ticket.diagnostics.portCheckV2) ticket.diagnostics.portCheckV2 = { categories: {} };
+  ticket.diagnostics.portCheckV2.ranAt = new Date().toISOString();
+  ticket.diagnostics.portCheckV2.categories[type] = categoryResult;
+
+  if (!ticket.qcChecks) ticket.qcChecks = {};
+  const passed = categoryResult.status === 'pass';
+  if (type === 'usb') ticket.qcChecks.portUsb = passed;
+  else if (type === 'video') ticket.qcChecks.portVideo = passed;
+  else if (type === 'audio') ticket.qcChecks.portAudio = passed;
+
+  ticket.updatedAt = new Date().toISOString();
+  appState.tickets[index] = ticket;
+  await saveDatabase();
+  await syncTicketToCloud(ticket);
+}
+
+// Persist the rgbSyncV2 result into the selected ticket
+async function saveRgbSyncResult(rgbResult) {
+  const ticketId = document.getElementById('client-ticket-select').value;
+  if (!ticketId) return;
+  const index = appState.tickets.findIndex(t => t.id === ticketId);
+  if (index === -1) return;
+  const ticket = appState.tickets[index];
+
+  if (!ticket.diagnostics) ticket.diagnostics = {};
+  ticket.diagnostics.rgbSyncV2 = { ...rgbResult, ranAt: new Date().toISOString() };
+  if (!ticket.qcChecks) ticket.qcChecks = {};
+  ticket.qcChecks.portRgb = rgbResult.overallStatus === 'pass' || rgbResult.overallStatus === 'partial';
+
+  ticket.updatedAt = new Date().toISOString();
+  appState.tickets[index] = ticket;
+  await saveDatabase();
+  await syncTicketToCloud(ticket);
+}
+
+// Cached RGB device list (from the last Detect Devices run) for apply actions
+let lastRgbDevices = [];
+
+function renderRgbDeviceControls(detailed) {
+  const container = document.getElementById('openrgb-device-list');
+  if (!container) return;
+  container.innerHTML = '';
+  detailed.forEach(dev => {
+    const zones = dev.zones && dev.zones.length ? dev.zones : ['(whole device)'];
+    const devEl = document.createElement('div');
+    devEl.className = 'dr-list';
+    devEl.innerHTML = zones.map((zone, zi) => `
+      <div class="dr-list-item">
+        <span>${dev.name}${zones.length > 1 || zone !== '(whole device)' ? ' — ' + zone : ''}</span>
+        <span style="display:flex;align-items:center;gap:6px;">
+          <input type="color" value="#e7014e" data-rgb-device="${dev.index}" data-rgb-zone="${dev.zones && dev.zones.length ? zi : ''}"
+                 style="width:34px;height:22px;padding:0;border:none;border-radius:4px;cursor:pointer;">
+          <button type="button" class="secondary-btn btn-rgb-zone-apply" data-rgb-device="${dev.index}" data-rgb-zone="${dev.zones && dev.zones.length ? zi : ''}"
+                  style="padding:2px 8px;font-size:0.7rem;">Apply</button>
+          <span class="rgb-zone-status dr-muted" data-rgb-status="${dev.index}-${zi}"></span>
+        </span>
+      </div>`).join('');
+    container.appendChild(devEl);
+  });
+
+  container.querySelectorAll('.btn-rgb-zone-apply').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const deviceIndex = btn.getAttribute('data-rgb-device');
+      const zoneIndex = btn.getAttribute('data-rgb-zone');
+      const picker = container.querySelector(`input[type="color"][data-rgb-device="${deviceIndex}"][data-rgb-zone="${zoneIndex}"]`);
+      const color = picker ? picker.value : '#e7014e';
+      const statusEl = container.querySelector(`[data-rgb-status="${deviceIndex}-${zoneIndex || 0}"]`);
+
+      btn.disabled = true;
+      if (statusEl) statusEl.textContent = 'Applying...';
+      try {
+        const result = await ipcRenderer.invoke('rgb:set-device-color', { deviceIndex, zoneIndex, mode: 'static', color });
+        if (statusEl) statusEl.textContent = result.success
+          ? (result.verified ? 'Applied ✦ controller OK' : 'Applied, unconfirmed')
+          : `Failed: ${result.error || 'unknown'}`;
+        // Record the zone-level result
+        const dev = lastRgbDevices.find(d => String(d.index) === String(deviceIndex));
+        if (dev) {
+          const zoneName = (dev.zones && dev.zones.length) ? dev.zones[parseInt(zoneIndex)] : dev.name;
+          await saveRgbSyncResult(buildRgbSyncResult(lastRgbDevices, { device: dev.name, zone: zoneName, color, verified: !!result.verified }));
+        }
+      } catch (e) {
+        if (statusEl) statusEl.textContent = `Error: ${e.message}`;
+      } finally {
+        btn.disabled = false;
+      }
+    });
+  });
+}
+
+// Build the diagnostics.rgbSyncV2 shape from the detected device list, merging
+// in the latest applied-color info (appliedInfo optional).
+function buildRgbSyncResult(detailed, appliedInfo) {
+  const existing = (() => {
+    const ticketId = document.getElementById('client-ticket-select').value;
+    const t = appState.tickets.find(t => t.id === ticketId);
+    return (t && t.diagnostics && t.diagnostics.rgbSyncV2) || null;
+  })();
+
+  const devices = detailed.map(dev => {
+    const zones = (dev.zones && dev.zones.length ? dev.zones : [dev.name]).map(zoneName => {
+      const prior = existing && existing.devices
+        ? (existing.devices.find(d => d.name === dev.name)?.zones || []).find(z => z.name === zoneName)
+        : null;
+      const isApplied = appliedInfo && appliedInfo.device === dev.name && appliedInfo.zone === zoneName;
+      return {
+        name: zoneName,
+        colorApplied: isApplied ? appliedInfo.color : (prior ? prior.colorApplied : null),
+        colorVerified: null, // CLI cannot read colors back — never claim it can
+        verified: isApplied ? appliedInfo.verified : (prior ? prior.verified : false)
+      };
+    });
+    return { name: dev.name, zones };
+  });
+
+  const anyVerified = devices.some(d => d.zones.some(z => z.verified));
+  const allVerified = devices.length > 0 && devices.every(d => d.zones.every(z => z.verified));
+  return {
+    controllerFound: detailed.length > 0,
+    devices,
+    overallStatus: detailed.length === 0 ? 'not-detected' : allVerified ? 'pass' : anyVerified ? 'partial' : 'pass'
+  };
+}
+
 function setupOpenRgbController() {
   const applyBtn = document.getElementById('btn-apply-openrgb');
   if (!applyBtn) return;
-  
+
   applyBtn.addEventListener('click', async () => {
     const ticketId = document.getElementById('client-ticket-select').value;
     if (!ticketId) {
@@ -1325,20 +1496,36 @@ function setupOpenRgbController() {
     }
     const ticket = appState.tickets.find(t => t.id === ticketId);
     if (!ticket) return;
-    
+
     const mode = document.getElementById('openrgb-mode').value;
     const color = document.getElementById('openrgb-color-picker').value;
-    
+    const statusEl = document.getElementById('openrgb-apply-status');
+
     applyBtn.disabled = true;
-    applyBtn.textContent = '⏳ Applying...';
-    
+    applyBtn.textContent = 'Applying...';
+
     try {
-      appendConsoleLine('c-console-box', `[RGB CONTROLLER] Applying RGB effect '${mode.toUpperCase()}'...`);
+      appendConsoleLine('c-console-box', `[RGB CONTROLLER] Applying RGB effect '${mode.toUpperCase()}' to all devices...`);
       const result = await ipcRenderer.invoke('rgb:set-color', { mode, color, brightness: 100 });
       if (result && result.success) {
-        appendConsoleLine('c-console-box', `[RGB CONTROLLER] Hardware sync applied via OpenRGB successfully!`);
+        const verifiedNote = result.verified ? 'controller re-enumerated OK' : 'controller did not re-confirm';
+        appendConsoleLine('c-console-box', `[RGB CONTROLLER] Applied via OpenRGB (${verifiedNote}).`);
+        if (statusEl) statusEl.textContent = result.verified ? `Applied — ${verifiedNote}` : 'Applied, unconfirmed';
+        // Record apply across every detected device/zone
+        if (lastRgbDevices.length) {
+          const applied = { color: mode === 'off' ? '#000000' : color, verified: !!result.verified };
+          let rgbResult = buildRgbSyncResult(lastRgbDevices, null);
+          rgbResult.devices = rgbResult.devices.map(d => ({
+            ...d,
+            zones: d.zones.map(z => ({ ...z, colorApplied: applied.color, verified: applied.verified }))
+          }));
+          const anyV = applied.verified;
+          rgbResult.overallStatus = rgbResult.controllerFound ? (anyV ? 'pass' : 'partial') : 'not-detected';
+          await saveRgbSyncResult(rgbResult);
+        }
       } else {
         appendConsoleLine('c-console-box', `[RGB CONTROLLER ERROR] Failed to sync: ${result ? result.error : 'Unknown error'}`);
+        if (statusEl) statusEl.textContent = `Failed: ${result ? result.error : 'unknown'}`;
       }
     } catch (err) {
       console.error("OpenRGB apply error:", err);
@@ -1350,93 +1537,117 @@ function setupOpenRgbController() {
   });
 }
 
+// Port Checker v2 — guided before/after verification.
+// Windows can only enumerate what it detects, so passive "is anything plugged
+// in" tells you nothing about a SPECIFIC port. Instead: snapshot the device
+// list, have the tech plug a known-good device into the port under test, then
+// snapshot again — a new device appearing PROVES that physical port works.
 function setupPortsChecker() {
-  const scans = [
-    { btnId: 'btn-scan-usb', type: 'usb', name: 'USB Ports' },
-    { btnId: 'btn-scan-video', type: 'video', name: 'Video Outputs' },
-    { btnId: 'btn-scan-audio', type: 'audio', name: 'Audio Jacks' },
-    { btnId: 'btn-scan-rgb', type: 'rgb', name: 'OpenRGB Controller' }
+  const guided = [
+    { type: 'usb',   name: 'USB Ports',    device: 'a USB flash drive or peripheral into the port you want to prove' },
+    { type: 'video', name: 'Video Output', device: 'a monitor into the HDMI / DisplayPort you want to prove' },
+    { type: 'audio', name: 'Audio Jack',   device: 'headphones or a speaker into the audio jack you want to prove' }
   ];
-  
-  scans.forEach(scan => {
-    const btn = document.getElementById(scan.btnId);
-    if (btn) {
-      btn.addEventListener('click', async () => {
-        const ticketId = document.getElementById('client-ticket-select').value;
-        if (!ticketId) {
-          alert("Please select a ticket first before verifying ports!");
+  const portState = {}; // type -> { before: [device names] }
+
+  function setBadge(type, status, label) {
+    const badge = document.getElementById(`badge-port-${type}`);
+    if (badge) { badge.className = `dr-pill dr-status-${status}`; badge.textContent = label; }
+  }
+
+  guided.forEach(cfg => {
+    const btn = document.getElementById(`btn-scan-${cfg.type}`);
+    if (!btn) return;
+    btn.addEventListener('click', async () => {
+      const ticketId = document.getElementById('client-ticket-select').value;
+      if (!ticketId) { alert("Please select a ticket first before verifying ports!"); return; }
+      const hint = document.getElementById(`hint-port-${cfg.type}`);
+      const listEl = document.getElementById(`list-port-${cfg.type}`);
+      const phase = btn.getAttribute('data-phase') || 'start';
+
+      if (phase === 'start') {
+        btn.disabled = true;
+        setBadge(cfg.type, 'unverified', 'Snapshotting…');
+        const snap = await ipcRenderer.invoke('sys:port-snapshot', cfg.type);
+        btn.disabled = false;
+
+        if (!snap.available) {
+          setBadge(cfg.type, 'unverified', 'Cannot verify');
+          if (hint) { hint.classList.remove('hidden'); hint.textContent = `Could not verify — ${snap.error || 'detection unavailable'}.`; }
+          await savePortCheckResult(cfg.type, { status: 'unverified', error: snap.error || 'unavailable', beforeDevices: [], afterDevices: [], newDevicesDetected: [] });
+          appendConsoleLine('c-console-box', `[PORT] ${cfg.name}: UNVERIFIED (${snap.error || 'unavailable'}).`);
           return;
         }
-        
-        const index = appState.tickets.findIndex(t => t.id === ticketId);
-        if (index === -1) return;
-        const ticket = appState.tickets[index];
-        
+
+        portState[cfg.type] = { before: snap.devices || [] };
+        if (hint) { hint.classList.remove('hidden'); hint.innerHTML = `Baseline captured. Now plug in <strong>${cfg.device}</strong>, then click <strong>Verify</strong>.`; }
+        if (listEl) { listEl.classList.remove('hidden'); listEl.innerHTML = `<div class="dr-list-item"><span class="dr-muted">Baseline: ${(snap.devices || []).length} device(s) already present</span></div>`; }
+        setBadge(cfg.type, 'unverified', 'Awaiting device');
+        btn.textContent = 'Verify';
+        btn.setAttribute('data-phase', 'verify');
+        appendConsoleLine('c-console-box', `[PORT] ${cfg.name}: baseline captured (${(snap.devices || []).length} devices). Waiting for plug-in…`);
+      } else {
         btn.disabled = true;
-        const badge = document.getElementById(`badge-port-${scan.type}`);
-        if (badge) {
-          badge.textContent = 'Scanning...';
-          badge.className = 'badge orange';
-        }
-        
-        const listEl = document.getElementById(`list-port-${scan.type}`);
+        setBadge(cfg.type, 'unverified', 'Verifying…');
+        const snap = await ipcRenderer.invoke('sys:port-snapshot', cfg.type);
+        btn.disabled = false;
+
+        const before = (portState[cfg.type] && portState[cfg.type].before) || [];
+        const after = snap.available ? (snap.devices || []) : [];
+        const newDevices = after.filter(d => !before.includes(d));
+        const status = !snap.available ? 'unverified' : (newDevices.length > 0 ? 'pass' : 'fail');
+
+        setBadge(cfg.type, status, status === 'pass' ? 'Verified' : status === 'fail' ? 'No new device' : 'Cannot verify');
         if (listEl) {
           listEl.classList.remove('hidden');
-          listEl.innerHTML = '⏳ Querying system hardware ports...';
+          listEl.innerHTML = newDevices.length
+            ? `<div class="dr-list-item"><span class="dr-muted">Newly detected on verify:</span></div>` + newDevices.map(d => `<div class="dr-list-item"><span>${window.NeoQcDiagnosticsRender.esc(d)}</span></div>`).join('')
+            : `<div class="dr-list-item" style="color:var(--dr-status-fail);">No new device detected — the port may be faulty, or nothing was plugged in.</div>`;
         }
-        
-        appendConsoleLine('c-console-box', `[SYS] Starting port scan for: ${scan.name}...`);
-        
-        try {
-          const res = await ipcRenderer.invoke('sys:check-port-hardware', scan.type);
-          const passed = !!res.passed;
-          
-          if (badge) {
-            badge.textContent = passed ? 'Passed' : 'Pending';
-            badge.className = `badge ${passed ? 'green' : 'red'}`;
-          }
-          
-          if (listEl) {
-            if (res.devices && res.devices.length > 0) {
-              listEl.innerHTML = res.devices.map(d => `<div style="padding: 2px 0;">• ${d}</div>`).join('');
-            } else {
-              listEl.innerHTML = `<div style="color: var(--status-urgent);">No active devices detected</div>`;
-            }
-          }
-          
-          if (!ticket.qcChecks) ticket.qcChecks = {};
-          if (scan.type === 'usb') ticket.qcChecks.portUsb = passed;
-          else if (scan.type === 'video') ticket.qcChecks.portVideo = passed;
-          else if (scan.type === 'audio') ticket.qcChecks.portAudio = passed;
-          else if (scan.type === 'rgb') {
-            ticket.qcChecks.portRgb = passed;
-            const openrgbPanel = document.getElementById('openrgb-control-panel');
-            if (openrgbPanel) {
-              if (passed) openrgbPanel.classList.remove('hidden');
-              else openrgbPanel.classList.add('hidden');
-            }
-          }
-          
-          appendConsoleLine('c-console-box', `[SYS] Scan completed for ${scan.name}. Status: ${passed ? 'PASSED' : 'PENDING'}`);
-          
-          ticket.updatedAt = new Date().toISOString();
-          appState.tickets[index] = ticket;
-          await saveDatabase();
-          await syncTicketToCloud(ticket);
-        } catch (err) {
-          console.error(`Port scan error for ${scan.type}:`, err);
-          if (badge) {
-            badge.textContent = 'Error';
-            badge.className = 'badge red';
-          }
-          if (listEl) listEl.innerHTML = `<div style="color: var(--status-urgent);">Scan error: ${err.message}</div>`;
-        } finally {
-          btn.disabled = false;
-        }
-      });
-    }
+        if (hint) hint.classList.add('hidden');
+        await savePortCheckResult(cfg.type, { status, beforeDevices: before, afterDevices: after, newDevicesDetected: newDevices });
+        appendConsoleLine('c-console-box', `[PORT] ${cfg.name}: ${status.toUpperCase()} (${newDevices.length} new device).`);
+        btn.textContent = 'Re-check';
+        btn.setAttribute('data-phase', 'start');
+      }
+    });
   });
-  
+
+  // RGB — detect controllable devices, expose per-device/zone controls
+  const rgbBtn = document.getElementById('btn-scan-rgb');
+  if (rgbBtn) {
+    rgbBtn.addEventListener('click', async () => {
+      const ticketId = document.getElementById('client-ticket-select').value;
+      if (!ticketId) { alert("Please select a ticket first before detecting RGB devices!"); return; }
+      rgbBtn.disabled = true;
+      setBadge('rgb', 'unverified', 'Detecting…');
+      const panel = document.getElementById('openrgb-control-panel');
+      const listEl = document.getElementById('list-port-rgb');
+      try {
+        const res = await ipcRenderer.invoke('rgb:list-devices');
+        const detailed = res.detailed || [];
+        lastRgbDevices = detailed;
+        if (detailed.length > 0) {
+          setBadge('rgb', 'pass', `${detailed.length} device(s)`);
+          renderRgbDeviceControls(detailed);
+          if (panel) panel.classList.remove('hidden');
+          if (listEl) listEl.classList.add('hidden');
+          await saveRgbSyncResult(buildRgbSyncResult(detailed, null));
+        } else {
+          setBadge('rgb', 'unverified', 'None detected');
+          if (panel) panel.classList.add('hidden');
+          if (listEl) { listEl.classList.remove('hidden'); listEl.innerHTML = `<div class="dr-list-item"><span class="dr-muted">No OpenRGB-controllable devices found.</span></div>`; }
+        }
+        appendConsoleLine('c-console-box', `[RGB] Detected ${detailed.length} controllable device(s).`);
+      } catch (err) {
+        setBadge('rgb', 'fail', 'Error');
+        appendConsoleLine('c-console-box', `[RGB ERROR] ${err.message}`);
+      } finally {
+        rgbBtn.disabled = false;
+      }
+    });
+  }
+
   setupOpenRgbController();
 }
 
@@ -2218,6 +2429,54 @@ function populatePrintFields(ticket) {
     document.getElementById('print-ssd-size').textContent   = ssdH.size ? Math.round(ssdH.size / 1e9) + ' GB' : '--';
   }
 
+  // ── Prime95 Torture Test ──
+  const p95 = d.prime95;
+  if (p95 && p95.overallResult && p95.overallResult !== 'not-run') {
+    const sec = document.getElementById('print-prime95-section');
+    if (sec) sec.classList.remove('hidden');
+    const p95Pass = p95.overallResult === 'pass';
+    document.getElementById('print-p95-result').innerHTML = badge(p95Pass) + (p95.overallResult === 'aborted' ? ' (aborted early)' : '');
+    document.getElementById('print-p95-duration').textContent = p95.durationActualSec ? Math.round(p95.durationActualSec / 60) + ' min (Blend)' : '--';
+    document.getElementById('print-p95-workers').textContent = p95.workerCount || (p95.workers || []).length || '--';
+    const errCount = (p95.workers || []).reduce((s, w) => s + (w.errors || 0), 0);
+    const warnCount = (p95.workers || []).reduce((s, w) => s + (w.roundingWarnings || 0), 0);
+    document.getElementById('print-p95-errors').textContent = `${errCount} error(s), ${warnCount} warning(s)`;
+    const errLines = document.getElementById('print-p95-error-lines');
+    if (errLines) errLines.innerHTML = (p95.errorSummary || []).slice(0, 5).map(l => `<div>• ${l}</div>`).join('');
+  }
+
+  // ── Component Passport ──
+  const cp = d.componentPassport;
+  if (cp) {
+    const sec = document.getElementById('print-passport-section');
+    const body = document.getElementById('print-passport-body');
+    if (sec && body) {
+      sec.classList.remove('hidden');
+      const rows = [];
+      if (cp.cpu) rows.push(['CPU', `${cp.cpu.model || '--'} — ${cp.cpu.cores || '?'}C/${cp.cpu.threads || '?'}T`,
+        cp.cpu.throttled ? 'THERMAL THROTTLE' : (cp.cpu.healthNote || (cp.cpu.tempMaxDuringTest != null ? `OK, max ${cp.cpu.tempMaxDuringTest}°C under load` : 'Not tested'))]);
+      if (cp.gpu) rows.push(['GPU', `${cp.gpu.model || '--'}${cp.gpu.vram ? ' — ' + cp.gpu.vram : ''}`,
+        cp.gpu.throttled ? 'THERMAL THROTTLE' : (cp.gpu.tempMaxDuringTest != null ? `OK, max ${cp.gpu.tempMaxDuringTest}°C under load` : 'Not tested')]);
+      if (cp.ram) rows.push(['RAM', `${cp.ram.totalGB || '?'} GB ${cp.ram.ddrGen || ''} (${(cp.ram.modules || []).length} module(s))`,
+        cp.ram.errorsDuringPrime95 > 0 ? `${cp.ram.errorsDuringPrime95} ERROR(S) in torture test` : (cp.ram.healthNote || 'Not tested')]);
+      if (cp.storage) rows.push(['Storage', `${cp.storage.model || '--'} — ${cp.storage.interface || cp.storage.mediaType || ''} ${cp.storage.sizeGB || '?'} GB`,
+        cp.storage.lifeRemaining != null ? `${cp.storage.healthStatus || 'OK'}, ${cp.storage.lifeRemaining}% life, ${cp.storage.powerOnHours != null ? cp.storage.powerOnHours + ' h powered on' : ''}` : (cp.storage.healthStatus || '--')]);
+      body.innerHTML = rows.map(r => `<tr><td><strong>${r[0]}</strong></td><td>${r[1]}</td><td>${r[2]}</td></tr>`).join('');
+    }
+  }
+
+  // ── Price-to-Performance (precomputed ticket_ppi, cached on last modal load) ──
+  const ppiRow = ppiCacheByTicket[ticket.id];
+  if (ppiRow && ppiRow.index != null) {
+    const sec = document.getElementById('print-ppi-section');
+    if (sec) sec.classList.remove('hidden');
+    document.getElementById('print-ppi-index').textContent = `${ppiRow.index} / 100`;
+    document.getElementById('print-ppi-fit').textContent = ppiRow.customer_fit_score != null ? Math.round(ppiRow.customer_fit_score * 100) + '%' : '--';
+    document.getElementById('print-ppi-usecases').textContent = (ppiRow.use_cases || []).join(', ') || '--';
+    const flagsEl = document.getElementById('print-ppi-flags');
+    if (flagsEl) flagsEl.innerHTML = (ppiRow.flags || []).map(f => `<div>⚠ ${f}</div>`).join('');
+  }
+
   // ── Activity Log ──
   const events = ticket.events || ticket.activityLog || [];
   if (events.length > 0) {
@@ -2422,6 +2681,7 @@ function openSettingsModal() {
   document.getElementById('settings-path-hwinfo').value = appState.settings.pathHwInfo || '';
   document.getElementById('settings-path-cinebench').value = appState.settings.pathCinebench || '';
   document.getElementById('settings-path-furmark').value = appState.settings.pathFurmark || '';
+  document.getElementById('settings-path-prime95').value = appState.settings.pathPrime95 || '';
   document.getElementById('settings-path-ssd-utility').value = appState.settings.pathSsdUtility || '';
   document.getElementById('settings-is-master').checked = !!appState.settings.isMaster;
   document.getElementById('settings-auto-detect-hw').checked = !!appState.settings.autoDetectHw;
@@ -2490,6 +2750,7 @@ async function handleSaveSettings() {
   appState.settings.pathHwInfo = document.getElementById('settings-path-hwinfo').value.trim();
   appState.settings.pathCinebench = document.getElementById('settings-path-cinebench').value.trim();
   appState.settings.pathFurmark = document.getElementById('settings-path-furmark').value.trim();
+  appState.settings.pathPrime95 = document.getElementById('settings-path-prime95').value.trim();
   appState.settings.pathSsdUtility = document.getElementById('settings-path-ssd-utility').value.trim();
   appState.settings.isMaster = document.getElementById('settings-is-master').checked;
   appState.settings.autoDetectHw = document.getElementById('settings-auto-detect-hw').checked;
@@ -2957,6 +3218,34 @@ function setupEventListeners() {
     await executeDiagnosticsWorkflow(true);
   });
 
+  // Compute Price-to-Performance (shells to ppi_sync.py via main process)
+  const ppiBtn = document.getElementById('btn-compute-ppi');
+  if (ppiBtn) {
+    ppiBtn.addEventListener('click', async () => {
+      if (!editingTicketId) {
+        alert('Save the ticket first — PPI needs a stored ticket with specs.');
+        return;
+      }
+      const useCaseSel = document.getElementById('modal-usecase-select');
+      const useCase = useCaseSel ? useCaseSel.value : '';
+      ppiBtn.disabled = true;
+      ppiBtn.textContent = 'Computing…';
+      try {
+        const res = await ipcRenderer.invoke('ppi:compute', { ticketId: editingTicketId, useCase });
+        if (res && res.success) {
+          await loadAndRenderPpi(editingTicketId);
+        } else {
+          alert('PPI compute failed: ' + ((res && res.error) || 'unknown error'));
+        }
+      } catch (e) {
+        alert('PPI compute failed: ' + e.message);
+      } finally {
+        ppiBtn.disabled = false;
+        ppiBtn.textContent = 'Compute Price-Performance';
+      }
+    });
+  }
+
   // Settings executable path browsers
   const setupPathBrowser = (btnId, inputId) => {
     document.getElementById(btnId).addEventListener('click', async () => {
@@ -2969,6 +3258,7 @@ function setupEventListeners() {
   setupPathBrowser('btn-select-path-hwinfo', 'settings-path-hwinfo');
   setupPathBrowser('btn-select-path-cinebench', 'settings-path-cinebench');
   setupPathBrowser('btn-select-path-furmark', 'settings-path-furmark');
+  setupPathBrowser('btn-select-path-prime95', 'settings-path-prime95');
   setupPathBrowser('btn-select-path-ssd-utility', 'settings-path-ssd-utility');
 
   // Welcome, Client settings triggers
@@ -3052,8 +3342,9 @@ function setupEventListeners() {
             supabaseUrl: "https://ggsxkhenzdhaachubrsc.supabase.co", 
             supabaseAnonKey: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imdnc3hraGVuemRoYWFjaHVicnNjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE3MTEwNjEsImV4cCI6MjA5NzI4NzA2MX0.bDhUK-qJSgcBEcNdEdOaZGg5vsUF6jH2gbSRQaMhjBo", 
             pathHwInfo: "", 
-            pathCinebench: "", 
-            pathFurmark: "", 
+            pathCinebench: "",
+            pathFurmark: "",
+            pathPrime95: "",
             pathSsdUtility: "",
             isMaster: false,
             autoDetectHw: false,
@@ -3733,6 +4024,18 @@ ipcRenderer.on('sys:ram-update', (event, data) => {
   if (mDesc) mDesc.textContent = `RAM Stressing: Iteration ${iter}`;
 });
 
+ipcRenderer.on('sys:prime95-update', (event, data) => {
+  const elapsedMin = Math.floor((data.elapsedSec || 0) / 60);
+  const totalMin = Math.round((data.durationSec || 0) / 60);
+  const line = `[Prime95] Blend torture test running — ${elapsedMin}/${totalMin} min, ${data.workerCount || '?'} workers...`;
+  ['c-prime95-panel', 'modal-prime95-panel'].forEach(id => {
+    const panel = document.getElementById(id);
+    if (panel && window.NeoQcDiagnosticsRender) {
+      panel.innerHTML = window.NeoQcDiagnosticsRender.emptyState(line);
+    }
+  });
+});
+
 async function executeDiagnosticsWorkflow(isModal) {
   const prefix = isModal ? 'form-' : 'c-';
   const hudPrefix = isModal ? 'modal-' : 'c-';
@@ -3806,11 +4109,26 @@ async function executeDiagnosticsWorkflow(isModal) {
   const useCaseSelectEl = document.getElementById(useCaseSelectId);
   const useCase = useCaseSelectEl ? useCaseSelectEl.value : 'gaming';
 
+  // Prime95 is opt-in with its own duration (15-30+ min), separate from the
+  // fast Cinebench/FurMark/RAM duration above.
+  const p95Prefix = isModal ? 'modal-' : 'c-';
+  const runPrime95 = !!document.getElementById(p95Prefix + 'prime95-enable')?.checked;
+  const prime95DurationEl = document.getElementById(p95Prefix + 'prime95-duration-select');
+  const prime95Duration = prime95DurationEl ? parseInt(prime95DurationEl.value) : 1200;
+  const prime95PanelId = p95Prefix + 'prime95-panel';
+  const prime95Panel = document.getElementById(prime95PanelId);
+  if (runPrime95 && prime95Panel && window.NeoQcDiagnosticsRender) {
+    prime95Panel.innerHTML = window.NeoQcDiagnosticsRender.emptyState(
+      `Prime95 running (Blend, CPU + RAM) — target ${Math.round(prime95Duration / 60)} min...`);
+  }
+
   // Run diagnostics!
   const res = await ipcRenderer.invoke('sys:run-diagnostics', {
     ...appState.settings,
     useCase: useCase,
-    duration: duration
+    duration: duration,
+    runPrime95: runPrime95,
+    prime95Duration: prime95Duration
   });
 
   clearInterval(timerInterval);
@@ -3895,6 +4213,26 @@ async function executeDiagnosticsWorkflow(isModal) {
     appendConsoleLine(boxId, `[SYS] SSD health query failed: ${e.message}`);
   }
 
+  // Build the component passport (identity + health per component)
+  appendConsoleLine(boxId, `[SYS] Building component passport (CPU / GPU / RAM / storage identity)...`);
+  let componentPassport = null;
+  try {
+    const hwId = await ipcRenderer.invoke('sys:component-passport');
+    if (hwId && !hwId.error) {
+      componentPassport = buildComponentPassport(hwId, res, ssdHealth);
+      const gridId = (isModal ? 'modal' : 'c') + '-passport-grid';
+      const gridEl = document.getElementById(gridId);
+      if (gridEl && window.NeoQcDiagnosticsRender) {
+        gridEl.innerHTML = window.NeoQcDiagnosticsRender.renderPassportGrid(componentPassport);
+      }
+      appendConsoleLine(boxId, `[SYS] Passport: ${componentPassport.cpu.model} | ${componentPassport.ram.totalGB}GB ${componentPassport.ram.ddrGen || 'RAM'} | ${componentPassport.storage.model || 'storage'}.`);
+    } else {
+      appendConsoleLine(boxId, `[SYS] Component passport query failed (${(hwId && hwId.error) || 'unknown'}).`);
+    }
+  } catch(e) {
+    appendConsoleLine(boxId, `[SYS] Component passport failed: ${e.message}`);
+  }
+
   // Auto-Save Diagnostics back into the loaded ticket
   const ticketId = isModal
     ? (document.getElementById('form-ticket-id').value || editingTicketId)
@@ -3917,6 +4255,24 @@ async function executeDiagnosticsWorkflow(isModal) {
       ticket.diagnostics.ssdRead = res.ssdRead || null;
       ticket.diagnostics.ssdWrite = res.ssdWrite || null;
       if (ssdHealth && !ssdHealth.error) ticket.diagnostics.ssdHealth = ssdHealth;
+
+      // Prime95 is the authoritative CPU+RAM torture test — its result is what
+      // now actually populates ramStress/ramDetail (previously read by the
+      // print report and dashboard's qcBadge() but never written by anything).
+      if (res.prime95) {
+        ticket.diagnostics.prime95 = res.prime95;
+        if (res.prime95.overallResult && res.prime95.overallResult !== 'not-run') {
+          ticket.diagnostics.ramStress = res.prime95.overallResult === 'pass' ? 'passed' : 'failed';
+          const errorCount = (res.prime95.workers || []).reduce((sum, w) => sum + (w.errors || 0), 0);
+          ticket.diagnostics.ramDetail = `Prime95 Blend, ${res.prime95.durationActualSec || 0}s, ${errorCount} error(s) across ${res.prime95.workerCount || 0} workers`;
+        }
+      }
+      if (prime95Panel && window.NeoQcDiagnosticsRender) {
+        prime95Panel.innerHTML = window.NeoQcDiagnosticsRender.renderPrime95Panel(res.prime95);
+      }
+      if (componentPassport) {
+        ticket.diagnostics.componentPassport = componentPassport;
+      }
 
       if (!isModal) {
         if (res.ramPassed) {
@@ -3942,6 +4298,108 @@ async function executeDiagnosticsWorkflow(isModal) {
   } else {
     checkClientFormReady();
   }
+}
+
+// Render a ticket's SAVED diagnostics (passport / Prime95) into the modal
+// panels when the ticket is opened — same shared renderers used everywhere.
+function renderSavedDiagnosticsPanels(ticket) {
+  const R = window.NeoQcDiagnosticsRender;
+  if (!R) return;
+  const d = (ticket && ticket.diagnostics) || {};
+  const pp = document.getElementById('modal-passport-grid');
+  if (pp) pp.innerHTML = d.componentPassport ? R.renderPassportGrid(d.componentPassport) : '';
+  const p95 = document.getElementById('modal-prime95-panel');
+  if (p95) p95.innerHTML = (d.prime95 && d.prime95.overallResult) ? R.renderPrime95Panel(d.prime95) : '';
+}
+
+// Fetch the precomputed PPI row for a ticket and render it (read-only; the
+// math lives in ppi.py, invoked via the Compute button → ppi:compute IPC).
+// Rows are cached here so the print report can include PPI without another
+// network round-trip (and without polluting the persisted ticket object).
+const ppiCacheByTicket = {};
+
+async function loadAndRenderPpi(ticketId) {
+  const panel = document.getElementById('modal-ppi-panel');
+  const R = window.NeoQcDiagnosticsRender;
+  if (!panel || !R) return;
+  panel.innerHTML = R.renderPpiPanel(null);
+  if (!supabaseClient || !ticketId) return;
+  try {
+    const { data, error } = await supabaseClient
+      .from('ticket_ppi').select('*').eq('ticket_id', ticketId).maybeSingle();
+    if (!error && data) {
+      ppiCacheByTicket[ticketId] = data;
+      panel.innerHTML = R.renderPpiPanel(data);
+    }
+  } catch (e) {
+    console.error('PPI load failed:', e);
+  }
+}
+
+// SMBIOSMemoryType -> DDR generation (DMTF SMBIOS Memory Device type codes)
+const SMBIOS_DDR_GEN = { 20: 'DDR', 21: 'DDR2', 24: 'DDR3', 26: 'DDR4', 34: 'DDR5' };
+
+// Combine raw hardware identity (sys:component-passport) with this run's
+// thermal/Prime95/SSD-health results into the diagnostics.componentPassport shape.
+function buildComponentPassport(hwId, res, ssdHealth) {
+  const settings = appState.settings || {};
+  const cpuThrottleTemp = 95; // conservative thermal-throttle proxy, °C
+  const gpuThrottleTemp = 90;
+
+  const p95 = res && res.prime95 && res.prime95.overallResult !== 'not-run' ? res.prime95 : null;
+  const p95Errors = p95 ? (p95.workers || []).reduce((s, w) => s + (w.errors || 0), 0) : null;
+
+  const modules = ((hwId.ram && hwId.ram.modules) || []).map(m => ({
+    manufacturer: m.manufacturer, partNumber: m.partNumber,
+    capacityGB: m.capacityGB, speedMHz: m.speedMHz, slot: m.slot
+  }));
+  const smbiosTypes = ((hwId.ram && hwId.ram.modules) || []).map(m => m.smbiosType).filter(Boolean);
+  const ddrGen = smbiosTypes.length ? (SMBIOS_DDR_GEN[smbiosTypes[0]] || `SMBIOS type ${smbiosTypes[0]}`) : null;
+
+  const vramMB = hwId.gpu && hwId.gpu.vramMB;
+  const vram = vramMB != null ? (vramMB >= 1024 ? `${Math.round(vramMB / 1024)} GB` : `${vramMB} MB`) : null;
+
+  return {
+    cpu: {
+      model: hwId.cpu && hwId.cpu.model,
+      cores: hwId.cpu && hwId.cpu.cores,
+      threads: hwId.cpu && hwId.cpu.threads,
+      baseClockMHz: hwId.cpu && hwId.cpu.baseClockMHz,
+      boostClockMHz: null, // WMI MaxClockSpeed is base; boost is not reliably exposed
+      tempMaxDuringTest: res ? res.cpuTempMax : null,
+      throttled: res && res.cpuTempMax != null ? res.cpuTempMax >= cpuThrottleTemp : false,
+      healthNote: p95 ? `Prime95 ${p95.overallResult.toUpperCase()} (${Math.round((p95.durationActualSec || 0) / 60)} min Blend)` : null
+    },
+    gpu: {
+      model: hwId.gpu && hwId.gpu.model,
+      vram: vram,
+      driverVersion: hwId.gpu && hwId.gpu.driverVersion,
+      tempMaxDuringTest: res ? res.gpuTempMax : null,
+      throttled: res && res.gpuTempMax != null ? res.gpuTempMax >= gpuThrottleTemp : false,
+      healthNote: null
+    },
+    ram: {
+      modules: modules,
+      totalGB: hwId.ram && hwId.ram.totalGB,
+      ddrGen: ddrGen,
+      errorsDuringPrime95: p95Errors,
+      healthNote: p95
+        ? (p95Errors > 0 ? `${p95Errors} error(s) during Prime95 Blend — investigate before handoff` : 'No errors during Prime95 Blend torture test')
+        : 'Prime95 torture test not run'
+    },
+    storage: {
+      model: (ssdHealth && ssdHealth.model) || (hwId.storage && hwId.storage.model),
+      mediaType: (ssdHealth && ssdHealth.mediaType) || (hwId.storage && hwId.storage.mediaType),
+      interface: hwId.storage && hwId.storage.busType,
+      sizeGB: (ssdHealth && ssdHealth.sizeGB) || (hwId.storage && hwId.storage.sizeGB),
+      wear: ssdHealth ? ssdHealth.wear : null,
+      lifeRemaining: ssdHealth ? ssdHealth.lifeRemaining : null,
+      powerOnHours: ssdHealth ? ssdHealth.powerOnHours : null,
+      healthStatus: ssdHealth ? ssdHealth.healthStatus : null,
+      readErrors: ssdHealth ? ssdHealth.readErrors : null,
+      writeErrors: ssdHealth ? ssdHealth.writeErrors : null
+    }
+  };
 }
 
 function renderSsdHealthCard(prefix, h) {
