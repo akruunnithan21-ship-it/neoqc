@@ -164,6 +164,20 @@ CREATE POLICY "Allow anon insert ticket_ppi" ON public.ticket_ppi FOR INSERT WIT
 CREATE POLICY "Allow anon update ticket_ppi" ON public.ticket_ppi FOR UPDATE USING (true) WITH CHECK (true);
 
 -- ==========================================================================
+-- LIVE WEB LOOKUP  (component_prices additions)
+-- When a technician searches for a component not in the catalog,
+-- pcstudio_import.py's consolidate_and_upsert() searches fallback retailers,
+-- averages the price across matching listings, and upserts here with
+-- source='web-lookup' (existing column, new value) so it's distinguishable
+-- from pcstudio.in-sourced rows without a separate product-category axis.
+-- ==========================================================================
+
+ALTER TABLE public.component_prices
+  ADD COLUMN IF NOT EXISTS needs_review      BOOLEAN DEFAULT false,
+  ADD COLUMN IF NOT EXISTS price_listings    JSONB,   -- [{source, url, price_inr, fetched_at}, ...]
+  ADD COLUMN IF NOT EXISTS price_sample_size INT;
+
+-- ==========================================================================
 -- diagnostics JSONB — new fields (benchmarking section overhaul)
 -- public.tickets.diagnostics is schemaless (JSONB DEFAULT '{}'::jsonb), so
 -- no DDL is needed for these, but the shape is documented here as the

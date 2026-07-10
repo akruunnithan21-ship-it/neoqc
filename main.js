@@ -262,6 +262,43 @@ ipcMain.handle('db:write', (event, data) => {
   }
 });
 
+// Catalog cache — a local mirror of Supabase's component_prices table
+// (5,000+ real, priced components scraped from pcstudio.in). The renderer
+// fetches the live table itself (it already has a Supabase client for
+// ticket sync) and hands the array here to persist; this just mirrors the
+// db:read/db:write pattern for a second, larger JSON file so the ticket-form
+// autocomplete has instant, offline-capable access to the real catalog
+// instead of the old hand-curated assets/component-data/*.json lists.
+const getCatalogCachePath = () => {
+  const appDataPath = app.getPath('userData');
+  const dbDir = path.join(appDataPath, 'database');
+  if (!fs.existsSync(dbDir)) {
+    fs.mkdirSync(dbDir, { recursive: true });
+  }
+  return path.join(dbDir, 'catalog-cache.json');
+};
+
+ipcMain.handle('catalog:read-cache', () => {
+  try {
+    const p = getCatalogCachePath();
+    if (!fs.existsSync(p)) return null;
+    return JSON.parse(fs.readFileSync(p, 'utf-8'));
+  } catch (err) {
+    console.error("Read catalog cache error:", err);
+    return null;
+  }
+});
+
+ipcMain.handle('catalog:write-cache', (event, data) => {
+  try {
+    fs.writeFileSync(getCatalogCachePath(), JSON.stringify(data), 'utf-8');
+    return { success: true, count: Array.isArray(data) ? data.length : 0 };
+  } catch (err) {
+    console.error("Write catalog cache error:", err);
+    return { success: false, error: err.message };
+  }
+});
+
 // IPC Handler: Select File Dialog
 ipcMain.handle('dialog:open-file', async (event, filters) => {
   const result = await dialog.showOpenDialog(mainWindow, {
@@ -1141,6 +1178,45 @@ ipcMain.handle('ppi:compute', async (event, { ticketId, useCase }) => {
     }));
     child.on('error', e => done({ success: false, error: e.message }));
     setTimeout(() => { try { child.kill(); } catch (_) {} done({ success: false, error: 'ppi_sync timeout (120s)' }); }, 120000);
+  });
+});
+
+// IPC Handler: Live web lookup for a component missing from the catalog.
+// Shells out to pcstudio_import.py --web-lookup, same pattern as ppi:compute
+// above. Unlike ppi:compute's free-text output, this one prints a *pure*
+// JSON object as its LAST stdout line (search_fallback_sites() also prints
+// polite per-request status lines before it, so we can't just take the
+// whole buffer — only the final line is the machine-readable contract).
+// Shorter timeout than ppi:compute since this is directly UI-blocking
+// (the technician is waiting on it, not a background batch job).
+ipcMain.handle('catalog:web-lookup', async (event, { query, category }) => {
+  const pyCandidates = [
+    'C:\\Users\\Aladeen\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe',
+    'python'
+  ];
+  const py = pyCandidates.find(p => p === 'python' || fs.existsSync(p));
+  const args = ['pcstudio_import.py', '--web-lookup', String(query)];
+  if (category) args.push('--category', String(category));
+
+  return new Promise((resolve) => {
+    let settled = false;
+    const done = (result) => { if (!settled) { settled = true; resolve(result); } };
+    const child = spawn(py, args, { cwd: __dirname, windowsHide: true });
+    let out = '', errOut = '';
+    child.stdout.on('data', d => { out += d.toString(); });
+    child.stderr.on('data', d => { errOut += d.toString(); });
+    child.on('close', () => {
+      const lines = out.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+      const lastLine = lines[lines.length - 1];
+      try {
+        const parsed = JSON.parse(lastLine);
+        done(parsed);
+      } catch (e) {
+        done({ found: false, error: (errOut || 'Could not parse web lookup result').slice(-1000) });
+      }
+    });
+    child.on('error', e => done({ found: false, error: e.message }));
+    setTimeout(() => { try { child.kill(); } catch (_) {} done({ found: false, error: 'Web lookup timeout (30s) — the fallback sites may be slow or unreachable.' }); }, 30000);
   });
 });
 

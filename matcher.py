@@ -26,14 +26,18 @@ Usage (CLI — batch-match every spec field in a ticket):
 """
 
 import argparse
-import io
 import json
 import re
 import sys
 from dataclasses import dataclass
 
-if hasattr(sys.stdout, "buffer"):
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+# reconfigure() mutates sys.stdout in place rather than replacing it with a
+# new TextIOWrapper — safe when this module is imported alongside other
+# scripts that also fix console encoding (e.g. pcstudio_import.py,
+# ppi_sync.py); two independent wrappers around the same buffer causes the
+# second's GC to close the buffer out from under the first.
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 from pathlib import Path
 from typing import Optional
 
@@ -87,20 +91,38 @@ def _token_weight(token: str) -> float:
     return 2.0 if HIGH_WEIGHT_RE.match(token) else 1.0
 
 
+def _has_digit(token: str) -> bool:
+    return any(c.isdigit() for c in token)
+
+
 def _score(query_tokens: list[str], candidate_tokens: set[str]) -> float:
     """
     Weighted intersection score.
     = sum(weight(t) for t in query if t in candidate)
       / sum(weight(t) for t in query)
     Penalizes if the candidate is much longer (very generic entries).
+
+    Model-number tokens often get glued to a prefix in one source but not the
+    other — e.g. a technician types "1000m" but the catalog entry's raw name
+    tokenizes the whole run as "pn1000m" (no separator between the letters
+    and digits). An exact-token match would score this 0, even though it's
+    plainly the right product. For digit-bearing tokens of length >= 3 with
+    no exact hit, award partial credit (0.75x weight) if the token is a
+    substring of some candidate token or vice versa.
     """
     if not query_tokens:
         return 0.0
 
     total_weight = sum(_token_weight(t) for t in query_tokens)
-    matched_weight = sum(
-        _token_weight(t) for t in query_tokens if t in candidate_tokens
-    )
+    matched_weight = 0.0
+    for t in query_tokens:
+        if t in candidate_tokens:
+            matched_weight += _token_weight(t)
+        elif len(t) >= 3 and _has_digit(t):
+            for ct in candidate_tokens:
+                if len(ct) >= 3 and (t in ct or ct in t):
+                    matched_weight += _token_weight(t) * 0.75
+                    break
 
     base = matched_weight / total_weight if total_weight else 0.0
 

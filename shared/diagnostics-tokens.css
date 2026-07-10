@@ -36,12 +36,25 @@
   --dr-border: rgba(15, 23, 42, 0.08);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --dr-text: #F1F5F9;
-    --dr-text-muted: #94A3B8;
-    --dr-border: rgba(255, 255, 255, 0.08);
-  }
+/*
+  Dark-mode override — scoped to how each HOST PAGE actually signals dark
+  mode, not the OS-level `prefers-color-scheme` media query. That query
+  reflects Windows' preference, which is independent of whichever theme this
+  app happens to be displaying right now — using it here previously made
+  card titles render near-white-on-light (or dark-on-dark) whenever the OS
+  preference didn't match the app's actual current theme.
+
+  - Admin app (index.html): toggles `body.dark-mode`, default is light —
+    see every other `body.dark-mode ...` rule in style.css for the pattern.
+  - Dashboard (dashboard/index.html, customer.html): permanently dark, no
+    toggle — see the unconditional override in dashboard/style.css.
+  - `:root[data-theme="..."]` kept as a forward-compatible hook in case a
+    host page ever sets that attribute directly.
+*/
+body.dark-mode {
+  --dr-text: #F1F5F9;
+  --dr-text-muted: #94A3B8;
+  --dr-border: rgba(255, 255, 255, 0.08);
 }
 :root[data-theme="dark"] {
   --dr-text: #F1F5F9;

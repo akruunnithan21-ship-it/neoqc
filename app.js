@@ -4,6 +4,16 @@ const path = require('path');
 const Fuse = require('fuse.js');
 
 // Component Autocomplete Database
+//
+// Primary source: a local cache of Supabase's component_prices table (5,000+
+// real, priced parts scraped from pcstudio.in), matched via shared/matcher.js
+// (the same token-weighted scorer ppi_sync.py uses — far better than generic
+// string distance for spec text like "RTX 4060 Ventus 2X 8GB").
+//
+// Fallback: the old hand-curated assets/component-data/*.json name lists +
+// Fuse.js, used only until the first successful catalog sync (or if the app
+// is fully offline with no cache yet) — never worse than the pre-existing
+// behavior, only strictly better once the real catalog is available.
 let componentDB = {
   cpu: [],
   gpu: [],
@@ -15,6 +25,8 @@ let componentDB = {
   cooler: []
 };
 let fuseInstances = {};
+let catalogMatcher = null;   // NeoQcMatcher.Matcher instance over the cached real catalog, once loaded
+let catalogSyncedAt = null;
 
 function loadComponentDatabase() {
   const categories = ['cpu', 'gpu', 'motherboard', 'ram', 'storage', 'psu', 'case', 'cooler'];
@@ -36,8 +48,64 @@ function loadComponentDatabase() {
   });
 }
 
+// Load whatever catalog cache is already on disk (instant, offline-capable —
+// this is what most app launches will use, since the fresh sync below
+// happens in the background and simply replaces this once it lands).
+async function loadCatalogCacheFromDisk() {
+  try {
+    const cached = await ipcRenderer.invoke('catalog:read-cache');
+    if (cached && Array.isArray(cached) && cached.length && window.NeoQcMatcher) {
+      catalogMatcher = new window.NeoQcMatcher.Matcher(cached);
+      console.log(`Catalog cache loaded from disk: ${cached.length} components.`);
+    }
+  } catch (e) {
+    console.error('Failed to load catalog cache from disk:', e);
+  }
+}
+
+// Pull the live component_prices table from Supabase and persist it locally.
+// Runs in the background (not awaited at boot) so it never blocks the splash
+// screen — the disk cache (or the assets/component-data fallback) covers the
+// gap until this completes.
+async function syncCatalogCache() {
+  if (!supabaseClient) return;
+  try {
+    const all = [];
+    let offset = 0;
+    const PAGE = 1000;
+    while (true) {
+      const { data, error } = await supabaseClient
+        .from('component_prices')
+        .select('sku,name,category,price_inr')
+        .range(offset, offset + PAGE - 1);
+      if (error) throw error;
+      if (!data || !data.length) break;
+      all.push(...data);
+      if (data.length < PAGE) break;
+      offset += PAGE;
+    }
+    if (!all.length) return;
+
+    await ipcRenderer.invoke('catalog:write-cache', all);
+    if (window.NeoQcMatcher) {
+      catalogMatcher = new window.NeoQcMatcher.Matcher(all);
+    }
+    catalogSyncedAt = new Date().toISOString();
+    console.log(`Catalog cache synced from Supabase: ${all.length} components.`);
+  } catch (e) {
+    console.error('Catalog cache sync failed (using disk cache / bundled fallback instead):', e);
+  }
+}
+
+// Track the resolved sku/price behind whatever text is currently sitting in
+// each spec input — nothing writes this into ticket.specs yet (that stays a
+// plain string, unchanged), but it's available in-memory for later use
+// (e.g. a future "Search Online" flow, or richer PPI wiring) without a
+// second lookup once a real catalog suggestion has been picked.
+const specFieldMatches = {};
+
 function setupSpecsAutocomplete() {
-  loadComponentDatabase();
+  loadComponentDatabase(); // fallback lists — see loadCatalogCacheFromDisk()/syncCatalogCache() for the primary source
 
   const fields = [
     { inputId: 'form-spec-mobo', listId: 'autocomplete-mobo', category: 'motherboard' },
@@ -55,6 +123,93 @@ function setupSpecsAutocomplete() {
     const list = document.getElementById(field.listId);
     if (!input || !list) return;
 
+    const renderItem = (label, sub, onPick) => {
+      const item = document.createElement('div');
+      item.className = 'autocomplete-item';
+      if (sub) {
+        item.style.display = 'flex';
+        item.style.justifyContent = 'space-between';
+        item.style.alignItems = 'center';
+        item.style.gap = '10px';
+        const labelEl = document.createElement('span');
+        labelEl.textContent = label;
+        const subEl = document.createElement('span');
+        subEl.textContent = sub;
+        subEl.style.opacity = '0.65';
+        subEl.style.fontSize = '0.72em';
+        subEl.style.whiteSpace = 'nowrap';
+        item.appendChild(labelEl);
+        item.appendChild(subEl);
+      } else {
+        item.textContent = label;
+      }
+      item.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        onPick();
+        list.classList.add('hidden');
+      });
+      list.appendChild(item);
+    };
+
+    // "Search Online" row — appended below whatever local suggestions exist
+    // (or on its own if there are none) when nothing confident was found
+    // locally. Manages the list's contents itself (loading -> result state)
+    // rather than the pick-and-close behavior of renderItem, since a live
+    // lookup takes several seconds.
+    const renderSearchOnlineRow = (query) => {
+      const row = document.createElement('div');
+      row.className = 'autocomplete-item autocomplete-search-online';
+      row.style.color = 'var(--primary-pink)';
+      row.style.fontWeight = '600';
+      row.textContent = `🔍 Search online for "${query}"`;
+      row.addEventListener('mousedown', async (e) => {
+        e.preventDefault();
+        row.textContent = 'Searching pcstudio.in-alternative retailers… (up to 30s)';
+        row.style.pointerEvents = 'none';
+        row.style.opacity = '0.7';
+        try {
+          const result = await ipcRenderer.invoke('catalog:web-lookup', { query, category: field.category });
+          list.innerHTML = '';
+          if (result && result.found) {
+            const priceLabel = result.price_inr != null
+              ? `₹${Math.round(result.price_inr).toLocaleString('en-IN')} (avg of ${result.price_sample_size} listing${result.price_sample_size === 1 ? '' : 's'})`
+              : 'price unknown';
+            renderItem(result.name, priceLabel, () => {
+              input.value = result.name;
+              specFieldMatches[field.inputId] = { sku: result.sku, priceInr: result.price_inr, category: result.category, confidence: 1, webLookup: true };
+            });
+            if (catalogMatcher) {
+              catalogMatcher.addEntry({ sku: result.sku, name: result.name, category: result.category, price_inr: result.price_inr });
+            }
+            if (!result.upserted) {
+              const warn = document.createElement('div');
+              warn.className = 'dr-muted';
+              warn.style.padding = '6px 12px';
+              warn.style.fontSize = '0.72em';
+              warn.textContent = `Found and usable now, but saving to the shared catalog failed (${result.upsert_error || 'unknown error'}) — it'll need re-adding for other technicians.`;
+              list.appendChild(warn);
+            }
+            list.classList.remove('hidden');
+          } else {
+            list.innerHTML = '';
+            const msg = document.createElement('div');
+            msg.className = 'autocomplete-item';
+            msg.style.opacity = '0.7';
+            msg.textContent = (result && result.message) || (result && result.error) || 'No listings found for that search.';
+            list.appendChild(msg);
+            list.classList.remove('hidden');
+          }
+        } catch (err) {
+          list.innerHTML = '';
+          const msg = document.createElement('div');
+          msg.className = 'autocomplete-item';
+          msg.textContent = `Search failed: ${err.message}`;
+          list.appendChild(msg);
+        }
+      });
+      list.appendChild(row);
+    };
+
     const updateSuggestions = () => {
       const val = input.value.trim();
       list.innerHTML = '';
@@ -62,31 +217,51 @@ function setupSpecsAutocomplete() {
         list.classList.add('hidden');
         return;
       }
+      const suggestThreshold = (window.NeoQcMatcher && window.NeoQcMatcher.SUGGEST_THRESHOLD) || 0.55;
 
+      // Primary: the real, priced catalog (5,000+ pcstudio.in components),
+      // matched with the same token-weighted scorer ppi_sync.py uses.
+      if (catalogMatcher) {
+        const results = catalogMatcher.suggest(val, field.category, 10);
+        const bestConfidence = results.length ? results[0].confidence : 0;
+        if (results.length > 0) {
+          list.classList.remove('hidden');
+          results.forEach(res => {
+            const priceLabel = res.priceInr != null ? `₹${Math.round(res.priceInr).toLocaleString('en-IN')}` : '';
+            renderItem(res.matchedName, priceLabel, () => {
+              input.value = res.matchedName;
+              specFieldMatches[field.inputId] = { sku: res.sku, priceInr: res.priceInr, category: res.category, confidence: res.confidence };
+            });
+          });
+        }
+        if (val.length >= 3 && bestConfidence < suggestThreshold) {
+          list.classList.remove('hidden');
+          renderSearchOnlineRow(val);
+        }
+        if (results.length > 0 || (val.length >= 3 && bestConfidence < suggestThreshold)) return;
+        // Catalog is loaded but genuinely has nothing close and the query is
+        // too short to offer online search yet — fall through to the
+        // bundled list rather than showing an empty dropdown.
+      }
+
+      // Fallback: bundled hand-curated list (used before the first catalog
+      // sync completes, or if Supabase is unreachable).
       const fuse = fuseInstances[field.category];
-      if (!fuse) {
+      const fuseResults = fuse ? fuse.search(val).slice(0, 10) : [];
+      if (fuseResults.length === 0 && !(val.length >= 3)) {
         list.classList.add('hidden');
         return;
       }
-
-      const results = fuse.search(val).slice(0, 10);
-      if (results.length === 0) {
-        list.classList.add('hidden');
-        return;
-      }
-
       list.classList.remove('hidden');
-      results.forEach(res => {
-        const item = document.createElement('div');
-        item.className = 'autocomplete-item';
-        item.textContent = res.item;
-        item.addEventListener('mousedown', (e) => {
-          e.preventDefault();
+      fuseResults.forEach(res => {
+        renderItem(res.item, '', () => {
           input.value = res.item;
-          list.classList.add('hidden');
+          delete specFieldMatches[field.inputId];
         });
-        list.appendChild(item);
       });
+      if (val.length >= 3 && fuseResults.length === 0) {
+        renderSearchOnlineRow(val);
+      }
     };
 
     input.addEventListener('input', updateSuggestions);
@@ -290,6 +465,10 @@ async function loadDatabase() {
 
   setSplashStatus('Connecting to cloud sync…');
   initSupabase();
+
+  setSplashStatus('Loading component catalog…');
+  await loadCatalogCacheFromDisk();
+  syncCatalogCache(); // background refresh — not awaited, never blocks boot
 
   // Seed beautiful mock tickets if db is empty to showcase the UI immediately!
   if (!appState.tickets || appState.tickets.length === 0) {

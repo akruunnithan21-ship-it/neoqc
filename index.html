@@ -1752,22 +1752,24 @@
     <div class="glass-slab modal-card" style="max-width: 650px; width: 100%; padding: 30px; border-radius: 20px;">
       <div class="modal-header" style="border-bottom: 1px solid var(--glass-border); padding-bottom: 15px; margin-bottom: 20px;">
         <h2 style="font-family: 'Syncopate', sans-serif; font-size: 1.3rem; color: var(--primary-pink); letter-spacing: 0.05em; margin: 0;">NEO QC UPDATED</h2>
-        <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; font-weight: 700; background: rgba(231, 1, 78, 0.1); color: var(--primary-pink); padding: 4px 8px; border-radius: 4px;">v1.2.0</span>
+        <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; font-weight: 700; background: rgba(231, 1, 78, 0.1); color: var(--primary-pink); padding: 4px 8px; border-radius: 4px;">v1.2.2</span>
       </div>
       <div class="modal-body" style="font-size: 0.92rem; line-height: 1.6; color: var(--text-dark); max-height: 420px; overflow-y: auto; padding-right: 5px;">
-        <p style="margin-top: 0;">An update has been installed. Here are the key improvements in NeoQC <strong>v1.2.0</strong> — the Benchmarking &amp; Stress-Test Overhaul:</p>
+        <p style="margin-top: 0;">An update has been installed. Here are the key improvements in NeoQC <strong>v1.2.2</strong>:</p>
         <ul style="padding-left: 20px; display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px;">
+          <li><strong>Real Catalog-Backed Autocomplete</strong>: Motherboard/CPU/GPU/RAM/Storage/PSU/Case/Cooler search now matches against the real 5,000+ item pcstudio.in catalog with live prices, instead of a small hand-picked list — far fewer "not found" results.</li>
+          <li><strong>Search Online for Missing Parts</strong>: When a component genuinely isn't in the catalog, search it live across multiple retailers, average the price, and add it to the shared database — usable immediately and searchable for every technician afterward.</li>
+          <li><strong>Startup Crash Fix</strong>: Fixed a duplicate internal handler that could crash the app on launch.</li>
+          <li><strong>Dark Mode Visibility Fix</strong>: Fixed card titles and text rendering nearly invisible in some port/RGB checker and diagnostic panels when Windows' dark mode setting didn't match the app's own theme.</li>
           <li><strong>Prime95 Torture Testing</strong>: Real CPU + RAM Blend-mode torture test baked in, with per-worker pass/fail, error counts, and its own report section.</li>
           <li><strong>Component Health Passports</strong>: Full identity + health cards for CPU / GPU / RAM / Storage — real DDR generation detection, per-module RAM detail, NVMe/SATA interface, SSD wear &amp; power-on hours.</li>
-          <li><strong>Price-to-Performance Index</strong>: One-click PPI for every build — 0-100 index, use-case fit score, bottleneck flags, and same-price alternatives, powered by live pcstudio.in prices + PassMark reference scores.</li>
-          <li><strong>Port Checker v2</strong>: Guided plug-in verification with before/after device detection — honest pass / fail / unverified results, no more silent passes.</li>
-          <li><strong>RGB Sync v2</strong>: Per-device, per-zone OpenRGB control with verify-after-apply feedback.</li>
-          <li><strong>Customer Dashboard Parity</strong>: The customer-facing dashboard now shows the same passports, torture-test results, and PPI analysis as the staff app — one shared render engine.</li>
-          <li><strong>Refined Startup</strong>: Choreographed splash sequence and a cleaner, minimal landing backdrop.</li>
+          <li><strong>Price-to-Performance Index</strong>: One-click PPI for every build — 0-100 index, use-case fit score, bottleneck flags, and same-price alternatives.</li>
+          <li><strong>Port Checker v2 &amp; RGB Sync v2</strong>: Guided plug-in verification with honest pass/fail/unverified results, and per-device/zone OpenRGB control with verify-after-apply feedback.</li>
+          <li><strong>Customer Dashboard Parity</strong>: The customer-facing dashboard now shows the same passports, torture-test results, and PPI analysis as the staff app.</li>
         </ul>
       </div>
       <div class="modal-footer" style="border-top: 1px solid var(--glass-border); padding-top: 15px; display: flex; justify-content: flex-end; margin-top: 20px;">
-        <button id="btn-close-changelog" class="primary-pink-btn" style="padding: 10px 24px; font-weight: 700; font-size: 0.95rem;">Launch NeoQC v1.2.0</button>
+        <button id="btn-close-changelog" class="primary-pink-btn" style="padding: 10px 24px; font-weight: 700; font-size: 0.95rem;">Launch NeoQC v1.2.2</button>
       </div>
     </div>
   </div>
@@ -1775,6 +1777,7 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="shared/icons.js"></script>
   <script src="shared/diagnostics-render.js"></script>
+  <script src="shared/matcher.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

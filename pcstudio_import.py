@@ -37,10 +37,15 @@ Each record:
   }
 """
 
-import sys, io
-# Force UTF-8 on Windows consoles so ₹ / ⚠ don't crash cp1252 stdout
-if hasattr(sys.stdout, "buffer"):
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+import sys
+# Force UTF-8 on Windows consoles so ₹ / ⚠ don't crash cp1252 stdout.
+# reconfigure() mutates in place rather than replacing sys.stdout with a new
+# TextIOWrapper — matcher.py (imported below) does the same UTF-8 fix, and
+# two independent wrappers around the same buffer causes the second one's
+# garbage collection to close the buffer out from under the first ("I/O
+# operation on closed file").
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 import argparse
 import csv
@@ -60,6 +65,11 @@ except ImportError:
         "Missing deps. Run:\n"
         "  pip install requests beautifulsoup4 lxml"
     )
+
+# Reused for consolidate_and_upsert()'s cross-site listing clustering — same
+# token-weighted scorer used everywhere else in this codebase (ppi_sync.py,
+# shared/matcher.js).
+from matcher import SUGGEST_THRESHOLD, _score, _tokenize  # noqa: E402
 
 # ─── Config ───────────────────────────────────────────────────────────────────
 
@@ -487,15 +497,34 @@ def _scrape_wc_listing(html, canonical_cat):
 # ─── Utilities ────────────────────────────────────────────────────────────────
 
 PRICE_RE = re.compile(r"[\d,]+\.?\d*")
+# A number immediately followed by "%" is a discount badge (e.g. "Save-45%"),
+# not a price — strip these before extracting, otherwise a concatenated
+# "Save-45%₹9,975.00" string parses as ₹45 instead of the real price.
+PERCENT_RE = re.compile(r"\d+\.?\d*\s*%")
 
 def _parse_price(text):
-    text = str(text).replace("₹", "").replace(",", "").strip()
+    text = PERCENT_RE.sub("", str(text))
+    text = text.replace("₹", "").replace(",", "").strip()
     m = PRICE_RE.search(text)
     if m:
         try:
             return float(m.group().replace(",", ""))
         except ValueError:
             pass
+    return None
+
+
+def _select_one_priority(card, comma_selector):
+    """
+    select_one() on a comma-joined "A, B" selector returns whichever matches
+    FIRST IN DOCUMENT ORDER, not "prefer A" — so a declared priority like
+    ".price-new, .price" doesn't reliably prefer the more specific selector.
+    Try each part in the order it was written, returning the first real hit.
+    """
+    for part in comma_selector.split(","):
+        el = card.select_one(part.strip())
+        if el is not None:
+            return el
     return None
 
 
@@ -649,33 +678,44 @@ def write_outputs(records, tier_used):
 # Each entry: (site_name, search_url_template, result_parser_fn)
 # Search URL must accept the query as {q} and return HTML with product cards.
 
+# Selectors below were LIVE-VALIDATED 2026-07-10 against real search result
+# pages (all three previously had stale/wrong selectors — mdcomputers.in's
+# theme changed entirely, primeabgb.com's discounted-price selector matched
+# the wrong <span>, and vedantcomputers.com's search URL was a leftover
+# Shopify-style path against a site that's actually since moved to OpenCart —
+# none of the three returned a single result before this fix, confirming
+# HANDOFF.md's long-standing "needs live testing" caveat).
 FALLBACK_SITES = [
     {
-        # mdcomputers.in — OpenCart store
+        # mdcomputers.in — OpenCart, custom "Ronixa" theme (not stock OpenCart markup)
         "name": "mdcomputers.in",
         "search_url": "https://mdcomputers.in/index.php?route=product/search&search={q}",
-        "result_sel": ".product-layout, .product-thumb",
-        "name_sel":   ".caption h4 a, .name a, h4 a",
-        "price_sel":  ".price-new, .price-normal, .price",
-        "link_sel":   ".caption h4 a, .name a, h4 a",
+        "result_sel": ".product-grid-item",
+        "name_sel":   "h3",
+        # WooCommerce-style del/ins pricing, but as classes not real <ins>/<del> tags
+        "price_sel":  ".price .ins .amount, .price .amount",
+        "link_sel":   "a.product-image-link",
     },
     {
         # primeabgb.com — WooCommerce
         "name": "primeabgb.com",
         "search_url": "https://www.primeabgb.com/?s={q}&post_type=product",
-        "result_sel": "li.product, .product-grid-item",
-        "name_sel":   ".woocommerce-loop-product__title, h2.product-title, h2",
-        "price_sel":  "ins .woocommerce-Price-amount, .woocommerce-Price-amount",
-        "link_sel":   "a.woocommerce-LoopProduct-link, a[href*='/product/']",
+        "result_sel": ".type-product",
+        "name_sel":   ".product-title a",
+        # real <ins>/<del> tags here (unlike mdcomputers.in above)
+        "price_sel":  ".price ins .woocommerce-Price-amount, .price .woocommerce-Price-amount",
+        "link_sel":   ".woocommerce-LoopProduct-link",
     },
     {
-        # vedantcomputers.com — Shopify
+        # vedantcomputers.com — actually OpenCart (React-enhanced), not Shopify;
+        # www subdomain required, and the search route is OpenCart's standard
+        # index.php?route=product/search, not a Shopify /search path.
         "name": "vedantcomputers.com",
-        "search_url": "https://vedantcomputers.com/search?type=product&q={q}",
-        "result_sel": ".product-card, .grid__item .card, [data-product-id]",
-        "name_sel":   ".card__heading a, .product-card__title, h3 a",
-        "price_sel":  ".price-item--sale, .price-item--regular, .price",
-        "link_sel":   ".card__heading a, .product-card__title a, h3 a",
+        "search_url": "https://www.vedantcomputers.com/index.php?route=product/search&search={q}",
+        "result_sel": ".product-thumb",
+        "name_sel":   ".name a",
+        "price_sel":  ".price-new, .price",
+        "link_sel":   ".name a",
     },
 ]
 
@@ -701,7 +741,14 @@ def search_fallback_sites(query: str) -> list[dict]:
 
         for card in cards:
             name_el  = card.select_one(site["name_sel"])
-            price_el = card.select_one(site["price_sel"])
+            # select_one() on a comma-joined "A, B" selector returns whichever
+            # matches first in DOCUMENT order, not "prefer A" — for a price
+            # this can land on a wrapping container whose full text
+            # concatenates a sale badge/original price/discounted price
+            # together (e.g. "Save-45%₹9,975.00₹17,999.00"), which then
+            # mis-parses. Try each comma-separated part in the declared
+            # priority order instead, stopping at the first real hit.
+            price_el = _select_one_priority(card, site["price_sel"])
             link_el  = card.select_one(site["link_sel"])
 
             name  = name_el.get_text(strip=True)  if name_el  else ""
@@ -732,6 +779,114 @@ def search_fallback_sites(query: str) -> list[dict]:
     return results
 
 
+def _slugify(name: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
+    return slug[:80]
+
+
+def consolidate_and_upsert(query: str, category: str | None = None) -> dict:
+    """
+    Live web-lookup entry point for a component NOT found in the local
+    catalog (called from the Electron app's "Search Online" action via the
+    ppi:compute-style IPC bridge, --json CLI mode below).
+
+    1. Search all FALLBACK_SITES for `query`.
+    2. Cluster the flat listing results by name-similarity (matcher.py's
+       token-weighted scorer — same algorithm used everywhere else in this
+       codebase) so listings for "the same" product across different sites
+       group together, even though each site phrases the name differently.
+    3. Average price_inr across the best-matching cluster. Never overstate
+       confidence: price_sample_size is the ACTUAL listing count used, and a
+       single-listing result is returned but flagged, not silently promoted
+       to look like a multi-site average.
+    4. Synthesize a WEB-<slug> SKU (component_prices.sku is NOT NULL PK; raw
+       fallback listings have sku=None) and upsert into Supabase directly,
+       tagged source='web-lookup', needs_review=true — distinct from
+       pcstudio.in-sourced rows without inventing a new category axis.
+
+    Returns a plain dict (JSON-serializable) describing the outcome —
+    the --json CLI mode below just json.dumps() this to stdout.
+    """
+    listings = search_fallback_sites(query)
+    if not listings:
+        return {"found": False, "query": query, "listings": [], "message": "No listings found on any fallback site."}
+
+    # Cluster by name similarity against the query itself: keep only listings
+    # that plausibly describe the same product the technician typed, not
+    # every tangential search hit each site returned. Score each listing
+    # directly (not via Matcher.match(), which only returns the pool's
+    # single best hit) so every listing gets its own confidence.
+    query_tokens = _tokenize(query)
+    ranked = [(_score(query_tokens, set(_tokenize(l["name"]))), l) for l in listings]
+    ranked.sort(key=lambda pair: pair[0], reverse=True)
+
+    # Keep listings within the confident band; require at least
+    # SUGGEST_THRESHOLD confidence against the query so a garbage hit from
+    # one site doesn't drag the average off.
+    cluster = [pair[1] for pair in ranked if pair[0] >= SUGGEST_THRESHOLD]
+    if not cluster:
+        return {
+            "found": False, "query": query, "listings": listings,
+            "message": f"Found {len(listings)} listing(s) but none matched the query confidently enough to trust."
+        }
+
+    priced = [l for l in cluster if l["price_inr"]]
+    sample_size = len(priced)
+    avg_price = round(sum(l["price_inr"] for l in priced) / sample_size, 2) if sample_size else None
+
+    best = cluster[0]
+    resolved_category = category or best["category"]
+    sku = f"WEB-{_slugify(best['name'])}"
+    now = _now()
+
+    row = {
+        "sku": sku,
+        "name": best["name"],
+        "category": resolved_category,
+        "price_inr": avg_price,
+        "url": best["url"],
+        "source": "web-lookup",
+        "source_method": "fallback-consolidated",
+        "fetched_at": now,
+        "updated_at": now,
+        "needs_review": True,
+        "price_sample_size": sample_size,
+        "price_listings": [
+            {"source": l["source"], "url": l["url"], "price_inr": l["price_inr"], "fetched_at": l["fetched_at"]}
+            for l in cluster
+        ],
+    }
+
+    upserted = False
+    upsert_error = None
+    try:
+        from supabase import create_client
+        sb = create_client(
+            "https://ggsxkhenzdhaachubrsc.supabase.co",
+            "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9"
+            ".eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imdnc3hraGVuemRoYWFjaHVicnNjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE3MTEwNjEsImV4cCI6MjA5NzI4NzA2MX0"
+            ".bDhUK-qJSgcBEcNdEdOaZGg5vsUF6jH2gbSRQaMhjBo",
+        )
+        sb.table("component_prices").upsert(row, on_conflict="sku").execute()
+        upserted = True
+    except Exception as e:  # noqa: BLE001 — surface any failure back to the caller, don't crash the CLI
+        upsert_error = str(e)
+
+    return {
+        "found": True,
+        "query": query,
+        "sku": sku,
+        "name": best["name"],
+        "category": resolved_category,
+        "price_inr": avg_price,
+        "price_sample_size": sample_size,
+        "price_listings": row["price_listings"],
+        "needs_review": True,
+        "upserted": upserted,
+        "upsert_error": upsert_error,
+    }
+
+
 # ─── Main ─────────────────────────────────────────────────────────────────────
 
 def main():
@@ -743,7 +898,22 @@ def main():
                         help="Search fallback retailers for a single component name")
     parser.add_argument("--resume", action="store_true",
                         help="Load existing output/catalog.json, fetch only the URLs still missing, and merge.")
+    parser.add_argument("--web-lookup", type=str, default=None,
+                        metavar="QUERY",
+                        help="Live web lookup for a component missing from the catalog: search "
+                             "fallback sites, average the price across matching listings, and "
+                             "upsert into Supabase (source='web-lookup', needs_review=true). "
+                             "Prints a single JSON object to stdout — this is the machine-readable "
+                             "entry point the Electron app's catalog:web-lookup IPC handler calls.")
+    parser.add_argument("--category", type=str, default=None,
+                        help="Category hint for --web-lookup (cpu/gpu/ram/storage/psu/case/cooler/motherboard)")
     args = parser.parse_args()
+
+    # ── Live web lookup mode (machine-readable JSON output) ────────────────────
+    if args.web_lookup:
+        result = consolidate_and_upsert(args.web_lookup, category=args.category)
+        print(json.dumps(result))
+        return 0 if result.get("found") else 1
 
     # ── Fallback single-item search mode ──────────────────────────────────────
     if args.fallback:
