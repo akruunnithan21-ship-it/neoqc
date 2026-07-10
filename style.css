@@ -1142,15 +1142,25 @@
   /* Forms inside modal */
   .form-section {
     position: relative;
+    z-index: 1;
     padding: 18px 20px;
     background: rgba(255, 255, 255, 0.25);
     border: 1px solid rgba(255, 255, 255, 0.5);
     border-radius: 14px;
     backdrop-filter: blur(16px);
     -webkit-backdrop-filter: blur(16px);
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4), 
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4),
                 0 4px 15px rgba(15, 23, 42, 0.02);
     transition: all 0.3s ease;
+  }
+
+  /* backdrop-filter makes each .form-section its own stacking context, so an
+     autocomplete dropdown (z-index:1000) that visually overflows below its
+     section gets painted OVER by the next section (a later DOM sibling always
+     wins when both have z-index:auto). Elevate whichever section currently
+     holds an open (non-empty) dropdown above its siblings. */
+  .form-section:has(.autocomplete-list:not(:empty)) {
+    z-index: 50;
   }
   
   body.dark-mode .form-section {

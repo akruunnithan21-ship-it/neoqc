@@ -1067,37 +1067,6 @@ ipcMain.handle('sys:port-snapshot', async (event, portType) => {
   });
 });
 
-// IPC Handler: Port snapshot — one enumeration pass for the guided verify flow.
-// Called twice by the renderer (before and after the technician plugs in a test
-// device); the renderer diffs the two lists. Missing script => ok:false, never
-// a fabricated pass.
-ipcMain.handle('sys:port-snapshot', async (event, portType) => {
-  const diagnosticsPath = app.isPackaged
-    ? path.join(process.resourcesPath, 'app.asar.unpacked', 'assets', 'diagnostics')
-    : path.join(__dirname, 'assets', 'diagnostics');
-  const portScript = path.join(diagnosticsPath, 'port_checker.ps1');
-
-  return new Promise((resolve) => {
-    if (!fs.existsSync(portScript)) {
-      resolve({ ok: false, error: 'detection script missing', devices: [] });
-      return;
-    }
-    exec(`powershell.exe -NoProfile -ExecutionPolicy Bypass -File "${portScript}" -Type ${portType}`, { timeout: 20000 }, (err, stdout) => {
-      const output = (stdout || '').trim();
-      if (err) {
-        resolve({ ok: false, error: err.message, devices: [] });
-        return;
-      }
-      // The script emits placeholder text when nothing is found — treat those
-      // as an empty device list, not as detected hardware.
-      const placeholders = /^(No active|Standard Display Monitor$|High Definition Audio Device$)/i;
-      const devices = placeholders.test(output)
-        ? []
-        : output.split(';').map(d => d.trim()).filter(Boolean);
-      resolve({ ok: true, devices });
-    });
-  });
-});
 
 // IPC Handler: Query SSD health via SMART/StorageReliabilityCounter
 ipcMain.handle('sys:check-ssd-health', async () => {
