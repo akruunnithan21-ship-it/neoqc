@@ -224,6 +224,63 @@ paper/PDF again.
 
 ---
 
+## v1.4.0 (2026-07-11) — port checker v3, RAM stress, RGB Defender, 4-page report, + 3 field bugs
+
+Big multi-front release. Six workstreams:
+
+1. **White-screen freeze (field bug)** — the window is frameless (`frame:false`),
+   so its close/minimize buttons are HTML drawn by the renderer; a renderer
+   crash blanked the WHOLE window, unresponsive. Added `render-process-gone` /
+   `unresponsive` / `did-fail-load` recovery in main.js (auto-reload) + a
+   renderer-side `error` / `unhandledrejection` net in app.js.
+2. **Client→admin sync (field bug)** — `setupRealtimeListener()` only delivers
+   if the `tickets` table is in the `supabase_realtime` publication, OFF by
+   default → completed client tests never reached admin until restart. Added
+   `startCloudPolling()` (15s `syncFromCloud()` + dashboard re-render; skips
+   while the ticket modal is open so it can't clobber an edit). Consider also
+   enabling Realtime on the table in Supabase for instant (vs 15s) propagation.
+3. **Cinebench 1632 for 9950X (field bug)** — the real score wasn't parsing and
+   the estimate table had no 9000-series, so it hit the generic single-core
+   ~1650. Rewrote `estimateCinebenchScore`: current-CPU single-core anchors +
+   multi = single × `os.cpus().length` × 0.57 (auto-scales to the test machine;
+   verified 9950X→2251 single/41879 multi, 14900K→41693 multi). Real-output
+   parse now takes the max CB/pts number and logs raw output for debugging.
+4. **RAM not stressed (earlier report)** — rewrote `ram-stress-worker.js`:
+   allocates up to 70% free RAM in 256 MB chunks, sustained tight write+verify
+   loop with a rotating pattern (real fault detection), reports allocatedMB /
+   faults / seconds. main.js passes durationSec + captures the rich result;
+   app.js now writes `ramStress`/`ramDetail` from the quick test too (not only
+   Prime95). Verified standalone (1 GB → 0 faults, sustained load).
+5. **Port checker v3** — replaced the guided before/after snapshot flow with
+   passive enumeration. New `assets/diagnostics/port_enumerate.ps1` (USB host
+   controllers + generation, connected USB devices, GPUs, video outputs by
+   connection tech via WmiMonitorConnectionParams, audio controllers +
+   endpoints) → `sys:enumerate-ports` IPC. UI is one "Scan Ports" card
+   (`#btn-scan-ports` → `#port-enum-results`), saved as `diagnostics.portScan`.
+   `renderPortCheckPanel` (shared), dashboard, and print report all consume the
+   new `portScan` shape (old `portCheckV2` retired; `sys:port-snapshot` handler
+   left in place but unused).
+6. **RGB Defender fix** — kept OpenRGB (user chose "OpenRGB engine + fix
+   Defender"). New `rgb:status` (installed? excluded?) and `rgb:authorize`
+   (`Add-MpPreference -ExclusionPath/-ExclusionProcess` + `MpCmdRun -Restore`)
+   handlers; the RGB card shows a one-click "⚡ Enable RGB Control" button when
+   OpenRGB isn't found (quarantined), then re-detects. `build/installer.nsh`
+   adds the exclusion at install time (nsis.include). App runs elevated so
+   Add-MpPreference works. NOTE: still needs a real board with RGB to validate
+   actual colour control end-to-end (dev laptop has none).
+7. **Report → 4 pages** — split into Certificate / Stress Lab / **Hardware
+   Health & Connectivity** (passport + SSD S.M.A.R.T. + full port enumeration) /
+   Value & Provenance. print-render.js renders `portScan` richly; RAM detail
+   row; `print-color-adjust:exact` + gradient accents so pink prints. All 4
+   pages verified ≤ A4 with maximal mock data in `report-harness.html`.
+
+**Dev harnesses (gitignored, `.harness-fixtures/`)**: `umd-test.html` (proves
+all 5 window globals set under simulated Electron `module` presence),
+`weblookup-test.html`. `report-harness.html` (repo root, committed) renders the
+real report markup on-screen as A4 sheets.
+
+---
+
 ## Files (current, non-exhaustive)
 
 | File | What it does |
