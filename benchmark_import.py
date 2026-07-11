@@ -28,11 +28,13 @@ import argparse
 import json
 import re
 import sys
-import io
 import time
 from pathlib import Path
 
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+# reconfigure(), never a new TextIOWrapper — see pcstudio_import.py's header
+# comment about the shared-buffer GC bug when two scripts wrap stdout.
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 try:
     import requests
@@ -82,10 +84,17 @@ def fetch_passmark_cpu():
                 score_text = str(row.get("cpumark") or "").replace(",", "")
                 if not name or not score_text.isdigit():
                     continue
-                results[name] = {
+                entry = {
                     "passmark_score": int(score_text),
                     "rank": row.get("rank") or len(results) + 1,
                 }
+                # "thread" = PassMark single-thread rating. Optional but
+                # near-universal in the mega-page data; ppi.py blends it into
+                # CPU scoring per use-case (fixes X3D undervaluation).
+                st_text = str(row.get("thread") or "").replace(",", "")
+                if st_text.isdigit():
+                    entry["single_thread_score"] = int(st_text)
+                results[name] = entry
     except (requests.exceptions.RequestException, ValueError) as e:
         print(f"  [CPU] mega-page JSON failed ({e}) — falling back to cpu_list.php")
 
@@ -205,6 +214,16 @@ def push_to_supabase(cpu_data, gpu_data):
             "tested_at":    None,
             "recorded_at":  now,
         })
+        if data.get("single_thread_score"):
+            rows.append({
+                "sku":          _name_to_sku(name),
+                "benchmark":    "passmark-cpu-st",
+                "score":        data["single_thread_score"],
+                "source":       "reference",
+                "source_detail": "PassMark CPU Single Thread / cpubenchmark.net (attribution required)",
+                "tested_at":    None,
+                "recorded_at":  now,
+            })
 
     for name, data in gpu_data.items():
         rows.append({
@@ -222,12 +241,13 @@ def push_to_supabase(cpu_data, gpu_data):
     # rejects an upsert batch that touches the same key twice. Keep the highest
     # score on collision (best-known figure for that part).
     deduped = {}
+    pre_dedup = len(rows)
     for row in rows:
         key = (row["sku"], row["benchmark"], row["source"])
         if key not in deduped or row["score"] > deduped[key]["score"]:
             deduped[key] = row
     rows = list(deduped.values())
-    collisions = len(cpu_data) + len(gpu_data) - len(rows)
+    collisions = pre_dedup - len(rows)
     if collisions:
         print(f"  ({collisions} duplicate reference-SKUs collapsed, kept highest score)")
 

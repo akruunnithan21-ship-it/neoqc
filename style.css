@@ -1159,7 +1159,7 @@
      section gets painted OVER by the next section (a later DOM sibling always
      wins when both have z-index:auto). Elevate whichever section currently
      holds an open (non-empty) dropdown above its siblings. */
-  .form-section:has(.autocomplete-list:not(:empty)) {
+  .form-section:has(.autocomplete-list:not(:empty):not(.hidden)) {
     z-index: 50;
   }
   
@@ -1725,262 +1725,8 @@
      PRINT STYLING RULES (A4 GRayscale PDF Output)
      ========================================================================== */
   
-  @media print {
-    /* Hide everything on screen */
-    body * {
-      visibility: hidden;
-      background: transparent !important;
-    }
-    
-    /* Display only print sheet */
-    #print-report-container, #print-report-container * {
-      visibility: visible;
-    }
-    
-    #print-report-container {
-      position: absolute;
-      left: 0;
-      top: 0;
-      width: 100%;
-      min-height: 100%;
-      color: #000 !important;
-      background-color: #fff !important;
-      font-size: 9.5pt;
-      line-height: 1.4;
-      padding: 16px 20px;
-      margin: 0;
-      box-sizing: border-box;
-    }
-    
-    .print-only {
-      display: block !important;
-    }
-    
-    /* Layout styling for prints */
-    .print-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: flex-start;
-      margin-bottom: 20px;
-    }
-    
-    .print-logo-section h1 {
-      font-size: 26pt;
-      margin-bottom: 2px;
-      color: #000;
-      font-family: 'Space Grotesk', sans-serif;
-    }
-    
-    .print-logo-section h3 {
-      font-size: 12pt;
-      color: #333;
-      margin-bottom: 2px;
-      letter-spacing: 0.1em;
-    }
-    
-    .print-logo-section p {
-      font-size: 8pt;
-      color: #666;
-    }
-    
-    .print-meta-section {
-      text-align: right;
-      font-size: 9pt;
-      line-height: 1.5;
-    }
-    
-    .print-divider {
-      border: 0;
-      border-top: 2px solid #000;
-      margin-bottom: 20px;
-    }
-    
-    .print-section {
-      margin-bottom: 20px;
-    }
-    
-    .print-section h3 {
-      font-size: 11pt;
-      border-bottom: 1px solid #666;
-      padding-bottom: 4px;
-      margin-bottom: 10px;
-      font-family: 'Space Grotesk', sans-serif;
-    }
-    
-    .print-table-fields {
-      width: 100%;
-      border-collapse: collapse;
-    }
-    
-    .print-table-fields td {
-      padding: 6px;
-      vertical-align: top;
-      font-size: 9pt;
-    }
-    
-    .print-spec-table, .print-metric-table, .print-bench-table {
-      width: 100%;
-      border-collapse: collapse;
-      margin-top: 8px;
-    }
-    
-    .print-spec-table th, .print-metric-table th, .print-bench-table th {
-      background: #f2f2f2 !important;
-      border: 1px solid #ccc;
-      padding: 6px 10px;
-      font-size: 8.5pt;
-      font-weight: bold;
-      text-align: left;
-    }
-    
-    .print-spec-table td, .print-metric-table td, .print-bench-table td {
-      border: 1px solid #ccc;
-      padding: 6px 10px;
-      font-size: 8.5pt;
-    }
-    
-    .print-checklist-grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr 1fr;
-      gap: 6px;
-      font-size: 8.5pt;
-    }
-    
-    .print-chk-item {
-      padding: 3px 0;
-    }
-    
-    .print-footer {
-      display: flex;
-      justify-content: space-between;
-      margin-top: 40px;
-      align-items: flex-end;
-      page-break-inside: avoid;
-    }
-    
-    .signature-line p {
-      font-size: 9pt;
-      line-height: 1.3;
-    }
-    
-    .stamp-section {
-      text-align: right;
-    }
-    
-    .stamp-box {
-      border: 3px double #000;
-      padding: 12px 24px;
-      font-size: 16pt;
-      font-weight: bold;
-      letter-spacing: 0.05em;
-      display: inline-block;
-      font-family: 'Space Grotesk', sans-serif;
-    }
-
-    /* Cert label above meta */
-    .print-cert-label {
-      font-size: 7.5pt;
-      font-weight: bold;
-      text-transform: uppercase;
-      letter-spacing: 0.18em;
-      color: #333;
-      border-bottom: 1px solid #bbb;
-      padding-bottom: 3px;
-      margin-bottom: 6px;
-    }
-
-    .print-meta-section p {
-      margin: 2px 0;
-    }
-
-    /* Verdict banner */
-    .print-verdict-banner {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      border: 2.5px solid #000;
-      padding: 10px 20px;
-      margin: 12px 0;
-      page-break-inside: avoid;
-    }
-    .print-verdict-pass  { border-style: solid; }
-    .print-verdict-fail  { border-style: double; border-width: 4px; }
-    .print-verdict-neutral { border-style: dashed; }
-
-    /* Two-column layout */
-    .print-two-col {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 20px;
-    }
-    .print-two-col > div { padding-right: 8px; }
-
-    /* Label columns in 4-cell field tables */
-    .print-table-fields td:first-child,
-    .print-table-fields td:nth-child(3) {
-      white-space: nowrap;
-      width: 130px;
-      color: #444;
-      font-size: 8.5pt;
-    }
-
-    /* Pass / Fail inline badges */
-    .print-pass-badge,
-    .print-fail-badge {
-      display: inline-block;
-      padding: 1px 6px;
-      font-size: 8pt;
-      font-weight: bold;
-      border: 1px solid #000;
-      white-space: nowrap;
-    }
-    .print-fail-badge { background: #e0e0e0 !important; }
-
-    /* Temperature sparklines */
-    .print-sparklines {
-      margin-top: 10px;
-      border-top: 1px dashed #ccc;
-      padding-top: 8px;
-    }
-    .print-sparkline-row {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      margin-bottom: 6px;
-    }
-    .print-sparkline-label {
-      font-size: 7.5pt;
-      color: #555;
-      white-space: nowrap;
-      min-width: 190px;
-    }
-
-    /* Activity log table */
-    .print-event-table {
-      width: 100%;
-      border-collapse: collapse;
-      font-size: 8pt;
-    }
-    .print-event-table th {
-      border: 1px solid #ccc;
-      padding: 4px 8px;
-      background: #f2f2f2 !important;
-      font-weight: bold;
-      text-align: left;
-    }
-    .print-event-table td {
-      border: 1px solid #ccc;
-      padding: 4px 8px;
-    }
-    .print-event-table tr:nth-child(even) td {
-      background: #fafafa !important;
-    }
-
-    /* Stamp variants */
-    .stamp-pass    { border: 3px double #000; }
-    .stamp-fail    { border: 4px double #000; background: #e0e0e0 !important; }
-    .stamp-pending { border: 2px dashed #000; }
-  }
+  /* Print report styles moved to print-report.css (loaded from index.html)
+     so the three-page QC report can be developed/tested on screen. */
 
   /* Loading Spinner Animation */
   @keyframes spin {
@@ -3925,6 +3671,16 @@ body.dark-mode ::-webkit-scrollbar-thumb:hover {
   border: 1px solid rgba(15, 23, 42, 0.12); /* Soft grey border, removes bright white outline */
   border-radius: 8px;
   box-shadow: 0 4px 16px rgba(15, 23, 42, 0.08);
+}
+
+/* Every spec field keeps its list div in the DOM at z-index:1000 permanently,
+   and an empty list still paints its 1px border + shadow as a ~2px line under
+   its input. When a field ABOVE opens its dropdown, the empty lists of the
+   fields underneath are later DOM siblings at the SAME z-index — so their
+   border-lines paint ON TOP of the open dropdown ("lines through the
+   suggestions" bug). An empty list must not paint at all. */
+.autocomplete-list:empty {
+  display: none;
 }
 
 body.dark-mode .autocomplete-list {

@@ -25,7 +25,10 @@
   var HIGH_WEIGHT_RE = new RegExp(
     '^(' +
       'rtx|gtx|rx|arc|rdna|' +
-      '[0-9]{3,5}[a-z]*|' + // model numbers: 4060, 9800x3d, rm1000x, b650m
+      // Model numbers: pure 3-5 digit runs (4060) or digits + alnum tail
+      // (9800x3d, 14700kf). Tail must START with a letter so long pure
+      // part-number digit runs never qualify (see matcher.py).
+      '[0-9]{3,5}[a-z][a-z0-9]*|[0-9]{3,5}|' +
       'x3d|xt|ti|super|oc|' +
       'ddr[45]?|cl[0-9]+|' +
       'nvme|sata|m2|pcie|' +
@@ -86,12 +89,15 @@
       totalWeight += w;
       if (candidateTokenSet.has(t)) {
         matchedWeight += w;
-      } else if (t.length >= 3 && hasDigit(t)) {
+      } else if (t.length >= 4 && hasDigit(t)) {
+        // >= 4, not >= 3: short digit runs shed by part numbers are
+        // substrings of everything ("100" from "100-100000910WOF" once
+        // matched "3100" and outranked the real 7800X3D) — see matcher.py.
         var iter = candidateTokenSet.values();
         var next;
         while (!(next = iter.next()).done) {
           var ct = next.value;
-          if (ct.length >= 3 && (ct.indexOf(t) !== -1 || t.indexOf(ct) !== -1)) {
+          if (ct.length >= 4 && (ct.indexOf(t) !== -1 || t.indexOf(ct) !== -1)) {
             matchedWeight += w * 0.75;
             break;
           }

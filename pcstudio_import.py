@@ -2,7 +2,8 @@
 pcstudio_import.py — Price catalog importer for pcstudio.in + fallback retailers.
 
 PRIMARY SOURCE: pcstudio.in (our supplier — scraping is authorised).
-FALLBACK SOURCES: mdcomputers.in, vedantcomputers.com, primeabgb.com
+FALLBACK SOURCES: mdcomputers.in, vedantcomputers.com, primeabgb.com,
+                  computechstore.in, vishalperipherals.com
   — used only when a component from a build ticket is NOT found in pcstudio's catalog.
   — fallback sources are labelled with source='fallback-<site>' so the QC report
     can show provenance clearly.
@@ -717,6 +718,39 @@ FALLBACK_SITES = [
         "price_sel":  ".price-new, .price",
         "link_sel":   ".name a",
     },
+    {
+        # computechstore.in — custom Tailwind storefront (server-rendered search
+        # at /search/?q=). No semantic card classes, so selectors lean on the
+        # few structural ones: product cards are the div.group elements that
+        # contain an h3 title (bare div.group also matches ~18 non-product
+        # wrappers on the page, which previously ate the [:10] card budget and
+        # produced 0 rows), and the CURRENT price is the font-black span — the
+        # struck-through MRP next to it is font-bold + .line-through (excluding
+        # it matters: the MRP can be a stale placeholder like ₹142350 beside a
+        # real ₹36999). span.font-black also matches the stock-status span
+        # ("In Stock"/"Sold Out"), but the price span comes first in card DOM
+        # order and a stock-text hit parses to a harmless null price.
+        # LIVE-VALIDATED 2026-07-11 against real "rtx 4060" search results.
+        "name": "computechstore.in",
+        "search_url": "https://computechstore.in/search/?q={q}",
+        "result_sel": "div.group:has(h3)",
+        "name_sel":   "h3",
+        "price_sel":  "span.font-black:not(.line-through)",
+        "link_sel":   "a[href*='/product/']",
+    },
+    {
+        # vishalperipherals.com — Shopify. Their /search HTML page renders
+        # results client-side (useless to scrape), but Shopify's built-in
+        # predictive-search JSON endpoint is server-side and stable:
+        # /search/suggest.json returns {resources:{results:{products:[...]}}}
+        # with title/price/url per product. Handled by the "shopify-suggest"
+        # branch in search_fallback_sites(), not the CSS-selector path.
+        # LIVE-VALIDATED 2026-07-11: "rtx 4060" → 10 priced products.
+        "name": "vishalperipherals.com",
+        "type": "shopify-suggest",
+        "search_url": "https://vishalperipherals.com/search/suggest.json"
+                      "?q={q}&resources[type]=product&resources[limit]=10",
+    },
 ]
 
 
@@ -734,6 +768,36 @@ def search_fallback_sites(query: str) -> list[dict]:
         url = site["search_url"].replace("{q}", quote_plus(query))
         r = get(url, tier_label=f"Fallback-{site['name']}")
         if r is None or r.status_code != 200:
+            continue
+
+        # Shopify predictive-search JSON endpoint (no HTML/CSS selectors) —
+        # price arrives as a plain decimal string in store currency (INR),
+        # e.g. "118990.00", and product URLs are site-relative.
+        if site.get("type") == "shopify-suggest":
+            try:
+                products = (r.json().get("resources", {})
+                             .get("results", {}).get("products", []))
+            except ValueError:
+                continue
+            for p in products:
+                name = (p.get("title") or "").strip()
+                if not name:
+                    continue
+                try:
+                    price = float(str(p.get("price", "")).replace(",", ""))
+                except ValueError:
+                    price = None
+                from urllib.parse import urljoin
+                results.append({
+                    "name":          name,
+                    "category":      cat,
+                    "price_inr":     price if price else None,
+                    "sku":           None,
+                    "url":           urljoin(url, p.get("url", "")),
+                    "fetched_at":    _now(),
+                    "source":        site["name"],
+                    "source_method": "fallback-search",
+                })
             continue
 
         soup = BeautifulSoup(r.text, "lxml")

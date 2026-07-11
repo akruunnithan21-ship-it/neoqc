@@ -9,6 +9,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Syncopate:wght@700&family=Hanken+Grotesk:ital,wght@0,100..900;1,100..900&family=JetBrains+Mono:ital,wght@0,100..800;1,100..800&family=Space+Grotesk:wght@300..700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="print-report.css">
   <link rel="stylesheet" href="shared/diagnostics-tokens.css">
 </head>
 <body class="light-mode">
@@ -1501,6 +1502,9 @@
   <!-- PRINTABLE QC REPORT TEMPLATE (Hidden from normal view, displays during print) -->
   <div id="print-report-container" class="print-only">
 
+    <!-- ═══ PAGE 1 — QUALITY CONTROL CERTIFICATE ═══ -->
+    <div class="print-page" id="print-page-1">
+
     <!-- ── HEADER ── -->
     <div class="print-header">
       <div class="print-logo-section">
@@ -1524,6 +1528,34 @@
     <div id="print-verdict-banner" class="print-verdict-banner">
       <span id="print-verdict-icon" style="font-size:18pt;margin-right:10px;">✓</span>
       <span id="print-verdict-text" style="font-size:13pt;font-weight:700;letter-spacing:0.08em;">ALL QUALITY CHECKS PASSED</span>
+    </div>
+
+    <!-- ── AT-A-GLANCE SCORE STRIP ── -->
+    <div id="print-score-strip" class="print-score-strip">
+      <div class="print-score-tile">
+        <div class="pst-value" id="print-tile-qc">--</div>
+        <div class="pst-label">QC Checks Passed</div>
+      </div>
+      <div class="print-score-tile">
+        <div class="pst-value" id="print-tile-stress">--</div>
+        <div class="pst-label">Stability Torture</div>
+        <div class="pst-sub" id="print-tile-stress-sub"></div>
+      </div>
+      <div class="print-score-tile">
+        <div class="pst-value" id="print-tile-thermal">--</div>
+        <div class="pst-label">Thermal Headroom</div>
+        <div class="pst-sub" id="print-tile-thermal-sub"></div>
+      </div>
+      <div class="print-score-tile">
+        <div class="pst-value" id="print-tile-ppi">--</div>
+        <div class="pst-label">Price-Performance</div>
+        <div class="pst-sub">index / 100</div>
+      </div>
+      <div class="print-score-tile">
+        <div class="pst-value" id="print-tile-fit">--</div>
+        <div class="pst-label">Use-Case Fit</div>
+        <div class="pst-sub" id="print-tile-fit-sub"></div>
+      </div>
     </div>
 
     <hr class="print-divider">
@@ -1579,6 +1611,19 @@
     <div class="print-section">
       <h3>Quality Assurance &amp; Hardware Verification Checklist</h3>
       <div id="print-checklist-container" class="print-checklist-grid"></div>
+    </div>
+
+    <div class="print-page-footline">
+      <span>NEO TOKYO — Quality Control Certificate</span>
+      <span>Page 1 of 3</span>
+    </div>
+    </div><!-- /print-page-1 -->
+
+    <!-- ═══ PAGE 2 — STRESS & DIAGNOSTICS LAB DATA ═══ -->
+    <div class="print-page" id="print-page-2">
+    <div class="print-page-subheader">
+      <span class="print-page-subtitle">STRESS &amp; DIAGNOSTICS — LAB DATA</span>
+      <span class="print-page-ref">Ticket #<span class="print-ticket-id-echo">--</span> · NEO TOKYO QA</span>
     </div>
 
     <!-- ── THERMAL & STRESS TEST RESULTS ── -->
@@ -1659,6 +1704,8 @@
           </tr>
         </tbody>
       </table>
+      <!-- Ghosted reference-vs-measured bars (populated by print-render.js) -->
+      <div id="print-bench-bars" class="print-bars hidden"></div>
     </div>
 
     <!-- ── SSD HEALTH ── -->
@@ -1705,20 +1752,53 @@
       </table>
     </div>
 
+    <!-- ── PORT & CONNECTIVITY VERIFICATION ── -->
+    <div id="print-ports-section" class="print-section hidden">
+      <h3>Port &amp; Connectivity Verification (Guided Plug-In Test)</h3>
+      <table class="print-event-table">
+        <thead><tr><th>Port Group</th><th>Result</th><th>Verified Device</th></tr></thead>
+        <tbody id="print-ports-body"></tbody>
+      </table>
+    </div>
+
+    <div class="print-page-footline">
+      <span>NEO TOKYO — Stress &amp; Diagnostics Lab Data</span>
+      <span>Page 2 of 3</span>
+    </div>
+    </div><!-- /print-page-2 -->
+
+    <!-- ═══ PAGE 3 — VALUE ANALYSIS & PROVENANCE ═══ -->
+    <div class="print-page" id="print-page-3">
+    <div class="print-page-subheader">
+      <span class="print-page-subtitle">VALUE ANALYSIS &amp; REPORT PROVENANCE</span>
+      <span class="print-page-ref">Ticket #<span class="print-ticket-id-echo">--</span> · NEO TOKYO QA</span>
+    </div>
+
     <!-- ── PRICE-TO-PERFORMANCE ── -->
     <div id="print-ppi-section" class="print-section hidden">
       <h3>Price-to-Performance Analysis</h3>
-      <table class="print-table-fields">
-        <tr>
-          <td><strong>PPI Index</strong></td><td id="print-ppi-index">--</td>
-          <td><strong>Use-Case Fit</strong></td><td id="print-ppi-fit">--</td>
-        </tr>
-        <tr>
-          <td><strong>Evaluated For</strong></td><td id="print-ppi-usecases" colspan="3">--</td>
-        </tr>
-      </table>
-      <div id="print-ppi-flags" style="font-size:7.5pt;color:#333;"></div>
-      <p style="font-size:6.5pt;color:#888;margin-top:3px;">Reference scores from PassMark&reg; (passmark.com). Prices from pcstudio.in. Your results may vary.</p>
+      <div class="print-ppi-headline">
+        <div class="print-ppi-index-tile">
+          <div class="ppi-big" id="print-ppi-index">--</div>
+          <div class="ppi-cap">PPI Index / 100</div>
+        </div>
+        <div class="print-ppi-meta">
+          <p><strong>Use-Case Fit:</strong> <span id="print-ppi-fit">--</span></p>
+          <p><strong>Evaluated For:</strong> <span id="print-ppi-usecases">--</span></p>
+          <p><strong>How to read this:</strong> each scored component is compared only against parts
+             available at the same price (±15%) — 100 means "the best performance money buys at this
+             exact price". Components without an objective benchmark are shown unscored, never guessed.</p>
+        </div>
+      </div>
+      <div id="print-ppi-component-bars" class="print-bars hidden"></div>
+      <div id="print-ppi-alternatives" class="hidden" style="margin-top:8px;">
+        <table class="print-event-table">
+          <thead><tr><th>Same-Price Alternative</th><th>Category</th><th>Price</th><th>vs. Installed</th></tr></thead>
+          <tbody id="print-ppi-alt-body"></tbody>
+        </table>
+      </div>
+      <div id="print-ppi-flags" class="print-ppi-flags"></div>
+      <p class="print-note">Reference scores: PassMark&reg; (passmark.com), attribution required. Prices: pcstudio.in + live retailer lookups. Your results may vary.</p>
     </div>
 
     <!-- ── ACTIVITY LOG ── -->
@@ -1728,6 +1808,15 @@
         <thead><tr><th>Timestamp (UTC)</th><th>Event</th><th>By</th></tr></thead>
         <tbody id="print-event-log-body"></tbody>
       </table>
+    </div>
+
+    <!-- ── DATA PROVENANCE ── -->
+    <div class="print-section">
+      <h3>Where Every Number On This Report Comes From</h3>
+      <div id="print-provenance" class="print-provenance">--</div>
+      <div class="print-integrity">Report integrity code: <strong id="print-integrity-code">--------</strong>
+        <span style="color:#888;"> — regenerate this report for the same ticket to verify it has not been altered.</span>
+      </div>
     </div>
 
     <!-- ── FOOTER ── -->
@@ -1745,6 +1834,12 @@
       </div>
     </div>
 
+    <div class="print-page-footline">
+      <span>NEO TOKYO — Value Analysis &amp; Report Provenance</span>
+      <span>Page 3 of 3</span>
+    </div>
+    </div><!-- /print-page-3 -->
+
   </div>
 
   <!-- CHANGELOG / OTA UPDATE MODAL -->
@@ -1752,24 +1847,20 @@
     <div class="glass-slab modal-card" style="max-width: 650px; width: 100%; padding: 30px; border-radius: 20px;">
       <div class="modal-header" style="border-bottom: 1px solid var(--glass-border); padding-bottom: 15px; margin-bottom: 20px;">
         <h2 style="font-family: 'Syncopate', sans-serif; font-size: 1.3rem; color: var(--primary-pink); letter-spacing: 0.05em; margin: 0;">NEO QC UPDATED</h2>
-        <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; font-weight: 700; background: rgba(231, 1, 78, 0.1); color: var(--primary-pink); padding: 4px 8px; border-radius: 4px;">v1.2.2</span>
+        <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; font-weight: 700; background: rgba(231, 1, 78, 0.1); color: var(--primary-pink); padding: 4px 8px; border-radius: 4px;">v1.3.0</span>
       </div>
       <div class="modal-body" style="font-size: 0.92rem; line-height: 1.6; color: var(--text-dark); max-height: 420px; overflow-y: auto; padding-right: 5px;">
-        <p style="margin-top: 0;">An update has been installed. Here are the key improvements in NeoQC <strong>v1.2.2</strong>:</p>
+        <p style="margin-top: 0;">An update has been installed. Here are the key improvements in NeoQC <strong>v1.3.0</strong>:</p>
         <ul style="padding-left: 20px; display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px;">
-          <li><strong>Real Catalog-Backed Autocomplete</strong>: Motherboard/CPU/GPU/RAM/Storage/PSU/Case/Cooler search now matches against the real 5,000+ item pcstudio.in catalog with live prices, instead of a small hand-picked list — far fewer "not found" results.</li>
-          <li><strong>Search Online for Missing Parts</strong>: When a component genuinely isn't in the catalog, search it live across multiple retailers, average the price, and add it to the shared database — usable immediately and searchable for every technician afterward.</li>
-          <li><strong>Startup Crash Fix</strong>: Fixed a duplicate internal handler that could crash the app on launch.</li>
-          <li><strong>Dark Mode Visibility Fix</strong>: Fixed card titles and text rendering nearly invisible in some port/RGB checker and diagnostic panels when Windows' dark mode setting didn't match the app's own theme.</li>
-          <li><strong>Prime95 Torture Testing</strong>: Real CPU + RAM Blend-mode torture test baked in, with per-worker pass/fail, error counts, and its own report section.</li>
-          <li><strong>Component Health Passports</strong>: Full identity + health cards for CPU / GPU / RAM / Storage — real DDR generation detection, per-module RAM detail, NVMe/SATA interface, SSD wear &amp; power-on hours.</li>
-          <li><strong>Price-to-Performance Index</strong>: One-click PPI for every build — 0-100 index, use-case fit score, bottleneck flags, and same-price alternatives.</li>
-          <li><strong>Port Checker v2 &amp; RGB Sync v2</strong>: Guided plug-in verification with honest pass/fail/unverified results, and per-device/zone OpenRGB control with verify-after-apply feedback.</li>
-          <li><strong>Customer Dashboard Parity</strong>: The customer-facing dashboard now shows the same passports, torture-test results, and PPI analysis as the staff app.</li>
+          <li><strong>All-New Three-Page QC Certificate</strong>: The printed report is now a full certificate — Page 1: verdict + at-a-glance score strip; Page 2: stress &amp; diagnostics lab data with measured-vs-threshold benchmark bars, Prime95, SSD health, component passports and port verification; Page 3: price-to-performance analysis, activity log, a "where every number comes from" provenance box, and a tamper-evident report integrity code.</li>
+          <li><strong>Fairer Price-to-Performance Scoring</strong>: CPU scoring now blends single-thread performance per use-case (gaming-focused X3D chips are no longer undervalued), scores read as "% of the best performance at this price", components without benchmark data are honestly unscored instead of silently passed, and bottleneck warnings are based on absolute performance.</li>
+          <li><strong>Component Matching Accuracy</strong>: Fixed a matching bug where part numbers in product names (e.g. "100-100000910WOF") could match the wrong CPU entirely — affects autocomplete, PPI and benchmark bridging.</li>
+          <li><strong>Web Lookup Across 5 Retailers</strong>: "Search Online" now checks five Indian PC retailers (added Computech Store and Vishal Peripherals) for better price averages on parts missing from the catalog.</li>
+          <li><strong>Autocomplete Visual Fix</strong>: Removed the stray horizontal lines that could appear through open suggestion dropdowns in the ticket form.</li>
         </ul>
       </div>
       <div class="modal-footer" style="border-top: 1px solid var(--glass-border); padding-top: 15px; display: flex; justify-content: flex-end; margin-top: 20px;">
-        <button id="btn-close-changelog" class="primary-pink-btn" style="padding: 10px 24px; font-weight: 700; font-size: 0.95rem;">Launch NeoQC v1.2.2</button>
+        <button id="btn-close-changelog" class="primary-pink-btn" style="padding: 10px 24px; font-weight: 700; font-size: 0.95rem;">Launch NeoQC v1.3.0</button>
       </div>
     </div>
   </div>
@@ -1778,6 +1869,7 @@
   <script src="shared/icons.js"></script>
   <script src="shared/diagnostics-render.js"></script>
   <script src="shared/matcher.js"></script>
+  <script src="print-render.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

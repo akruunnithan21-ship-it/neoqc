@@ -12,7 +12,8 @@
   "nsis": {
     "oneClick": false,
     "allowToChangeInstallationDirectory": true,
-    "deleteAppDataOnUninstall": true
+    "deleteAppDataOnUninstall": true,
+    "artifactName": "NeoQC-Setup-${version}.${ext}"
   },
   "portable": {
     "artifactName": "NeoQC.exe"

@@ -49,7 +49,12 @@ HIGH_WEIGHT_RE = re.compile(
     r"""
     \b(
         rtx|gtx|rx|arc|rdna|
-        [0-9]{3,5}[a-z]*|     # model numbers: 4060, 9800x3d, rm1000x, b650m
+        # Model numbers: pure 3-5 digit runs (4060) or digits + alnum tail
+        # (9800x3d, 14700kf). The tail must START with a letter so long pure
+        # part-number digit runs ("100000910" in "100-100000910WOF") never
+        # qualify — those used to be scored like model numbers and could
+        # outweigh the real model token in the same name.
+        [0-9]{3,5}[a-z][a-z0-9]*|[0-9]{3,5}|
         x3d|xt|ti|super|oc|
         ddr[45]?|cl[0-9]+|
         nvme|sata|m2|pcie|
@@ -106,9 +111,12 @@ def _score(query_tokens: list[str], candidate_tokens: set[str]) -> float:
     other — e.g. a technician types "1000m" but the catalog entry's raw name
     tokenizes the whole run as "pn1000m" (no separator between the letters
     and digits). An exact-token match would score this 0, even though it's
-    plainly the right product. For digit-bearing tokens of length >= 3 with
+    plainly the right product. For digit-bearing tokens of length >= 4 with
     no exact hit, award partial credit (0.75x weight) if the token is a
-    substring of some candidate token or vice versa.
+    substring of some candidate token or vice versa. (>= 4, not >= 3: short
+    digit runs shed by part numbers are substrings of everything — "100"
+    from "100-100000910WOF" matching "3100" once made a Ryzen 3 3100 beat
+    the actual Ryzen 7 7800X3D for that very 7800X3D's own catalog name.)
     """
     if not query_tokens:
         return 0.0
@@ -118,9 +126,9 @@ def _score(query_tokens: list[str], candidate_tokens: set[str]) -> float:
     for t in query_tokens:
         if t in candidate_tokens:
             matched_weight += _token_weight(t)
-        elif len(t) >= 3 and _has_digit(t):
+        elif len(t) >= 4 and _has_digit(t):
             for ct in candidate_tokens:
-                if len(ct) >= 3 and (t in ct or ct in t):
+                if len(ct) >= 4 and (t in ct or ct in t):
                     matched_weight += _token_weight(t) * 0.75
                     break
 

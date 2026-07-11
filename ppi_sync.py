@@ -82,27 +82,29 @@ def _load_component_prices(sb) -> dict:
 
 
 def _passmark_matchers():
-    """Build fuzzy matchers over the PassMark name lists (name → score)."""
+    """Build fuzzy matchers over the PassMark name lists (name → score dict)."""
     cpu_data = json.loads((BENCH_DIR / "cpu_passmark.json").read_text(encoding="utf-8"))
     gpu_data = json.loads((BENCH_DIR / "gpu_passmark.json").read_text(encoding="utf-8"))
 
-    def matcher_for(data, category, score_key):
+    def matcher_for(data, category):
         catalog = [
             {"name": name, "sku": name, "category": category, "price_inr": None}
             for name in data
         ]
-        return Matcher(catalog), {name: entry[score_key] for name, entry in data.items()}
+        return Matcher(catalog), data
 
-    cpu_m, cpu_scores = matcher_for(cpu_data, "cpu", "passmark_score")
-    gpu_m, gpu_scores = matcher_for(gpu_data, "gpu", "g3d_score")
-    return {"cpu": (cpu_m, cpu_scores, "passmark-cpu"), "gpu": (gpu_m, gpu_scores, "g3d")}
+    cpu_m, cpu_entries = matcher_for(cpu_data, "cpu")
+    gpu_m, gpu_entries = matcher_for(gpu_data, "gpu")
+    return {"cpu": (cpu_m, cpu_entries), "gpu": (gpu_m, gpu_entries)}
 
 
 def _benchmark_scores_for_pool(component_prices, build_specs, price_band_pct):
     """
     Name-match PassMark scores for every priced cpu/gpu inside the build's
     price bands (plus the build's own components). Returns
-    {sku: {"passmark-cpu": n}} / {sku: {"passmark-g3d": n}}.
+    {sku: {"passmark-cpu": n, "passmark-cpu-st": n?}} for CPUs (single-thread
+    is included whenever cpu_passmark.json has it — ppi.py's use-case-aware
+    blend needs it) and {sku: {"passmark-g3d": n}} for GPUs.
     """
     pm = _passmark_matchers()
     scores: dict[str, dict] = {}
@@ -110,7 +112,7 @@ def _benchmark_scores_for_pool(component_prices, build_specs, price_band_pct):
     for category, bench_key in (("cpu", "passmark-cpu"), ("gpu", "passmark-g3d")):
         own_sku = build_specs.get(category)
         own = component_prices.get(own_sku) if own_sku else None
-        matcher, name_scores, _ = pm[category]
+        matcher, name_entries = pm[category]
 
         # candidate pool: own component + anything in its price band
         candidates = []
@@ -132,7 +134,13 @@ def _benchmark_scores_for_pool(component_prices, build_specs, price_band_pct):
                 continue
             m = matcher.match(entry["name"], category=category)
             if m.sku and m.confidence >= 0.55:
-                scores[sku] = {bench_key: float(name_scores[m.sku])}
+                bench_entry = name_entries[m.sku]
+                if category == "cpu":
+                    scores[sku] = {bench_key: float(bench_entry["passmark_score"])}
+                    if bench_entry.get("single_thread_score"):
+                        scores[sku]["passmark-cpu-st"] = float(bench_entry["single_thread_score"])
+                else:
+                    scores[sku] = {bench_key: float(bench_entry["g3d_score"])}
     return scores
 
 
@@ -222,7 +230,7 @@ def main():
             for cat, entries in result.in_range_comparisons.items()
         },
         "flags": all_flags,
-        "source_note": "ppi.py v1",
+        "source_note": "ppi.py v2 (ratio-to-best in price band; single-thread-aware CPU blend; unscored categories excluded from index)",
     }
 
     if args.dry_run:

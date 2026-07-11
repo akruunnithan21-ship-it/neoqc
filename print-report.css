@@ -1,0 +1,439 @@
+/*
+  print-report.css — Neo Tokyo three-page QC / stress-test / info report.
+
+  Split out of style.css so the report layout can be rendered ON SCREEN in a
+  test harness (the rules below are scoped to #print-report-container and are
+  media-agnostic; on screen the container is display:none via .print-only in
+  style.css, so they cost nothing). Only the visibility dance + page setup
+  live inside @media print.
+
+  Design language: monochrome-first (laser-printer safe) with one restrained
+  Neo Tokyo pink accent (#E7014E) that degrades to a mid-grey on B/W printers.
+  Three fixed pages:
+    1 — Quality Control Certificate (verdict, score strip, identity, checklist)
+    2 — Stress & Diagnostics Lab Data (thermals, benchmarks, torture, health)
+    3 — Value Analysis & Provenance (PPI, activity, data sources, signatures)
+*/
+
+@media print {
+  /* Hide the app, show only the report */
+  body * {
+    visibility: hidden;
+    background: transparent !important;
+  }
+  #print-report-container, #print-report-container * {
+    visibility: visible;
+  }
+  #print-report-container {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    margin: 0;
+  }
+  .print-only {
+    display: block !important;
+  }
+  @page {
+    size: A4;
+    margin: 9mm 10mm;
+  }
+  .print-page {
+    page-break-after: always;
+  }
+  .print-page:last-child {
+    page-break-after: auto;
+  }
+  .print-section, .print-verdict-banner, .print-footer, .print-score-strip {
+    page-break-inside: avoid;
+  }
+}
+
+/* ─── Base ──────────────────────────────────────────────────────────────── */
+
+#print-report-container {
+  color: #000;
+  background: #fff;
+  font-size: 9.5pt;
+  line-height: 1.4;
+  font-family: 'Hanken Grotesk', 'Outfit', sans-serif;
+  box-sizing: border-box;
+}
+#print-report-container * {
+  box-sizing: border-box;
+}
+
+/* ─── Header / page chrome ──────────────────────────────────────────────── */
+
+#print-report-container .print-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 12px;
+}
+#print-report-container .print-meta-section {
+  text-align: right;
+  font-size: 9pt;
+  line-height: 1.5;
+}
+#print-report-container .print-meta-section p { margin: 2px 0; }
+#print-report-container .print-cert-label {
+  font-size: 7.5pt;
+  font-weight: bold;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: #333;
+  border-bottom: 2px solid #E7014E;
+  padding-bottom: 3px;
+  margin-bottom: 6px;
+}
+#print-report-container .print-divider {
+  border: 0;
+  border-top: 2px solid #000;
+  margin: 10px 0 14px 0;
+}
+
+/* Slim continuation header on pages 2 & 3 */
+#print-report-container .print-page-subheader {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  border-bottom: 2px solid #000;
+  padding-bottom: 5px;
+  margin-bottom: 10px;
+}
+#print-report-container .print-page-subheader .print-page-subtitle {
+  font-family: 'Space Grotesk', sans-serif;
+  font-weight: 700;
+  font-size: 12pt;
+  letter-spacing: 0.04em;
+}
+#print-report-container .print-page-subheader .print-page-ref {
+  font-size: 7.5pt;
+  color: #666;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+/* Page footer strip (page number + tagline) */
+#print-report-container .print-page-footline {
+  display: flex;
+  justify-content: space-between;
+  border-top: 1px solid #bbb;
+  margin-top: 6px;
+  padding-top: 4px;
+  font-size: 7pt;
+  color: #777;
+  letter-spacing: 0.06em;
+}
+
+/* ─── Sections ──────────────────────────────────────────────────────────── */
+
+#print-report-container .print-section { margin-bottom: 8px; }
+#print-report-container .print-section h3 {
+  font-size: 10.5pt;
+  font-family: 'Space Grotesk', sans-serif;
+  border-bottom: 1px solid #999;
+  border-left: 4px solid #E7014E;
+  padding: 0 0 2px 7px;
+  margin: 0 0 6px 0;
+  letter-spacing: 0.02em;
+}
+
+/* ─── Verdict banner ────────────────────────────────────────────────────── */
+
+#print-report-container .print-verdict-banner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2.5px solid #000;
+  padding: 8px 20px;
+  margin: 10px 0;
+}
+#print-report-container .print-verdict-pass    { border-style: solid; }
+#print-report-container .print-verdict-fail    { border-style: double; border-width: 4px; }
+#print-report-container .print-verdict-neutral { border-style: dashed; }
+
+/* ─── At-a-glance score strip ───────────────────────────────────────────── */
+
+#print-report-container .print-score-strip {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 6px;
+  margin: 10px 0 14px 0;
+}
+#print-report-container .print-score-tile {
+  border: 1px solid #999;
+  border-top: 3px solid #E7014E;
+  padding: 6px 8px 5px 8px;
+  text-align: center;
+}
+#print-report-container .print-score-tile .pst-value {
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 13pt;
+  font-weight: 700;
+  line-height: 1.15;
+}
+#print-report-container .print-score-tile .pst-label {
+  font-size: 6.5pt;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #555;
+  margin-top: 2px;
+}
+#print-report-container .print-score-tile .pst-sub {
+  font-size: 6.5pt;
+  color: #888;
+}
+
+/* ─── Tables ────────────────────────────────────────────────────────────── */
+
+#print-report-container .print-table-fields {
+  width: 100%;
+  border-collapse: collapse;
+}
+#print-report-container .print-table-fields td {
+  padding: 5px 6px;
+  vertical-align: top;
+  font-size: 9pt;
+}
+#print-report-container .print-table-fields td:first-child,
+#print-report-container .print-table-fields td:nth-child(3) {
+  white-space: nowrap;
+  width: 130px;
+  color: #444;
+  font-size: 8.5pt;
+}
+
+#print-report-container .print-spec-table,
+#print-report-container .print-metric-table,
+#print-report-container .print-bench-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 6px;
+}
+#print-report-container .print-spec-table th,
+#print-report-container .print-metric-table th,
+#print-report-container .print-bench-table th {
+  background: #f2f2f2 !important;
+  border: 1px solid #ccc;
+  padding: 5px 9px;
+  font-size: 8.5pt;
+  font-weight: bold;
+  text-align: left;
+}
+#print-report-container .print-spec-table td,
+#print-report-container .print-metric-table td,
+#print-report-container .print-bench-table td {
+  border: 1px solid #ccc;
+  padding: 4px 8px;
+  font-size: 8.5pt;
+}
+
+#print-report-container .print-event-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 8pt;
+}
+#print-report-container .print-event-table th {
+  border: 1px solid #ccc;
+  padding: 4px 8px;
+  background: #f2f2f2 !important;
+  font-weight: bold;
+  text-align: left;
+}
+#print-report-container .print-event-table td {
+  border: 1px solid #ccc;
+  padding: 3px 8px;
+}
+#print-report-container .print-event-table tr:nth-child(even) td {
+  background: #fafafa !important;
+}
+
+/* ─── Checklist ─────────────────────────────────────────────────────────── */
+
+#print-report-container .print-checklist-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 5px;
+  font-size: 8.5pt;
+}
+#print-report-container .print-chk-item { padding: 2px 0; }
+
+/* ─── Badges ────────────────────────────────────────────────────────────── */
+
+#print-report-container .print-pass-badge,
+#print-report-container .print-fail-badge {
+  display: inline-block;
+  padding: 1px 6px;
+  font-size: 8pt;
+  font-weight: bold;
+  border: 1px solid #000;
+  white-space: nowrap;
+}
+#print-report-container .print-fail-badge { background: #e0e0e0 !important; }
+
+/* ─── Sparklines ────────────────────────────────────────────────────────── */
+
+#print-report-container .print-sparklines {
+  margin-top: 5px;
+  border-top: 1px dashed #ccc;
+  padding-top: 4px;
+}
+#print-report-container .print-sparkline-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 5px;
+}
+#print-report-container .print-sparkline-label {
+  font-size: 7.5pt;
+  color: #555;
+  white-space: nowrap;
+  min-width: 190px;
+}
+
+/* ─── Ghosted measured-vs-reference benchmark bars ──────────────────────── */
+
+#print-report-container .print-bars {
+  margin-top: 5px;
+  border-top: 1px dashed #ccc;
+  padding-top: 4px;
+}
+#print-report-container .print-bar-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 3px;
+}
+#print-report-container .print-bar-label {
+  font-size: 7.5pt;
+  color: #444;
+  min-width: 190px;
+  white-space: nowrap;
+}
+#print-report-container .print-bar-track {
+  position: relative;
+  flex: 1;
+  height: 9px;
+  background: #f3f3f3;
+  border: 1px solid #ccc;
+}
+#print-report-container .print-bar-ghost {
+  position: absolute;
+  top: 0; left: 0; bottom: 0;
+  background: repeating-linear-gradient(135deg, #ddd 0 3px, #eee 3px 6px);
+}
+#print-report-container .print-bar-fill {
+  position: absolute;
+  top: 0; left: 0; bottom: 0;
+  background: #444;
+}
+#print-report-container .print-bar-fill.accent { background: #E7014E; }
+#print-report-container .print-bar-value {
+  font-size: 7.5pt;
+  font-family: 'JetBrains Mono', monospace;
+  min-width: 120px;
+  text-align: right;
+  white-space: nowrap;
+}
+
+/* ─── PPI (page 3) ──────────────────────────────────────────────────────── */
+
+#print-report-container .print-ppi-headline {
+  display: flex;
+  gap: 14px;
+  align-items: stretch;
+  margin-bottom: 8px;
+}
+#print-report-container .print-ppi-index-tile {
+  border: 2px solid #000;
+  padding: 8px 16px;
+  text-align: center;
+  min-width: 110px;
+}
+#print-report-container .print-ppi-index-tile .ppi-big {
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 20pt;
+  font-weight: 700;
+  line-height: 1.05;
+}
+#print-report-container .print-ppi-index-tile .ppi-cap {
+  font-size: 6.5pt;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: #555;
+}
+#print-report-container .print-ppi-meta {
+  flex: 1;
+  font-size: 8.5pt;
+}
+#print-report-container .print-ppi-meta p { margin: 2px 0; }
+#print-report-container .print-ppi-flags {
+  font-size: 7.5pt;
+  color: #333;
+  margin-top: 5px;
+}
+
+/* ─── Provenance & integrity ────────────────────────────────────────────── */
+
+#print-report-container .print-provenance {
+  border: 1px solid #999;
+  border-left: 4px solid #E7014E;
+  padding: 7px 10px;
+  font-size: 7.5pt;
+  color: #333;
+  line-height: 1.5;
+}
+#print-report-container .print-provenance strong { color: #000; }
+#print-report-container .print-integrity {
+  margin-top: 8px;
+  font-size: 7.5pt;
+  color: #444;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+/* ─── Two-column ────────────────────────────────────────────────────────── */
+
+#print-report-container .print-two-col {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+}
+#print-report-container .print-two-col > div { padding-right: 8px; }
+
+/* ─── Footer / signatures ───────────────────────────────────────────────── */
+
+#print-report-container .print-footer {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 26px;
+  align-items: flex-end;
+}
+#print-report-container .signature-line p {
+  font-size: 9pt;
+  line-height: 1.3;
+  margin: 2px 0;
+}
+#print-report-container .stamp-section { text-align: right; }
+#print-report-container .stamp-box {
+  border: 3px double #000;
+  padding: 12px 24px;
+  font-size: 16pt;
+  font-weight: bold;
+  letter-spacing: 0.05em;
+  display: inline-block;
+  font-family: 'Space Grotesk', sans-serif;
+}
+#print-report-container .stamp-pass    { border: 3px double #000; }
+#print-report-container .stamp-fail    { border: 4px double #000; background: #e0e0e0 !important; }
+#print-report-container .stamp-pending { border: 2px dashed #000; }
+
+/* ─── Misc ──────────────────────────────────────────────────────────────── */
+
+#print-report-container .print-logo-section h1 { color: #000; }
+#print-report-container .print-note {
+  font-size: 6.5pt;
+  color: #888;
+  margin-top: 3px;
+}
+#print-report-container .hidden { display: none !important; }

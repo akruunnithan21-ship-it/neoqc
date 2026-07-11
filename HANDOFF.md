@@ -1,187 +1,203 @@
 # Neo QC — Session Handoff
-**Project:** Neo QC v1.1.2 — Price-to-Performance & QC Report Overhaul  
-**Shop:** Neo Tokyo Kochi service dept  
-**Repo:** `C:\Users\Aladeen\Desktop\Aladeen\neoqc-main`  
-**Python:** `C:\Users\Aladeen\AppData\Local\Python\pythoncore-3.14-64\python.exe`  
-**Supabase:** `https://ggsxkhenzdhaachubrsc.supabase.co` (anon key in main.js:111)  
-**Last session date:** 2026-07-08
+
+**Project:** Neo QC — Electron QC/build-tracking app for Neo Tokyo Kochi service dept
+**Repo:** `C:\Users\Aladeen\Desktop\Aladeen\neoqc-main`
+**Python:** `C:\Users\Aladeen\AppData\Local\Python\pythoncore-3.14-64\python.exe`
+**Supabase:** `https://ggsxkhenzdhaachubrsc.supabase.co` (anon key hardcoded in `main.js`, `app.js`, `dashboard/app.js`, and every Python script that touches Supabase)
+**GitHub:** `akruunnithan21-ship-it/neoqc` — releases are the OTA update mechanism (electron-updater)
+**Shipped version:** **v1.2.2** (live on GitHub Releases, verified OTA-resolvable)
+**Last session date:** 2026-07-11 (unreleased work in tree — see "This session (2026-07-11)" below)
 
 ---
 
 ## What this project is
 
-An Electron desktop app (main.js / app.js, Supabase backend, dashboard/) used by Neo Tokyo Kochi's service dept to track PC builds and QC. Currently v1.1.2. Building a **Price-to-Performance Index (PPI)** system and **two-page visual QC report** with:
-- PPI for the built config vs. same-price alternatives
-- Customer-fit / suitability analysis against stated use-case and budget
-- Visual benchmark graphs (solid bars = measured, ghosted = reference)
+An Electron desktop app (`main.js` = main process, `app.js` = renderer, `dashboard/` = separate static customer-facing site on GitHub Pages, `customer.html` = in-app customer view) used by Neo Tokyo Kochi's service dept to track PC builds and QC. Two people/screens: the **admin/technician app** (ticket modal in `index.html`) and the **customer dashboard** (`dashboard/`, `customer.html`) — both should show identical diagnostic/pricing data via a **shared render module** (see below).
 
 ---
 
-## Architecture (5 layers)
+## Architecture (5 layers) — status
 
 | Layer | What | Status |
 |---|---|---|
-| 1 | Price index — `component_prices` + `price_history` in Supabase + local JSON | **DONE** |
-| 2 | Performance reference — `component_performance` table + PassMark CSV | **DONE** |
-| 3 | Matching layer — ticket free-text → catalog SKU | **DONE** |
-| 4 | PPI engine — pure function, I/O-free | **DONE (v1)** — `ppi.py` |
-| 5 | Report rendering — two-page visual QC report | **NOT STARTED** |
+| 1 | Price index — `component_prices` + `price_history` in Supabase | **DONE**, live, 5,693 usable SKUs |
+| 2 | Performance reference — `component_performance` + PassMark | **DONE**, live, ~8,900 rows (CPU+GPU, incl. AMD — see bug fix below) |
+| 3 | Matching layer — free-text → catalog SKU | **DONE** — `matcher.py` (Python) + `shared/matcher.js` (JS port, kept in lockstep) |
+| 4 | PPI engine — pure function | **DONE** — `ppi.py`, wired end-to-end via `ppi_sync.py` → `ticket_ppi` table |
+| 5 | Report rendering — visual QC report | **DONE (2026-07-11, unreleased)** — three-page report built (`print-report.css` + `print-render.js` + restructured `#print-report-container`), verified in browser harness (`report-harness.html`); still needs a real Electron print/PDF smoke test |
 
 ---
 
-## Files built this session
+## Big picture: what shipped this cycle (v1.2.0 → v1.2.1 → v1.2.2)
+
+### v1.2.0 — Benchmarking & Stress-Test Overhaul
+Plan file (still useful reference): `C:\Users\Aladeen\.claude\plans\yes-with-that-section-binary-badger.md`
+- **Prime95 torture test** (CPU+RAM Blend mode) baked into the diagnostics run, real per-worker pass/fail.
+- **Component health passport cards** (CPU/GPU/RAM/Storage) — real SMBIOS DDR-gen detection (fixed a bug where DDR gen was guessed from capacity), per-module RAM detail, NVMe/SATA interface, SSD wear/power-on-hours.
+- **PPI end-to-end**: `ppi_sync.py` (new) loads a ticket's specs → matches to catalog via `matcher.py` → bridges to PassMark scores → calls `ppi()` → upserts `ticket_ppi` (new table). "Compute Price-Performance" button in the admin ticket modal; identical panel renders on the customer dashboard.
+- **Port checker v2**: guided before/after plug-in verification (`sys:port-snapshot` IPC), honest pass/fail/unverified states — removed a silent auto-pass fallback that used to fabricate a "Generic Device" pass when the detection script was missing.
+- **RGB sync v2**: per-device/zone OpenRGB control with verify-after-apply.
+- **Shared render module** (`shared/diagnostics-render.js`, `shared/icons.js`, `shared/diagnostics-tokens.css`) — pure JS functions consumed identically by the admin app, the customer dashboard, and the print report. `dashboard/shared/` is a **committed copy** (GitHub Pages serves straight from the repo, no build step) — after editing `shared/`, run `node sync-shared.js` and commit both.
+- Two real bugs fixed: `resolveExecutable()` was dead code (Settings → custom Cinebench/FurMark tool paths were silently ignored); `diagnostics.ramStress`/`ramDetail` were read by the report but never written by any code path (RAM could never fail QC).
+
+### v1.2.1 — Hotfix
+- **Startup crash**: `main.js` had registered `ipcMain.handle('sys:port-snapshot', ...)` **twice** (leftover duplicate from v1.2.0 work) — Electron throws on double-registration and crashes the whole main process. Fixed; also confirmed no other duplicate handlers exist (`grep -oP "ipcMain\.handle\('\K[^']+" main.js | sort | uniq -c | sort -rn` should show nothing >1 — **check this after any future main.js edit**).
+- **Autocomplete dropdown stacking bug**: `.form-section` uses `backdrop-filter`, which creates a new CSS stacking context per section — a dropdown's `z-index:1000` only won *within its own section*, so a later sibling `.form-section` always painted on top, hiding/clipping suggestions. Fixed via `.form-section:has(.autocomplete-list:not(:empty)) { z-index: 50; }`.
+
+### v1.2.2 — Catalog-Backed Autocomplete + Live Web Lookup
+**Root cause found:** the ticket-form spec autocomplete (Motherboard/CPU/GPU/RAM/Storage/PSU/Case/Cooler) was searching `assets/component-data/*.json` — a tiny hand-curated 20-80-item-per-category list via generic Fuse.js — completely disconnected from the real 5,693-item Supabase catalog. This is why real products like "Deepcool 1000M" or "Corsair Air 5400" showed nothing useful.
+
+Fixed:
+- **`shared/matcher.js`** — JS port of `matcher.py`'s token-weighted scorer, loaded via `<script>` like the other shared modules. **Kept in lockstep with `matcher.py` intentionally.** Also fixed a real matching bug present in *both*: glued model-number tokens (e.g. catalog name tokenizes "PN1000M" as one run, but a technician types "1000m" separately) didn't match — added a substring-containment fallback (0.75× weight) for digit-bearing tokens ≥3 chars. Verified no regression on existing high-confidence matches.
+- **`catalog:sync-cache` IPC** (`main.js`) + `syncCatalogCache()`/`loadCatalogCacheFromDisk()` (`app.js`): background-syncs the full `component_prices` table to `userData/database/catalog-cache.json` on boot (paged, 1000 rows/page). `assets/component-data/*.json` is kept only as an offline-before-first-sync fallback, never deleted.
+- **`setupSpecsAutocomplete()` rewritten** to search the cached catalog via the shared matcher instead of Fuse. Shows real prices in the dropdown. Verified live in browser.
+- **"Search Online" live web lookup** for genuinely-missing items (local match confidence < 0.55):
+  - **Live-validated and fixed all 3 fallback retailer scrapers** in `pcstudio_import.py` (`FALLBACK_SITES`) — mdcomputers.in, primeabgb.com, vedantcomputers.com were **all completely broken** (0 results, stale selectors) before this session, exactly matching this file's old "needs live testing" caveat. vedantcomputers.com's config even had the wrong platform assumption (labeled Shopify, is actually OpenCart) and a dead URL.
+  - Fixed two real price-parsing bugs found during testing: (1) `select_one()` on a comma-joined CSS selector doesn't respect declared priority order — added `_select_one_priority()` helper that tries each part in order; (2) a discount-percentage number like "Save-45%" was being misread as the price itself — added `PERCENT_RE` strip in `_parse_price()`.
+  - **`consolidate_and_upsert(query, category)`** (`pcstudio_import.py`, new): searches all fallback sites, clusters listings by name-similarity against the query (reuses `matcher.py`'s scorer), averages `price_inr` across the matched cluster, and — critically — **never fabricates confidence**: `price_sample_size` is the actual listing count used, not padded to look like "5 sites" when fewer matched. Synthesizes a `WEB-<slug>` SKU (mirrors the existing `REF-<slug>` convention for PassMark rows) since `component_prices.sku` is a NOT-NULL primary key. Upserts with `source='web-lookup'`, `needs_review=true` — new columns, additive `ALTER TABLE`, **already applied to Supabase**.
+  - **`catalog:web-lookup` IPC** (`main.js`): spawns `pcstudio_import.py --web-lookup "<query>" --category <cat>`, parses the **last line** of stdout as JSON (the scraper prints progress lines before the final JSON result — not a pure-JSON-only stream).
+  - Verified end-to-end for real: search → 10 real listings gathered across sites → averaged to a sane price → written to Supabase → confirmed queryable → confirmed a repeat search now finds it (or the better pcstudio.in entry, if one exists — real supplier data always wins when available).
+- **Fixed a stdout double-wrap bug**: `matcher.py` and `pcstudio_import.py` (and originally `ppi_sync.py`, `benchmark_import.py`, `supabase_loader.py`) each independently replaced `sys.stdout` with a **new** `TextIOWrapper` for UTF-8 console output — when one script imports another that does this too, the second wrapper's GC closes the shared buffer out from under the first, causing `"I/O operation on closed file"`. **Fixed everywhere by using `sys.stdout.reconfigure(encoding="utf-8", errors="replace")` instead of replacing the object.** If you add a new Python script that imports any of the others, use `reconfigure()`, not `io.TextIOWrapper(sys.stdout.buffer, ...)`.
+- **Fixed the "invisible card titles" dark-mode bug** (found while investigating a user report of "visible lines" in dropdowns/port-checker lists — turned out to be invisible text, not lines): `shared/diagnostics-tokens.css` switched its dark-mode text color via `@media (prefers-color-scheme: dark)` / `:root[data-theme]`, neither of which the admin app's actual dark-mode toggle (`body.dark-mode` class, used everywhere else in `style.css`) ever sets — so card titles rendered near-white-on-light (invisible) whenever the OS-level preference didn't match the app's own displayed theme, and the opposite bug on the dashboard. Fixed: added a `body.dark-mode { --dr-text: ...; }` scoped override for the admin app, and set `data-theme="dark"` directly on `dashboard/index.html`/`customer.html`'s `<html>` tag (both are permanently dark, no toggle, so this is a one-time hook, not user-facing).
+
+---
+
+## This session (2026-07-11) — dropdown fix, 5 retailer sites, PPI v2, 3-page report (ALL UNRELEASED)
+
+### 1. Autocomplete "lines through the dropdown" — REAL root cause found & fixed
+The v1.2.2 "invisible text" fix was a different bug; the user's lines were real. Every spec
+field keeps its `.autocomplete-list` div in the DOM at `z-index:1000` permanently, and an EMPTY
+list still painted its 1px border + shadow as a ~2px line under its input. When a field above
+opened its dropdown, the empty lists of fields underneath were LATER DOM siblings at the SAME
+z-index → their border-lines painted on top of the open dropdown. Proven via elementFromPoint
+hit-testing in a static repro. Fixed: `.autocomplete-list:empty { display:none; }` (style.css),
+`:not(.hidden)` added to the v1.2.1 `:has()` section-elevation rule, and blur now clears
+`list.innerHTML` as well as adding `.hidden` (app.js).
+
+### 2. Fallback retailer sites: 3 → 5 (live-validated 2026-07-11)
+- **computechstore.in** — custom Tailwind storefront, server-rendered `/search/?q=`. Cards are
+  `div.group:has(h3)` (bare `div.group` matches ~18 non-product wrappers and previously ate the
+  card budget → 0 rows); current price = `span.font-black:not(.line-through)`.
+- **vishalperipherals.com** — Shopify; its /search HTML is client-rendered (useless), so this
+  entry uses Shopify's server-side predictive-search JSON endpoint `/search/suggest.json`,
+  handled by a new `"type": "shopify-suggest"` branch in `search_fallback_sites()`.
+- Rejected: theitdepot.com (no working search URL found), elitehubs.com (suggest.json returns
+  0 results for model-number queries like "4060" — exactly what technicians type),
+  ezpzsolutions.in (search redirects to homepage).
+- Verified end-to-end: `--web-lookup "deepcool ak400" --category cooler` → 26 listings across
+  ALL FIVE sites → ₹3,475.69 average → upserted (needs_review=true).
+
+### 3. PPI engine v2 (`ppi.py`, `ppi_sync.py`, `benchmark_import.py`)
+- **Single-thread-aware CPU scoring**: PassMark single-thread ratings now captured
+  (`benchmark_import.py` reads the mega-page `thread` field → `single_thread_score` in
+  cpu_passmark.json → `passmark-cpu-st` rows in component_performance, ~5,850 pushed).
+  `ppi.py` blends CPU perf as `multithread^(1-α) × singlethread^α` per use-case
+  (`CPU_ST_EMPHASIS`; gaming-1080p α=0.6 … ai-ml α=0.2). Whole-pool fallback to multithread
+  (with flag) if ANY band member lacks ST data — blended and unblended magnitudes must never mix.
+- **Honest scoring**: categories without an objective benchmark / price / peers are now
+  UNSCORED (None, excluded from the index) instead of a fake "neutral 100" that inflated it.
+- **Ratio-to-best replaces min-max**: score = 100 × own/best-in-band ("% of the best
+  performance money buys at this price") — worst-in-band no longer craters to 0.
+- **Bottleneck flags now use ABSOLUTE fit ratios** (raw score vs MIN_RECOMMENDED), not the
+  price-band-relative scores (a great-value CPU next to a mid-value GPU is not a bottleneck).
+- **Matcher bug fixed in BOTH matcher.py and shared/matcher.js (lockstep, dashboard synced)**:
+  AMD part-number digit runs (e.g. "(100-100000910WOF)") poisoned the PassMark bridge — the
+  "100" token earned substring credit against "3100", so a 7800X3D catalog row matched
+  "AMD Ryzen 3 3100" (mt 11,521!). Fixes: model-number high-weight regex is now
+  `[0-9]{3,5}[a-z][a-z0-9]*|[0-9]{3,5}` (mixed tails like 7800x3d now high-weight; long pure
+  digit runs never), and substring-containment credit requires len ≥ 4 (was ≥ 3).
+- Real-ticket result (t_mock1, 7800X3D + 4070 Ti Super, gaming-1440p):
+  cpu 28.2 → **60.7**, index 77.9 → **87.9**, fit 1.0, bogus "CPU limiting" flag gone.
+- `benchmark_import.py` also had the OLD stdout TextIOWrapper double-wrap pattern (missed by
+  the v1.2.2 sweep) — now uses `reconfigure()` like everything else.
+
+### 4. Three-page QC / stress / info report (Layer 5) — BUILT, needs Electron print smoke test
+- **`print-report.css`** (new): all report styling, extracted from style.css's old
+  `@media print` block (now deleted there). Layout rules are scoped to
+  `#print-report-container` and media-agnostic; only the visibility dance + `@page` live in
+  `@media print`. This is what makes the report testable on screen.
+- **`print-render.js`** (new, loaded before app.js): ALL populate logic, Electron-free —
+  `NeoQcPrintRender.populate(ticket, settings, ppiRow)`. app.js's `populatePrintFields()` is
+  now a thin wrapper injecting appState.settings + ppiCacheByTicket (old ~300-line
+  implementation deleted from app.js).
+- **`report-harness.html`** (new, dev-only, repo root) + `.claude/launch.json` "report-harness"
+  entry (serves repo root on :4321): renders the REAL index.html report markup + REAL css/js
+  with a fully-loaded mock ticket as on-screen A4 sheets. Iterate on the report here, never in
+  Electron. All 3 pages verified ≤ A4 height with every section populated.
+- **Page structure** (`index.html` `#print-report-container`, all old element IDs preserved):
+  - **Page 1 — Quality Control Certificate**: header, verdict banner, NEW at-a-glance score
+    strip (QC n/13, Prime95 result, worst-case thermal headroom °C, PPI index, use-case fit),
+    customer/job + Windows, spec table w/ serials, QC checklist.
+  - **Page 2 — Stress & Diagnostics Lab Data**: thermal table + sparklines, benchmark table +
+    NEW ghosted measured-vs-QC-minimum bars (hatched = shop threshold, solid = measured, pink
+    when passing), Prime95 torture, SSD S.M.A.R.T., component passport, NEW port & connectivity
+    verification table (from d.portCheckV2 — honest pass/fail/unverified).
+  - **Page 3 — Value Analysis & Provenance**: expanded PPI (big index tile, "how to read this",
+    per-component ratio-to-best bars with unscored categories listed honestly, same-price
+    alternatives table, flags, PassMark attribution), activity log, NEW "Where every number
+    comes from" provenance box (measured-on-this-unit vs shop-policy thresholds vs reference
+    data), NEW deterministic report integrity code (FNV-1a over key results — reprint the same
+    ticket to verify a report wasn't doctored), signature + stamp.
+- Design: monochrome-first (B/W-laser safe) with one pink accent (#E7014E) on section markers,
+  tile tops, and passing bars. Verdict/stamp logic unchanged but Prime95 now counts toward the
+  overall verdict.
+
+### Remaining before release
+1. **Electron print smoke test**: open a real ticket → Print/Save PDF → confirm 3 clean pages
+   (harness verifies layout at exact A4 metrics, but Chromium print margins can differ slightly).
+2. Bump changelog modal + package.json, build, `gh release create` (dash-named assets!).
+
+---
+
+## Files (current, non-exhaustive)
 
 | File | What it does |
 |---|---|
-| `pcstudio_import.py` | Scrapes pcstudio.in (our supplier) via sitemap+JSON-LD. 3-tier fallback. `--limit N` for smoke test, `--fallback "query"` to search other retailers. |
-| `supabase_loader.py` | Loads `output/catalog.json` → Supabase. Upserts on SKU into `component_prices`, appends to `price_history` only when price changes. |
-| `benchmark_import.py` | Fetches PassMark CPU Mark (2,834 CPUs) + G3D GPU (2,830 GPUs). Saves to `assets/benchmarks/`. `--load-supabase` to push into `component_performance`. |
-| `matcher.py` | Token-set fuzzy matcher. Order-independent. Normalises wattage/GB/MHz. Three-band output: auto-accept ≥82%, suggest 55-82%, no-match <55%. CLI: `python matcher.py --text "RTX 4060" --category gpu` |
-| `database.sql` | Extended with: `component_prices`, `price_history`, `component_performance`, `sku_aliases` tables (full RLS, indexes). Run in Supabase SQL Editor. |
-| `assets/benchmarks/cpu_passmark.json` | 2,834 CPU PassMark scores (commercially free with attribution) |
-| `assets/benchmarks/gpu_passmark.json` | 2,830 GPU G3D scores (commercially free with attribution) |
+| `pcstudio_import.py` | Scrapes pcstudio.in (primary supplier), 3-tier fallback + `--resume` + checkpointing. `search_fallback_sites()`/`consolidate_and_upsert()` = live web lookup for missing components (mdcomputers.in, primeabgb.com, vedantcomputers.com — all live-validated 2026-07-10). `--web-lookup "query" --category X` prints JSON for the IPC bridge. |
+| `supabase_loader.py` | Loads `output/catalog.json` → Supabase `component_prices`/`price_history`. Converts ₹0 (out-of-stock) to NULL = price-unknown. |
+| `benchmark_import.py` | Fetches PassMark CPU/GPU scores → `assets/benchmarks/*.json` → `component_performance`. Uses the mega-page JSON endpoint for CPU data (the old `cpu_list.php` table scrape silently returned Intel-only — fixed, verify AMD entries exist if you touch this again). |
+| `matcher.py` | Token-set fuzzy matcher (Python). `Matcher.from_catalog_json()`, `.match()`, `.match_build_specs()`. Has the substring-containment fallback for glued model-number tokens (see v1.2.2 above). |
+| `shared/matcher.js` | JS port of `matcher.py`, kept in lockstep. `shared/diagnostics-render.js`, `shared/icons.js`, `shared/diagnostics-tokens.css` = the rest of the shared render module. `dashboard/shared/` is a committed mirror — run `node sync-shared.js` after any edit to `shared/`. |
+| `ppi.py` | Layer 4 PPI engine — pure function, no I/O. `USE_CASE_WEIGHTS`/`MIN_RECOMMENDED` need boss sign-off (see Open Items). |
+| `ppi_sync.py` | Loads ticket specs → matches to catalog → computes `ppi()` → upserts `ticket_ppi`. Invoked via the `ppi:compute` IPC handler in `main.js`. |
+| `database.sql` | Full schema — all tables and columns described here are **live in Supabase**. Re-run additive blocks manually in the SQL Editor when adding new ones (same pattern used all session). |
+| `resume_run.bat` + Windows Scheduled Task pattern | Used once to survive the app being closed mid-scrape — see git history if you need to resume a long-running Python job independent of the Electron app. |
 
 ---
 
-## Catalog import — PARTIAL (2,738 / ~8,003), resume available
+## Database — all live in Supabase (verified)
 
-The overnight full run (2026-07-08 → finished 2026-07-09 04:02) captured only
-**2,738 of ~8,003 products**: the machine lost network/DNS partway (~product
-#3,491) and never recovered, so ~5,265 URLs failed with `getaddrinfo failed`.
-The captured 2,738 are valid, all 9 categories, in `output/catalog.json`.
-**This is not the site or the scraper — it was a local connectivity drop.**
-
-The scraper is now **hardened** (2026-07-09):
-- `get()` retries transient network failures 3× with exponential backoff.
-- `--resume` loads `output/catalog.json`, skips captured URLs, fetches only the
-  ~5,265 still missing, and merges (de-duped by URL) — no full re-scrape needed.
-- Checkpoints `catalog.json` every 100 products, so a future drop can't wipe progress.
-
-### To finish the catalog (fill the missing ~5,265):
-```powershell
-$py = "C:\Users\Aladeen\AppData\Local\Python\pythoncore-3.14-64\python.exe"
-Set-Location "C:\Users\Aladeen\Desktop\Aladeen\neoqc-main"
-& $py pcstudio_import.py --resume        # ~1 hr on a stable connection; safe to re-run if it drops again
 ```
-
-### Then push to Supabase (needs live network + the new tables applied — already done):
-```powershell
-& $py -m pip install supabase           # if not already installed
-& $py supabase_loader.py                 # push catalog → component_prices / price_history
-& $py benchmark_import.py --load-supabase   # push PassMark scores → component_performance
+component_prices      — 5,693 usable SKUs (has SKU + category), 7,996 total scraped rows.
+                         New columns (v1.2.2): needs_review BOOLEAN, price_listings JSONB,
+                         price_sample_size INT — used by the web-lookup flow.
+price_history          — append-only price log
+component_performance  — ~8,900 PassMark rows (CPU + GPU, includes AMD — fixed a bug where
+                          the old scrape source was silently Intel-only)
+sku_aliases             — free-text → SKU map, staff-confirmable (not yet used by any UI flow)
+ticket_ppi              — precomputed PPI results per ticket (written by ppi_sync.py, read-only
+                           from both the admin app and the dashboard)
 ```
 
 ---
 
-## Database tables added (run database.sql in Supabase SQL Editor)
+## Known data-quality caveats (not bugs to silently "fix," just be aware)
 
-```
-component_prices     — current price per SKU (upsert target)
-price_history        — append-only price log (insert only when price changes)
-component_performance — benchmark scores, source=measured|reference
-sku_aliases          — free-text → SKU map, staff-confirmable
-```
-
-**Schema not yet applied to live Supabase** — the new tables need to be created by running the additions at the bottom of `database.sql` in the Supabase SQL Editor.
-
----
-
-## pcstudio.in scraper — key facts
-
-- **Tier that works:** Tier 2 (sitemap + JSON-LD). Site has 9 product sitemaps, 8,003 URLs total.
-- **Smoke test result:** 50 products, 100% with price, 100% with SKU — perfect.
-- **Category slugs confirmed working:**
-  - `processor`, `graphics-card`, `motherboard`, `ram`, `storage`, `power-supply`, `cabinets`, `cpu-cooler`
-- **Site is our supplier** — scraping is authorised. Still display "Prices from pcstudio.in" in any customer-facing output.
-- **Price field:** `offers.price` in JSON-LD is a number (INR), no parsing needed.
-- **Known categorisation quirk:** WooCommerce sometimes labels AMD Ryzen platform motherboards under a "processor" category. The importer now checks name keywords and URL slug as fallback, with `motherboard` keywords taking priority over `cpu` keywords.
-
----
-
-## Matcher — how it works
-
-`matcher.py` — `Matcher.from_catalog_json("output/catalog.json")`
-
-- Tokenises both query and catalog entry, lowercased, noise-words removed
-- Normalises: `1000W` = `1000 Watts` → `1000w`; `16GB` = `16 GB` → `16gb`; `6000MHz` = `6000 MHz` → `6000mhz`
-- Scores by weighted token intersection (model numbers / spec tokens score 2×)
-- `match(text, category=None)` → `MatchResult(sku, matched_name, confidence, auto_accepted, needs_confirm)`
-- `match_build_specs(specs_dict)` → matches all fields at once (for ticket batch processing)
-
-**Tested confidence scores (20-item smoke catalog):**
-- "MSI B650M Gaming Plus WiFi" → motherboard → 96% AUTO-ACCEPT ✓
-- "RTX 5080 Zotac Solid Core" → gpu → 92% AUTO-ACCEPT ✓  
-- "Corsair RM1000x 1000W" → psu → 88% AUTO-ACCEPT ✓
-
----
-
-## Fallback price sources (partial — needs HTML selector tuning)
-
-`python pcstudio_import.py --fallback "component name"` searches:
-- mdcomputers.in (OpenCart)
-- primeabgb.com (WooCommerce)
-- vedantcomputers.com (Shopify)
-
-Infrastructure is in place but per-site HTML selectors need live testing against each site. Do this when you hit a real component that's missing from pcstudio's catalog.
-
----
-
-## Benchmark licensing (read before showing scores to customers)
-
-| Source | Benchmark | Licence for commercial use |
-|---|---|---|
-| PassMark / cpubenchmark.net | CPU Mark | **Free** — must display "PassMark® / passmark.com" attribution |
-| PassMark / videocardbenchmark.net | G3D Mark | **Free** — same attribution requirement |
-| Our own Cinebench / FurMark runs | Cinebench MT, FurMark score | **Ours** — no restriction |
-| Our own CrystalDiskMark | CDM seq read/write | **Ours** — no restriction |
-
-In the QC report: solid bars = our measured scores, ghosted/outlined bars = PassMark reference. Footnote: "Reference scores from PassMark® (passmark.com). Your results may vary."
-
----
-
-## Layer 4 — PPI Engine (built this session)
-
-`ppi.py` — pure function, no I/O, unit-tested manually with a synthetic catalog (see below):
-
-```
-ppi(
-    build_specs: dict,         # category -> SKU, matched from build ticket
-    component_prices: dict,    # SKU -> {name, category, price_inr} — full catalog, not just the build
-    benchmark_scores: dict,    # SKU -> {benchmark_name: score}, e.g. {"passmark-cpu": 32000}
-    use_cases: list[str],      # selected from USE_CASE_WEIGHTS keys
-    price_band_pct: float = 0.15  # how wide a "same price range" is (±15%)
-) → PPIResult(
-    index: float,                 # 0–100 composite score
-    per_component_scores: dict,   # category -> 0-100
-    in_range_comparisons: dict,   # category -> top 3 ComparisonEntry alternatives
-    customer_fit_score: float,    # 0–1, ratio of build's benchmark vs MIN_RECOMMENDED thresholds
-    flags: list[str],             # e.g. "GPU bottlenecked relative to CPU for the selected use-case"
-)
-```
-
-**How it works:**
-- Only `cpu` and `gpu` have objective benchmark data (`passmark-cpu` / `passmark-g3d`) wired up. `ram`/`storage`/`psu`/`case`/`cooler`/`motherboard` currently score a neutral 100 with a flag noting no benchmark data exists yet for them — see Open Items #7 (measured scores loader) to eventually fix this for storage (CDM) at least.
-- Per-component score = min-max normalize the build's own benchmark score against every catalog SKU of the same category within `±price_band_pct` of its own price.
-- Composite `index` = weighted average of per-component scores, weights averaged across all selected `use_cases` from `USE_CASE_WEIGHTS` (in `ppi.py`).
-- `customer_fit_score` compares the build's raw CPU/GPU benchmark numbers against `MIN_RECOMMENDED` thresholds per use-case — **these thresholds and the `gaming-1080p`/`gaming-4k`/`streaming`/`content-creation` weight rows are engineering-judgment placeholders, not reviewed by the boss yet** (same caveat as the original weights table — see Open Items #3/#4).
-- Bottleneck flag fires when CPU/GPU normalized scores diverge by more than 1.6x for gaming/ai-ml use-cases.
-
-**Not yet done:** wiring `ppi()` up to real Supabase data (needs the full catalog import + `component_prices`/`component_performance` tables live), and Layer 5 (report rendering) which will call `ppi()` and draw the two-page QC report.
-
-### Use-case taxonomy & PPI weights — now live in `ppi.py`
-`USE_CASE_WEIGHTS` and `MIN_RECOMMENDED` in `ppi.py` are the current source of truth (superseding the old draft tables that used to live here). `gaming-1440p`/`video-editing`/`cad-3d`/`office`/`ai-ml` weights match what the boss reviewed; `gaming-1080p`/`gaming-4k`/`streaming`/`content-creation` are engineering-judgment fill-ins pending sign-off (Open Items #3/#4).
+- **Catalog is ~8,000 of pcstudio.in's ~8,003+ current listings** (a handful of sitemap URLs 404'd/weren't products). Good enough for real use; not literally 100%.
+- **780 rows have NULL price** (`price_inr`) — these were ₹0 (out-of-stock) at scrape time, intentionally converted to NULL so they don't pollute PPI price-band math. They still have name/SKU/category.
+- **Some accessories are miscategorized** (e.g. a cooler occasionally lands under `cpu`) — a scraper keyword-categorization quirk, minor, hasn't been root-caused/fixed.
+- ~~Only 3 of the target 5+ fallback sites configured~~ **RESOLVED 2026-07-11**: 5 sites now live (added computechstore.in + vishalperipherals.com, both live-validated — see "This session" above). The do-NOT-trust-selectors-without-live-testing rule still applies to any future additions.
 
 ---
 
 ## Open items (don't let these get lost)
 
-1. **Apply database.sql to Supabase** — the new tables are NOT live yet. Paste the bottom half of `database.sql` into Supabase SQL Editor.
-2. **Wait for full run to finish** then run `supabase_loader.py` and `benchmark_import.py --load-supabase`.
-3. **Finalise use-case taxonomy** — the list above is a draft. Confirm with the boss which use cases Neo Tokyo Kochi actually sells.
-4. **PPI weights** — the table above is a starting point. Needs review.
-5. **Fallback site selectors** — debug when you have a real missing component to test.
-6. **PassMark attribution** — wire into QC report UI before showing reference scores.
-7. **`source=measured` scores** — need a loader for our own Cinebench/FurMark/CrystalDiskMark results (currently only `source=reference` from PassMark is implemented).
+1. **PPI weight sign-off** — `ppi.py`'s `USE_CASE_WEIGHTS`/`MIN_RECOMMENDED`: `gaming-1440p`/`video-editing`/`cad-3d`/`office`/`ai-ml` rows were reviewed by the boss in an earlier session; `gaming-1080p`/`gaming-4k`/`streaming`/`content-creation`, all `MIN_RECOMMENDED` thresholds, AND the new `CPU_ST_EMPHASIS` α values (2026-07-11) are engineering-judgment placeholders pending sign-off. (The X3D multithread-undervaluation caveat itself is FIXED — single-thread blend, see "This session".)
+2. ~~Layer 5 two-page visual QC report~~ **BUILT 2026-07-11** as a three-page report — needs a real Electron print/Save-PDF smoke test before release (see "Remaining before release").
+3. **Real-hardware validation still needed**: a full-length Prime95 run, the guided port-checker flow, and RGB zone control have only been tested against this dev laptop (no RGB hardware present) — need a real shop PC with RGB to fully validate v1.2.0's features.
+4. ~~Fallback site coverage~~ **RESOLVED 2026-07-11** — 5 sites live.
+5. **`sku_aliases` table** exists (staff-confirmable free-text→SKU map) but nothing in the UI writes to or reads from it yet — a possible future improvement for the matching/review workflow.
+6. **Package + ship this session's work** as the next OTA release (v1.3.0 suggested — the report + PPI v2 are user-visible).
 
 ---
 
@@ -191,11 +207,10 @@ ppi(
 $py = "C:\Users\Aladeen\AppData\Local\Python\pythoncore-3.14-64\python.exe"
 Set-Location "C:\Users\Aladeen\Desktop\Aladeen\neoqc-main"
 
-# Check full run progress
-Get-Content output\full_run_stdout.txt | Select-Object -Last 5
-(Get-Content output\full_run_stdout.txt | Select-String "Tier2-JSONLD").Count
+# Re-sync full catalog from pcstudio.in (checkpointed, resumable)
+& $py pcstudio_import.py --resume
 
-# After full run finishes: load to Supabase
+# Push catalog / benchmarks to Supabase after a re-scrape
 & $py supabase_loader.py
 & $py benchmark_import.py --load-supabase
 
@@ -203,12 +218,27 @@ Get-Content output\full_run_stdout.txt | Select-Object -Last 5
 & $py matcher.py --text "RTX 4070 Super ASUS" --category gpu
 & $py matcher.py --ticket-id <ticket-id>
 
-# Search fallback retailers for missing component
-& $py pcstudio_import.py --fallback "Ryzen 9 9950X"
+# Live web lookup for a missing component (writes to Supabase!)
+& $py pcstudio_import.py --web-lookup "some component name" --category psu
 
-# Re-run smoke test
-& $py pcstudio_import.py --limit 50
+# Compute PPI for a ticket manually
+& $py ppi_sync.py --ticket-id <ticket-id> --use-case gaming-1440p
 
-# Fetch fresh benchmark scores
-& $py benchmark_import.py
+# After editing anything in shared/ — sync the dashboard's committed copy
+node sync-shared.js
+
+# Build + release a new version (electron-builder; see git log for the exact
+# gh release create incantation used each time — MUST rename assets to the
+# dash-format latest.yml expects, e.g. "NeoQC-Setup-1.2.2.exe" not
+# "NeoQC Setup 1.2.2.exe" — GitHub's asset-name space→dot mangling breaks
+# the updater URL otherwise. Verify after publishing:
+#   curl -sL https://github.com/akruunnithan21-ship-it/neoqc/releases/latest/download/latest.yml
+npm run build
+```
+
+## Sanity checks worth running after any main.js edit
+
+```powershell
+# No duplicate IPC handler registrations (caused the v1.2.1 crash)
+Get-Content main.js | Select-String "ipcMain\.handle\('" | Group-Object { $_.Line -replace ".*handle\('([^']+)'.*", '$1' } | Where-Object Count -gt 1
 ```

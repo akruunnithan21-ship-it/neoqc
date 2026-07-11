@@ -267,7 +267,13 @@ function setupSpecsAutocomplete() {
     input.addEventListener('input', updateSuggestions);
     input.addEventListener('focus', updateSuggestions);
     input.addEventListener('blur', () => {
-      setTimeout(() => list.classList.add('hidden'), 200);
+      // Clear as well as hide: an empty list is display:none via the
+      // :empty rule, so a stale hidden list can never paint its border
+      // over a sibling field's open dropdown again.
+      setTimeout(() => {
+        list.classList.add('hidden');
+        list.innerHTML = '';
+      }, 200);
     });
   });
 }
@@ -2414,302 +2420,20 @@ function checkClientFormReady() {
 // ==========================================================================
 // PRINTING REPORTS MAPPING (A4 Layout Integration)
 // ==========================================================================
-function populatePrintChecklist(ticket) {
-  const qcContainer = document.getElementById('print-checklist-container');
-  if (qcContainer) {
-    const getBuildCheck = (prop) => (ticket.buildChecks && ticket.buildChecks[prop]) || false;
-    const getQcCheck = (prop) => (ticket.qcChecks && ticket.qcChecks[prop]) || false;
-
-    const items = [
-      { checked: getQcCheck('physCabinet'), label: "Physical Condition Clean & Checked" },
-      { checked: getQcCheck('physMobo'), label: "Motherboard Socket & CPU Pins Checked" },
-      { checked: getQcCheck('physRam'), label: "RAM Modules Correctly Installed" },
-      { checked: getBuildCheck('cooler'), label: "CPU Cooler / AIO Thermal Assembly Secured" },
-      { checked: getBuildCheck('cables'), label: "Structural Cables Organized & Zip-tied" },
-      { checked: getBuildCheck('posted'), label: "System Posted successfully to BIOS" },
-      { checked: getQcCheck('softWindows'), label: "Windows OS Installed & Fully Licensed" },
-      { checked: getQcCheck('softDrivers'), label: "System Hardware Drivers Updated" },
-      { checked: getQcCheck('softBios'), label: "Motherboard BIOS Updated" },
-      { checked: getQcCheck('portUsb'), label: "Front/Rear USB Ports Functional" },
-      { checked: getQcCheck('portVideo'), label: "HDMI & DisplayPort Output Verified" },
-      { checked: getQcCheck('portAudio'), label: "Audio Port Sound Jack Checked" },
-      { checked: getQcCheck('portWifi'), label: "Wi-Fi Antenna Mounted & Calibrated" }
-    ];
-    qcContainer.innerHTML = items.map(item => `
-      <div class="print-chk-item">${item.checked ? '✔️' : '❌'} ${item.label}</div>
-    `).join('');
-  }
-}
-
-function buildSparkline(data, threshold) {
-  if (!data || data.length < 2) return '';
-  const W = 300, H = 38, PAD = 4;
-  const min = Math.min(...data) - 2;
-  const max = Math.max(...data, threshold) + 2;
-  const xStep = (W - PAD * 2) / (data.length - 1);
-  const yScale = (H - PAD * 2) / (max - min);
-  const pts = data.map((v, i) => {
-    const x = PAD + i * xStep;
-    const y = H - PAD - (v - min) * yScale;
-    return `${x.toFixed(1)},${y.toFixed(1)}`;
-  }).join(' ');
-  const ty = (H - PAD - (threshold - min) * yScale).toFixed(1);
-  return `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" style="vertical-align:middle;">` +
-    `<line x1="${PAD}" y1="${ty}" x2="${W - PAD}" y2="${ty}" stroke="#bbb" stroke-width="0.8" stroke-dasharray="4,3"/>` +
-    `<polyline points="${pts}" fill="none" stroke="#000" stroke-width="1.5" stroke-linejoin="round"/>` +
-    `</svg>`;
-}
-
+// The three-page report populate logic lives in print-render.js
+// (NeoQcPrintRender) — deliberately Electron-free so the report layout can be
+// developed and visually tested in a plain browser harness
+// (report-harness.html). This wrapper just injects the app-side state.
 function populatePrintFields(ticket) {
-  populatePrintChecklist(ticket);
-
-  const d       = ticket.diagnostics || {};
-  const specs   = ticket.specs       || {};
-  const serials = ticket.serials     || {};
-  const settings = appState.settings || {};
-
-  // ── Header ──
-  document.getElementById('print-ticket-id').textContent = ticket.id.slice(-6).toUpperCase();
-  document.getElementById('print-build-type').textContent = ticket.buildType || ticket.jobType || 'PC Assembly';
-  document.getElementById('print-date').textContent = new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
-  document.getElementById('print-tech').textContent = ticket.technician || '--';
-  const shopContactEl = document.getElementById('print-shop-contact');
-  if (shopContactEl) shopContactEl.textContent = settings.shopContact || '';
-
-  // ── Customer & Job ──
-  document.getElementById('print-customer-name').textContent = ticket.customerName || '--';
-  document.getElementById('print-job-type').textContent = ticket.buildType || ticket.jobType || '--';
-  document.getElementById('print-status').textContent = ticket.status || '--';
-  document.getElementById('print-created-at').textContent = ticket.createdAt
-    ? new Date(ticket.createdAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '--';
-  document.getElementById('print-deadline').textContent = ticket.deadline
-    ? new Date(ticket.deadline).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '--';
-  document.getElementById('print-completed-at').textContent = ticket.completedAt
-    ? new Date(ticket.completedAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '--';
-
-  // ── Windows ──
-  document.getElementById('print-win-status').textContent = ticket.windowsActivation || d.windowsActivation || '--';
-  document.getElementById('print-win-key').textContent    = ticket.windowsKey         || d.windowsKey         || '--';
-
-  // ── Hardware Specs ──
-  document.getElementById('print-spec-cpu').textContent     = specs.cpu        || '--';
-  document.getElementById('print-spec-igpu').textContent    = specs.igpu       || 'None / Integrated';
-  document.getElementById('print-spec-gpu').textContent     = specs.gpu        || '--';
-  document.getElementById('print-spec-ram').textContent     = specs.ram        || '--';
-  document.getElementById('print-spec-storage').textContent = specs.storage    || '--';
-  document.getElementById('print-spec-mobo').textContent    = specs.mobo       || specs.motherboard || '--';
-  document.getElementById('print-spec-cooler').textContent  = specs.cooler     || '--';
-  document.getElementById('print-spec-psu').textContent     = specs.psu        || '--';
-  document.getElementById('print-spec-case').textContent    = specs.case       || specs.cabinet || '--';
-
-  // Serials
-  document.getElementById('print-serial-gpu').textContent     = serials.gpu                         || '—';
-  document.getElementById('print-serial-ram').textContent     = serials.ram                         || '—';
-  document.getElementById('print-serial-ssd').textContent     = serials.ssd                         || '—';
-  document.getElementById('print-serial-mobo').textContent    = serials.mobo || serials.motherboard  || '—';
-  document.getElementById('print-serial-cabinet').textContent = serials.cabinet                      || '—';
-
-  // Missing parts note
-  const missingParts = ticket.missingParts || ticket.pendingParts || '';
-  const missingEl     = document.getElementById('print-missing-parts');
-  const missingTextEl = document.getElementById('print-missing-parts-text');
-  if (missingParts && missingEl && missingTextEl) {
-    missingTextEl.textContent = missingParts;
-    missingEl.classList.remove('hidden');
+  if (!window.NeoQcPrintRender) {
+    console.error('print-render.js not loaded — cannot populate print report');
+    return;
   }
-
-  // ── Thresholds from settings (with sensible defaults) ──
-  const cpuThresh   = settings.cpuMaxTemp    || 85;
-  const gpuThresh   = settings.gpuMaxTemp    || 80;
-  const cbThresh    = settings.minCinebench  || 10000;
-  const fmThresh    = settings.minFurmark    || 5000;
-  const readThresh  = settings.minSsdRead    || 3000;
-  const writeThresh = settings.minSsdWrite   || 2500;
-
-  const badge = (pass) => pass
-    ? '<span class="print-pass-badge">&#x2713; PASS</span>'
-    : '<span class="print-fail-badge">&#x2717; FAIL</span>';
-
-  // ── Thermal Results ──
-  const cpuMin = d.cpuTempMin ?? null;
-  const cpuMax = d.cpuTempMax ?? null;
-  const cpuAvg = d.cpuTempAvg ?? null;
-  const gpuMin = d.gpuTempMin ?? null;
-  const gpuMax = d.gpuTempMax ?? null;
-  const gpuAvg = d.gpuTempAvg ?? null;
-
-  const cpuPass = cpuMax !== null ? cpuMax <= cpuThresh : null;
-  const gpuPass = gpuMax !== null ? gpuMax <= gpuThresh : null;
-  const ramPass = d.ramStress === 'passed' || d.ramStress === true;
-
-  document.getElementById('print-cpu-min').textContent = cpuMin !== null ? cpuMin + ' °C' : '--';
-  document.getElementById('print-cpu-avg').textContent = cpuAvg !== null ? cpuAvg + ' °C' : '--';
-  document.getElementById('print-cpu-max').textContent = cpuMax !== null ? cpuMax + ' °C' : '--';
-  document.getElementById('print-gpu-min').textContent = gpuMin !== null ? gpuMin + ' °C' : '--';
-  document.getElementById('print-gpu-avg').textContent = gpuAvg !== null ? gpuAvg + ' °C' : '--';
-  document.getElementById('print-gpu-max').textContent = gpuMax !== null ? gpuMax + ' °C' : '--';
-  document.getElementById('print-cpu-thresh').textContent = `≤ ${cpuThresh} °C`;
-  document.getElementById('print-gpu-thresh').textContent = `≤ ${gpuThresh} °C`;
-  document.getElementById('print-cpu-result').innerHTML = cpuPass !== null ? badge(cpuPass) : '--';
-  document.getElementById('print-gpu-result').innerHTML = gpuPass !== null ? badge(gpuPass) : '--';
-
-  const ramDetailEl = document.getElementById('print-ram-detail');
-  if (ramDetailEl) ramDetailEl.textContent = d.ramDetail || (d.ramStress !== undefined ? String(d.ramStress) : '--');
-  document.getElementById('print-ram-result').innerHTML = d.ramStress !== undefined ? badge(ramPass) : '--';
-
-  // ── Temperature Sparklines ──
-  const cpuLog = d.cpuTempLog || [];
-  const gpuLog = d.gpuTempLog || [];
-  if (cpuLog.length > 1 || gpuLog.length > 1) {
-    const sparkEl = document.getElementById('print-sparklines');
-    if (sparkEl) sparkEl.classList.remove('hidden');
-    const cpuSpark = document.getElementById('print-cpu-sparkline');
-    const gpuSpark = document.getElementById('print-gpu-sparkline');
-    if (cpuSpark && cpuLog.length > 1) cpuSpark.innerHTML = buildSparkline(cpuLog, cpuThresh);
-    if (gpuSpark && gpuLog.length > 1) gpuSpark.innerHTML = buildSparkline(gpuLog, gpuThresh);
-  }
-
-  // ── Benchmark Results ──
-  const cb   = d.cinebench    ?? d.cinebenchScore ?? null;
-  const fm   = d.furmark      ?? d.furmarkScore   ?? null;
-  const ssdR = d.ssdRead      ?? null;
-  const ssdW = d.ssdWrite     ?? null;
-
-  const cbPass    = cb   !== null ? cb   >= cbThresh    : null;
-  const fmPass    = fm   !== null ? fm   >= fmThresh    : null;
-  const readPass  = ssdR !== null ? ssdR >= readThresh  : null;
-  const writePass = ssdW !== null ? ssdW >= writeThresh : null;
-
-  document.getElementById('print-score-cb').textContent    = cb   !== null ? cb.toLocaleString()   + ' pts'   : '--';
-  document.getElementById('print-score-fm').textContent    = fm   !== null ? fm.toLocaleString()   + ' pts'   : '--';
-  document.getElementById('print-score-read').textContent  = ssdR !== null ? ssdR.toLocaleString() + ' MB/s'  : '--';
-  document.getElementById('print-score-write').textContent = ssdW !== null ? ssdW.toLocaleString() + ' MB/s'  : '--';
-
-  document.getElementById('print-thresh-cb').textContent    = `≥ ${cbThresh.toLocaleString()} pts`;
-  document.getElementById('print-thresh-fm').textContent    = `≥ ${fmThresh.toLocaleString()} pts`;
-  document.getElementById('print-thresh-read').textContent  = `≥ ${readThresh.toLocaleString()} MB/s`;
-  document.getElementById('print-thresh-write').textContent = `≥ ${writeThresh.toLocaleString()} MB/s`;
-
-  document.getElementById('print-result-cb').innerHTML    = cbPass    !== null ? badge(cbPass)    : '--';
-  document.getElementById('print-result-fm').innerHTML    = fmPass    !== null ? badge(fmPass)    : '--';
-  document.getElementById('print-result-read').innerHTML  = readPass  !== null ? badge(readPass)  : '--';
-  document.getElementById('print-result-write').innerHTML = writePass !== null ? badge(writePass) : '--';
-
-  // ── SSD Drive Health ──
-  const ssdH = d.ssdHealth;
-  if (ssdH && !ssdH.error) {
-    const ssdSection = document.getElementById('print-ssd-health-section');
-    if (ssdSection) ssdSection.classList.remove('hidden');
-    document.getElementById('print-ssd-model').textContent  = ssdH.model        || '--';
-    document.getElementById('print-ssd-type').textContent   = ssdH.mediaType    || '--';
-    document.getElementById('print-ssd-health').textContent = ssdH.healthStatus || '--';
-    document.getElementById('print-ssd-life').textContent   = ssdH.lifeRemaining != null ? ssdH.lifeRemaining + '%' : 'N/A';
-    document.getElementById('print-ssd-hours').textContent  = ssdH.powerOnHours != null ? ssdH.powerOnHours + ' hrs' : 'N/A';
-    document.getElementById('print-ssd-size').textContent   = ssdH.size ? Math.round(ssdH.size / 1e9) + ' GB' : '--';
-  }
-
-  // ── Prime95 Torture Test ──
-  const p95 = d.prime95;
-  if (p95 && p95.overallResult && p95.overallResult !== 'not-run') {
-    const sec = document.getElementById('print-prime95-section');
-    if (sec) sec.classList.remove('hidden');
-    const p95Pass = p95.overallResult === 'pass';
-    document.getElementById('print-p95-result').innerHTML = badge(p95Pass) + (p95.overallResult === 'aborted' ? ' (aborted early)' : '');
-    document.getElementById('print-p95-duration').textContent = p95.durationActualSec ? Math.round(p95.durationActualSec / 60) + ' min (Blend)' : '--';
-    document.getElementById('print-p95-workers').textContent = p95.workerCount || (p95.workers || []).length || '--';
-    const errCount = (p95.workers || []).reduce((s, w) => s + (w.errors || 0), 0);
-    const warnCount = (p95.workers || []).reduce((s, w) => s + (w.roundingWarnings || 0), 0);
-    document.getElementById('print-p95-errors').textContent = `${errCount} error(s), ${warnCount} warning(s)`;
-    const errLines = document.getElementById('print-p95-error-lines');
-    if (errLines) errLines.innerHTML = (p95.errorSummary || []).slice(0, 5).map(l => `<div>• ${l}</div>`).join('');
-  }
-
-  // ── Component Passport ──
-  const cp = d.componentPassport;
-  if (cp) {
-    const sec = document.getElementById('print-passport-section');
-    const body = document.getElementById('print-passport-body');
-    if (sec && body) {
-      sec.classList.remove('hidden');
-      const rows = [];
-      if (cp.cpu) rows.push(['CPU', `${cp.cpu.model || '--'} — ${cp.cpu.cores || '?'}C/${cp.cpu.threads || '?'}T`,
-        cp.cpu.throttled ? 'THERMAL THROTTLE' : (cp.cpu.healthNote || (cp.cpu.tempMaxDuringTest != null ? `OK, max ${cp.cpu.tempMaxDuringTest}°C under load` : 'Not tested'))]);
-      if (cp.gpu) rows.push(['GPU', `${cp.gpu.model || '--'}${cp.gpu.vram ? ' — ' + cp.gpu.vram : ''}`,
-        cp.gpu.throttled ? 'THERMAL THROTTLE' : (cp.gpu.tempMaxDuringTest != null ? `OK, max ${cp.gpu.tempMaxDuringTest}°C under load` : 'Not tested')]);
-      if (cp.ram) rows.push(['RAM', `${cp.ram.totalGB || '?'} GB ${cp.ram.ddrGen || ''} (${(cp.ram.modules || []).length} module(s))`,
-        cp.ram.errorsDuringPrime95 > 0 ? `${cp.ram.errorsDuringPrime95} ERROR(S) in torture test` : (cp.ram.healthNote || 'Not tested')]);
-      if (cp.storage) rows.push(['Storage', `${cp.storage.model || '--'} — ${cp.storage.interface || cp.storage.mediaType || ''} ${cp.storage.sizeGB || '?'} GB`,
-        cp.storage.lifeRemaining != null ? `${cp.storage.healthStatus || 'OK'}, ${cp.storage.lifeRemaining}% life, ${cp.storage.powerOnHours != null ? cp.storage.powerOnHours + ' h powered on' : ''}` : (cp.storage.healthStatus || '--')]);
-      body.innerHTML = rows.map(r => `<tr><td><strong>${r[0]}</strong></td><td>${r[1]}</td><td>${r[2]}</td></tr>`).join('');
-    }
-  }
-
-  // ── Price-to-Performance (precomputed ticket_ppi, cached on last modal load) ──
-  const ppiRow = ppiCacheByTicket[ticket.id];
-  if (ppiRow && ppiRow.index != null) {
-    const sec = document.getElementById('print-ppi-section');
-    if (sec) sec.classList.remove('hidden');
-    document.getElementById('print-ppi-index').textContent = `${ppiRow.index} / 100`;
-    document.getElementById('print-ppi-fit').textContent = ppiRow.customer_fit_score != null ? Math.round(ppiRow.customer_fit_score * 100) + '%' : '--';
-    document.getElementById('print-ppi-usecases').textContent = (ppiRow.use_cases || []).join(', ') || '--';
-    const flagsEl = document.getElementById('print-ppi-flags');
-    if (flagsEl) flagsEl.innerHTML = (ppiRow.flags || []).map(f => `<div>⚠ ${f}</div>`).join('');
-  }
-
-  // ── Activity Log ──
-  const events = ticket.events || ticket.activityLog || [];
-  if (events.length > 0) {
-    const logSection = document.getElementById('print-event-log-section');
-    const logBody    = document.getElementById('print-event-log-body');
-    if (logSection && logBody) {
-      logSection.classList.remove('hidden');
-      const recent = events.slice(-10).reverse();
-      logBody.innerHTML = recent.map(ev => `<tr>
-        <td>${ev.timestamp ? new Date(ev.timestamp).toLocaleString('en-IN') : '--'}</td>
-        <td>${ev.message || ev.event || '--'}</td>
-        <td>${ev.by || ev.user || ev.technician || '--'}</td>
-      </tr>`).join('');
-    }
-  }
-
-  // ── Overall Verdict ──
-  const knownPasses = [];
-  if (cpuPass  !== null) knownPasses.push(cpuPass);
-  if (gpuPass  !== null) knownPasses.push(gpuPass);
-  if (d.ramStress !== undefined) knownPasses.push(ramPass);
-  if (cbPass   !== null) knownPasses.push(cbPass);
-  if (fmPass   !== null) knownPasses.push(fmPass);
-  if (readPass !== null) knownPasses.push(readPass);
-  if (writePass!== null) knownPasses.push(writePass);
-  const overallPass = knownPasses.length === 0 ? null : knownPasses.every(Boolean);
-
-  const verdictBanner = document.getElementById('print-verdict-banner');
-  const verdictIcon   = document.getElementById('print-verdict-icon');
-  const verdictText   = document.getElementById('print-verdict-text');
-  const stampBox      = document.getElementById('print-stamp-box');
-
-  if (overallPass === null) {
-    if (verdictBanner) verdictBanner.className = 'print-verdict-banner print-verdict-neutral';
-    if (verdictIcon)   verdictIcon.textContent  = '◎';
-    if (verdictText)   verdictText.textContent  = 'DIAGNOSTICS PENDING — AWAITING TEST COMPLETION';
-    if (stampBox)      { stampBox.textContent = 'PENDING'; stampBox.className = 'stamp-box stamp-pending'; }
-  } else if (overallPass) {
-    if (verdictBanner) verdictBanner.className = 'print-verdict-banner print-verdict-pass';
-    if (verdictIcon)   verdictIcon.textContent  = '✓';
-    if (verdictText)   verdictText.textContent  = 'ALL QUALITY CHECKS PASSED — SYSTEM CLEARED FOR HANDOFF';
-    if (stampBox)      { stampBox.textContent = 'QC APPROVED'; stampBox.className = 'stamp-box stamp-pass'; }
-  } else {
-    if (verdictBanner) verdictBanner.className = 'print-verdict-banner print-verdict-fail';
-    if (verdictIcon)   verdictIcon.textContent  = '✗';
-    if (verdictText)   verdictText.textContent  = 'ONE OR MORE CHECKS FAILED — REVIEW REQUIRED BEFORE HANDOFF';
-    if (stampBox)      { stampBox.textContent = 'QC FAILED'; stampBox.className = 'stamp-box stamp-fail'; }
-  }
-
-  // ── Footer ──
-  const footerTech    = document.getElementById('print-footer-tech');
-  const footerContact = document.getElementById('print-footer-contact');
-  if (footerTech)    footerTech.textContent    = ticket.technician || '--';
-  if (footerContact) footerContact.textContent = settings.shopContact || 'Neo Tokyo Kochi QA Lab';
+  window.NeoQcPrintRender.populate(
+    ticket,
+    (appState && appState.settings) || {},
+    ppiCacheByTicket[ticket.id]
+  );
 }
 
 function triggerPrintReport(ticketId, shouldPrint = true) {

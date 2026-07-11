@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>NeoQC — 3-page report dev harness</title>
+<!--
+  Dev-only harness: renders the REAL print report (markup fetched live from
+  index.html, styled by the real print-report.css, populated by the real
+  print-render.js) on screen with a fully-loaded mock ticket, so the report
+  can be iterated without launching Electron or printing. Not shipped to
+  customers; not referenced by the app.
+-->
+<link rel="stylesheet" href="print-report.css">
+<style>
+  body { background: #666; margin: 0; padding: 20px; font-family: sans-serif; }
+  /* Emulate A4 sheets on screen */
+  #print-report-container { display: block !important; }
+  #print-report-container .print-page {
+    background: #fff;
+    width: 210mm;
+    min-height: 296mm;
+    margin: 0 auto 18px auto;
+    padding: 9mm 10mm;
+    box-shadow: 0 3px 14px rgba(0,0,0,0.4);
+  }
+  .harness-note { color: #eee; text-align: center; font-size: 12px; margin-bottom: 14px; }
+</style>
+</head>
+<body>
+<div class="harness-note">NeoQC report harness — real markup from index.html + real print-render.js + mock ticket. Each white sheet = one printed A4 page.</div>
+<div id="mount">loading…</div>
+
+<script src="print-render.js"></script>
+<script>
+const MOCK_TICKET = {
+  id: 't_harness_mock01',
+  customerName: 'Anand Krishnan',
+  buildType: 'New PC Build',
+  status: 'QC Complete',
+  technician: 'Ananthakrishnan',
+  createdAt: '2026-07-08T10:00:00Z',
+  deadline: '2026-07-14T18:00:00Z',
+  completedAt: '2026-07-11T15:30:00Z',
+  windowsActivation: 'Activated (Digital License)',
+  windowsKey: 'XXXXX-XXXXX-XXXXX-XXXXX-XXXXX',
+  specs: {
+    cpu: 'Ryzen 7 7800X3D', igpu: 'AMD Radeon Graphics', gpu: 'RTX 4070 Ti Super 16GB',
+    ram: '32 GB DDR5 6000MHz', storage: '2TB NVMe Gen4 SSD', mobo: 'MSI PRO B650M-A WIFI',
+    cooler: 'Deepcool AK620', psu: 'Deepcool PM850D 850W Gold', case: 'Corsair 4000D Airflow'
+  },
+  serials: { gpu: 'GPU-8842-XK', ram: 'RAM-1029-BB', ssd: 'SSD-5521-NV', mobo: 'MB-7761-MS', cabinet: 'CAB-3301-CR' },
+  buildChecks: { cooler: true, cables: true, posted: true },
+  qcChecks: {
+    physCabinet: true, physMobo: true, physRam: true, softWindows: true,
+    softDrivers: true, softBios: true, portUsb: true, portVideo: true,
+    portAudio: true, portWifi: false
+  },
+  missingParts: '',
+  events: [
+    { timestamp: '2026-07-08T10:05:00Z', message: 'Ticket created', by: 'Ananthakrishnan' },
+    { timestamp: '2026-07-09T12:10:00Z', message: 'Assembly complete, system posted', by: 'Ananthakrishnan' },
+    { timestamp: '2026-07-10T09:00:00Z', message: 'Full diagnostics run started', by: 'NeoQC' },
+    { timestamp: '2026-07-10T11:42:00Z', message: 'Prime95 Blend 60 min — 0 errors', by: 'NeoQC' },
+    { timestamp: '2026-07-11T15:30:00Z', message: 'QC sign-off', by: 'Ananthakrishnan' }
+  ],
+  diagnostics: {
+    cpuTempMin: 38, cpuTempAvg: 71, cpuTempMax: 79,
+    gpuTempMin: 33, gpuTempAvg: 64, gpuTempMax: 71,
+    cpuTempLog: [38,45,58,66,71,74,76,78,79,78,77,76,75,74,73],
+    gpuTempLog: [33,40,52,60,64,66,68,70,71,70,69,68,67,66,65],
+    ramStress: 'passed', ramDetail: '80% allocation, 2 pass — 0 errors',
+    cinebench: 17840, furmark: 9860, ssdRead: 7080, ssdWrite: 6420,
+    ssdHealth: { model: 'Samsung 990 Pro 2TB', mediaType: 'NVMe SSD', healthStatus: 'OK', lifeRemaining: 99, powerOnHours: 14, size: 2e12 },
+    prime95: {
+      overallResult: 'pass', durationActualSec: 3600, workerCount: 16,
+      workers: Array.from({length:16}, () => ({errors: 0, roundingWarnings: 0})),
+      errorSummary: []
+    },
+    componentPassport: {
+      cpu: { model: 'AMD Ryzen 7 7800X3D', cores: 8, threads: 16, throttled: false, tempMaxDuringTest: 79 },
+      gpu: { model: 'NVIDIA RTX 4070 Ti Super', vram: '16 GB GDDR6X', throttled: false, tempMaxDuringTest: 71 },
+      ram: { totalGB: 32, ddrGen: 'DDR5', modules: [{},{}], errorsDuringPrime95: 0, healthNote: 'Stable through 60 min Blend' },
+      storage: { model: 'Samsung 990 Pro', interface: 'NVMe Gen4', sizeGB: 2000, healthStatus: 'OK', lifeRemaining: 99, powerOnHours: 14 }
+    },
+    portCheckV2: {
+      ranAt: '2026-07-10T13:00:00Z',
+      categories: {
+        usb:     { status: 'pass', newDevicesDetected: [{ name: 'SanDisk Ultra USB 3.0' }] },
+        video:   { status: 'pass', newDevicesDetected: [{ name: 'Dell U2723QE (DisplayPort)' }] },
+        audio:   { status: 'pass', newDevicesDetected: [{ name: 'Realtek HD Audio — headphone jack' }] },
+        network: { status: 'unverified', error: 'Wi-Fi antenna not yet mounted' }
+      }
+    }
+  }
+};
+
+const MOCK_PPI = {
+  index: 87.9, customer_fit_score: 1.0, use_cases: ['gaming-1440p'], price_band_pct: 0.15,
+  per_component_scores: { cpu: 60.7, gpu: 100.0, psu: null, ram: null, case: null, storage: null },
+  in_range_comparisons: {
+    cpu: [
+      { name: 'Intel Core Ultra 7 270K Plus Desktop Processor', price_inr: 43850, score: 100.0, delta_vs_own: 39.3 },
+      { name: 'Intel Core i9 14900KF 14th Gen Desktop Processor', price_inr: 43000, score: 88.3, delta_vs_own: 27.6 }
+    ],
+    gpu: [
+      { name: 'MSI GeForce RTX 4070 Ti Gaming X Trio 12GB', price_inr: 85890, score: 99.0, delta_vs_own: -1.0 }
+    ]
+  },
+  flags: [
+    'gpu: best performer in its price band ✓',
+    'psu: no objective benchmark exists — shown unscored, not counted in the index'
+  ]
+};
+
+const MOCK_SETTINGS = {
+  shopContact: 'Neo Tokyo Kochi · +91 484 000 0000 · service@neotokyo.in',
+  cpuMaxTemp: 85, gpuMaxTemp: 80, minCinebench: 15000, minFurmark: 8000, minSsdRead: 5000, minSsdWrite: 4000
+};
+
+fetch('index.html')
+  .then(r => r.text())
+  .then(html => {
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    const container = doc.getElementById('print-report-container');
+    if (!container) throw new Error('print-report-container not found in index.html');
+    document.getElementById('mount').replaceWith(container);
+    window.NeoQcPrintRender.populate(MOCK_TICKET, MOCK_SETTINGS, MOCK_PPI);
+    document.title = 'harness-ready';
+  })
+  .catch(e => {
+    document.getElementById('mount').textContent = 'HARNESS ERROR: ' + e.message;
+    document.title = 'harness-error';
+  });
+</script>
+</body>
+</html>
