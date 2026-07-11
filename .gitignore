@@ -19,3 +19,4 @@ assets/diagnostics/*.zip
 output/
 __pycache__/
 .claude/
+.harness-fixtures/

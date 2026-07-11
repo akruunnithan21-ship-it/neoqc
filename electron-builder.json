@@ -24,7 +24,9 @@
     "repo": "neoqc"
   },
   "asarUnpack": [
-    "assets/diagnostics/**"
+    "assets/diagnostics/**",
+    "*.py",
+    "assets/benchmarks/**"
   ],
   "directories": {
     "output": "C:/Users/Aladeen/Desktop/final build"

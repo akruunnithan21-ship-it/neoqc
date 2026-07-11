@@ -1847,20 +1847,19 @@
     <div class="glass-slab modal-card" style="max-width: 650px; width: 100%; padding: 30px; border-radius: 20px;">
       <div class="modal-header" style="border-bottom: 1px solid var(--glass-border); padding-bottom: 15px; margin-bottom: 20px;">
         <h2 style="font-family: 'Syncopate', sans-serif; font-size: 1.3rem; color: var(--primary-pink); letter-spacing: 0.05em; margin: 0;">NEO QC UPDATED</h2>
-        <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; font-weight: 700; background: rgba(231, 1, 78, 0.1); color: var(--primary-pink); padding: 4px 8px; border-radius: 4px;">v1.3.0</span>
+        <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; font-weight: 700; background: rgba(231, 1, 78, 0.1); color: var(--primary-pink); padding: 4px 8px; border-radius: 4px;">v1.3.1</span>
       </div>
       <div class="modal-body" style="font-size: 0.92rem; line-height: 1.6; color: var(--text-dark); max-height: 420px; overflow-y: auto; padding-right: 5px;">
-        <p style="margin-top: 0;">An update has been installed. Here are the key improvements in NeoQC <strong>v1.3.0</strong>:</p>
+        <p style="margin-top: 0;">An update has been installed. Here are the key improvements in NeoQC <strong>v1.3.1</strong>:</p>
         <ul style="padding-left: 20px; display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px;">
-          <li><strong>All-New Three-Page QC Certificate</strong>: The printed report is now a full certificate — Page 1: verdict + at-a-glance score strip; Page 2: stress &amp; diagnostics lab data with measured-vs-threshold benchmark bars, Prime95, SSD health, component passports and port verification; Page 3: price-to-performance analysis, activity log, a "where every number comes from" provenance box, and a tamper-evident report integrity code.</li>
-          <li><strong>Fairer Price-to-Performance Scoring</strong>: CPU scoring now blends single-thread performance per use-case (gaming-focused X3D chips are no longer undervalued), scores read as "% of the best performance at this price", components without benchmark data are honestly unscored instead of silently passed, and bottleneck warnings are based on absolute performance.</li>
-          <li><strong>Component Matching Accuracy</strong>: Fixed a matching bug where part numbers in product names (e.g. "100-100000910WOF") could match the wrong CPU entirely — affects autocomplete, PPI and benchmark bridging.</li>
-          <li><strong>Web Lookup Across 5 Retailers</strong>: "Search Online" now checks five Indian PC retailers (added Computech Store and Vishal Peripherals) for better price averages on parts missing from the catalog.</li>
-          <li><strong>Autocomplete Visual Fix</strong>: Removed the stray horizontal lines that could appear through open suggestion dropdowns in the ticket form.</li>
+          <li><strong>"Search Online" Now Works on Every PC</strong>: The live retailer lookup no longer needs Python installed — it runs inside the app itself. The "spawn … ENOENT" error when searching for missing components is gone for good.</li>
+          <li><strong>Manual Entry Everywhere</strong>: Every component dropdown now ends with a "✏️ Use as typed" row — if the exact part isn't in the catalog or online results, one click keeps exactly what you typed.</li>
+          <li><strong>Cooler Model Field Fixed</strong>: Selecting "Air Cooler" or "AIO Liquid Cooler" now actually reveals the model input (it previously only appeared when re-opening a saved ticket).</li>
+          <li><strong>Fresher Catalog</strong>: The component database has been refreshed from the supplier for the newest boards, GPUs and cases — and every successful online search keeps growing it automatically for all technicians.</li>
         </ul>
       </div>
       <div class="modal-footer" style="border-top: 1px solid var(--glass-border); padding-top: 15px; display: flex; justify-content: flex-end; margin-top: 20px;">
-        <button id="btn-close-changelog" class="primary-pink-btn" style="padding: 10px 24px; font-weight: 700; font-size: 0.95rem;">Launch NeoQC v1.3.0</button>
+        <button id="btn-close-changelog" class="primary-pink-btn" style="padding: 10px 24px; font-weight: 700; font-size: 0.95rem;">Launch NeoQC v1.3.1</button>
       </div>
     </div>
   </div>
@@ -1869,6 +1868,7 @@
   <script src="shared/icons.js"></script>
   <script src="shared/diagnostics-render.js"></script>
   <script src="shared/matcher.js"></script>
+  <script src="web-lookup.js"></script>
   <script src="print-render.js"></script>
   <script src="app.js"></script>
 </body>

@@ -1152,9 +1152,20 @@ ipcMain.handle('sys:check-ssd-health', async () => {
   });
 });
 
+// Directory the bundled Python scripts actually live in at runtime. Inside a
+// packaged build __dirname points INTO app.asar — a single archive FILE, not
+// a real directory — so spawn(..., { cwd: __dirname }) fails with ENOENT and
+// Python couldn't open the scripts anyway. electron-builder.json asarUnpacks
+// *.py + assets/benchmarks/** so the real files exist under app.asar.unpacked.
+const SCRIPTS_DIR = __dirname.includes('app.asar')
+  ? __dirname.replace('app.asar', 'app.asar.unpacked')
+  : __dirname;
+
 // IPC Handler: Compute Price-to-Performance for a ticket. Shells out to
 // ppi_sync.py (matcher → ppi() → upsert ticket_ppi); the renderer then just
 // re-reads the ticket_ppi row. No PPI math lives in JS.
+// NOTE: still requires Python + pip deps on the machine (dev/technician PC).
+// Machines without Python get a clear message instead of a raw spawn error.
 ipcMain.handle('ppi:compute', async (event, { ticketId, useCase }) => {
   const pyCandidates = [
     'C:\\Users\\Aladeen\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe',
@@ -1167,7 +1178,7 @@ ipcMain.handle('ppi:compute', async (event, { ticketId, useCase }) => {
   return new Promise((resolve) => {
     let settled = false;
     const done = (result) => { if (!settled) { settled = true; resolve(result); } };
-    const child = spawn(py, args, { cwd: __dirname, windowsHide: true });
+    const child = spawn(py, args, { cwd: SCRIPTS_DIR, windowsHide: true });
     let out = '', errOut = '';
     child.stdout.on('data', d => { out += d.toString(); });
     child.stderr.on('data', d => { errOut += d.toString(); });
@@ -1176,48 +1187,46 @@ ipcMain.handle('ppi:compute', async (event, { ticketId, useCase }) => {
       output: out.slice(-2000),
       error: code === 0 ? null : (errOut || out).slice(-1000)
     }));
-    child.on('error', e => done({ success: false, error: e.message }));
+    child.on('error', e => done({
+      success: false,
+      error: e.code === 'ENOENT'
+        ? 'Python is not installed on this PC — Price-to-Performance computation currently runs on the technician workstation only.'
+        : e.message
+    }));
     setTimeout(() => { try { child.kill(); } catch (_) {} done({ success: false, error: 'ppi_sync timeout (120s)' }); }, 120000);
   });
 });
 
-// IPC Handler: Live web lookup for a component missing from the catalog.
-// Shells out to pcstudio_import.py --web-lookup, same pattern as ppi:compute
-// above. Unlike ppi:compute's free-text output, this one prints a *pure*
-// JSON object as its LAST stdout line (search_fallback_sites() also prints
-// polite per-request status lines before it, so we can't just take the
-// whole buffer — only the final line is the machine-readable contract).
-// Shorter timeout than ppi:compute since this is directly UI-blocking
-// (the technician is waiting on it, not a background batch job).
-ipcMain.handle('catalog:web-lookup', async (event, { query, category }) => {
-  const pyCandidates = [
-    'C:\\Users\\Aladeen\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe',
-    'python'
-  ];
-  const py = pyCandidates.find(p => p === 'python' || fs.existsSync(p));
-  const args = ['pcstudio_import.py', '--web-lookup', String(query)];
-  if (category) args.push('--category', String(category));
-
-  return new Promise((resolve) => {
-    let settled = false;
-    const done = (result) => { if (!settled) { settled = true; resolve(result); } };
-    const child = spawn(py, args, { cwd: __dirname, windowsHide: true });
-    let out = '', errOut = '';
-    child.stdout.on('data', d => { out += d.toString(); });
-    child.stderr.on('data', d => { errOut += d.toString(); });
-    child.on('close', () => {
-      const lines = out.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
-      const lastLine = lines[lines.length - 1];
-      try {
-        const parsed = JSON.parse(lastLine);
-        done(parsed);
-      } catch (e) {
-        done({ found: false, error: (errOut || 'Could not parse web lookup result').slice(-1000) });
-      }
+// IPC Handler: plain HTTP fetch bridge for the live web lookup.
+// The lookup itself (site configs, HTML parsing, clustering, Supabase upsert)
+// now lives entirely in the renderer (web-lookup.js) — no Python at runtime.
+// The main process only performs the network request because renderer fetch()
+// is subject to CORS while Electron's net module is not. This replaced the
+// old catalog:web-lookup handler, which spawned pcstudio_import.py and could
+// never work in a packaged build (scripts inside app.asar, cwd not a real
+// directory, and shop PCs don't have Python + pip deps installed).
+ipcMain.handle('catalog:fetch-url', async (event, { url }) => {
+  const { net } = require('electron');
+  try {
+    if (!/^https:\/\//i.test(String(url))) {
+      return { ok: false, error: 'Only https URLs are allowed.' };
+    }
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 20000);
+    const res = await net.fetch(String(url), {
+      headers: {
+        'User-Agent': 'NeoQC-PriceIndexBot/1.0 (internal tool; contact akruunnithan21@gmail.com)',
+        'Accept-Language': 'en-IN,en;q=0.9'
+      },
+      redirect: 'follow',
+      signal: controller.signal
     });
-    child.on('error', e => done({ found: false, error: e.message }));
-    setTimeout(() => { try { child.kill(); } catch (_) {} done({ found: false, error: 'Web lookup timeout (30s) — the fallback sites may be slow or unreachable.' }); }, 30000);
-  });
+    clearTimeout(timer);
+    const body = await res.text();
+    return { ok: true, status: res.status, url: res.url, body };
+  } catch (e) {
+    return { ok: false, error: e.name === 'AbortError' ? 'Request timed out (20s)' : e.message };
+  }
 });
 
 // IPC Handler: Component passport — structured identity data for CPU/GPU/RAM/storage.

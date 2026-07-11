@@ -224,6 +224,7 @@
   var api = {
     Matcher: Matcher,
     tokenize: tokenize,
+    score: score, // exposed for web-lookup.js's cross-site listing clustering (mirrors pcstudio_import.py importing matcher._score)
     CONFIRM_THRESHOLD: CONFIRM_THRESHOLD,
     SUGGEST_THRESHOLD: SUGGEST_THRESHOLD,
     FIELD_TO_CATEGORY: FIELD_TO_CATEGORY

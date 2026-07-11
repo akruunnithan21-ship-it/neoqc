@@ -168,7 +168,17 @@ function setupSpecsAutocomplete() {
         row.style.pointerEvents = 'none';
         row.style.opacity = '0.7';
         try {
-          const result = await ipcRenderer.invoke('catalog:web-lookup', { query, category: field.category });
+          // Pure-JS lookup (web-lookup.js): only the raw HTTP fetch goes
+          // through the main process (catalog:fetch-url — renderer fetch is
+          // CORS-bound, main-process net.fetch is not). No Python involved —
+          // the old spawn-pcstudio_import.py path failed with ENOENT on every
+          // packaged install (scripts inside app.asar, no Python on shop PCs).
+          const result = await window.NeoQcWebLookup.lookup(
+            query,
+            field.category,
+            (url) => ipcRenderer.invoke('catalog:fetch-url', { url }),
+            supabaseClient
+          );
           list.innerHTML = '';
           if (result && result.found) {
             const priceLabel = result.price_inr != null
@@ -210,6 +220,27 @@ function setupSpecsAutocomplete() {
       list.appendChild(row);
     };
 
+    // Always-available manual entry: the spec fields save whatever free text
+    // is typed, but nothing in the UI said so — technicians hitting a part
+    // that's missing from the catalog (and from the online lookup) thought
+    // they were stuck. This row makes "just use what I typed" an explicit,
+    // clickable choice at the bottom of every suggestion list.
+    const renderManualRow = (query) => {
+      const row = document.createElement('div');
+      row.className = 'autocomplete-item autocomplete-manual-entry';
+      row.style.opacity = '0.85';
+      row.style.borderTop = '1px dashed rgba(15, 23, 42, 0.15)';
+      row.textContent = `✏️ Use "${query}" as typed (manual entry)`;
+      row.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        input.value = query;
+        delete specFieldMatches[field.inputId]; // no catalog SKU behind this text — honest manual entry
+        list.classList.add('hidden');
+        list.innerHTML = '';
+      });
+      list.appendChild(row);
+    };
+
     const updateSuggestions = () => {
       const val = input.value.trim();
       list.innerHTML = '';
@@ -238,7 +269,10 @@ function setupSpecsAutocomplete() {
           list.classList.remove('hidden');
           renderSearchOnlineRow(val);
         }
-        if (results.length > 0 || (val.length >= 3 && bestConfidence < suggestThreshold)) return;
+        if (results.length > 0 || (val.length >= 3 && bestConfidence < suggestThreshold)) {
+          if (val.length >= 3) renderManualRow(val);
+          return;
+        }
         // Catalog is loaded but genuinely has nothing close and the query is
         // too short to offer online search yet — fall through to the
         // bundled list rather than showing an empty dropdown.
@@ -262,6 +296,7 @@ function setupSpecsAutocomplete() {
       if (val.length >= 3 && fuseResults.length === 0) {
         renderSearchOnlineRow(val);
       }
+      if (val.length >= 3) renderManualRow(val);
     };
 
     input.addEventListener('input', updateSuggestions);
@@ -274,6 +309,28 @@ function setupSpecsAutocomplete() {
         list.classList.add('hidden');
         list.innerHTML = '';
       }, 200);
+    });
+  });
+
+  // Cooler-type radios → model input visibility. Until now ONLY the
+  // edit-ticket load path toggled this field, so on a fresh ticket choosing
+  // "Air Cooler" or "AIO Liquid Cooler" never revealed the model input at
+  // all — there was literally no way to type the cooler model.
+  document.querySelectorAll('input[name="form-spec-cooler-type"]').forEach(radio => {
+    radio.addEventListener('change', () => {
+      const modelEl = document.getElementById('form-spec-cooler-model');
+      if (!modelEl) return;
+      if (radio.value === 'stock') {
+        modelEl.classList.add('hidden');
+        modelEl.removeAttribute('required');
+        modelEl.value = '';
+        delete specFieldMatches['form-spec-cooler-model'];
+      } else {
+        modelEl.classList.remove('hidden');
+        modelEl.setAttribute('required', 'required');
+        modelEl.placeholder = `Search or type ${radio.value === 'aio' ? 'AIO liquid' : 'air'} cooler model...`;
+        modelEl.focus();
+      }
     });
   });
 }

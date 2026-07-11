@@ -152,6 +152,45 @@ report (harness verified exact A4 metrics, but a physical printout hasn't been e
 
 ---
 
+## v1.3.1 (2026-07-11, same day as v1.3.0) — field-reported bug fixes
+
+User hit three real problems using installed v1.3.0:
+
+1. **"spawn python.exe ENOENT" on Search Online** — root cause: the packaged
+   app spawned `pcstudio_import.py` with `cwd: __dirname`, but in a packaged
+   build `__dirname` points INTO `app.asar` (an archive FILE, not a real
+   directory) → spawn always ENOENT; the .py scripts weren't unpacked either,
+   and shop PCs don't have Python + pip deps anyway. **Fix: the in-app web
+   lookup is now pure JS** — new `web-lookup.js` (renderer: site configs,
+   DOMParser parsing, matcher-based clustering, Supabase upsert; kept in
+   LOCKSTEP with pcstudio_import.py's FALLBACK_SITES) + new `catalog:fetch-url`
+   IPC in main.js (Electron net.fetch — main-process requests aren't
+   CORS-bound; https-only, 20s timeout). The old `catalog:web-lookup` spawn
+   handler is deleted. Verified in a browser test page against saved real
+   retailer fixtures (`.harness-fixtures/weblookup-test.html`, gitignored):
+   HTML path, Shopify-suggest path, cross-site averaging, garbage rejection,
+   needs_review upsert row.
+   - `ppi:compute` still shells to Python (dev/technician PC only) but is now
+     asar-safe: `SCRIPTS_DIR` swaps app.asar → app.asar.unpacked, and
+     electron-builder.json asarUnpacks `*.py` + `assets/benchmarks/**`. On a
+     machine without Python it now says so instead of a raw ENOENT. Porting
+     PPI fully to JS is a known future item.
+2. **Cooler model input never appeared for Air/AIO on a NEW ticket** — there
+   was no change listener on the cooler-type radios at all (only the
+   edit-ticket load path toggled the field). Added a listener: reveals +
+   requires + focuses the model input for air/aio, hides/clears for stock.
+3. **No way to enter a component that's not in the dropdown** — free text was
+   always saved, but nothing said so. Every suggestion list now ends with a
+   "✏️ Use "<text>" as typed (manual entry)" row (clears the field's
+   specFieldMatches entry — honest manual entry, no fake SKU).
+4. **Catalog freshness** — ran `pcstudio_import.py --resume` +
+   `supabase_loader.py` to pull listings added since the 2026-07-08 scrape
+   (user hit missing MSI X870E Gaming Plus WIFI, CM Elite 502 etc.). The JS
+   web lookup also grows `component_prices` organically on every successful
+   search from any machine.
+
+---
+
 ## Files (current, non-exhaustive)
 
 | File | What it does |
