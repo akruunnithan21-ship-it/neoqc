@@ -187,42 +187,41 @@
       '</div>';
   }
 
-  // ─── Port checker panel ─────────────────────────────────────────────
+  // ─── Port enumeration panel (v3 — passive) ──────────────────────────
+  // Consumes ticket.diagnostics.portScan: { usbControllers, usbDevices,
+  // usbDeviceCount, gpus, videoOutputs, audioControllers, audioEndpoints }.
 
-  var PORT_CATEGORY_LABEL = { usb: 'USB', video: 'Video', audio: 'Audio' };
+  function portRow(a, b) {
+    return '<div class="dr-list-item"><span>' + esc(a) + '</span>' +
+      (b != null && b !== '' ? '<span class="dr-muted">' + esc(b) + '</span>' : '') + '</div>';
+  }
 
-  function deviceListHtml(devices) {
-    if (!devices || !devices.length) return emptyState('No devices detected.');
-    return '<div class="dr-list">' + devices.map(function (d) {
-      return '<div class="dr-list-item"><span>' + esc(typeof d === 'string' ? d : d.name || JSON.stringify(d)) + '</span></div>';
-    }).join('') + '</div>';
+  function portCard(title, rows) {
+    return '<div class="dr-card">' +
+      '<div class="dr-card-header">' + icon('port') + '<span class="dr-card-title">' + esc(title) + '</span></div>' +
+      (rows.length ? '<div class="dr-list">' + rows.join('') + '</div>' : emptyState('None detected.')) +
+      '</div>';
   }
 
   function renderPortCheckPanel(data) {
-    var categories = (data && data.categories) || {};
-    var keys = Object.keys(PORT_CATEGORY_LABEL);
     if (!data) {
-      return '<div class="dr-grid">' + keys.map(function (k) {
-        return '<div class="dr-card"><div class="dr-card-header">' + icon('port') + '<span class="dr-card-title">' + PORT_CATEGORY_LABEL[k] + '</span></div>' + emptyState('Not yet checked.') + '</div>';
-      }).join('') + '</div>';
+      return '<div class="dr-card"><div class="dr-card-header">' + icon('port') +
+        '<span class="dr-card-title">System Ports</span></div>' + emptyState('Not yet scanned.') + '</div>';
     }
-    return '<div class="dr-grid">' + keys.map(function (k) {
-      var c = categories[k] || { status: 'unverified' };
-      var body;
-      if (c.newDevicesDetected && c.newDevicesDetected.length) {
-        body = '<div class="dr-muted">Newly detected on verify:</div>' + deviceListHtml(c.newDevicesDetected);
-      } else if (c.status === 'fail') {
-        body = emptyState('No new device detected on the port under test.');
-      } else if (c.status === 'unverified') {
-        body = emptyState(c.error ? ('Could not verify — ' + esc(c.error) + '.') : 'Not verified.');
-      } else {
-        body = deviceListHtml(c.afterDevices || c.beforeDevices);
-      }
-      return '<div class="dr-card">' +
-        '<div class="dr-card-header">' + icon('port') + '<span class="dr-card-title">' + PORT_CATEGORY_LABEL[k] + '</span>' + statusPill(c.status) + '</div>' +
-        body +
-        '</div>';
-    }).join('') + '</div>';
+    var usb = (data.usbControllers || []).map(function (c) { return portRow(c.name, c.generation); });
+    if (data.usbDeviceCount != null) {
+      usb.push('<div class="dr-list-item dr-muted">' + data.usbDeviceCount + ' external USB device(s) connected</div>');
+    }
+    var video = (data.videoOutputs || []).map(function (o) { return portRow(o.connection, o.monitor); });
+    (data.gpus || []).forEach(function (g) {
+      video.unshift(portRow(g.name, [g.vramMB ? g.vramMB + ' MB' : null, g.resolution].filter(Boolean).join(' · ')));
+    });
+    var audio = (data.audioEndpoints || []).map(function (e) { return portRow(e, null); });
+    return '<div class="dr-grid">' +
+      portCard('USB Controllers & Generations', usb) +
+      portCard('Video Outputs', video) +
+      portCard('Audio Endpoints', audio) +
+      '</div>';
   }
 
   // ─── RGB sync panel ─────────────────────────────────────────────────

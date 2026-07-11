@@ -58,6 +58,12 @@
   line-height: 1.4;
   font-family: 'Hanken Grotesk', 'Outfit', sans-serif;
   box-sizing: border-box;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+#print-report-container * {
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
 }
 #print-report-container * {
   box-sizing: border-box;
@@ -82,14 +88,17 @@
   font-weight: bold;
   text-transform: uppercase;
   letter-spacing: 0.18em;
-  color: #333;
-  border-bottom: 2px solid #E7014E;
-  padding-bottom: 3px;
+  color: #fff;
+  background: linear-gradient(90deg, #E7014E 0%, #E70077 100%);
+  padding: 3px 8px;
   margin-bottom: 6px;
+  display: inline-block;
+  border-radius: 2px;
 }
 #print-report-container .print-divider {
   border: 0;
-  border-top: 2px solid #000;
+  height: 3px;
+  background: linear-gradient(90deg, #000 0%, #000 70%, #E7014E 70%, #E7014E 100%);
   margin: 10px 0 14px 0;
 }
 
@@ -162,10 +171,12 @@
   margin: 10px 0 14px 0;
 }
 #print-report-container .print-score-tile {
-  border: 1px solid #999;
+  border: 1px solid #ccc;
   border-top: 3px solid #E7014E;
-  padding: 6px 8px 5px 8px;
+  border-radius: 0 0 3px 3px;
+  padding: 7px 8px 6px 8px;
   text-align: center;
+  background: #fafafa;
 }
 #print-report-container .print-score-tile .pst-value {
   font-family: 'Space Grotesk', sans-serif;

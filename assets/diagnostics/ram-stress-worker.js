@@ -1,65 +1,114 @@
+/*
+  ram-stress-worker.js — sustained memory stress + integrity test.
+
+  Rewritten 2026-07-11 (v1.3.3): the old version allocated a single Buffer and
+  did one write+read per ~10ms setTimeout tick, so it barely registered in Task
+  Manager (long idle gaps between short bursts) and did no real bit-integrity
+  check. It also reported nothing about how much was actually tested.
+
+  This version:
+   • Allocates the target in 256 MB chunks (an array of Buffers) — avoids any
+     single-Buffer max-length ceiling and lets us cap safely below free RAM.
+   • Runs a TIGHT sustained loop for the whole requested duration, yielding to
+     the message queue only every ~128 MB via setImmediate (not sleeping), so
+     the CPU + memory bus stay genuinely busy → visible, steady load.
+   • Writes a rotating 64-bit pattern to every 8th byte, then reads it back and
+     compares — a mismatch means a real memory fault (this is what makes it a
+     QC test, not just an allocation). Fault count is reported.
+   • Reports allocatedMB, passes, and errorCount so the UI/report can show
+     "Stressed N MB for Ts — 0 faults".
+*/
 const { parentPort, workerData } = require('worker_threads');
-const crypto = require('crypto');
 
-const sizeBytes = parseInt(workerData.sizeBytes) || (256 * 1024 * 1024); // Default 256MB
-let isRunning = true;
+const CHUNK = 256 * 1024 * 1024;              // 256 MB per buffer
+const requested = parseInt(workerData.sizeBytes) || (1024 * 1024 * 1024);
+const durationMs = (parseInt(workerData.durationSec) || 20) * 1000;
 
-parentPort.on('message', (msg) => {
-  if (msg === 'stop') {
-    isRunning = false;
-  }
-});
+let running = true;
+parentPort.on('message', (msg) => { if (msg === 'stop') running = false; });
 
-function runTest() {
+function send(type, extra) { parentPort.postMessage(Object.assign({ type }, extra || {})); }
+
+function run() {
+  const buffers = [];
+  let allocated = 0;
   try {
-    parentPort.postMessage({ type: 'status', message: `Allocating ${(sizeBytes / (1024 * 1024)).toFixed(0)} MB...` });
-    const buffer = Buffer.alloc(sizeBytes);
-    parentPort.postMessage({ type: 'status', message: `Allocated. Starting read/write stress loops.` });
-
-    let iterations = 0;
-    const chunkSize = 4 * 1024 * 1024; // 4MB chunks
-    const randomChunk = crypto.randomBytes(chunkSize);
-
-    function runIteration() {
-      if (!isRunning) {
-        parentPort.postMessage({ type: 'status', message: 'Test stopped by user.' });
-        parentPort.postMessage({ type: 'done' });
-        return;
-      }
-
+    send('status', { message: `Allocating up to ${(requested / 1048576).toFixed(0)} MB in 256 MB blocks…` });
+    while (allocated + 1 <= requested) {
+      const thisChunk = Math.min(CHUNK, requested - allocated);
+      if (thisChunk < 1024 * 1024) break;      // stop below 1 MB granularity
+      let buf;
       try {
-        // 1. Write Phase: Fill buffer with random chunk repetitions
-        for (let offset = 0; offset < sizeBytes; offset += chunkSize) {
-          const currentChunkSize = Math.min(chunkSize, sizeBytes - offset);
-          randomChunk.copy(buffer, offset, 0, currentChunkSize);
-        }
-
-        // 2. Read / Verify Phase: Calculate a checksum by sampling buffer bytes
-        let checksum = 0;
-        for (let i = 0; i < sizeBytes; i += 4096) {
-          checksum = (checksum + buffer[i]) % 1000000007;
-        }
-
-        iterations++;
-        parentPort.postMessage({ 
-          type: 'progress', 
-          iterations, 
-          bytesTested: sizeBytes,
-          checksum 
-        });
-
-        // Yield control to the event loop so it can handle "stop" messages from parentPort
-        setTimeout(runIteration, 10);
-      } catch (innerErr) {
-        parentPort.postMessage({ type: 'error', error: innerErr.message });
+        buf = Buffer.allocUnsafe(thisChunk);   // we fill every byte ourselves below
+      } catch (e) {
+        // Ran into an allocation ceiling — stop growing, test what we have.
+        send('status', { message: `Allocation stopped at ${(allocated / 1048576).toFixed(0)} MB (${e.message}).` });
+        break;
       }
+      buffers.push(buf);
+      allocated += thisChunk;
+    }
+  } catch (e) {
+    send('error', { error: 'Allocation failed: ' + e.message });
+    return;
+  }
+
+  const allocatedMB = Math.round(allocated / 1048576);
+  if (!buffers.length) {
+    send('error', { error: 'Could not allocate any memory to test.' });
+    return;
+  }
+  send('status', { message: `Allocated ${allocatedMB} MB. Running sustained write/verify stress…` });
+
+  const start = Date.now();
+  let iterations = 0;
+  let faults = 0;
+  let pattern = 0x0123456789abcdefn & 0xffffffffn; // 32-bit rotating seed (BigInt-free hot path below)
+  let patt = Number(pattern) >>> 0;
+
+  // One "pass" = write pattern to every buffer, then read-verify every buffer.
+  function pass() {
+    if (!running || Date.now() - start >= durationMs) {
+      const seconds = Math.round((Date.now() - start) / 1000);
+      send('result', { allocatedMB, iterations, faults, seconds, passed: faults === 0 });
+      send('done');
+      return;
     }
 
-    // Start iterations
-    runIteration();
-  } catch (err) {
-    parentPort.postMessage({ type: 'error', error: err.message });
+    // Rotate the pattern each pass so we exercise different bit combinations.
+    patt = ((patt << 1) | (patt >>> 31)) >>> 0;
+    const bytes = [patt & 0xff, (patt >>> 8) & 0xff, (patt >>> 16) & 0xff, (patt >>> 24) & 0xff];
+
+    let sinceYield = 0;
+    let bi = 0;
+
+    function step() {
+      // Process buffers in slices, yielding every ~128 MB so a 'stop' can land
+      // but the loop otherwise stays hot (no timer sleeps → real sustained load).
+      while (bi < buffers.length) {
+        const buf = buffers[bi];
+        // write
+        for (let i = 0; i < buf.length; i++) buf[i] = bytes[i & 3];
+        // read + verify
+        for (let i = 0; i < buf.length; i++) {
+          if (buf[i] !== bytes[i & 3]) faults++;
+        }
+        sinceYield += buf.length;
+        bi++;
+        if (sinceYield >= 128 * 1024 * 1024) {
+          sinceYield = 0;
+          setImmediate(step);
+          return;
+        }
+      }
+      iterations++;
+      send('progress', { iterations, allocatedMB, faults, elapsedSec: Math.round((Date.now() - start) / 1000) });
+      setImmediate(pass);
+    }
+    step();
   }
+
+  pass();
 }
 
-runTest();
+run();

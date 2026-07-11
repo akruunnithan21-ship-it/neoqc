@@ -82,14 +82,23 @@ const MOCK_TICKET = {
       ram: { totalGB: 32, ddrGen: 'DDR5', modules: [{},{}], errorsDuringPrime95: 0, healthNote: 'Stable through 60 min Blend' },
       storage: { model: 'Samsung 990 Pro', interface: 'NVMe Gen4', sizeGB: 2000, healthStatus: 'OK', lifeRemaining: 99, powerOnHours: 14 }
     },
-    portCheckV2: {
+    ramDetail: '6144 MB stressed for 600s — 0 fault(s)',
+    portScan: {
       ranAt: '2026-07-10T13:00:00Z',
-      categories: {
-        usb:     { status: 'pass', newDevicesDetected: [{ name: 'SanDisk Ultra USB 3.0' }] },
-        video:   { status: 'pass', newDevicesDetected: [{ name: 'Dell U2723QE (DisplayPort)' }] },
-        audio:   { status: 'pass', newDevicesDetected: [{ name: 'Realtek HD Audio — headphone jack' }] },
-        network: { status: 'unverified', error: 'Wi-Fi antenna not yet mounted' }
-      }
+      usbControllers: [
+        { name: 'AMD USB 3.10 eXtensible Host Controller', generation: 'USB 3.2 Gen 2 (10 Gbps)', status: 'OK' },
+        { name: 'AMD USB 3.10 eXtensible Host Controller', generation: 'USB 3.x (5 Gbps)', status: 'OK' },
+        { name: 'USB4 Host Router', generation: 'USB4 (40 Gbps)', status: 'OK' }
+      ],
+      usbDeviceCount: 3,
+      usbDevices: ['SanDisk Ultra USB 3.0', 'Logitech G Pro Keyboard', 'Razer DeathAdder'],
+      gpus: [{ name: 'NVIDIA RTX 4070 Ti Super', driver: '552.44', vramMB: 16384, resolution: '2560x1440' }],
+      videoOutputs: [
+        { connection: 'DisplayPort (external)', monitor: 'Dell U2723QE' },
+        { connection: 'HDMI', monitor: 'LG 27GL850' }
+      ],
+      audioControllers: [{ name: 'Realtek Audio', status: 'OK' }, { name: 'NVIDIA High Definition Audio', status: 'OK' }],
+      audioEndpoints: ['Speakers (Realtek Audio)', 'Headphones (Front Panel)', 'Microphone (Realtek Audio)', 'NVIDIA HDMI Output']
     }
   }
 };

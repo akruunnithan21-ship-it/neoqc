@@ -13,7 +13,8 @@
     "oneClick": false,
     "allowToChangeInstallationDirectory": true,
     "deleteAppDataOnUninstall": true,
-    "artifactName": "NeoQC-Setup-${version}.${ext}"
+    "artifactName": "NeoQC-Setup-${version}.${ext}",
+    "include": "build/installer.nsh"
   },
   "portable": {
     "artifactName": "NeoQC.exe"

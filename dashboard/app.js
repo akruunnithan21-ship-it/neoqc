@@ -174,8 +174,8 @@ function renderDiagnosticsDetail(diag) {
   if (diag.prime95 && diag.prime95.overallResult && diag.prime95.overallResult !== 'not-run') {
     html += `<div class="sc-diag-section"><div class="sc-diag-title">Stability Torture Test</div>${R.renderPrime95Panel(diag.prime95)}</div>`;
   }
-  if (diag.portCheckV2 && diag.portCheckV2.categories) {
-    html += `<div class="sc-diag-section"><div class="sc-diag-title">Port Verification</div>${R.renderPortCheckPanel(diag.portCheckV2)}</div>`;
+  if (diag.portScan && (diag.portScan.usbControllers || diag.portScan.audioEndpoints)) {
+    html += `<div class="sc-diag-section"><div class="sc-diag-title">System Ports &amp; Connectivity</div>${R.renderPortCheckPanel(diag.portScan)}</div>`;
   }
   if (diag.rgbSyncV2 && diag.rgbSyncV2.controllerFound) {
     html += `<div class="sc-diag-section"><div class="sc-diag-title">RGB Lighting</div>${R.renderRgbSyncPanel(diag.rgbSyncV2)}</div>`;

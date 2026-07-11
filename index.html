@@ -328,38 +328,18 @@
               <h4 style="color: var(--primary-pink); font-size: 0.82rem; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 12px; display: flex; align-items: center; gap: 6px;"><span class="dr-inline-icon" data-icon="port"></span>Port Verification &amp; RGB Sync</h4>
 
               <div style="display: flex; flex-direction: column; gap: 12px;">
-                <!-- USB / Video / Audio guided verification cards -->
-                <div class="dr-card scan-item-card" data-port-card="usb">
+                <!-- Passive port enumeration (v3): one scan reports what Windows
+                     recognises — USB controllers & generations, video outputs by
+                     connection type, audio controllers & endpoints. -->
+                <div class="dr-card scan-item-card" data-port-card="enum">
                   <div class="dr-card-header">
                     <span class="dr-inline-icon" data-icon="port"></span>
-                    <span class="dr-card-title" style="font-size: 0.85rem;">USB Ports</span>
-                    <span id="badge-port-usb" class="dr-pill dr-status-unverified">Not checked</span>
-                    <button type="button" id="btn-scan-usb" class="secondary-btn" style="padding: 4px 10px; font-size: 0.72rem;">Start Check</button>
+                    <span class="dr-card-title" style="font-size: 0.85rem;">System Ports &amp; Connectivity</span>
+                    <span id="badge-port-enum" class="dr-pill dr-status-unverified">Not scanned</span>
+                    <button type="button" id="btn-scan-ports" class="secondary-btn" style="padding: 4px 10px; font-size: 0.72rem;">Scan Ports</button>
                   </div>
-                  <div id="hint-port-usb" class="dr-muted hidden" style="margin-bottom: 6px;"></div>
-                  <div id="list-port-usb" class="dr-list hidden"></div>
-                </div>
-
-                <div class="dr-card scan-item-card" data-port-card="video">
-                  <div class="dr-card-header">
-                    <span class="dr-inline-icon" data-icon="gpu"></span>
-                    <span class="dr-card-title" style="font-size: 0.85rem;">Video Outputs (HDMI / DP)</span>
-                    <span id="badge-port-video" class="dr-pill dr-status-unverified">Not checked</span>
-                    <button type="button" id="btn-scan-video" class="secondary-btn" style="padding: 4px 10px; font-size: 0.72rem;">Start Check</button>
-                  </div>
-                  <div id="hint-port-video" class="dr-muted hidden" style="margin-bottom: 6px;"></div>
-                  <div id="list-port-video" class="dr-list hidden"></div>
-                </div>
-
-                <div class="dr-card scan-item-card" data-port-card="audio">
-                  <div class="dr-card-header">
-                    <span class="dr-inline-icon" data-icon="unverified"></span>
-                    <span class="dr-card-title" style="font-size: 0.85rem;">Audio Jacks</span>
-                    <span id="badge-port-audio" class="dr-pill dr-status-unverified">Not checked</span>
-                    <button type="button" id="btn-scan-audio" class="secondary-btn" style="padding: 4px 10px; font-size: 0.72rem;">Start Check</button>
-                  </div>
-                  <div id="hint-port-audio" class="dr-muted hidden" style="margin-bottom: 6px;"></div>
-                  <div id="list-port-audio" class="dr-list hidden"></div>
+                  <div class="dr-muted" style="font-size: 0.72rem; margin-bottom: 6px;">Detects USB port generations (2.0 / 3.x / USB4 / Type-C), video outputs (HDMI / DisplayPort), and audio endpoints that Windows currently recognises.</div>
+                  <div id="port-enum-results"></div>
                 </div>
 
                 <!-- RGB Sync v2 — per-device / per-zone control -->
@@ -1708,6 +1688,44 @@
       <div id="print-bench-bars" class="print-bars hidden"></div>
     </div>
 
+    <!-- ── PRIME95 TORTURE TEST ── -->
+    <div id="print-prime95-section" class="print-section hidden">
+      <h3>Stability Torture Test (Prime95 Blend — CPU + RAM)</h3>
+      <table class="print-table-fields">
+        <tr>
+          <td><strong>Result</strong></td><td id="print-p95-result">--</td>
+          <td><strong>Duration</strong></td><td id="print-p95-duration">--</td>
+        </tr>
+        <tr>
+          <td><strong>Workers</strong></td><td id="print-p95-workers">--</td>
+          <td><strong>Errors / Warnings</strong></td><td id="print-p95-errors">--</td>
+        </tr>
+      </table>
+      <div id="print-p95-error-lines" style="font-size:7.5pt;color:#333;"></div>
+    </div>
+
+    <div class="print-page-footline">
+      <span>NEO TOKYO — Stress &amp; Diagnostics Lab Data</span>
+      <span>Page 2 of 4</span>
+    </div>
+    </div><!-- /print-page-2 -->
+
+    <!-- ═══ PAGE 3 — HARDWARE HEALTH & CONNECTIVITY ═══ -->
+    <div class="print-page" id="print-page-2b">
+    <div class="print-page-subheader">
+      <span class="print-page-subtitle">HARDWARE HEALTH &amp; CONNECTIVITY</span>
+      <span class="print-page-ref">Ticket #<span class="print-ticket-id-echo">--</span> · NEO TOKYO QA</span>
+    </div>
+
+    <!-- ── COMPONENT PASSPORT ── -->
+    <div id="print-passport-section" class="print-section hidden">
+      <h3>Component Health Passport</h3>
+      <table class="print-event-table">
+        <thead><tr><th>Component</th><th>Identity</th><th>Status</th></tr></thead>
+        <tbody id="print-passport-body"></tbody>
+      </table>
+    </div>
+
     <!-- ── SSD HEALTH ── -->
     <div id="print-ssd-health-section" class="print-section hidden">
       <h3>SSD Drive Health Report (S.M.A.R.T. Data)</h3>
@@ -1727,47 +1745,22 @@
       </table>
     </div>
 
-    <!-- ── PRIME95 TORTURE TEST ── -->
-    <div id="print-prime95-section" class="print-section hidden">
-      <h3>Stability Torture Test (Prime95 Blend — CPU + RAM)</h3>
-      <table class="print-table-fields">
-        <tr>
-          <td><strong>Result</strong></td><td id="print-p95-result">--</td>
-          <td><strong>Duration</strong></td><td id="print-p95-duration">--</td>
-        </tr>
-        <tr>
-          <td><strong>Workers</strong></td><td id="print-p95-workers">--</td>
-          <td><strong>Errors / Warnings</strong></td><td id="print-p95-errors">--</td>
-        </tr>
-      </table>
-      <div id="print-p95-error-lines" style="font-size:7.5pt;color:#333;"></div>
-    </div>
-
-    <!-- ── COMPONENT PASSPORT ── -->
-    <div id="print-passport-section" class="print-section hidden">
-      <h3>Component Health Passport</h3>
-      <table class="print-event-table">
-        <thead><tr><th>Component</th><th>Identity</th><th>Status</th></tr></thead>
-        <tbody id="print-passport-body"></tbody>
-      </table>
-    </div>
-
-    <!-- ── PORT & CONNECTIVITY VERIFICATION ── -->
+    <!-- ── PORT & CONNECTIVITY ENUMERATION ── -->
     <div id="print-ports-section" class="print-section hidden">
-      <h3>Port &amp; Connectivity Verification (Guided Plug-In Test)</h3>
+      <h3>Port &amp; Connectivity — Recognised by Windows</h3>
       <table class="print-event-table">
-        <thead><tr><th>Port Group</th><th>Result</th><th>Verified Device</th></tr></thead>
+        <thead><tr><th>Interface</th><th>Detected</th><th>Detail</th></tr></thead>
         <tbody id="print-ports-body"></tbody>
       </table>
     </div>
 
     <div class="print-page-footline">
-      <span>NEO TOKYO — Stress &amp; Diagnostics Lab Data</span>
-      <span>Page 2 of 3</span>
+      <span>NEO TOKYO — Hardware Health &amp; Connectivity</span>
+      <span>Page 3 of 4</span>
     </div>
-    </div><!-- /print-page-2 -->
+    </div><!-- /print-page-2b -->
 
-    <!-- ═══ PAGE 3 — VALUE ANALYSIS & PROVENANCE ═══ -->
+    <!-- ═══ PAGE 4 — VALUE ANALYSIS & PROVENANCE ═══ -->
     <div class="print-page" id="print-page-3">
     <div class="print-page-subheader">
       <span class="print-page-subtitle">VALUE ANALYSIS &amp; REPORT PROVENANCE</span>
@@ -1836,7 +1829,7 @@
 
     <div class="print-page-footline">
       <span>NEO TOKYO — Value Analysis &amp; Report Provenance</span>
-      <span>Page 3 of 3</span>
+      <span>Page 4 of 4</span>
     </div>
     </div><!-- /print-page-3 -->
 
@@ -1847,18 +1840,22 @@
     <div class="glass-slab modal-card" style="max-width: 650px; width: 100%; padding: 30px; border-radius: 20px;">
       <div class="modal-header" style="border-bottom: 1px solid var(--glass-border); padding-bottom: 15px; margin-bottom: 20px;">
         <h2 style="font-family: 'Syncopate', sans-serif; font-size: 1.3rem; color: var(--primary-pink); letter-spacing: 0.05em; margin: 0;">NEO QC UPDATED</h2>
-        <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; font-weight: 700; background: rgba(231, 1, 78, 0.1); color: var(--primary-pink); padding: 4px 8px; border-radius: 4px;">v1.3.2</span>
+        <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; font-weight: 700; background: rgba(231, 1, 78, 0.1); color: var(--primary-pink); padding: 4px 8px; border-radius: 4px;">v1.4.0</span>
       </div>
       <div class="modal-body" style="font-size: 0.92rem; line-height: 1.6; color: var(--text-dark); max-height: 420px; overflow-y: auto; padding-right: 5px;">
-        <p style="margin-top: 0;">An update has been installed. Here are the key improvements in NeoQC <strong>v1.3.2</strong>:</p>
+        <p style="margin-top: 0;">An update has been installed. Here are the key improvements in NeoQC <strong>v1.4.0</strong>:</p>
         <ul style="padding-left: 20px; display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px;">
-          <li><strong>QC Report Actually Fills In Now</strong>: A module-loading bug made the printed/PDF report come out as an empty "--" skeleton in the installed app. The full three-page certificate — score strip, specs with serials, thermal and benchmark data with comparison bars, Prime95, SSD health, component passports, port verification, price-to-performance analysis, provenance and integrity code — now populates correctly. If report generation ever fails again, the app refuses to print a blank skeleton and tells you why.</li>
-          <li><strong>Real Catalog Autocomplete In The App</strong>: The same bug meant the 8,000-item priced catalog search never engaged in the installed app — dropdowns silently used a tiny built-in list instead. Component search now matches the full live catalog with prices (e.g. "msi x870e gaming plus wifi" resolves instantly), and diagnostics/PPI panels that depended on the same modules render properly.</li>
-          <li><strong>Search Online restored</strong>: The in-app retailer lookup introduced in v1.3.1 was affected by the same loading bug — it now works as designed.</li>
+          <li><strong>No More White-Screen Freeze</strong>: If the app ever went fully white and unresponsive (window buttons included), it now detects the renderer crash and reloads itself automatically instead of leaving a dead window.</li>
+          <li><strong>Client → Admin Sync Fixed</strong>: A test completed on a client/testing PC now reliably appears on the admin PC within ~15 seconds, even if Supabase live-replication isn't enabled — the app now polls the cloud as a fallback and refreshes the dashboard.</li>
+          <li><strong>Cinebench Scores Corrected</strong>: Modern CPUs (Ryzen 9000/7000, Core 14th/13th gen, Core Ultra) are now scored correctly — a Ryzen 9 9950X no longer reports a nonsensical ~1600. Estimates auto-scale to the actual core/thread count, and real Cinebench output parsing is more robust.</li>
+          <li><strong>RAM Is Actually Stressed</strong>: The memory test now allocates up to 70% of free RAM (shows real load in Task Manager), writes and verifies a rotating pattern to detect faults, and reports exactly how much was tested — with the result now saved to the report even without Prime95.</li>
+          <li><strong>Simpler Port Check</strong>: One "Scan Ports" button now lists what Windows recognises — USB controllers and their generations (2.0 / 3.x / USB4), video outputs by connection (HDMI / DisplayPort), and audio endpoints — no more plug-in/verify dance.</li>
+          <li><strong>RGB Control + Defender Fix</strong>: RGB lighting control now offers one-click "Enable RGB Control" that adds a Windows Defender exclusion and un-quarantines the lighting engine (OpenRGB), fixing the "detected as a threat" problem. New installs add the exclusion automatically.</li>
+          <li><strong>Richer 4-Page QC Report</strong>: The certificate is now four pages and far more information-dense — a dedicated Hardware Health &amp; Connectivity page (component passports, SSD S.M.A.R.T., full port enumeration), refined visuals, and RAM stress detail.</li>
         </ul>
       </div>
       <div class="modal-footer" style="border-top: 1px solid var(--glass-border); padding-top: 15px; display: flex; justify-content: flex-end; margin-top: 20px;">
-        <button id="btn-close-changelog" class="primary-pink-btn" style="padding: 10px 24px; font-weight: 700; font-size: 0.95rem;">Launch NeoQC v1.3.2</button>
+        <button id="btn-close-changelog" class="primary-pink-btn" style="padding: 10px 24px; font-weight: 700; font-size: 0.95rem;">Launch NeoQC v1.4.0</button>
       </div>
     </div>
   </div>

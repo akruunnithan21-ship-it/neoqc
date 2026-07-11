@@ -313,18 +313,37 @@
       }).join('');
     }
 
-    // ── Port & connectivity verification ──
-    var PORT_LABELS = { usb: 'USB Ports', video: 'Video Outputs (HDMI/DP)', audio: 'Audio Jacks', network: 'Network / Wi-Fi' };
-    var pc = d.portCheckV2;
-    if (pc && pc.categories && Object.keys(pc.categories).length && $('print-ports-body')) {
+    // ── Port & connectivity enumeration (passive, v3) ──
+    var ps = d.portScan;
+    if (ps && (ps.usbControllers || ps.audioEndpoints) && $('print-ports-body')) {
       show('print-ports-section');
-      $('print-ports-body').innerHTML = Object.keys(pc.categories).map(function (k) {
-        var c = pc.categories[k] || {};
-        var devs = (c.newDevicesDetected && c.newDevicesDetected.length ? c.newDevicesDetected : (c.afterDevices || []))
-          .map(function (dv) { return dv.name || dv; }).slice(0, 2).join(', ');
-        var result = c.status === 'pass' ? '✔ Verified' : (c.status === 'fail' ? '✗ Failed' : '— Unverified');
-        return '<tr><td>' + esc(PORT_LABELS[k] || k) + '</td><td>' + result + '</td><td>' + esc(devs || '—') + '</td></tr>';
-      }).join('');
+      var prows2 = [];
+      var yes = '✔ Yes', dash = '—';
+      // USB — one row per distinct generation, with controller count
+      var usbGens = {};
+      (ps.usbControllers || []).forEach(function (c) {
+        usbGens[c.generation] = (usbGens[c.generation] || 0) + 1;
+      });
+      Object.keys(usbGens).forEach(function (g) {
+        prows2.push('<tr><td>USB — ' + esc(g) + '</td><td>' + yes + '</td><td>' + usbGens[g] + ' host controller(s)</td></tr>');
+      });
+      if (ps.usbDeviceCount != null) {
+        prows2.push('<tr><td>USB peripherals connected</td><td>' + (ps.usbDeviceCount > 0 ? yes : dash) + '</td><td>' +
+          esc((ps.usbDevices || []).slice(0, 4).join(', ') || 'none at scan time') + '</td></tr>');
+      }
+      // Video outputs
+      (ps.videoOutputs || []).forEach(function (o) {
+        prows2.push('<tr><td>Video output — ' + esc(o.connection) + '</td><td>' + yes + '</td><td>' + esc(o.monitor || 'connected display') + '</td></tr>');
+      });
+      (ps.gpus || []).forEach(function (g) {
+        prows2.push('<tr><td>Graphics adapter</td><td>' + yes + '</td><td>' + esc(g.name + (g.resolution ? ' @ ' + g.resolution : '')) + '</td></tr>');
+      });
+      // Audio
+      (ps.audioEndpoints || []).forEach(function (e) {
+        prows2.push('<tr><td>Audio endpoint</td><td>' + yes + '</td><td>' + esc(e) + '</td></tr>');
+      });
+      $('print-ports-body').innerHTML = prows2.join('') ||
+        '<tr><td colspan="3" class="dr-muted">No ports enumerated.</td></tr>';
     }
 
     // ── PPI (page 3) ──

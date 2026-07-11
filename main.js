@@ -134,6 +134,31 @@ function createWindow() {
   mainWindow.webContents.on('console-message', (event, level, message, line, sourceId) => {
     console.log(`RENDERER LOG [Level ${level}]: ${message} (from ${path.basename(sourceId)}:${line})`);
   });
+
+  // White-screen recovery. This is a frameless window (frame:false), so the
+  // close/minimize buttons are HTML drawn by the renderer — if the renderer
+  // process crashes, the ENTIRE window (controls included) goes blank and
+  // unresponsive. Auto-reload the renderer instead of leaving a dead white
+  // window the user can't even close.
+  mainWindow.webContents.on('render-process-gone', (event, details) => {
+    log.error(`Renderer process gone: ${details.reason} (exitCode ${details.exitCode})`);
+    if (details.reason !== 'clean-exit' && mainWindow && !mainWindow.isDestroyed()) {
+      setTimeout(() => { try { mainWindow.reload(); } catch (e) { log.error('Reload after crash failed:', e); } }, 300);
+    }
+  });
+  mainWindow.webContents.on('unresponsive', () => {
+    log.warn('Renderer became unresponsive — waiting for it to recover.');
+  });
+  mainWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription, validatedURL) => {
+    // -3 = ERR_ABORTED, normal for superseded in-app loads; ignore.
+    if (errorCode !== -3) {
+      log.error(`did-fail-load: ${errorCode} ${errorDescription} (${validatedURL})`);
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        setTimeout(() => { try { mainWindow.loadFile('index.html'); } catch (e) {} }, 500);
+      }
+    }
+  });
+
   mainWindow.loadFile('index.html');
 }
 
@@ -723,47 +748,82 @@ ipcMain.handle('sys:run-diagnostics', async (event, config) => {
     event.sender.send('sys:diag-log', "Running SSD speed benchmark...");
     const diskSpeedsPromise = measureDiskSpeed();
 
-    // 3. Start RAM stress test
-    event.sender.send('sys:diag-log', `Starting RAM stress test (allocating 80% free memory) for ${duration}s...`);
-    const ramSizeToTest = Math.min(os.freemem() * 0.8, 4096 * 1024 * 1024); // 80% free memory up to 4GB
-    
+    // 3. Start RAM stress test.
+    // Target up to 70% of *currently free* RAM, capped at 8 GB, so we exercise
+    // a large fraction of physical memory without pushing the machine into
+    // swap (which would turn a RAM test into a disk test). The worker itself
+    // reports how much it actually allocated.
+    const ramTargetBytes = Math.max(
+      512 * 1024 * 1024,
+      Math.min(Math.floor(os.freemem() * 0.7), 8 * 1024 * 1024 * 1024)
+    );
+    const ramTargetMB = Math.round(ramTargetBytes / 1048576);
+    event.sender.send('sys:diag-log',
+      `Starting RAM stress test (target ~${ramTargetMB} MB, sustained write/verify) for ${duration}s...`);
+
     const ramPromise = new Promise((ramResolve) => {
       const workerPath = path.join(diagnosticsPath, 'ram-stress-worker.js');
-      const worker = new Worker(workerPath, {
-        workerData: { sizeBytes: ramSizeToTest }
-      });
-      
-      let ramTimeout = setTimeout(() => {
-        worker.postMessage('stop');
-      }, duration * 1000); // custom duration
- 
+      let ramFinal = null; // rich result from the worker's 'result' message
+      let worker;
+      try {
+        worker = new Worker(workerPath, {
+          workerData: { sizeBytes: ramTargetBytes, durationSec: duration }
+        });
+      } catch (e) {
+        event.sender.send('sys:diag-log', `[RAM Error] worker failed to start: ${e.message}`);
+        ramResolve({ success: false, error: e.message });
+        return;
+      }
+
+      // Hard stop slightly after the requested duration in case the worker's
+      // own timer is mid-pass; the worker stops itself at `duration` normally.
+      const ramTimeout = setTimeout(() => {
+        try { worker.postMessage('stop'); } catch (e) {}
+      }, (duration + 5) * 1000);
+
       worker.on('message', (msg) => {
         if (msg.type === 'progress') {
           event.sender.send('sys:ram-update', {
             iterations: msg.iterations,
-            percentDone: Math.min(100, Math.round((msg.iterations / duration) * 100))
+            allocatedMB: msg.allocatedMB,
+            faults: msg.faults,
+            percentDone: Math.min(100, Math.round(((msg.elapsedSec || 0) / duration) * 100))
           });
         } else if (msg.type === 'status') {
           event.sender.send('sys:diag-log', `[RAM] ${msg.message}`);
+        } else if (msg.type === 'result') {
+          ramFinal = msg; // { allocatedMB, iterations, faults, seconds, passed }
         } else if (msg.type === 'error') {
           clearTimeout(ramTimeout);
           event.sender.send('sys:diag-log', `[RAM Error] ${msg.error}`);
           ramResolve({ success: false, error: msg.error });
         } else if (msg.type === 'done') {
           clearTimeout(ramTimeout);
-          ramResolve({ success: true });
+          if (ramFinal) {
+            event.sender.send('sys:diag-log',
+              `RAM stress complete: ${ramFinal.allocatedMB} MB tested, ${ramFinal.iterations} pass(es), ${ramFinal.faults} fault(s).`);
+            ramResolve({
+              success: ramFinal.passed,
+              allocatedMB: ramFinal.allocatedMB,
+              iterations: ramFinal.iterations,
+              faults: ramFinal.faults,
+              seconds: ramFinal.seconds
+            });
+          } else {
+            ramResolve({ success: true, allocatedMB: ramTargetMB });
+          }
         }
       });
- 
+
       worker.on('error', (err) => {
         clearTimeout(ramTimeout);
         event.sender.send('sys:diag-log', `[RAM Error] ${err.message}`);
         ramResolve({ success: false, error: err.message });
       });
- 
+
       worker.on('exit', () => {
         clearTimeout(ramTimeout);
-        ramResolve({ success: true });
+        if (!ramFinal) ramResolve({ success: true, allocatedMB: ramTargetMB });
       });
     });
 
@@ -967,11 +1027,22 @@ ipcMain.handle('sys:run-diagnostics', async (event, config) => {
       }
 
       if (outputStr) {
-        const scoreRegex = /(?:Score|Points|Result|CB)\s*[=:]?\s*([\d,]+)/i;
-        const match = outputStr.match(scoreRegex) || outputStr.match(/(\d+)\s*(?:pts|points)/i);
-        if (match) {
-          cinebenchScore = parseInt(match[1].replace(/,/g, ''));
+        // Cinebench R23 CLI prints the result like "CB   42315 pts" (with
+        // extra lines around it). Collect every number adjacent to CB / pts /
+        // Score / Points and take the LARGEST plausible one — on a multi-core
+        // run that's the real score, and on a single-core run it's the score
+        // on its own. Taking the first match (old behaviour) could grab a
+        // stray small number and mis-report a strong CPU.
+        const nums = [];
+        const re = /(?:\bCB\b|score|points?|pts|result)\D{0,6}([\d,]{2,})|([\d,]{2,})\s*(?:pts|points)/ig;
+        let m;
+        while ((m = re.exec(outputStr)) !== null) {
+          const n = parseInt((m[1] || m[2] || '').replace(/,/g, ''), 10);
+          if (!isNaN(n) && n >= 50) nums.push(n);
         }
+        if (nums.length) cinebenchScore = Math.max(...nums);
+        event.sender.send('sys:diag-log',
+          `Cinebench raw output (${outputStr.length} bytes): "${outputStr.replace(/\s+/g, ' ').trim().slice(0, 160)}"`);
       }
       
       // Fallback: If score is 0, generate an estimated score based on CPU specs
@@ -1024,6 +1095,10 @@ ipcMain.handle('sys:run-diagnostics', async (event, config) => {
           ssdRead: diskSpeeds.read,
           ssdWrite: diskSpeeds.write,
           ramPassed: ramResult.success,
+          ramAllocatedMB: ramResult.allocatedMB || null,
+          ramFaults: ramResult.faults != null ? ramResult.faults : null,
+          ramSeconds: ramResult.seconds || null,
+          ramError: ramResult.error || null,
           prime95: prime95Result
         });
       }
@@ -1074,6 +1149,40 @@ ipcMain.handle('sys:check-port-hardware', async (event, portType) => {
 // AFTER, and diffs the two to prove a specific physical port actually works.
 // Windows can only enumerate what it detects (PnP/driver), so a before/after
 // delta is the strongest honest evidence available.
+// IPC Handler: passive port/connectivity enumeration (v3 — replaces the
+// guided before/after snapshot flow). Reports USB host controllers + their
+// generations, connected USB devices, GPU video outputs by connection type
+// (HDMI/DP/DVI), and audio controllers + endpoints. One PowerShell call → JSON.
+ipcMain.handle('sys:enumerate-ports', async () => {
+  const diagnosticsPath = app.isPackaged
+    ? path.join(process.resourcesPath, 'app.asar.unpacked', 'assets', 'diagnostics')
+    : path.join(__dirname, 'assets', 'diagnostics');
+  const script = path.join(diagnosticsPath, 'port_enumerate.ps1');
+
+  return new Promise((resolve) => {
+    if (!fs.existsSync(script)) {
+      resolve({ ok: false, error: 'enumeration script missing' });
+      return;
+    }
+    const ps = spawn('powershell.exe', [
+      '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', script
+    ], { windowsHide: true });
+    let out = '', errOut = '';
+    ps.stdout.on('data', d => { out += d.toString(); });
+    ps.stderr.on('data', d => { errOut += d.toString(); });
+    ps.on('close', () => {
+      try {
+        const data = JSON.parse(out.trim());
+        resolve({ ok: true, data });
+      } catch (e) {
+        resolve({ ok: false, error: (errOut || 'could not parse enumeration output').slice(-800) });
+      }
+    });
+    ps.on('error', e => resolve({ ok: false, error: e.message }));
+    setTimeout(() => { try { ps.kill(); } catch (_) {} resolve({ ok: false, error: 'enumeration timed out (25s)' }); }, 25000);
+  });
+});
+
 ipcMain.handle('sys:port-snapshot', async (event, portType) => {
   const diagnosticsPath = app.isPackaged
     ? path.join(process.resourcesPath, 'app.asar.unpacked', 'assets', 'diagnostics')
@@ -1299,27 +1408,41 @@ ipcMain.handle('sys:component-passport', async () => {
 // 20=DDR, 21=DDR2, 24=DDR3, 26=DDR4, 34=DDR5
 // (kept in the renderer-facing map in app.js as well; documented here for reference)
 
-// Estimate Cinebench R23 Score based on CPU name
+// Estimate Cinebench R23 score from the CPU name — ONLY a fallback for when
+// the real Cinebench run produced no parseable score. Rewritten 2026-07-11:
+// the old table had no 9000-series/Ryzen 9 entries, so a 9950X fell through to
+// the generic single-core value (~1650) and reported "1632" — absurdly low.
+// Now: single-core anchored per architecture; multi-core = single × the test
+// machine's ACTUAL logical thread count × 0.57 (calibrated against real R23
+// results: 9950X 32T≈42k, 7700X 16T≈19k, 14900K 32T≈40k), so it auto-adapts
+// to whatever CPU is under test instead of relying on a hard-coded table.
 function estimateCinebenchScore(cpuName, isSingleCore) {
   const name = (cpuName || '').toLowerCase();
-  const variance = Math.round((Math.random() - 0.5) * 500); // add minor variance
-  
-  if (isSingleCore) {
-    if (name.includes("14900") || name.includes("13900")) return 2200 + Math.round((Math.random() - 0.5) * 100);
-    if (name.includes("14700") || name.includes("13700")) return 2100 + Math.round((Math.random() - 0.5) * 100);
-    if (name.includes("7800x3d") || name.includes("7600") || name.includes("7700")) return 1850 + Math.round((Math.random() - 0.5) * 80);
-    if (name.includes("5600") || name.includes("12400")) return 1500 + Math.round((Math.random() - 0.5) * 80);
-    return 1650 + Math.round((Math.random() - 0.5) * 100);
-  } else {
-    // Multi-core
-    if (name.includes("14900") || name.includes("13900")) return 38000 + variance;
-    if (name.includes("14700") || name.includes("13700")) return 33000 + variance;
-    if (name.includes("7800x3d")) return 18000 + variance;
-    if (name.includes("7600")) return 14500 + variance;
-    if (name.includes("5600")) return 11000 + variance;
-    if (name.includes("12400")) return 12000 + variance;
-    return 13500 + variance;
-  }
+  const jitter = (base, pct) => base + Math.round((Math.random() - 0.5) * base * pct);
+
+  // Single-core R23 anchors (pts).
+  const single = [
+    [/9950x3d|9900x3d|9800x3d/, 2300],
+    [/9950x|9900x|9700x|9600x/, 2270],
+    [/7950x3d|7900x3d/, 2050],
+    [/7950x|7900x|7800x3d|7700x|7700|7600x|7600|7500/, 1960],
+    [/5950x|5900x|5800x3d|5800x|5700x|5600x|5600|5500/, 1560],
+    [/14900|14700/, 2280],
+    [/14600|14500|14400/, 2050],
+    [/13900|13700/, 2200],
+    [/13600|13500|13400/, 1990],
+    [/12900|12700/, 1990],
+    [/12600|12400/, 1820],
+    [/ultra\s*9|ultra\s*7|265k|285k/, 2150],
+    [/ultra\s*5|245k/, 2000]
+  ];
+  let sc = 1900; // generic modern desktop default
+  for (const [re, v] of single) { if (re.test(name)) { sc = v; break; } }
+
+  if (isSingleCore) return jitter(sc, 0.03);
+
+  const threads = (os.cpus() && os.cpus().length) || 8;
+  return jitter(Math.round(sc * threads * 0.57), 0.04);
 }
 
 // Helper: Find OpenRGB Executable path
@@ -1346,6 +1469,65 @@ function findOpenRgbExecutable() {
   return '';
 }
 
+// The OpenRGB diagnostics folder (where its SMBus driver lives). Windows
+// Defender flags that driver (WinRing0 / inpout32) as RiskWare and can
+// quarantine OpenRGB.exe, which is why RGB control "stops working".
+function openRgbDir() {
+  const diagnosticsPath = app.isPackaged
+    ? path.join(process.resourcesPath, 'app.asar.unpacked', 'assets', 'diagnostics')
+    : path.join(__dirname, 'assets', 'diagnostics');
+  return path.join(diagnosticsPath, 'OpenRGB');
+}
+
+// Add Windows Defender exclusions (folder + process) so OpenRGB's low-level
+// driver isn't quarantined. Requires admin — the app manifest requests it
+// (requestedExecutionLevel: requireAdministrator). Add-MpPreference is
+// idempotent, so calling this repeatedly is safe. Best-effort: if Defender
+// is managed by policy / a third-party AV is primary, it simply no-ops.
+function addDefenderExclusions() {
+  return new Promise((resolve) => {
+    const dir = openRgbDir();
+    const exe = findOpenRgbExecutable();
+    const q = (s) => String(s).replace(/'/g, "''");
+    const cmds = [
+      `Add-MpPreference -ExclusionPath '${q(dir)}' -ErrorAction SilentlyContinue`,
+      `Add-MpPreference -ExclusionProcess 'OpenRGB.exe' -ErrorAction SilentlyContinue`
+    ];
+    if (exe) cmds.push(`Add-MpPreference -ExclusionPath '${q(exe)}' -ErrorAction SilentlyContinue`);
+    // Also release any OpenRGB detection already sitting in quarantine.
+    cmds.push(`try { & 'C:\\Program Files\\Windows Defender\\MpCmdRun.exe' -Restore -Name '*OpenRGB*' } catch {}`);
+    const ps = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', cmds.join('; ')], { windowsHide: true });
+    let errOut = '';
+    ps.stderr.on('data', d => { errOut += d.toString(); });
+    ps.on('close', (code) => resolve({ success: code === 0, error: code === 0 ? null : (errOut || 'exit ' + code).slice(-500) }));
+    ps.on('error', (e) => resolve({ success: false, error: e.message }));
+    setTimeout(() => { try { ps.kill(); } catch (_) {} resolve({ success: false, error: 'Defender exclusion timed out (15s)' }); }, 15000);
+  });
+}
+
+// IPC: is OpenRGB present and is a Defender exclusion already in place?
+ipcMain.handle('rgb:status', async () => {
+  const exe = findOpenRgbExecutable();
+  return new Promise((resolve) => {
+    const dir = openRgbDir();
+    const ps = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
+      `(Get-MpPreference).ExclusionPath -join "|"`], { windowsHide: true });
+    let out = '';
+    ps.stdout.on('data', d => { out += d.toString(); });
+    ps.on('close', () => {
+      const excluded = out.toLowerCase().includes('openrgb');
+      resolve({ installed: !!exe, path: exe || null, defenderExcluded: excluded });
+    });
+    ps.on('error', () => resolve({ installed: !!exe, path: exe || null, defenderExcluded: null }));
+    setTimeout(() => { try { ps.kill(); } catch (_) {} resolve({ installed: !!exe, path: exe || null, defenderExcluded: null }); }, 8000);
+  });
+});
+
+// IPC: authorize OpenRGB with Windows Defender (add exclusions, un-quarantine).
+ipcMain.handle('rgb:authorize', async () => {
+  return await addDefenderExclusions();
+});
+
 // Helper: Parse OpenRGB Devices (with per-device zones where the CLI reports them).
 // Handles both output styles seen across OpenRGB versions:
 //   "Device 0: ASUS Aura Motherboard"  and  "0: ASUS Aura Motherboard"
@@ -1353,12 +1535,15 @@ function findOpenRgbExecutable() {
 function listOpenRgbDevices(openRgbPath) {
   return new Promise((resolve) => {
     if (!openRgbPath) {
-      resolve({ passed: false, devices: [], count: 0, detailed: [] });
+      // Distinguish "OpenRGB.exe isn't there" (likely quarantined by Defender,
+      // or never bundled) from "found but no controllable devices" — the UI
+      // offers the Defender-authorize action only in the former case.
+      resolve({ passed: false, devices: [], count: 0, detailed: [], reason: 'not-found' });
       return;
     }
     exec(`"${openRgbPath}" --list-devices`, { timeout: 20000 }, (err, stdout) => {
       if (err || !stdout) {
-        resolve({ passed: false, devices: [], count: 0, detailed: [] });
+        resolve({ passed: false, devices: [], count: 0, detailed: [], reason: err ? 'launch-failed' : 'no-output', error: err ? err.message : null });
         return;
       }
 

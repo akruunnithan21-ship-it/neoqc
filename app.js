@@ -3,6 +3,20 @@ const fs = require('fs');
 const path = require('path');
 const Fuse = require('fuse.js');
 
+// Global safety net. An unhandled exception or promise rejection in the
+// renderer can leave the UI wedged — and because this is a frameless window,
+// a wedged renderer shows as an unresponsive WHITE screen with white window
+// controls. Catch and log both (the main process mirrors renderer console to
+// electron-log) so a single stray async failure never kills the session, and
+// so we have a breadcrumb if it recurs.
+window.addEventListener('error', (e) => {
+  console.error('[GlobalError]', e.message, (e.filename || '') + ':' + (e.lineno || ''), e.error && e.error.stack);
+});
+window.addEventListener('unhandledrejection', (e) => {
+  const r = e.reason;
+  console.error('[UnhandledRejection]', r && (r.stack || r.message || String(r)));
+});
+
 // Component Autocomplete Database
 //
 // Primary source: a local cache of Supabase's component_prices table (5,000+
@@ -1593,8 +1607,11 @@ function setPortPill(type, status, label) {
   badge.textContent = label;
 }
 
-// Persist a portCheckV2 category result into the selected ticket + qcChecks
-async function savePortCheckResult(type, categoryResult) {
+// Persist the passive port-enumeration result into the selected ticket.
+// qcChecks are ticked when Windows recognises at least one device of each type
+// (a USB controller, a video output, an audio endpoint) — i.e. the ports the
+// board exposes are alive and enumerated.
+async function savePortScanResult(data) {
   const ticketId = document.getElementById('client-ticket-select').value;
   if (!ticketId) return;
   const index = appState.tickets.findIndex(t => t.id === ticketId);
@@ -1602,15 +1619,12 @@ async function savePortCheckResult(type, categoryResult) {
   const ticket = appState.tickets[index];
 
   if (!ticket.diagnostics) ticket.diagnostics = {};
-  if (!ticket.diagnostics.portCheckV2) ticket.diagnostics.portCheckV2 = { categories: {} };
-  ticket.diagnostics.portCheckV2.ranAt = new Date().toISOString();
-  ticket.diagnostics.portCheckV2.categories[type] = categoryResult;
+  ticket.diagnostics.portScan = { ...data, ranAt: new Date().toISOString() };
 
   if (!ticket.qcChecks) ticket.qcChecks = {};
-  const passed = categoryResult.status === 'pass';
-  if (type === 'usb') ticket.qcChecks.portUsb = passed;
-  else if (type === 'video') ticket.qcChecks.portVideo = passed;
-  else if (type === 'audio') ticket.qcChecks.portAudio = passed;
+  ticket.qcChecks.portUsb = (data.usbControllers || []).length > 0;
+  ticket.qcChecks.portVideo = (data.videoOutputs || []).length > 0 || (data.gpus || []).length > 0;
+  ticket.qcChecks.portAudio = (data.audioEndpoints || []).length > 0;
 
   ticket.updatedAt = new Date().toISOString();
   appState.tickets[index] = ticket;
@@ -1779,81 +1793,76 @@ function setupOpenRgbController() {
   });
 }
 
-// Port Checker v2 — guided before/after verification.
-// Windows can only enumerate what it detects, so passive "is anything plugged
-// in" tells you nothing about a SPECIFIC port. Instead: snapshot the device
-// list, have the tech plug a known-good device into the port under test, then
-// snapshot again — a new device appearing PROVES that physical port works.
+// Port Checker v3 — passive enumeration.
+// The shop just needs to know what Windows recognises: USB controllers and
+// their generations (2.0 / 3.x / USB4 / Type-C), the video outputs actually in
+// use (HDMI / DisplayPort / DVI), and the audio controllers + endpoints. One
+// scan, no plug-in dance.
 function setupPortsChecker() {
-  const guided = [
-    { type: 'usb',   name: 'USB Ports',    device: 'a USB flash drive or peripheral into the port you want to prove' },
-    { type: 'video', name: 'Video Output', device: 'a monitor into the HDMI / DisplayPort you want to prove' },
-    { type: 'audio', name: 'Audio Jack',   device: 'headphones or a speaker into the audio jack you want to prove' }
-  ];
-  const portState = {}; // type -> { before: [device names] }
-
   function setBadge(type, status, label) {
     const badge = document.getElementById(`badge-port-${type}`);
     if (badge) { badge.className = `dr-pill dr-status-${status}`; badge.textContent = label; }
   }
 
-  guided.forEach(cfg => {
-    const btn = document.getElementById(`btn-scan-${cfg.type}`);
-    if (!btn) return;
-    btn.addEventListener('click', async () => {
+  const esc = (s) => (window.NeoQcDiagnosticsRender ? window.NeoQcDiagnosticsRender.esc(s) : String(s == null ? '' : s));
+
+  function renderPortEnum(data) {
+    const section = (title, rows) =>
+      `<div class="dr-muted" style="margin-top:8px;font-weight:600;">${esc(title)}</div>` +
+      (rows.length ? `<div class="dr-list">${rows.join('')}</div>`
+                   : `<div class="dr-list-item dr-muted">None detected.</div>`);
+    const item = (a, b) =>
+      `<div class="dr-list-item"><span>${esc(a)}</span>${b != null ? `<span class="dr-muted">${esc(b)}</span>` : ''}</div>`;
+
+    const usb = (data.usbControllers || []).map(c => item(c.name, c.generation));
+    const usbDev = (data.usbDevices || []).length
+      ? `<div class="dr-list-item dr-muted">${data.usbDeviceCount} connected USB device(s): ${(data.usbDevices || []).slice(0, 6).map(esc).join(', ')}${(data.usbDevices || []).length > 6 ? '…' : ''}</div>`
+      : `<div class="dr-list-item dr-muted">No external USB peripherals currently connected.</div>`;
+    const gpus = (data.gpus || []).map(g => item(g.name, [g.vramMB ? g.vramMB + ' MB' : null, g.resolution].filter(Boolean).join(' · ')));
+    const outs = (data.videoOutputs || []).map(o => item(o.connection, o.monitor || null));
+    const aud = (data.audioControllers || []).map(a => item(a.name, a.status));
+    const ep = (data.audioEndpoints || []).map(e => item(e, null));
+
+    return section('USB Host Controllers', usb) + usbDev +
+           section('Graphics Adapters', gpus) +
+           section('Active Video Outputs', outs) +
+           section('Audio Controllers', aud) +
+           section('Audio Endpoints (jacks / devices)', ep);
+  }
+
+  const scanBtn = document.getElementById('btn-scan-ports');
+  if (scanBtn) {
+    scanBtn.addEventListener('click', async () => {
       const ticketId = document.getElementById('client-ticket-select').value;
-      if (!ticketId) { alert("Please select a ticket first before verifying ports!"); return; }
-      const hint = document.getElementById(`hint-port-${cfg.type}`);
-      const listEl = document.getElementById(`list-port-${cfg.type}`);
-      const phase = btn.getAttribute('data-phase') || 'start';
-
-      if (phase === 'start') {
-        btn.disabled = true;
-        setBadge(cfg.type, 'unverified', 'Snapshotting…');
-        const snap = await ipcRenderer.invoke('sys:port-snapshot', cfg.type);
-        btn.disabled = false;
-
-        if (!snap.available) {
-          setBadge(cfg.type, 'unverified', 'Cannot verify');
-          if (hint) { hint.classList.remove('hidden'); hint.textContent = `Could not verify — ${snap.error || 'detection unavailable'}.`; }
-          await savePortCheckResult(cfg.type, { status: 'unverified', error: snap.error || 'unavailable', beforeDevices: [], afterDevices: [], newDevicesDetected: [] });
-          appendConsoleLine('c-console-box', `[PORT] ${cfg.name}: UNVERIFIED (${snap.error || 'unavailable'}).`);
+      if (!ticketId) { alert('Please select a ticket first before scanning ports!'); return; }
+      const resultsEl = document.getElementById('port-enum-results');
+      scanBtn.disabled = true;
+      setBadge('enum', 'unverified', 'Scanning…');
+      if (resultsEl) resultsEl.innerHTML = '<div class="dr-muted" style="padding:6px 0;">Enumerating USB, video and audio…</div>';
+      try {
+        const res = await ipcRenderer.invoke('sys:enumerate-ports');
+        if (!res.ok) {
+          setBadge('enum', 'unverified', 'Scan failed');
+          if (resultsEl) resultsEl.innerHTML = `<div class="dr-list-item" style="color:var(--dr-status-fail);">Could not enumerate ports — ${esc(res.error || 'unknown error')}.</div>`;
+          appendConsoleLine('c-console-box', `[PORT] Enumeration failed: ${res.error || 'unknown'}.`);
           return;
         }
-
-        portState[cfg.type] = { before: snap.devices || [] };
-        if (hint) { hint.classList.remove('hidden'); hint.innerHTML = `Baseline captured. Now plug in <strong>${cfg.device}</strong>, then click <strong>Verify</strong>.`; }
-        if (listEl) { listEl.classList.remove('hidden'); listEl.innerHTML = `<div class="dr-list-item"><span class="dr-muted">Baseline: ${(snap.devices || []).length} device(s) already present</span></div>`; }
-        setBadge(cfg.type, 'unverified', 'Awaiting device');
-        btn.textContent = 'Verify';
-        btn.setAttribute('data-phase', 'verify');
-        appendConsoleLine('c-console-box', `[PORT] ${cfg.name}: baseline captured (${(snap.devices || []).length} devices). Waiting for plug-in…`);
-      } else {
-        btn.disabled = true;
-        setBadge(cfg.type, 'unverified', 'Verifying…');
-        const snap = await ipcRenderer.invoke('sys:port-snapshot', cfg.type);
-        btn.disabled = false;
-
-        const before = (portState[cfg.type] && portState[cfg.type].before) || [];
-        const after = snap.available ? (snap.devices || []) : [];
-        const newDevices = after.filter(d => !before.includes(d));
-        const status = !snap.available ? 'unverified' : (newDevices.length > 0 ? 'pass' : 'fail');
-
-        setBadge(cfg.type, status, status === 'pass' ? 'Verified' : status === 'fail' ? 'No new device' : 'Cannot verify');
-        if (listEl) {
-          listEl.classList.remove('hidden');
-          listEl.innerHTML = newDevices.length
-            ? `<div class="dr-list-item"><span class="dr-muted">Newly detected on verify:</span></div>` + newDevices.map(d => `<div class="dr-list-item"><span>${window.NeoQcDiagnosticsRender.esc(d)}</span></div>`).join('')
-            : `<div class="dr-list-item" style="color:var(--dr-status-fail);">No new device detected — the port may be faulty, or nothing was plugged in.</div>`;
-        }
-        if (hint) hint.classList.add('hidden');
-        await savePortCheckResult(cfg.type, { status, beforeDevices: before, afterDevices: after, newDevicesDetected: newDevices });
-        appendConsoleLine('c-console-box', `[PORT] ${cfg.name}: ${status.toUpperCase()} (${newDevices.length} new device).`);
-        btn.textContent = 'Re-check';
-        btn.setAttribute('data-phase', 'start');
+        const d = res.data || {};
+        if (resultsEl) resultsEl.innerHTML = renderPortEnum(d);
+        const usbGens = [...new Set((d.usbControllers || []).map(c => c.generation))];
+        setBadge('enum', 'pass', `${(d.usbControllers || []).length} USB · ${(d.videoOutputs || []).length} video · ${(d.audioEndpoints || []).length} audio`);
+        appendConsoleLine('c-console-box',
+          `[PORT] Recognised: ${(d.usbControllers || []).length} USB controller(s) [${usbGens.join(', ')}], ` +
+          `${(d.videoOutputs || []).length} video output(s), ${(d.audioEndpoints || []).length} audio endpoint(s).`);
+        await savePortScanResult(d);
+      } catch (e) {
+        setBadge('enum', 'unverified', 'Scan error');
+        if (resultsEl) resultsEl.innerHTML = `<div class="dr-list-item" style="color:var(--dr-status-fail);">Error: ${esc(e.message)}</div>`;
+      } finally {
+        scanBtn.disabled = false;
       }
     });
-  });
+  }
 
   // RGB — detect controllable devices, expose per-device/zone controls
   const rgbBtn = document.getElementById('btn-scan-rgb');
@@ -1878,9 +1887,37 @@ function setupPortsChecker() {
         } else {
           setBadge('rgb', 'unverified', 'None detected');
           if (panel) panel.classList.add('hidden');
-          if (listEl) { listEl.classList.remove('hidden'); listEl.innerHTML = `<div class="dr-list-item"><span class="dr-muted">No OpenRGB-controllable devices found.</span></div>`; }
+          // If OpenRGB.exe isn't found, it was most likely quarantined by
+          // Windows Defender (its SMBus driver trips RiskWare heuristics).
+          // Offer a one-click authorize that adds a Defender exclusion and
+          // un-quarantines it, then re-detects.
+          const notFound = res.reason === 'not-found' || res.reason === 'launch-failed';
+          if (listEl) {
+            listEl.classList.remove('hidden');
+            if (notFound) {
+              listEl.innerHTML =
+                `<div class="dr-list-item" style="flex-direction:column;align-items:flex-start;gap:6px;">` +
+                `<span class="dr-muted">RGB engine (OpenRGB) isn't running — Windows Defender may have quarantined it (its low-level lighting driver is a common false positive).</span>` +
+                `<button type="button" id="btn-rgb-authorize" class="primary-pink-btn" style="padding:5px 12px;font-size:0.75rem;">⚡ Enable RGB Control (authorize with Windows Defender)</button>` +
+                `<span id="rgb-authorize-status" class="dr-muted"></span></div>`;
+              const authBtn = document.getElementById('btn-rgb-authorize');
+              const authStatus = document.getElementById('rgb-authorize-status');
+              if (authBtn) authBtn.addEventListener('click', async () => {
+                authBtn.disabled = true;
+                if (authStatus) authStatus.textContent = 'Adding Defender exclusion and restoring OpenRGB…';
+                const r = await ipcRenderer.invoke('rgb:authorize');
+                if (authStatus) authStatus.textContent = r.success
+                  ? 'Authorized ✓ — re-detecting devices…'
+                  : `Could not authorize automatically (${r.error || 'unknown'}). You may need to allow OpenRGB in Windows Security manually.`;
+                if (r.success) { authBtn.remove(); setTimeout(() => rgbBtn.click(), 800); }
+                else authBtn.disabled = false;
+              });
+            } else {
+              listEl.innerHTML = `<div class="dr-list-item"><span class="dr-muted">OpenRGB is running but found no controllable lighting on this board.</span></div>`;
+            }
+          }
         }
-        appendConsoleLine('c-console-box', `[RGB] Detected ${detailed.length} controllable device(s).`);
+        appendConsoleLine('c-console-box', `[RGB] Detected ${detailed.length} controllable device(s)${detailed.length === 0 && res.reason ? ` (${res.reason})` : ''}.`);
       } catch (err) {
         setBadge('rgb', 'fail', 'Error');
         appendConsoleLine('c-console-box', `[RGB ERROR] ${err.message}`);
@@ -3389,6 +3426,7 @@ function initSupabase() {
       );
       console.log("Supabase Client initialized successfully.");
       setupRealtimeListener();
+      startCloudPolling();
     } catch (err) {
       console.error("Failed to initialize Supabase Client:", err);
       supabaseClient = null;
@@ -3397,6 +3435,39 @@ function initSupabase() {
     console.log("Supabase cloud sync not active (no keys configured). Using local storage.");
     supabaseClient = null;
   }
+}
+
+// Polling fallback for cross-machine sync. The realtime listener above only
+// fires if the Supabase `tickets` table is added to the `supabase_realtime`
+// publication — which is OFF by default on many projects, so a test completed
+// on the client PC would never reach the admin PC until an app restart. This
+// timer re-pulls the cloud every 15s and refreshes whatever view is open, so
+// completed diagnostics show up on the admin side within seconds regardless of
+// the realtime replication setting. Cheap: one indexed SELECT on a small table.
+let cloudPollTimer = null;
+function startCloudPolling() {
+  if (cloudPollTimer) clearInterval(cloudPollTimer);
+  cloudPollTimer = setInterval(async () => {
+    if (!supabaseClient) return;
+    // Don't clobber a technician mid-edit: skip the pull while the ticket
+    // modal is open (the realtime path shows a conflict banner for that case).
+    const modal = document.getElementById('ticket-modal');
+    if (modal && modal.classList.contains('active')) return;
+    try {
+      await syncFromCloud();
+      if (currentMode === 'staff') {
+        renderDashboard();
+      } else if (currentMode === 'client-console') {
+        const sel = document.getElementById('client-ticket-select');
+        const keep = sel ? sel.value : '';
+        populateClientTicketSelect(keep);
+      } else if (currentMode === 'client') {
+        populateWelcomeTicketSelect();
+      }
+    } catch (e) {
+      console.error('Cloud poll failed:', e);
+    }
+  }, 15000);
 }
 
 // Upload a single ticket to Supabase
@@ -3978,21 +4049,23 @@ ipcRenderer.on('sys:sensor-update', (event, data) => {
 
 ipcRenderer.on('sys:ram-update', (event, data) => {
   const pct = data.percentDone || 0;
-  const iter = data.iterations || 0;
-  
+  const mb = data.allocatedMB || 0;
+  const faults = data.faults || 0;
+  const desc = `RAM: ${mb} MB under load${faults ? ` — ${faults} FAULT(S)` : ''}`;
+
   const cVal = document.getElementById('c-hud-ram-val');
   const cBar = document.getElementById('c-hud-ram-bar');
   const cDesc = document.getElementById('c-hud-ram-desc');
   if (cVal) cVal.textContent = `${pct}%`;
   if (cBar) cBar.style.width = `${pct}%`;
-  if (cDesc) cDesc.textContent = `RAM Stressing: Iteration ${iter}`;
+  if (cDesc) cDesc.textContent = desc;
 
   const mVal = document.getElementById('modal-hud-ram-val');
   const mBar = document.getElementById('modal-hud-ram-bar');
   const mDesc = document.getElementById('modal-hud-ram-desc');
   if (mVal) mVal.textContent = `${pct}%`;
   if (mBar) mBar.style.width = `${pct}%`;
-  if (mDesc) mDesc.textContent = `RAM Stressing: Iteration ${iter}`;
+  if (mDesc) mDesc.textContent = desc;
 });
 
 ipcRenderer.on('sys:prime95-update', (event, data) => {
@@ -4146,9 +4219,14 @@ async function executeDiagnosticsWorkflow(isModal) {
   updateTempBar(hudPrefix + 'hud-cpu-temp-val', hudPrefix + 'hud-cpu-temp-bar', res.cpuTempAvg);
   updateTempBar(hudPrefix + 'hud-gpu-temp-val', hudPrefix + 'hud-gpu-temp-bar', res.gpuTempAvg);
 
+  const ramSummary = res.ramError
+    ? `RAM test could not run: ${res.ramError}`
+    : (res.ramAllocatedMB != null
+        ? `${res.ramAllocatedMB} MB stressed, ${res.ramFaults || 0} fault(s) — ${res.ramPassed ? 'passed' : 'FAILED'}`
+        : (res.ramPassed ? 'RAM test passed successfully.' : 'RAM test failed!'));
   if (ramVal) ramVal.textContent = '100%';
   if (ramBar) ramBar.style.width = '100%';
-  if (ramDesc) ramDesc.textContent = res.ramPassed ? 'RAM test passed successfully.' : 'RAM test failed!';
+  if (ramDesc) ramDesc.textContent = ramSummary;
 
   if (ssdVal) ssdVal.textContent = `${res.ssdRead} R / ${res.ssdWrite} W MB/s`;
   if (ssdBar) ssdBar.style.width = '100%';
@@ -4166,7 +4244,7 @@ async function executeDiagnosticsWorkflow(isModal) {
   appendConsoleLine(boxId, `[SYS] GPU avg ${res.gpuTempAvg}°C (min ${res.gpuTempMin}°C / max ${res.gpuTempMax}°C) over ${(res.gpuTempLog || []).length} samples.`);
   appendConsoleLine(boxId, `[SYS] Cinebench R23: ${res.cinebenchScore} pts | FurMark: ${res.furmarkScore} pts.`);
   appendConsoleLine(boxId, `[SYS] SSD — Read: ${res.ssdRead} MB/s, Write: ${res.ssdWrite} MB/s.`);
-  appendConsoleLine(boxId, `[SYS] RAM stress test: ${res.ramPassed ? "PASSED ✓" : "FAILED ✗"}.`);
+  appendConsoleLine(boxId, `[SYS] RAM stress test: ${res.ramPassed ? "PASSED ✓" : "FAILED ✗"}${res.ramAllocatedMB != null ? ` (${res.ramAllocatedMB} MB, ${res.ramFaults || 0} faults)` : ''}.`);
 
   // Query SSD health
   appendConsoleLine(boxId, `[SYS] Querying SSD health via SMART data...`);
@@ -4227,9 +4305,21 @@ async function executeDiagnosticsWorkflow(isModal) {
       ticket.diagnostics.ssdWrite = res.ssdWrite || null;
       if (ssdHealth && !ssdHealth.error) ticket.diagnostics.ssdHealth = ssdHealth;
 
-      // Prime95 is the authoritative CPU+RAM torture test — its result is what
-      // now actually populates ramStress/ramDetail (previously read by the
-      // print report and dashboard's qcBadge() but never written by anything).
+      // RAM verdict + detail come from the quick sustained stress test that
+      // ALWAYS runs. Previously these were only written when the opt-in Prime95
+      // torture test ran, so a normal diagnostics pass left the report's RAM
+      // row blank even though the RAM test had executed.
+      if (res.ramError) {
+        ticket.diagnostics.ramStress = 'failed';
+        ticket.diagnostics.ramDetail = `RAM stress could not run: ${res.ramError}`;
+      } else if (res.ramAllocatedMB != null) {
+        ticket.diagnostics.ramStress = res.ramPassed ? 'passed' : 'failed';
+        ticket.diagnostics.ramDetail =
+          `${res.ramAllocatedMB} MB stressed for ${res.ramSeconds || 0}s — ${res.ramFaults || 0} fault(s)`;
+      }
+
+      // Prime95 (opt-in) is the deeper CPU+RAM torture test. When it runs it
+      // OVERRIDES the quick RAM verdict with its longer, stronger result.
       if (res.prime95) {
         ticket.diagnostics.prime95 = res.prime95;
         if (res.prime95.overallResult && res.prime95.overallResult !== 'not-run') {
