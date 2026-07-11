@@ -248,9 +248,12 @@
   }
 
   var api = { lookup: lookup, searchFallbackSites: searchFallbackSites, parsePrice: parsePrice, FALLBACK_SITES: FALLBACK_SITES };
+  // ALWAYS set the browser global when a window exists (Electron UMD gotcha
+  // — see shared/matcher.js). Node require() still gets module.exports.
   if (typeof module !== 'undefined' && module.exports) {
     module.exports = api;
-  } else {
+  }
+  if (typeof window !== 'undefined') {
     global.NeoQcWebLookup = api;
   }
 })(typeof window !== 'undefined' ? window : this);

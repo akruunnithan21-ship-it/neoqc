@@ -2482,22 +2482,33 @@ function checkClientFormReady() {
 // developed and visually tested in a plain browser harness
 // (report-harness.html). This wrapper just injects the app-side state.
 function populatePrintFields(ticket) {
+  // Returns true only when the report was actually populated — callers MUST
+  // abort printing otherwise. v1.3.0 silently printed the empty "--" skeleton
+  // when NeoQcPrintRender was missing (the Electron UMD gotcha); an unusable
+  // report must never reach paper/PDF quietly again.
   if (!window.NeoQcPrintRender) {
-    console.error('print-render.js not loaded — cannot populate print report');
-    return;
+    alert('Report renderer failed to load (print-render.js) — cannot generate the QC report. Please report this to the developer.');
+    return false;
   }
-  window.NeoQcPrintRender.populate(
-    ticket,
-    (appState && appState.settings) || {},
-    ppiCacheByTicket[ticket.id]
-  );
+  try {
+    window.NeoQcPrintRender.populate(
+      ticket,
+      (appState && appState.settings) || {},
+      ppiCacheByTicket[ticket.id]
+    );
+    return true;
+  } catch (e) {
+    console.error('Report populate failed:', e);
+    alert('Report generation failed: ' + e.message);
+    return false;
+  }
 }
 
 function triggerPrintReport(ticketId, shouldPrint = true) {
   const ticket = appState.tickets.find(t => t.id === ticketId);
   if (!ticket) return;
 
-  populatePrintFields(ticket);
+  if (!populatePrintFields(ticket)) return; // never print an unpopulated skeleton
 
   // Execute print in main Electron window
   if (shouldPrint) {
@@ -2509,7 +2520,7 @@ async function triggerSavePdf(ticketId) {
   const ticket = appState.tickets.find(t => t.id === ticketId);
   if (!ticket) return;
 
-  populatePrintFields(ticket);
+  if (!populatePrintFields(ticket)) return; // never save an unpopulated skeleton
 
   // Save PDF filename
   const cleanName = ticket.customerName.replace(/[^a-z0-9]/gi, '_').toLowerCase();

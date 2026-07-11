@@ -230,9 +230,16 @@
     FIELD_TO_CATEGORY: FIELD_TO_CATEGORY
   };
 
+  // ALWAYS set the browser global when a window exists — in the Electron
+  // renderer (nodeIntegration:true) `module` is defined even for <script>
+  // tags, so the old either/or UMD took the CommonJS branch and
+  // window.NeoQcMatcher was silently never set inside the packaged app:
+  // the 8,000-item catalog autocomplete never engaged there and quietly
+  // fell back to the tiny bundled Fuse list. Node require() still works.
   if (typeof module !== 'undefined' && module.exports) {
     module.exports = api;
-  } else {
+  }
+  if (typeof window !== 'undefined') {
     global.NeoQcMatcher = api;
   }
 })(typeof window !== 'undefined' ? window : this);

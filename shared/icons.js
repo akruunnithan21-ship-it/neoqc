@@ -36,9 +36,15 @@
 
   var api = { ICONS: ICONS, iconSvg: iconSvg };
 
+  // ALWAYS set the browser global when a window exists — in the Electron
+  // renderer (nodeIntegration:true) `module` is defined even for <script>
+  // tags, so the old either/or UMD took the CommonJS branch and the
+  // window.* global was silently never set inside the packaged app
+  // (classic Electron UMD gotcha). Node require() still gets module.exports.
   if (typeof module !== 'undefined' && module.exports) {
     module.exports = api;
-  } else {
+  }
+  if (typeof window !== 'undefined') {
     global.NeoQcIcons = api;
   }
 })(typeof window !== 'undefined' ? window : this);

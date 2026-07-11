@@ -486,9 +486,15 @@
   }
 
   var api = { populate: populate, buildSparkline: buildSparkline };
+  // ALWAYS set the browser global when a window exists (Electron UMD gotcha
+  // — see shared/matcher.js). The either/or version of this block is exactly
+  // why installed v1.3.0 printed an all-dashes skeleton report: `module` is
+  // defined in the Electron renderer, so window.NeoQcPrintRender was never
+  // set and populatePrintFields() bailed out silently.
   if (typeof module !== 'undefined' && module.exports) {
     module.exports = api;
-  } else {
+  }
+  if (typeof window !== 'undefined') {
     global.NeoQcPrintRender = api;
   }
 })(typeof window !== 'undefined' ? window : this);

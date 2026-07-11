@@ -191,6 +191,39 @@ User hit three real problems using installed v1.3.0:
 
 ---
 
+## v1.3.2 (2026-07-11) — THE Electron UMD gotcha: window.* globals never set in the packaged app
+
+User's installed app printed an all-dashes skeleton PDF and autocomplete quality stayed poor.
+Root cause (affects EVERYTHING loaded via <script> that used the either/or UMD pattern): the
+renderer runs with `nodeIntegration: true, contextIsolation: false` (main.js), so **`module`
+is a defined global even inside plain `<script src>` tags** — every shared module took the
+CommonJS branch (`module.exports = api`) and NEVER set its `window.*` global inside the app.
+In a plain browser (dashboard, dev harness — where everything had been verified) `module` is
+undefined and the globals were set fine, which is why this was invisible until a real
+packaged-app PDF surfaced.
+
+Casualties while broken (silent, because call sites guard with `if (window.X)`):
+- `window.NeoQcMatcher` → catalog autocomplete NEVER engaged in the app (fell back to the
+  tiny bundled Fuse list — the real reason "components don't show up correctly")
+- `window.NeoQcPrintRender` → populate skipped → empty "--" skeleton reports
+- `window.NeoQcDiagnosticsRender` → PPI/passport/port panels blank in the app modal
+- `window.NeoQcWebLookup` → v1.3.1's pure-JS Search Online dead on arrival
+- `window.NeoQcIcons`
+
+Fix: all five modules (shared/icons.js, shared/matcher.js, shared/diagnostics-render.js,
+print-render.js, web-lookup.js) now ALWAYS set the window global when a window exists AND
+still set module.exports for Node require() (tests/tooling). **Any future module loaded via
+<script> in this app MUST use this both/and pattern — never if/else on `typeof module`.**
+Verified via `.harness-fixtures/umd-test.html`, which simulates the Electron condition by
+defining `module` before loading the scripts: all 5 globals set, matcher resolves
+"msi x870e gaming plus wifi" at 0.97.
+
+Hardening: populatePrintFields() now returns false + alerts on any populate failure, and
+triggerPrintReport/triggerSavePdf abort — an unpopulated skeleton can never silently reach
+paper/PDF again.
+
+---
+
 ## Files (current, non-exhaustive)
 
 | File | What it does |

@@ -1847,19 +1847,18 @@
     <div class="glass-slab modal-card" style="max-width: 650px; width: 100%; padding: 30px; border-radius: 20px;">
       <div class="modal-header" style="border-bottom: 1px solid var(--glass-border); padding-bottom: 15px; margin-bottom: 20px;">
         <h2 style="font-family: 'Syncopate', sans-serif; font-size: 1.3rem; color: var(--primary-pink); letter-spacing: 0.05em; margin: 0;">NEO QC UPDATED</h2>
-        <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; font-weight: 700; background: rgba(231, 1, 78, 0.1); color: var(--primary-pink); padding: 4px 8px; border-radius: 4px;">v1.3.1</span>
+        <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; font-weight: 700; background: rgba(231, 1, 78, 0.1); color: var(--primary-pink); padding: 4px 8px; border-radius: 4px;">v1.3.2</span>
       </div>
       <div class="modal-body" style="font-size: 0.92rem; line-height: 1.6; color: var(--text-dark); max-height: 420px; overflow-y: auto; padding-right: 5px;">
-        <p style="margin-top: 0;">An update has been installed. Here are the key improvements in NeoQC <strong>v1.3.1</strong>:</p>
+        <p style="margin-top: 0;">An update has been installed. Here are the key improvements in NeoQC <strong>v1.3.2</strong>:</p>
         <ul style="padding-left: 20px; display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px;">
-          <li><strong>"Search Online" Now Works on Every PC</strong>: The live retailer lookup no longer needs Python installed — it runs inside the app itself. The "spawn … ENOENT" error when searching for missing components is gone for good.</li>
-          <li><strong>Manual Entry Everywhere</strong>: Every component dropdown now ends with a "✏️ Use as typed" row — if the exact part isn't in the catalog or online results, one click keeps exactly what you typed.</li>
-          <li><strong>Cooler Model Field Fixed</strong>: Selecting "Air Cooler" or "AIO Liquid Cooler" now actually reveals the model input (it previously only appeared when re-opening a saved ticket).</li>
-          <li><strong>Fresher Catalog</strong>: The component database has been refreshed from the supplier for the newest boards, GPUs and cases — and every successful online search keeps growing it automatically for all technicians.</li>
+          <li><strong>QC Report Actually Fills In Now</strong>: A module-loading bug made the printed/PDF report come out as an empty "--" skeleton in the installed app. The full three-page certificate — score strip, specs with serials, thermal and benchmark data with comparison bars, Prime95, SSD health, component passports, port verification, price-to-performance analysis, provenance and integrity code — now populates correctly. If report generation ever fails again, the app refuses to print a blank skeleton and tells you why.</li>
+          <li><strong>Real Catalog Autocomplete In The App</strong>: The same bug meant the 8,000-item priced catalog search never engaged in the installed app — dropdowns silently used a tiny built-in list instead. Component search now matches the full live catalog with prices (e.g. "msi x870e gaming plus wifi" resolves instantly), and diagnostics/PPI panels that depended on the same modules render properly.</li>
+          <li><strong>Search Online restored</strong>: The in-app retailer lookup introduced in v1.3.1 was affected by the same loading bug — it now works as designed.</li>
         </ul>
       </div>
       <div class="modal-footer" style="border-top: 1px solid var(--glass-border); padding-top: 15px; display: flex; justify-content: flex-end; margin-top: 20px;">
-        <button id="btn-close-changelog" class="primary-pink-btn" style="padding: 10px 24px; font-weight: 700; font-size: 0.95rem;">Launch NeoQC v1.3.1</button>
+        <button id="btn-close-changelog" class="primary-pink-btn" style="padding: 10px 24px; font-weight: 700; font-size: 0.95rem;">Launch NeoQC v1.3.2</button>
       </div>
     </div>
   </div>
