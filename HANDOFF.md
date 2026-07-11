@@ -5,8 +5,8 @@
 **Python:** `C:\Users\Aladeen\AppData\Local\Python\pythoncore-3.14-64\python.exe`
 **Supabase:** `https://ggsxkhenzdhaachubrsc.supabase.co` (anon key hardcoded in `main.js`, `app.js`, `dashboard/app.js`, and every Python script that touches Supabase)
 **GitHub:** `akruunnithan21-ship-it/neoqc` — releases are the OTA update mechanism (electron-updater)
-**Shipped version:** **v1.2.2** (live on GitHub Releases, verified OTA-resolvable)
-**Last session date:** 2026-07-11 (unreleased work in tree — see "This session (2026-07-11)" below)
+**Shipped version:** **v1.3.0** (live on GitHub Releases 2026-07-11, verified OTA-resolvable: latest.yml → 1.3.0, installer URL 200 with matching byte size)
+**Last session date:** 2026-07-11 — see "This session (2026-07-11)" below for what shipped in v1.3.0
 
 ---
 
@@ -142,10 +142,13 @@ hit-testing in a static repro. Fixed: `.autocomplete-list:empty { display:none; 
   tile tops, and passing bars. Verdict/stamp logic unchanged but Prime95 now counts toward the
   overall verdict.
 
-### Remaining before release
-1. **Electron print smoke test**: open a real ticket → Print/Save PDF → confirm 3 clean pages
-   (harness verifies layout at exact A4 metrics, but Chromium print margins can differ slightly).
-2. Bump changelog modal + package.json, build, `gh release create` (dash-named assets!).
+### Released as v1.3.0 (2026-07-11, tag v1.3.0, commit d8dee94)
+Built with `npm run build`, published via `gh release create v1.3.0` with NeoQC-Setup-1.3.0.exe
++ blockmap + latest.yml. **electron-builder.json now sets nsis `artifactName:
+"NeoQC-Setup-${version}.${ext}"`** so artifacts and latest.yml come out dash-named natively —
+the manual rename step from previous releases is no longer needed.
+**Still worth doing on a real machine**: an Electron print/Save-PDF smoke test of the new
+report (harness verified exact A4 metrics, but a physical printout hasn't been eyeballed).
 
 ---
 
