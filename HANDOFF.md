@@ -281,6 +281,48 @@ real report markup on-screen as A4 sheets.
 
 ---
 
+## v1.4.1 (2026-07-11/12) — PPI "0/100 + NaN%" field bug: bridge direction was backwards
+
+Field screenshot: PPI panel showed **0/100, fit NaN%**, flags "cpu/gpu: no
+passmark score on file", plus "windowsActivationState: 'Unverified' not matched"
+noise, and no way to pick the use case. Reproduced on ticket t_mrgbgk2ulwys9
+(9950X + Zotac RTX 5070 Ti, all specs picked from catalog autocomplete = full
+retail names). Five distinct fixes:
+
+1. **Bridge direction (the core bug)** — `_benchmark_scores_for_pool` used
+   `Matcher.match(retail_name)` over PassMark names, which scores how much of
+   the QUERY the candidate covers. Retail names are long, PassMark names short
+   ("GeForce RTX 5070 Ti"), so coverage diluted below 0.55 → own cpu/gpu got NO
+   benchmark score → everything unscored → index 0. New `_bridge_match()` in
+   ppi_sync.py scores REFERENCE-token coverage inside the retail name
+   (`_score(pm_tokens, retail_token_set)`, threshold 0.55, best wins).
+   Result on the failing ticket: 13 → 65 components bridged, index 0.0 → 92.2
+   (cpu 95.3 / gpu 90.7, fit 1.0). **Rule: matching short-reference ↔ long-retail
+   must score coverage of the SHORT side** (pcstudio_import's consolidation
+   already does this; Matcher.match is for short-query → long-catalog).
+2. **Use-case selector** — new `#modal-ppi-usecase` dropdown (9 canonical
+   cases) next to the Compute button; previously the handler read
+   `#modal-usecase-select` (the Cinebench gaming/studio toggle — "studio" isn't
+   a PPI use case and silently became office). loadAndRenderPpi() sets the
+   selector to the ticket's stored use_cases[0] on open.
+3. **NaN% fit** — `(row.customer_fit_score || row.customerFitScore)` turned a
+   legitimate fit of 0 into undefined → NaN%. Fixed in
+   shared/diagnostics-render.js (dashboard synced).
+4. **Noise fields** — ppi_sync now matches ONLY real component fields via a
+   FIELD_CATEGORY map (os/windowsKey/windowsActivationState/coolerType
+   skipped; mobo→motherboard, coolerModel→cooler now category-gated), so
+   build_specs keys are canonical categories and "Windows → MSI laptop 84%"
+   flags are gone.
+5. **Bottleneck flag** — only fires when the weaker of cpu/gpu is genuinely
+   near the use-case minimum (fit < 1.5×); a 9950X + 5070 Ti no longer gets
+   "GPU is limiting". ppi() also adds an explicit "data gap, not a verdict"
+   flag if nothing could be scored.
+
+All PPI/matcher regression suites re-run green; real ticket recomputed and
+stored (the user's panel shows 92.2 on next open).
+
+---
+
 ## Files (current, non-exhaustive)
 
 | File | What it does |
