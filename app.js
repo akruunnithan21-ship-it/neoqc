@@ -3234,8 +3234,13 @@ function setupEventListeners() {
         alert('Save the ticket first — PPI needs a stored ticket with specs.');
         return;
       }
-      const useCaseSel = document.getElementById('modal-usecase-select');
-      const useCase = useCaseSel ? useCaseSel.value : '';
+      // The dedicated PPI use-case selector (9 canonical use cases). Was
+      // previously wired to #modal-usecase-select — the Cinebench
+      // gaming/studio toggle — so "studio" mapped to no known use case and
+      // silently fell back to office weights, and the technician had no way
+      // to pick the real intended use.
+      const useCaseSel = document.getElementById('modal-ppi-usecase');
+      const useCase = useCaseSel ? useCaseSel.value : 'gaming-1440p';
       ppiBtn.disabled = true;
       ppiBtn.textContent = 'Computing…';
       try {
@@ -4391,6 +4396,12 @@ async function loadAndRenderPpi(ticketId) {
     if (!error && data) {
       ppiCacheByTicket[ticketId] = data;
       panel.innerHTML = R.renderPpiPanel(data);
+      // Reflect the stored use case in the selector so recompute defaults to
+      // what this ticket was last evaluated for.
+      const sel = document.getElementById('modal-ppi-usecase');
+      if (sel && data.use_cases && data.use_cases.length && [...sel.options].some(o => o.value === data.use_cases[0])) {
+        sel.value = data.use_cases[0];
+      }
     }
   } catch (e) {
     console.error('PPI load failed:', e);

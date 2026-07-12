@@ -304,6 +304,8 @@ def ppi(
             weight_total += w
 
     index = round(weighted_sum / weight_total, 1) if weight_total else 0.0
+    if not weight_total:
+        flags.append("No component could be scored against reference data — the 0 index is a data gap, not a verdict on this build")
     customer_fit_score = round(sum(fit_ratios) / len(fit_ratios), 3) if fit_ratios else 0.0
 
     # Bottleneck detection on ABSOLUTE performance vs the use-case's minimums —
@@ -322,10 +324,16 @@ def ppi(
         if cpu_fits and gpu_fits:
             cpu_fit = sum(cpu_fits) / len(cpu_fits)
             gpu_fit = sum(gpu_fits) / len(gpu_fits)
-            if gpu_fit / max(cpu_fit, 1e-6) < 1 / BOTTLENECK_RATIO:
-                flags.append("GPU is the limiting component for the selected use-case (CPU has headroom)")
-            elif cpu_fit / max(gpu_fit, 1e-6) < 1 / BOTTLENECK_RATIO:
-                flags.append("CPU is the limiting component for the selected use-case (GPU has headroom)")
+            # Only call something "limiting" when it is actually CLOSE to the
+            # use-case minimum (fit < 1.5×) — not merely smaller than the other
+            # part's headroom. A 9950X + 5070 Ti both clear gaming minimums by
+            # miles; flagging the GPU there is noise, not insight.
+            weaker = min(cpu_fit, gpu_fit)
+            if weaker < 1.5:
+                if gpu_fit / max(cpu_fit, 1e-6) < 1 / BOTTLENECK_RATIO:
+                    flags.append("GPU is the limiting component for the selected use-case (CPU has headroom)")
+                elif cpu_fit / max(gpu_fit, 1e-6) < 1 / BOTTLENECK_RATIO:
+                    flags.append("CPU is the limiting component for the selected use-case (GPU has headroom)")
 
     if fit_ratios and customer_fit_score < 0.6:
         flags.append("Build is underpowered for the selected use-case(s)")

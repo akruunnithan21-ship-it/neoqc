@@ -858,9 +858,22 @@
             <div id="modal-passport-grid" class="margin-top"></div>
 
             <!-- Price-to-Performance (reads precomputed ticket_ppi; Compute shells to ppi_sync.py) -->
-            <div style="display:flex; align-items:center; justify-content:space-between; margin-top:14px; margin-bottom:8px;">
+            <div style="display:flex; align-items:center; justify-content:space-between; margin-top:14px; margin-bottom:8px; flex-wrap:wrap; gap:8px;">
               <h4 style="color: var(--primary-pink); font-size: 0.82rem; text-transform: uppercase; letter-spacing: 0.05em; margin: 0; display:flex; align-items:center; gap:6px;"><span class="dr-inline-icon" data-icon="price-tag"></span>Price-to-Performance</h4>
-              <button type="button" id="btn-compute-ppi" class="secondary-btn" style="padding: 4px 10px; font-size: 0.72rem;">Compute Price-Performance</button>
+              <div style="display:flex; align-items:center; gap:8px;">
+                <select id="modal-ppi-usecase" title="Customer's intended use — sets component weights and minimum-performance targets" style="padding: 4px 8px; font-size: 0.72rem; border-radius: 4px; border: 1px solid var(--glass-border); background: var(--glass-bg); color: var(--text-dark); outline: none;">
+                  <option value="gaming-1080p">Gaming — 1080p</option>
+                  <option value="gaming-1440p" selected>Gaming — 1440p</option>
+                  <option value="gaming-4k">Gaming — 4K</option>
+                  <option value="streaming">Streaming</option>
+                  <option value="video-editing">Video Editing</option>
+                  <option value="cad-3d">CAD / 3D</option>
+                  <option value="content-creation">Content Creation</option>
+                  <option value="ai-ml">AI / ML</option>
+                  <option value="office">Office / General</option>
+                </select>
+                <button type="button" id="btn-compute-ppi" class="secondary-btn" style="padding: 4px 10px; font-size: 0.72rem;">Compute Price-Performance</button>
+              </div>
             </div>
             <div id="modal-ppi-panel"></div>
 
@@ -1840,22 +1853,18 @@
     <div class="glass-slab modal-card" style="max-width: 650px; width: 100%; padding: 30px; border-radius: 20px;">
       <div class="modal-header" style="border-bottom: 1px solid var(--glass-border); padding-bottom: 15px; margin-bottom: 20px;">
         <h2 style="font-family: 'Syncopate', sans-serif; font-size: 1.3rem; color: var(--primary-pink); letter-spacing: 0.05em; margin: 0;">NEO QC UPDATED</h2>
-        <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; font-weight: 700; background: rgba(231, 1, 78, 0.1); color: var(--primary-pink); padding: 4px 8px; border-radius: 4px;">v1.4.0</span>
+        <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; font-weight: 700; background: rgba(231, 1, 78, 0.1); color: var(--primary-pink); padding: 4px 8px; border-radius: 4px;">v1.4.1</span>
       </div>
       <div class="modal-body" style="font-size: 0.92rem; line-height: 1.6; color: var(--text-dark); max-height: 420px; overflow-y: auto; padding-right: 5px;">
-        <p style="margin-top: 0;">An update has been installed. Here are the key improvements in NeoQC <strong>v1.4.0</strong>:</p>
+        <p style="margin-top: 0;">An update has been installed. Here are the key improvements in NeoQC <strong>v1.4.1</strong>:</p>
         <ul style="padding-left: 20px; display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px;">
-          <li><strong>No More White-Screen Freeze</strong>: If the app ever went fully white and unresponsive (window buttons included), it now detects the renderer crash and reloads itself automatically instead of leaving a dead window.</li>
-          <li><strong>Client → Admin Sync Fixed</strong>: A test completed on a client/testing PC now reliably appears on the admin PC within ~15 seconds, even if Supabase live-replication isn't enabled — the app now polls the cloud as a fallback and refreshes the dashboard.</li>
-          <li><strong>Cinebench Scores Corrected</strong>: Modern CPUs (Ryzen 9000/7000, Core 14th/13th gen, Core Ultra) are now scored correctly — a Ryzen 9 9950X no longer reports a nonsensical ~1600. Estimates auto-scale to the actual core/thread count, and real Cinebench output parsing is more robust.</li>
-          <li><strong>RAM Is Actually Stressed</strong>: The memory test now allocates up to 70% of free RAM (shows real load in Task Manager), writes and verifies a rotating pattern to detect faults, and reports exactly how much was tested — with the result now saved to the report even without Prime95.</li>
-          <li><strong>Simpler Port Check</strong>: One "Scan Ports" button now lists what Windows recognises — USB controllers and their generations (2.0 / 3.x / USB4), video outputs by connection (HDMI / DisplayPort), and audio endpoints — no more plug-in/verify dance.</li>
-          <li><strong>RGB Control + Defender Fix</strong>: RGB lighting control now offers one-click "Enable RGB Control" that adds a Windows Defender exclusion and un-quarantines the lighting engine (OpenRGB), fixing the "detected as a threat" problem. New installs add the exclusion automatically.</li>
-          <li><strong>Richer 4-Page QC Report</strong>: The certificate is now four pages and far more information-dense — a dedicated Hardware Health &amp; Connectivity page (component passports, SSD S.M.A.R.T., full port enumeration), refined visuals, and RAM stress detail.</li>
+          <li><strong>Price-to-Performance Actually Computes</strong>: Builds picked from catalog autocomplete (full retail names like "Zotac RTX 5070 Ti AMP Extreme…") no longer come back as 0/100 with "no score on file" — the benchmark matcher now correctly recognises the reference CPU/GPU inside long retail names. A 9950X + 5070 Ti build that scored 0 now scores 92+.</li>
+          <li><strong>Use Case Is Now Selectable</strong>: A dedicated dropdown next to "Compute Price-Performance" offers all nine use cases (Gaming 1080p/1440p/4K, Streaming, Video Editing, CAD/3D, Content Creation, AI/ML, Office) — weights and minimum-performance targets follow your choice, and the selector remembers what each ticket was last evaluated for.</li>
+          <li><strong>Cleaner PPI Panel</strong>: No more "NaN%" fit, no more nonsense matches on non-component fields (e.g. "Windows → laptop at 84%"), motherboard/cooler are now properly categorised, and a false "GPU is limiting" warning no longer appears on balanced high-end builds.</li>
         </ul>
       </div>
       <div class="modal-footer" style="border-top: 1px solid var(--glass-border); padding-top: 15px; display: flex; justify-content: flex-end; margin-top: 20px;">
-        <button id="btn-close-changelog" class="primary-pink-btn" style="padding: 10px 24px; font-weight: 700; font-size: 0.95rem;">Launch NeoQC v1.4.0</button>
+        <button id="btn-close-changelog" class="primary-pink-btn" style="padding: 10px 24px; font-weight: 700; font-size: 0.95rem;">Launch NeoQC v1.4.1</button>
       </div>
     </div>
   </div>

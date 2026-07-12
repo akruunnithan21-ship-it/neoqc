@@ -277,7 +277,10 @@
       return '<div class="dr-muted" style="margin-top:8px;">' + esc(cat.toUpperCase()) + ' alternatives at this price</div><div class="dr-list">' + rows + '</div>';
     }).join('');
 
-    var fitPct = row.customer_fit_score != null ? Math.round((row.customer_fit_score || row.customerFitScore) * 100) : null;
+    // NOTE: no `a || b` here — a fit score of exactly 0 is falsy, and the old
+    // fallback chain turned it into undefined → "NaN%" on the panel.
+    var fitRaw = row.customer_fit_score != null ? row.customer_fit_score : row.customerFitScore;
+    var fitPct = fitRaw != null ? Math.round(fitRaw * 100) : null;
 
     return '<div class="dr-card">' +
       '<div class="dr-card-header">' + icon('price-tag') + '<span class="dr-card-title">Price-to-Performance Index</span></div>' +

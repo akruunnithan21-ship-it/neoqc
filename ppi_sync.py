@@ -32,7 +32,7 @@ from pathlib import Path
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-from matcher import Matcher
+from matcher import Matcher, _score, _tokenize
 from ppi import ppi, USE_CASE_WEIGHTS
 
 try:
@@ -82,20 +82,43 @@ def _load_component_prices(sb) -> dict:
 
 
 def _passmark_matchers():
-    """Build fuzzy matchers over the PassMark name lists (name → score dict)."""
+    """Load the PassMark name lists, pre-tokenized for the reverse-direction
+    bridge match (see _bridge_match below)."""
     cpu_data = json.loads((BENCH_DIR / "cpu_passmark.json").read_text(encoding="utf-8"))
     gpu_data = json.loads((BENCH_DIR / "gpu_passmark.json").read_text(encoding="utf-8"))
 
-    def matcher_for(data, category):
-        catalog = [
-            {"name": name, "sku": name, "category": category, "price_inr": None}
-            for name in data
-        ]
-        return Matcher(catalog), data
+    def prepared(data):
+        return [(name, _tokenize(name)) for name in data], data
 
-    cpu_m, cpu_entries = matcher_for(cpu_data, "cpu")
-    gpu_m, gpu_entries = matcher_for(gpu_data, "gpu")
-    return {"cpu": (cpu_m, cpu_entries), "gpu": (gpu_m, gpu_entries)}
+    cpu_tok, cpu_entries = prepared(cpu_data)
+    gpu_tok, gpu_entries = prepared(gpu_data)
+    return {"cpu": (cpu_tok, cpu_entries), "gpu": (gpu_tok, gpu_entries)}
+
+
+def _bridge_match(retail_name: str, pm_tokenized) -> tuple[str | None, float]:
+    """
+    Match a RETAIL catalog name to a PassMark reference name.
+
+    Direction matters: Matcher.match() scores how much of the QUERY the
+    candidate covers — right for "technician types short text, catalog has the
+    long name", but exactly backwards here. Retail names are long ("Zotac RTX
+    5070 Ti AMP Extreme Infinity 16Gb Graphics Card") and PassMark names are
+    short ("GeForce RTX 5070 Ti"), so query-coverage dilutes below the 0.55
+    threshold and strong builds ended up with NO benchmark score at all
+    (index 0.0 — the 9950X/5070 Ti field bug, 2026-07-11). Score instead by
+    how much of the REFERENCE name appears inside the retail name.
+    """
+    q_set = set(_tokenize(retail_name))
+    if not q_set:
+        return None, 0.0
+    best_name, best_score = None, 0.0
+    for pm_name, pm_tokens in pm_tokenized:
+        if not pm_tokens:
+            continue
+        s = _score(pm_tokens, q_set)
+        if s > best_score:
+            best_score, best_name = s, pm_name
+    return best_name, best_score
 
 
 def _benchmark_scores_for_pool(component_prices, build_specs, price_band_pct):
@@ -112,7 +135,7 @@ def _benchmark_scores_for_pool(component_prices, build_specs, price_band_pct):
     for category, bench_key in (("cpu", "passmark-cpu"), ("gpu", "passmark-g3d")):
         own_sku = build_specs.get(category)
         own = component_prices.get(own_sku) if own_sku else None
-        matcher, name_entries = pm[category]
+        pm_tokenized, name_entries = pm[category]
 
         # candidate pool: own component + anything in its price band
         candidates = []
@@ -132,9 +155,9 @@ def _benchmark_scores_for_pool(component_prices, build_specs, price_band_pct):
         for sku, entry in candidates:
             if sku in scores:
                 continue
-            m = matcher.match(entry["name"], category=category)
-            if m.sku and m.confidence >= 0.55:
-                bench_entry = name_entries[m.sku]
+            pm_name, confidence = _bridge_match(entry["name"], pm_tokenized)
+            if pm_name and confidence >= 0.55:
+                bench_entry = name_entries[pm_name]
                 if category == "cpu":
                     scores[sku] = {bench_key: float(bench_entry["passmark_score"])}
                     if bench_entry.get("single_thread_score"):
@@ -184,13 +207,23 @@ def main():
     matcher = Matcher([
         {"sku": sku, **entry} for sku, entry in component_prices.items()
     ])
+    # Only actual component fields participate. Tickets also carry metadata in
+    # specs (os / windowsKey / windowsActivationState / coolerType / igpu) that
+    # used to be fuzzy-matched anyway — producing nonsense matches ("Windows" →
+    # an MSI laptop at 84%) and noise flags on the customer-facing report.
+    FIELD_CATEGORY = {
+        "cpu": "cpu", "gpu": "gpu", "ram": "ram", "storage": "storage",
+        "psu": "psu", "case": "case", "mobo": "motherboard",
+        "motherboard": "motherboard", "cooler": "cooler", "coolerModel": "cooler",
+    }
     build_specs = {}
     for field, text in specs.items():
-        if not text:
+        category = FIELD_CATEGORY.get(field)
+        if not text or not category:
             continue
-        m = matcher.match(text, category=field if field in ("cpu", "gpu", "ram", "storage") else None)
+        m = matcher.match(text, category=category)
         if m.sku and m.confidence >= 0.55:
-            build_specs[field] = m.sku
+            build_specs[category] = m.sku
             print(f"  {field:<10} {text[:38]:<40} → {m.matched_name[:44]} ({m.confidence:.0%})")
         else:
             flags_extra.append(f"{field}: '{text[:40]}' not matched to catalog (best {m.confidence:.0%})")
