@@ -323,6 +323,30 @@ stored (the user's panel shows 92.2 on next open).
 
 ---
 
+## v1.4.2 (2026-07-12) — print crash regression, part-code stripping, update-check on landing
+
+1. **"Report generation failed: pc is not defined" (field bug, MY regression)** —
+   the v1.4.0 port-scan rework renamed `var pc = d.portCheckV2` → `var ps =
+   d.portScan` in print-render.js but missed the PROVENANCE section's `if (pc
+   && pc.categories …)` reference → every Print/PDF threw. The v1.3.2 fail-loud
+   guard did its job (alert instead of a blank report), but printing was dead.
+   Fixed; harness re-run confirms populate completes. **Lesson: when renaming a
+   variable, grep the whole file for the old name.**
+2. **Part-code stripping** — `NeoQcMatcher.cleanName()` (shared/matcher.js,
+   display-only): strips single-token parenthesized part codes (dash/slash +
+   digits, or 4+ digit runs — "(100-100001277WOF)", "(BX80768270K)",
+   "(E502-KGNN-S00)", "(EVMNV/2TB)") while keeping "(White)", "(32Gbx1)",
+   "(650W)", "(2023)", "(2 x 8GB)". Applied at autocomplete pick (so specs are
+   stored clean going forward), web-lookup pick, completed-builds table,
+   customer target-spec view, PPI alternatives (panel + print), and all print
+   spec fields (covers legacy tickets). 12-case test suite in the session
+   scratchpad passes. Matching still uses full names — display-only.
+3. **Update check on mode-selector landing** — `update:check` IPC in main.js
+   (rate-limited to 1/10 min; boot check unchanged), sent by switchScreen()
+   whenever the selector screen shows.
+
+---
+
 ## Files (current, non-exhaustive)
 
 | File | What it does |

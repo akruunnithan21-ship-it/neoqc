@@ -138,13 +138,36 @@ function createWindow() {
   // White-screen recovery. This is a frameless window (frame:false), so the
   // close/minimize buttons are HTML drawn by the renderer — if the renderer
   // process crashes, the ENTIRE window (controls included) goes blank and
-  // unresponsive. Auto-reload the renderer instead of leaving a dead white
-  // window the user can't even close.
+  // unresponsive. Auto-reload the renderer instead of leaving a dead window.
+  //
+  // Guarded against runaway reload loops (a v1.4.1 field bug: on a shop
+  // machine the renderer crashed deterministically at startup and the
+  // unguarded reload spun forever, so the app appeared to "never open"). If
+  // we see >= 3 crashes within 20s the recovery gives up and shows a native
+  // error dialog with the log path, so the technician can send us actionable
+  // diagnostics instead of a flashing white window.
+  var recentCrashes = [];
   mainWindow.webContents.on('render-process-gone', (event, details) => {
     log.error(`Renderer process gone: ${details.reason} (exitCode ${details.exitCode})`);
-    if (details.reason !== 'clean-exit' && mainWindow && !mainWindow.isDestroyed()) {
-      setTimeout(() => { try { mainWindow.reload(); } catch (e) { log.error('Reload after crash failed:', e); } }, 300);
+    if (details.reason === 'clean-exit' || !mainWindow || mainWindow.isDestroyed()) return;
+    var now = Date.now();
+    recentCrashes = recentCrashes.filter(t => now - t < 20000);
+    recentCrashes.push(now);
+    if (recentCrashes.length >= 3) {
+      log.error(`Renderer crashed ${recentCrashes.length} times in 20s — stopping the reload loop.`);
+      try {
+        dialog.showErrorBox(
+          'Neo QC — Repeated Renderer Crash',
+          `Neo QC keeps crashing while starting up.\n\n` +
+          `Reason: ${details.reason} (exit code ${details.exitCode})\n\n` +
+          `Please send the log file to the developer:\n${log.transports.file.getFile().path}\n\n` +
+          `Neo QC will now exit. Try reinstalling from the latest release.`
+        );
+      } catch (e) {}
+      app.quit();
+      return;
     }
+    setTimeout(() => { try { mainWindow.reload(); } catch (e) { log.error('Reload after crash failed:', e); } }, 300);
   });
   mainWindow.webContents.on('unresponsive', () => {
     log.warn('Renderer became unresponsive — waiting for it to recover.');
@@ -153,7 +176,7 @@ function createWindow() {
     // -3 = ERR_ABORTED, normal for superseded in-app loads; ignore.
     if (errorCode !== -3) {
       log.error(`did-fail-load: ${errorCode} ${errorDescription} (${validatedURL})`);
-      if (mainWindow && !mainWindow.isDestroyed()) {
+      if (mainWindow && !mainWindow.isDestroyed() && recentCrashes.length < 3) {
         setTimeout(() => { try { mainWindow.loadFile('index.html'); } catch (e) {} }, 500);
       }
     }
@@ -249,6 +272,18 @@ app.whenReady().then(() => {
   ipcMain.on('update:install', () => {
     log.info('User triggered quit-and-install via pill.');
     autoUpdater.quitAndInstall();
+  });
+
+  // Re-check for updates on demand (renderer calls this whenever the user
+  // lands back on the mode-selector screen). Rate-limited to once per 10
+  // minutes so bouncing between modes doesn't hammer GitHub's release API —
+  // the boot-time check below still always runs.
+  let lastUpdateCheck = Date.now();
+  ipcMain.on('update:check', () => {
+    if (Date.now() - lastUpdateCheck < 10 * 60 * 1000) return;
+    lastUpdateCheck = Date.now();
+    log.info('Re-checking for updates (mode-selector landing).');
+    autoUpdater.checkForUpdates().catch(e => log.warn('update:check failed:', e.message));
   });
 
   // Check for updates (autoDownload is false — pill click triggers the download)

@@ -163,15 +163,20 @@
     setText('print-win-key', ticket.windowsKey || d.windowsKey || '--');
 
     // ── Hardware Specs ──
-    setText('print-spec-cpu', specs.cpu || '--');
-    setText('print-spec-igpu', specs.igpu || 'None / Integrated');
-    setText('print-spec-gpu', specs.gpu || '--');
-    setText('print-spec-ram', specs.ram || '--');
-    setText('print-spec-storage', specs.storage || '--');
-    setText('print-spec-mobo', specs.mobo || specs.motherboard || '--');
-    setText('print-spec-cooler', specs.cooler || specs.coolerModel || '--');
-    setText('print-spec-psu', specs.psu || '--');
-    setText('print-spec-case', specs.case || specs.cabinet || '--');
+    // Strip manufacturer part codes ("(100-100001277WOF)") for display —
+    // older tickets stored them verbatim from the catalog. Identity function
+    // when matcher.js isn't loaded (e.g. the standalone report harness).
+    var cleanName = (typeof window !== 'undefined' && window.NeoQcMatcher && window.NeoQcMatcher.cleanName)
+      ? window.NeoQcMatcher.cleanName : function (s) { return s; };
+    setText('print-spec-cpu', cleanName(specs.cpu) || '--');
+    setText('print-spec-igpu', cleanName(specs.igpu) || 'None / Integrated');
+    setText('print-spec-gpu', cleanName(specs.gpu) || '--');
+    setText('print-spec-ram', cleanName(specs.ram) || '--');
+    setText('print-spec-storage', cleanName(specs.storage) || '--');
+    setText('print-spec-mobo', cleanName(specs.mobo || specs.motherboard) || '--');
+    setText('print-spec-cooler', cleanName(specs.cooler || specs.coolerModel) || '--');
+    setText('print-spec-psu', cleanName(specs.psu) || '--');
+    setText('print-spec-case', cleanName(specs.case || specs.cabinet) || '--');
 
     setText('print-serial-gpu', serials.gpu || '—');
     setText('print-serial-ram', serials.ram || '—');
@@ -378,7 +383,7 @@
       Object.keys(comps).forEach(function (cat) {
         (comps[cat] || []).slice(0, 3).forEach(function (e) {
           var delta = e.delta_vs_own != null ? e.delta_vs_own : 0;
-          altRows.push('<tr><td>' + esc(e.name) + '</td><td>' + esc(cat.toUpperCase()) + '</td><td>₹' +
+          altRows.push('<tr><td>' + esc(cleanName(e.name)) + '</td><td>' + esc(cat.toUpperCase()) + '</td><td>₹' +
             (e.price_inr != null ? Math.round(e.price_inr).toLocaleString('en-IN') : '--') + '</td><td>' +
             (delta >= 0 ? '+' : '') + delta + ' pts</td></tr>');
         });
@@ -475,7 +480,7 @@
     if (ssdR !== null || ssdW !== null) measured.push('SSD speed');
     if (p95 && p95.overallResult && p95.overallResult !== 'not-run') measured.push('Prime95 torture test');
     if (ssdH && !ssdH.error) measured.push('S.M.A.R.T. drive health');
-    if (pc && pc.categories && Object.keys(pc.categories).length) measured.push('guided port verification');
+    if (ps && (ps.usbControllers || ps.audioEndpoints)) measured.push('port & connectivity enumeration');
     prov.push('<strong>Measured on this exact unit</strong> by NeoQC diagnostics on ' +
       new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) + ': ' +
       (measured.length ? measured.join(', ') : 'no automated tests recorded') + '.');

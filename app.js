@@ -198,8 +198,10 @@ function setupSpecsAutocomplete() {
             const priceLabel = result.price_inr != null
               ? `₹${Math.round(result.price_inr).toLocaleString('en-IN')} (avg of ${result.price_sample_size} listing${result.price_sample_size === 1 ? '' : 's'})`
               : 'price unknown';
-            renderItem(result.name, priceLabel, () => {
-              input.value = result.name;
+            const webDisplayName = window.NeoQcMatcher && window.NeoQcMatcher.cleanName
+              ? window.NeoQcMatcher.cleanName(result.name) : result.name;
+            renderItem(webDisplayName, priceLabel, () => {
+              input.value = webDisplayName;
               specFieldMatches[field.inputId] = { sku: result.sku, priceInr: result.price_inr, category: result.category, confidence: 1, webLookup: true };
             });
             if (catalogMatcher) {
@@ -273,8 +275,13 @@ function setupSpecsAutocomplete() {
           list.classList.remove('hidden');
           results.forEach(res => {
             const priceLabel = res.priceInr != null ? `₹${Math.round(res.priceInr).toLocaleString('en-IN')}` : '';
-            renderItem(res.matchedName, priceLabel, () => {
-              input.value = res.matchedName;
+            // Display + store WITHOUT the manufacturer part code — nobody
+            // wants "(100-100001277WOF)" on dropdowns, specs, or reports.
+            // The SKU keeps the exact identity; matching handles clean names.
+            const displayName = window.NeoQcMatcher && window.NeoQcMatcher.cleanName
+              ? window.NeoQcMatcher.cleanName(res.matchedName) : res.matchedName;
+            renderItem(displayName, priceLabel, () => {
+              input.value = displayName;
               specFieldMatches[field.inputId] = { sku: res.sku, priceInr: res.priceInr, category: res.category, confidence: res.confidence };
             });
           });
@@ -634,6 +641,9 @@ function switchScreen(mode, selectedId = null) {
     }
   } else {
     document.getElementById('mode-selector-screen').classList.add('active');
+    // Landing back on the mode selector is a natural pause point — re-check
+    // for OTA updates (main process rate-limits to once per 10 min).
+    ipcRenderer.send('update:check');
   }
 }
 
@@ -851,7 +861,7 @@ function renderDashboard() {
         <td class="font-mono">#${t.id.slice(-6)}</td>
         <td><strong>${t.customerName}</strong></td>
         <td>${t.technician}</td>
-        <td>${t.specs ? (t.specs.cpu || 'System Build') : 'N/A'}</td>
+        <td>${t.specs ? (window.NeoQcMatcher && window.NeoQcMatcher.cleanName ? window.NeoQcMatcher.cleanName(t.specs.cpu || 'System Build') : (t.specs.cpu || 'System Build')) : 'N/A'}</td>
         <td class="font-mono">${t.diagnostics ? (t.diagnostics.cinebench || 'Not Run') : 'N/A'} pts</td>
         <td>${t.completedAt ? new Date(t.completedAt).toLocaleDateString() : 'N/A'}</td>
         <td>
@@ -1372,12 +1382,13 @@ function handleClientTicketSelect() {
   const matchStatusEl = document.getElementById('specs-match-status');
   if (matchStatusEl) matchStatusEl.classList.add('hidden');
 
-  // Populate target specs
-  document.getElementById('c-target-mobo').textContent = (ticket.specs && ticket.specs.mobo) || '--';
-  document.getElementById('c-target-cpu').textContent = (ticket.specs && ticket.specs.cpu) || '--';
-  document.getElementById('c-target-gpu').textContent = (ticket.specs && ticket.specs.gpu) || '--';
-  document.getElementById('c-target-ram').textContent = (ticket.specs && ticket.specs.ram) || '--';
-  document.getElementById('c-target-storage').textContent = (ticket.specs && ticket.specs.storage) || '--';
+  // Populate target specs (part codes stripped for display)
+  const cleanSpec = (s) => (window.NeoQcMatcher && window.NeoQcMatcher.cleanName ? window.NeoQcMatcher.cleanName(s || '') : (s || '')) || '--';
+  document.getElementById('c-target-mobo').textContent = cleanSpec(ticket.specs && ticket.specs.mobo);
+  document.getElementById('c-target-cpu').textContent = cleanSpec(ticket.specs && ticket.specs.cpu);
+  document.getElementById('c-target-gpu').textContent = cleanSpec(ticket.specs && ticket.specs.gpu);
+  document.getElementById('c-target-ram').textContent = cleanSpec(ticket.specs && ticket.specs.ram);
+  document.getElementById('c-target-storage').textContent = cleanSpec(ticket.specs && ticket.specs.storage);
   
   let coolerText = '';
   if (ticket.specs && ticket.specs.coolerType) {

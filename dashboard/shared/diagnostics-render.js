@@ -267,12 +267,14 @@
     }).join('');
 
     var comparisons = row.in_range_comparisons || row.inRangeComparisons || {};
+    var stripCode = (typeof global !== 'undefined' && global.NeoQcMatcher && global.NeoQcMatcher.cleanName)
+      ? global.NeoQcMatcher.cleanName : function (s) { return s; };
     var compHtml = Object.keys(comparisons).map(function (cat) {
       var entries = comparisons[cat] || [];
       if (!entries.length) return '';
       var rows = entries.map(function (e) {
         var deltaSign = (e.delta_vs_own || e.deltaVsOwn || 0) >= 0 ? '+' : '';
-        return '<div class="dr-list-item"><span>' + esc(e.name) + '</span><span class="dr-muted">₹' + esc(e.price_inr || e.priceInr) + ' &middot; ' + deltaSign + esc(e.delta_vs_own || e.deltaVsOwn) + ' pts</span></div>';
+        return '<div class="dr-list-item"><span>' + esc(stripCode(e.name)) + '</span><span class="dr-muted">₹' + esc(e.price_inr || e.priceInr) + ' &middot; ' + deltaSign + esc(e.delta_vs_own || e.deltaVsOwn) + ' pts</span></div>';
       }).join('');
       return '<div class="dr-muted" style="margin-top:8px;">' + esc(cat.toUpperCase()) + ' alternatives at this price</div><div class="dr-list">' + rows + '</div>';
     }).join('');

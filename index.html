@@ -1853,18 +1853,18 @@
     <div class="glass-slab modal-card" style="max-width: 650px; width: 100%; padding: 30px; border-radius: 20px;">
       <div class="modal-header" style="border-bottom: 1px solid var(--glass-border); padding-bottom: 15px; margin-bottom: 20px;">
         <h2 style="font-family: 'Syncopate', sans-serif; font-size: 1.3rem; color: var(--primary-pink); letter-spacing: 0.05em; margin: 0;">NEO QC UPDATED</h2>
-        <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; font-weight: 700; background: rgba(231, 1, 78, 0.1); color: var(--primary-pink); padding: 4px 8px; border-radius: 4px;">v1.4.1</span>
+        <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; font-weight: 700; background: rgba(231, 1, 78, 0.1); color: var(--primary-pink); padding: 4px 8px; border-radius: 4px;">v1.4.2</span>
       </div>
       <div class="modal-body" style="font-size: 0.92rem; line-height: 1.6; color: var(--text-dark); max-height: 420px; overflow-y: auto; padding-right: 5px;">
-        <p style="margin-top: 0;">An update has been installed. Here are the key improvements in NeoQC <strong>v1.4.1</strong>:</p>
+        <p style="margin-top: 0;">An update has been installed. Here are the key improvements in NeoQC <strong>v1.4.2</strong>:</p>
         <ul style="padding-left: 20px; display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px;">
-          <li><strong>Price-to-Performance Actually Computes</strong>: Builds picked from catalog autocomplete (full retail names like "Zotac RTX 5070 Ti AMP Extreme…") no longer come back as 0/100 with "no score on file" — the benchmark matcher now correctly recognises the reference CPU/GPU inside long retail names. A 9950X + 5070 Ti build that scored 0 now scores 92+.</li>
-          <li><strong>Use Case Is Now Selectable</strong>: A dedicated dropdown next to "Compute Price-Performance" offers all nine use cases (Gaming 1080p/1440p/4K, Streaming, Video Editing, CAD/3D, Content Creation, AI/ML, Office) — weights and minimum-performance targets follow your choice, and the selector remembers what each ticket was last evaluated for.</li>
-          <li><strong>Cleaner PPI Panel</strong>: No more "NaN%" fit, no more nonsense matches on non-component fields (e.g. "Windows → laptop at 84%"), motherboard/cooler are now properly categorised, and a false "GPU is limiting" warning no longer appears on balanced high-end builds.</li>
+          <li><strong>Print / PDF Fixed</strong>: Report generation no longer fails with "pc is not defined" — printing and Save-PDF work again from the completed-builds table and the ticket modal.</li>
+          <li><strong>Clean Component Names</strong>: Manufacturer part codes like "(100-100001277WOF)" are stripped everywhere you see components — dropdowns, ticket specs, the completed-builds table, customer views and the printed report — while meaningful details like "(White)", "(32Gbx1)" or "(2023)" are kept.</li>
+          <li><strong>Update Check On Landing</strong>: Returning to the mode-selector screen now re-checks for updates automatically (rate-limited), so machines that stay open for days still pick up new versions without a restart.</li>
         </ul>
       </div>
       <div class="modal-footer" style="border-top: 1px solid var(--glass-border); padding-top: 15px; display: flex; justify-content: flex-end; margin-top: 20px;">
-        <button id="btn-close-changelog" class="primary-pink-btn" style="padding: 10px 24px; font-weight: 700; font-size: 0.95rem;">Launch NeoQC v1.4.1</button>
+        <button id="btn-close-changelog" class="primary-pink-btn" style="padding: 10px 24px; font-weight: 700; font-size: 0.95rem;">Launch NeoQC v1.4.2</button>
       </div>
     </div>
   </div>

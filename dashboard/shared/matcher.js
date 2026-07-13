@@ -51,6 +51,35 @@
     generation: 1, gen: 1, series: 1
   };
 
+  // Strip manufacturer part-number codes from a catalog name for DISPLAY:
+  // "AMD Ryzen 9 9950X AM5 Processor with Radeon Graphics (100-100001277WOF)"
+  //   -> "AMD Ryzen 9 9950X AM5 Processor with Radeon Graphics"
+  // Removes parenthesized groups that look like part codes — a single token
+  // with digits plus either a dash ("100-100001277WOF", "E502-KGNN-S00") or a
+  // 4+ digit run ("BX80768270K") — while KEEPING meaningful parens like
+  // "(Black)", "(32Gbx1)", "(2 x 16GB)": no digits, unit suffixes (gb/tb/w/
+  // mhz…), or multi-word content don't match. Display-only — matching still
+  // uses the full name (the codes are harmless there since the v1.3.x
+  // token-weight fixes).
+  // Candidate: any single-token parenthesized group containing a digit
+  // (multi-word parens like "(2 x 8GB)" never match the token charset).
+  var PART_CODE_RE = /\s*\(\s*(?=[^)\s]*\d)[A-Za-z0-9][A-Za-z0-9\-_\/\.]*\s*\)/g;
+  function cleanName(name) {
+    if (!name) return name;
+    var out = String(name).replace(PART_CODE_RE, function (match) {
+      var inner = match.replace(/[()]/g, '').trim();
+      // Keep years: "(2023)" is a product revision, not a part code.
+      if (/^(19|20)\d{2}$/.test(inner)) return match;
+      // Keep unit-style specs: "(32Gbx1)", "(650W)", "(3600MHz)".
+      if (/^\d+(?:\.\d+)?(?:gb|tb|mb|w|watt|mhz|hz|mm|cm|rpm|pin)s?(?:x\d+)?$/i.test(inner)) return match;
+      // Strip: dash/slash codes ("100-100001277WOF", "EVMNV/2TB",
+      // "Cc-9011201-Ww") and long digit runs ("BX80768270K").
+      if ((/[-\/]/.test(inner) && /\d/.test(inner)) || /\d{4}/.test(inner)) return '';
+      return match;
+    });
+    return out.replace(/\s{2,}/g, ' ').trim();
+  }
+
   function tokenize(text) {
     var t = (text || '').toLowerCase();
     // Normalize wattage: "1000W"/"1000 Watts"/"1000w" -> "1000w"
@@ -225,6 +254,7 @@
     Matcher: Matcher,
     tokenize: tokenize,
     score: score, // exposed for web-lookup.js's cross-site listing clustering (mirrors pcstudio_import.py importing matcher._score)
+    cleanName: cleanName, // display-only part-code stripping
     CONFIRM_THRESHOLD: CONFIRM_THRESHOLD,
     SUGGEST_THRESHOLD: SUGGEST_THRESHOLD,
     FIELD_TO_CATEGORY: FIELD_TO_CATEGORY
