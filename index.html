@@ -655,7 +655,27 @@
                 <label for="form-missing-components-toggle">Awaiting Components?</label>
                 <div class="input-toggle-row">
                   <input type="checkbox" id="form-missing-components-toggle">
-                  <input type="text" id="form-missing-components" disabled placeholder="Specify missing parts (e.g. RAM, GPU)">
+                  <span id="awaiting-toggle-hint" class="dr-muted" style="font-size:0.75rem;">Tick if any component isn't delivered yet</span>
+                </div>
+                <div id="awaiting-components-editor" class="hidden" style="margin-top:6px;">
+                  <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
+                    <select id="awaiting-category-select" style="padding:5px 8px; font-size:0.8rem; border-radius:6px; border:1px solid var(--glass-border); background:var(--glass-bg); color:var(--text-dark); outline:none; min-width:130px;">
+                      <option value="cpu">CPU</option>
+                      <option value="gpu">GPU</option>
+                      <option value="ram">RAM</option>
+                      <option value="storage">Storage</option>
+                      <option value="psu">PSU</option>
+                      <option value="motherboard">Motherboard</option>
+                      <option value="cooler">Cooler</option>
+                      <option value="case">Case</option>
+                      <option value="other">Other</option>
+                    </select>
+                    <input type="text" id="awaiting-note-input" placeholder="Optional — specific model / brand" style="flex:1; min-width:180px; padding:5px 10px; font-size:0.8rem; border-radius:6px; border:1px solid var(--glass-border); background:var(--glass-bg); color:var(--text-dark); outline:none;">
+                    <button type="button" id="btn-add-awaiting" class="secondary-btn" style="padding:5px 12px; font-size:0.75rem;">+ Add</button>
+                  </div>
+                  <div id="awaiting-chips-list" style="display:flex; flex-wrap:wrap; gap:6px; margin-top:8px;"></div>
+                  <!-- Hidden mirror for legacy code paths that expected a single text input -->
+                  <input type="hidden" id="form-missing-components" value="">
                 </div>
               </div>
             </div>
@@ -1940,21 +1960,23 @@
     <div class="glass-slab modal-card" style="max-width: 650px; width: 100%; padding: 30px; border-radius: 20px;">
       <div class="modal-header" style="border-bottom: 1px solid var(--glass-border); padding-bottom: 15px; margin-bottom: 20px;">
         <h2 style="font-family: 'Syncopate', sans-serif; font-size: 1.3rem; color: var(--primary-pink); letter-spacing: 0.05em; margin: 0;">NEO QC UPDATED</h2>
-        <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; font-weight: 700; background: rgba(231, 1, 78, 0.1); color: var(--primary-pink); padding: 4px 8px; border-radius: 4px;">v1.4.3</span>
+        <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; font-weight: 700; background: rgba(231, 1, 78, 0.1); color: var(--primary-pink); padding: 4px 8px; border-radius: 4px;">v1.4.4</span>
       </div>
       <div class="modal-body" style="font-size: 0.92rem; line-height: 1.6; color: var(--text-dark); max-height: 420px; overflow-y: auto; padding-right: 5px;">
-        <p style="margin-top: 0;">An update has been installed. Here are the key improvements in NeoQC <strong>v1.4.3</strong>:</p>
+        <p style="margin-top: 0;">An update has been installed. Here are the key improvements in NeoQC <strong>v1.4.4</strong>:</p>
         <ul style="padding-left: 20px; display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px;">
-          <li><strong>CPU Temperature Chart Fixed</strong>: The QC report's CPU-over-time graph is no longer blank on AMD Ryzen systems (a 9950X, 9800X3D, etc. now shows a proper curve alongside the GPU one). Also captures CPU + GPU % load to prove the stress test actually pinned the hardware.</li>
-          <li><strong>SSD Power-On Hours &amp; PCIe Generation</strong>: The report now shows a full drive deep-dive — PCIe generation (current + max), link width, expected peak throughput, plus power-on hours labelled honestly when the drive controller doesn't expose them (no more misleading "N/A").</li>
-          <li><strong>Generation-Aware SSD Speed Grading</strong>: SATA, NVMe Gen3, Gen4, and Gen5 drives are graded against class-appropriate targets — no more false "QC FAIL" on drives that are performing perfectly for their class. Also flags "Gen4 drive negotiated at Gen3" (wrong slot) and explains likely causes when speeds are below tier (thermal throttle, SLC cache exhaustion, chipset lanes vs CPU-direct, SATA on a 3 Gbps port).</li>
-          <li><strong>Report v2 — 4 dense pages</strong>: New Handoff &amp; Warranty grid on page 1, CPU/GPU load sparklines on page 2, full SSD deep-dive card on page 3, and page 4 is now packed with the Price-to-Performance panel (always visible with a friendly note if not computed), a Build Cost Breakdown with total, and a Recommended Upgrade Path derived from same-price alternatives.</li>
-          <li><strong>Version Badge Fix</strong>: The Settings header no longer shows "vundefined" — the modern Electron IPC path replaces a deprecated Electron API call.</li>
-          <li><strong>Theme Accent Dropdown</strong>: Options are now readable in dark mode (the non-selected items appeared greyed out / "disabled" before).</li>
+          <li><strong>Price-to-Performance now runs on every PC</strong>: PPI is a pure-JS engine — no Python required. The "no python installed" error on build-room machines is gone. Same math as before, same use-cases, same ratio-to-best scoring — just ported to run in the app itself.</li>
+          <li><strong>Windows product key retrieval fixed</strong>: The reported key now decodes DigitalProductId (what Windows actually uses) instead of returning the OEM factory key baked into BIOS. Matches what the tech installed, cross-checked against the last-5 activation partial.</li>
+          <li><strong>OpenRGB survives Defender — permanently</strong>: On every boot the app provisions its own writable copy of OpenRGB in per-user storage, adds Defender exclusions for the folder, process, and low-level driver files (WinRing0*.sys / inpout*.dll), and un-quarantines anything a signature update already ate. If Defender re-flags it, the next launch self-heals.</li>
+          <li><strong>RAM stress now uses your full memory</strong>: The 8 GB cap is gone — the stress test targets 85 % of installed RAM (with a safety buffer so Windows itself doesn't page). No more "only 50 % used" on a 16 GB build.</li>
+          <li><strong>Completed tickets move to Completed</strong>: The completion gate no longer requires every diagnostic value to be non-null (iGPU-only builds have no FurMark GPU temp, sensor-name quirks can drop CPU temp). When every QC checkbox is ticked, the ticket completes.</li>
+          <li><strong>Client-side parts cross-check</strong>: The "MISMATCH DETECTED" false positive is fixed. Verification now scores token overlap (via the shared matcher) instead of raw substring — so "ASUS PRIME B650M-A WIFI DDR5 mATX Motherboard" correctly matches the WMIC-detected "PRIME B650M-A WIFI". The status pill also names which component actually mismatched.</li>
+          <li><strong>Faster autocomplete + smarter manual entry</strong>: 120 ms debounce so the 8 000-item catalog scorer doesn't run on every keystroke. Manual entries fire-and-forget upsert to the shared catalog so the next tech to type the same thing finds it. Null-price catalog rows show "🔎 price pending" and auto-fill from the retailer network on pick.</li>
+          <li><strong>Multi-part Awaiting Components</strong>: Replaced the single free-text "missing parts" field with a proper chip UI — pick a category, add a note, and the matching spec input gets an "⏳ Awaiting" badge + is un-required until the part arrives.</li>
         </ul>
       </div>
       <div class="modal-footer" style="border-top: 1px solid var(--glass-border); padding-top: 15px; display: flex; justify-content: flex-end; margin-top: 20px;">
-        <button id="btn-close-changelog" class="primary-pink-btn" style="padding: 10px 24px; font-weight: 700; font-size: 0.95rem;">Launch NeoQC v1.4.3</button>
+        <button id="btn-close-changelog" class="primary-pink-btn" style="padding: 10px 24px; font-weight: 700; font-size: 0.95rem;">Launch NeoQC v1.4.4</button>
       </div>
     </div>
   </div>
@@ -1965,6 +1987,8 @@
   <script src="shared/matcher.js"></script>
   <script src="ssd-grading.js"></script>
   <script src="web-lookup.js"></script>
+  <script src="ppi.js"></script>
+  <script src="ppi-sync.js"></script>
   <script src="print-render.js"></script>
   <script src="app.js"></script>
 </body>

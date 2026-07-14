@@ -5,8 +5,10 @@
 **Python:** `C:\Users\Aladeen\AppData\Local\Python\pythoncore-3.14-64\python.exe`
 **Supabase:** `https://ggsxkhenzdhaachubrsc.supabase.co` (anon key hardcoded in `main.js`, `app.js`, `dashboard/app.js`, and every Python script that touches Supabase)
 **GitHub:** `akruunnithan21-ship-it/neoqc` — releases are the OTA update mechanism (electron-updater)
-**Shipped version:** **v1.3.0** (live on GitHub Releases 2026-07-11, verified OTA-resolvable: latest.yml → 1.3.0, installer URL 200 with matching byte size)
-**Last session date:** 2026-07-11 — see "This session (2026-07-11)" below for what shipped in v1.3.0
+**Shipped version:** **v1.4.4** (2026-07-15) — pushed by user after a
+comprehensive field-bug batch (see "v1.4.4 SHIPPED" below). v1.4.3 stayed
+current for ~3 days before this cut.
+**Last session date:** 2026-07-15
 
 ---
 
@@ -344,6 +346,344 @@ stored (the user's panel shows 92.2 on next open).
 3. **Update check on mode-selector landing** — `update:check` IPC in main.js
    (rate-limited to 1/10 min; boot check unchanged), sent by switchScreen()
    whenever the selector screen shows.
+
+---
+
+## v1.4.3 (2026-07-12, SHIPPED, OTA live)
+
+Diagnostics + report overhaul. Seven workstreams:
+
+1. **CPU sparkline blank on AMD systems** — `monitor.ps1` regex was Intel-centric
+   (`Package|Core Max|Average`) and missed AMD Ryzen sensors entirely (a 9950X
+   exposes CPU temp only as `Core (Tctl/Tdie)`, `Tctl`, `Tdie`, or `CCD1`).
+   Rewrote sensor pickup with a priority list (Intel + AMD + Apple + generic
+   names) and a `Pick-Sensor` helper that falls back to any-Temperature-with-
+   a-real-value. Added CPU/GPU % load capture too — the report can now prove
+   Cinebench actually pinned the CPU. First message from `monitor.ps1` is
+   now a one-shot inventory of every sensor found (`{"inventory":"..."}`),
+   surfaced to the diagnostics log so future sensor mysteries are debuggable
+   in one glance.
+
+2. **SSD Power-On Hours "N/A"** — new `assets/diagnostics/ssd_probe.ps1`
+   replaces the inline query. Tries multiple sources for hours:
+   `Get-StorageReliabilityCounter` (SATA + some NVMe) → NVMe log page 0x02
+   via `Get-StorageNode`. Labels source honestly (`powerOnHoursSource:
+   'not-exposed'` when neither works) so the report can say "Not exposed by
+   drive controller" instead of misleading "N/A". Also captures PCIe
+   `currentGen`/`maxGen`/`currentWidth`/`maxWidth` via `Get-PnpDeviceProperty`
+   with the `DEVPKEY_PciDevice_*` keys, computes an `expectedMBps` for the
+   drive class.
+
+3. **SSD flat-threshold QC fail** — new `ssd-grading.js` (renderer-side helper)
+   grades drives by class:
+   - SATA III: read ≥480 MB/s, write ≥380 MB/s
+   - NVMe Gen3 x4: ≥2800 / ≥2200
+   - NVMe Gen4 x4: ≥6000 / ≥4500
+   - NVMe Gen5 x4: ≥11500 / ≥9000
+   Also flags "Gen4 drive negotiated at Gen3 — slot limit" and "Only N lanes
+   active (drive supports M)" as slot-mismatch reasoning. When speeds are
+   below tier, gives probable-cause hints (thermal throttle / SLC cache /
+   chipset lanes vs CPU-direct / SATA on 3 Gbps port).
+
+4. **Report v2 — 4 dense pages, all fit A4 verified in harness**:
+   - **Page 1 (Certificate)**: added new **Handoff & Warranty grid** (4 pink-
+     accent cells: workmanship 6mo / drivers 30d / component / turnaround)
+     next to the QC checklist.
+   - **Page 2 (Stress & Diagnostics Lab Data)**: added **CPU + GPU % load
+     sparklines** with min/avg/max stats alongside the temp curves.
+   - **Page 3 (Hardware Health & Connectivity)**: **SSD deep-dive** replaces
+     the bare 6-cell table — 3 identity cards (drive / interface / health)
+     showing model + firmware + serial, PCIe gen × width + expected peak,
+     lifeRemaining + hours + read/write errors. Verdict box below with a
+     coloured badge (`✓ AT SPEC` / `~ MIXED` / `✗ BELOW SPEC`) and
+     tier-appropriate reasoning bullets. Component passport and port
+     enumeration also on this page.
+   - **Page 4 (Value Analysis & Provenance)**: PPI section **always
+     visible** — shows a friendly `.print-ppi-empty` placeholder when not
+     computed telling the tech to hit "Compute Price-Performance". PPI-
+     computed panel has index tile + fit%/use-case, per-component ratio-to-
+     best bars, same-price alternatives table. Below that: 2-column layout
+     with **Build Cost Breakdown** (sums `specPrices` per category, shows
+     total) and **Recommended Upgrade Path** (top same-price swaps sorted by
+     delta descending, "switch to X for +N pts"). Then activity log,
+     provenance box, integrity code, footer/signature/stamp.
+
+5. **`specPrices` persistence** — `handleTicketFormSubmit` now captures
+   per-category prices from `specFieldMatches` into `updatedTicket.specPrices`
+   AND nests them inside `specs.__prices` so cross-machine Supabase sync
+   carries them without a schema migration (specs is JSONB). Print report
+   reads `ticket.specPrices || specs.__prices` in that order.
+
+6. **"vundefined" version badge in Settings** — renderer was using
+   `require('electron').remote.app.getVersion()`, but `electron.remote` was
+   removed in Electron 14+ (this app is on Electron 42), so the expression
+   returned `undefined` and the badge showed literally `"vundefined"`. New
+   `app:get-version` IPC handler + async fetch in `openSettingsModal()`;
+   falls back to `v—` cleanly.
+
+7. **Theme accent dropdown dark-mode readability** — `.settings-select
+   option` had `background: var(--dark-bg)` but no explicit `color`, so
+   options inherited a near-invisible dark grey from OS defaults. Set
+   `color: #f0f0f0` explicitly.
+
+Also: `report-harness.html` now works via `file://` (absolute URL
+resolution for the `fetch()` fallback).
+
+Verified: all 4 report pages ≤ A4 with full mock data (PPI 87.9, cost
+₹2,17,840, SSD "AT SPEC" on Gen4x4, CPU sparkline populates from mock
+`cpuTempLog`), all 9 modules syntax clean, no duplicate IPC handlers,
+shared modules synced to dashboard.
+
+---
+
+## v1.4.4 SHIPPED (2026-07-15) — comprehensive field-bug batch
+
+User signaled push on 2026-07-15 after asking for a comprehensive fix pass
+before the next release. The list they gave:
+  1. Completed tickets not moving to Completed section
+  2. Windows product key retrieval returning wrong key
+  3. RAM stress using only 50 % of installed memory
+  4. OpenRGB blocked by Defender AGAIN — permanent fix needed
+  5. PPI engine failing on build-room PC ("no python installed")
+  6. Client cross-check showing parts-mismatch on genuinely matching specs
+  7. "check for other critical errors too" and ship it
+
+Everything below the eight-point WORK ADDED THIS RELEASE section is the
+in-flight-batch content from the pre-push v1.4.4 (autocomplete debounce,
+manual-entry upsert, null-price auto-fill, Awaiting Components chip UI).
+
+### WORK ADDED THIS RELEASE (2026-07-15) — the eight critical field fixes
+
+1. **Completion routing** (`app.js` in `handleTicketFormSubmit`): the
+   completion gate no longer requires `cpuTempAvg && gpuTempAvg && cinebench`
+   to all be non-null. iGPU-only builds legitimately have no discrete-GPU
+   temp, and AMD sensor-name quirks can suppress CPU temp sampling — the
+   old gate held completed tickets in "QC Stress Testing" forever. Now
+   `isQcComplete` alone flips the ticket to `completed`. Diag values are
+   still saved when present; they just don't gate the status.
+
+2. **Windows product key** (new `assets/diagnostics/winkey_probe.ps1` +
+   `main.js` `sys:check-win`): the old handler queried
+   `OA3xOriginalProductKey` first, which returns the OEM factory key from
+   the BIOS MSDM table — so every OEM machine reported the *original*
+   factory key regardless of what the tech had actually installed. New
+   probe decodes `DigitalProductId` from `HKLM\SOFTWARE\Microsoft\Windows
+   NT\CurrentVersion` (the classic ProduKey-style base24 decoder, N-edition
+   aware), cross-checks the last 5 chars against `SoftwareLicensingProduct`'s
+   `PartialProductKey`, and only falls back to OA3x when the decode fails.
+   Also reports `oemDiffersFromInstalled` so the report can flag mismatches.
+
+3. **RAM stress cap raised** (`main.js` `sys:run-diagnostics`): old target
+   was `Math.min(freemem * 0.7, 8 GB)` — the 8 GB cap meant a 16 GB build
+   used only ~50 % of RAM (exact field report). New target is
+   `max(totalmem * 0.85, freemem * 0.7)` clamped by a 1.5 GB safety buffer
+   below freemem. No arbitrary cap.
+
+4. **OpenRGB / Defender — permanent fix** (`main.js`
+   `openRgbAutoAuthorize()`, `provisionOpenRgb()`, expanded
+   `addDefenderExclusions()`; `build/installer.nsh`): three defenses run
+   on **every** boot: (a) provision OpenRGB from the packaged read-only
+   `app.asar.unpacked` copy into a writable `userData\OpenRGB` folder
+   (per-user paths, so Defender exclusions actually stick), (b) add
+   exclusions for BOTH paths, the `OpenRGB.exe` process name, AND
+   explicit driver files (`WinRing0*.sys`, `inpout*.dll`), plus
+   `Set-MpPreference -SubmitSamplesConsent 2` so we don't re-teach MAPS,
+   (c) `MpCmdRun -Restore` for `*OpenRGB*`, `*WinRing*`, `*inpout*`,
+   `HackTool:Win32/WinRing0`. If a signature update re-quarantined
+   between boots, the next launch self-heals. Installer.nsh got the
+   broader exclusion set for the very first launch too. `rgb:authorize`
+   IPC now also re-provisions.
+
+5. **PPI ported to pure JS** (new `ppi.js` + `ppi-sync.js`;
+   `index.html` script tags; `app.js` compute-button handler):
+   PPI no longer shells to Python. `ppi.js` is the pure engine (kept
+   in lockstep with `ppi.py`: same weight tables, ratio-to-best math,
+   ST-blend, bottleneck rules). `ppi-sync.js` bridges: uses the
+   in-memory `catalogMatcher` (already synced from Supabase on boot),
+   fetches PassMark JSON from the shipped `assets/benchmarks/*.json`
+   via `fetch()`, and upserts the result into `ticket_ppi` via the
+   existing Supabase client. Verified via harness — real
+   `computePpi({ticketSpecs, catalogMatcher, useCase:'gaming-1440p'})`
+   returns index 92.2 for a 7800X3D + RTX 4070 Ti Super build. New
+   optional `ticketPrices` opt: backfills null catalog prices with
+   per-ticket stored prices (fixes the "GPU: no price on file" flag
+   the user's screenshot showed even when the tech had a real price).
+   Python `ppi:compute` IPC kept as fallback if JS deps ever fail to
+   load; `ppi_sync.py` still callable from the CLI/cron path.
+   All five UMD modules (matcher, ppi, ppi-sync, web-lookup,
+   diagnostics-render, icons, print-render) still use the both/and
+   export pattern from v1.3.2.
+
+6. **Client parts cross-check** (`app.js` `checkSpecsMatch`): naive
+   `.toLowerCase().includes()` in both directions failed the moment
+   detected and target names diverged in vendor prefix or noise words
+   ("ASUS PRIME B650M-A WIFI DDR5 mATX Motherboard" vs WMIC's "PRIME
+   B650M-A WIFI"). Now scores symmetric token coverage via
+   `NeoQcMatcher.score()` at threshold 0.55 (matches the catalog-match
+   SUGGEST threshold), with an exact/substring fast path and a
+   fallback that shares any 4+ char word if the matcher isn't loaded.
+   The status pill also names which specific component mismatched
+   rather than just "MISMATCH DETECTED".
+
+7. **Sensor / RAM UI screenshot re-verified**: v1.4.3's monitor.ps1
+   already handled AMD sensor names (Tctl/Tdie/CCD1). The user's
+   screenshot of `--°C` widgets is the initial idle state before
+   diagnostics run, not a broken pipeline. No changes needed to
+   monitor.ps1 this release.
+
+8. **Sweep + ship**: no duplicate IPC handlers (checked); all 9 JS
+   modules syntax-clean via `node -c` / `node -e require()`; PPI JS
+   end-to-end tested in the report harness browser context.
+
+---
+
+## v1.4.4 in-flight-batch (superseded / carried into shipped v1.4.4)
+
+The below was the working-tree state before the 2026-07-15 push signal.
+All four items ARE included in v1.4.4 (they were already staged) — kept
+below for a historical view of what the working tree looked like when the
+comprehensive-fix batch above was requested.
+
+Current working tree: **3 files modified, no new files, nothing committed.**
+```
+ M app.js         (+319, ~14 removed) — most of the changes
+ M index.html     (+22)  — new awaiting-components editor markup
+ M print-render.js (+14) — reads missingComponents via NeoQcFormatMissing
+```
+
+Four workstreams in this batch:
+
+### 1. Autocomplete performance (task #22)
+- Wrapped `updateSuggestions` in a **120 ms debounce** in
+  `setupSpecsAutocomplete()`. Was scoring ~8,000 catalog entries on every
+  keystroke → sluggish typing.
+- Focus no longer re-fires the matcher on an empty field.
+- No behaviour change beyond smoothness.
+
+### 2. Fast manual-entry → catalog upsert (task #23)
+- `renderManualRow()` now, on click:
+  1. Immediately fills the field, closes the dropdown, sets
+     `specFieldMatches[fid] = { sku: 'MANUAL-<slug>', priceInr: null,
+     category, manualEntry: true }`.
+  2. Adds to the in-session `catalogMatcher` via `addEntry()` so it's
+     searchable this session.
+  3. **Fire-and-forget** background `supabaseClient.from('component_prices').
+     upsert({ sku, name, category, price_inr: null, source: 'manual-entry',
+     source_method: 'technician-typed', needs_review: true })`. Never blocks
+     UI, silent-fail logged to console.
+- Row label changed from `Use "X" as typed (manual entry)` →
+  `Use "X" — add to catalog for next time` so the network effect is clear.
+
+### 3. Auto-fill missing catalog prices from web (task #24)
+- ~780 catalog rows have `price_inr = NULL` (were ₹0 at scrape time). Now:
+  - Dropdown shows `🔎 price pending` instead of blank in the price column.
+  - Picking a null-priced entry triggers `fillMissingPrice(res, field)`
+    (new function, module-level in app.js).
+  - `fillMissingPrice` invokes the existing `window.NeoQcWebLookup.lookup()`
+    with the component's name + category. On a valid `price_inr` result:
+    - `component_prices.update({ price_inr, updated_at }).eq('sku', catalogHit.sku)`
+      updates the ORIGINAL row (the `WEB-<slug>` row that `consolidate_and_
+      upsert()` also wrote is left as a separate provenance record).
+    - `catalogMatcher._entries` is patched in-place so subsequent picks see
+      the new price.
+    - `specFieldMatches[fieldId].priceInr` is upgraded if the pick is still
+      the current one → ticket save carries the real price into the report.
+  - **Guard**: `priceLookupTried = new Set()` at module level de-dupes so a
+    quick pick → re-pick doesn't spam the retailer lookup.
+
+### 4. Multi-part Awaiting Components + spec-field linking (task #25)
+Replaces the single text field `Specify missing parts (e.g. RAM, GPU)` with
+a proper chip UI. **Details a fresh Claude needs:**
+
+- **HTML** (`index.html`, in the Basic Details form-section, replacing the
+  old single-input toggle row):
+  - `#form-missing-components-toggle` (checkbox) — kept, shows/hides editor.
+  - `#awaiting-components-editor` (div, hidden by default) contains:
+    - `#awaiting-category-select` (9 options: cpu / gpu / ram / storage /
+      psu / motherboard / cooler / case / other)
+    - `#awaiting-note-input` (text — optional specific model/brand)
+    - `#btn-add-awaiting` (button)
+    - `#awaiting-chips-list` (renders the current chip stack)
+    - `#form-missing-components` (kept as hidden input for legacy code that
+      still reads it as a string — synced by `renderAwaitingChips`).
+
+- **State + logic** (`app.js`, module-level):
+  - `awaitingComponentsList` — `[{ category, note }, ...]` in-memory list.
+  - `AWAITING_CATEGORY_TO_SPEC` — map from category → target spec input id
+    (e.g. `gpu` → `form-spec-gpu`, `motherboard` → `form-spec-mobo`,
+    `cooler` → `form-spec-cooler-model`; `other` intentionally absent).
+  - `parseAwaitingComponents(raw)` — accepts array, JSON string, or legacy
+    plain string; returns normalised array. Legacy strings become a single
+    `[{category:'other', note: str}]`. Verified with 4 shape tests.
+  - `formatMissingComponentsHuman(raw)` — the dashboard card + event log +
+    print report all render through this now. Exposed as
+    `window.NeoQcFormatMissing` so `print-render.js` can use it.
+  - `markSpecFieldAwaiting(category, note)`:
+    - Sets `data-awaiting="1"`, `disabled=true`, removes `required`.
+    - Prefills the note into the spec input **without** any ⏳ prefix (label
+      badge is the visual cue).
+    - Appends a pink `⏳ Awaiting` pill badge next to the field label.
+  - `unmarkSpecFieldAwaiting(category)`:
+    - Reverses `disabled` / re-adds `required` if the label has an `*`.
+    - Removes the badge.
+    - **Does NOT auto-clear the prefilled note** — when the part arrives,
+      that value typically becomes the actual spec (one-motion flow).
+  - `renderAwaitingChips()` — full re-render: first unmarks every category,
+    then repaints each chip and re-marks its spec field. Also updates the
+    hidden legacy `#form-missing-components` with a human summary string.
+
+- **Save path** (`handleTicketFormSubmit`, line ~2185):
+  - `missingComponents = missingComponentsToggle && awaitingComponentsList.length
+    ? JSON.stringify(awaitingComponentsList) : ''`
+  - Stored inside the existing TEXT column `missing_components` in Supabase
+    (no schema change; loaders handle both new/legacy shapes).
+
+- **Load path** (`openTicketModal`, ticket-edit branch):
+  - `awaitingComponentsList.length = 0; parseAwaitingComponents(ticket.
+    missingComponents).forEach(entry => awaitingComponentsList.push(entry));
+    renderAwaitingChips();`
+
+- **Reset path** (`openTicketModal`, new-ticket branch): clears the list
+  and hides the editor.
+
+- **Event listeners** (registered in the DOMContentLoaded setup, replacing
+  the old `componentsToggle.addEventListener('change', ...)`):
+  - Toggle change → show/hide editor + clear chips when unchecked.
+  - `#btn-add-awaiting` click → validates no duplicate category, appends
+    entry, clears note input, re-renders.
+  - Enter key in the note input triggers add.
+
+- **Bonus fixes carried into this batch**:
+  - Dashboard card `#{t.id}` "Awaiting: X" now renders through
+    `formatMissingComponentsHuman()` so JSON strings don't leak.
+  - Event-log message `Awaiting parts: "..."` also uses the formatter.
+  - Print report page 1 outstanding-parts banner reads via
+    `NeoQcFormatMissing` when available, falls back to legacy `missingParts`/
+    `pendingParts` fields.
+
+**Verified locally**:
+- All 9 modules syntax clean.
+- `parseAwaitingComponents` regression: empty / null / legacy string / new
+  array / JSON string → all produce expected shape.
+- Report harness (`http://localhost:4340/report-harness.html`) still
+  renders all 4 pages ≤ A4 with integrity code stable.
+- No duplicate IPC handlers.
+
+**When user says "push it" / "ship v1.4.4":**
+1. `version` → `1.4.4` in `package.json`.
+2. Update the changelog modal in `index.html` (search for `v1.4.3` in the
+   changelog section around line ~1876 — pattern: version badge span,
+   `<p>` intro, `<ul>` items, launch button text).
+3. `git add -A && git commit -m "..." && git push -q origin main`.
+4. `npm run build` (background it, notification when done).
+5. `gh release create v1.4.4 --repo akruunnithan21-ship-it/neoqc --target
+   main --title "..." --notes "..."` with `NeoQC-Setup-1.4.4.exe` +
+   blockmap + `latest.yml` (dash-named artifacts land in
+   `C:\Users\Aladeen\Desktop\final build\` per electron-builder.json).
+6. Verify OTA: `curl -sL https://github.com/akruunnithan21-ship-it/neoqc/
+   releases/latest/download/latest.yml` should show `version: 1.4.4`, and
+   `curl -sIL .../NeoQC-Setup-1.4.4.exe` should return `HTTP/1.1 200 OK`
+   with matching Content-Length.
 
 ---
 

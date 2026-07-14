@@ -118,6 +118,192 @@ async function syncCatalogCache() {
 // second lookup once a real catalog suggestion has been picked.
 const specFieldMatches = {};
 
+// Track SKUs we've already tried to price this session so a quick pick →
+// re-pick doesn't spam the retailer lookup for the same item.
+const priceLookupTried = new Set();
+
+// ── Awaiting Components v2 ──────────────────────────────────────────────
+// In-memory list of parts the customer is still waiting for. Shape:
+//   [{ category: 'gpu', note: 'Gigabyte RTX 4080 Super' | null }, ...]
+// Persisted as the ticket's `missingComponents` field (JSON.stringify'd so
+// the existing text column in Supabase carries it without a migration).
+// Legacy ticket data (a plain string like "Gigabyte RTX 4080 Super") is
+// normalised into a single {category:'other', note} entry on load.
+const awaitingComponentsList = [];
+
+// Which target-build-spec input matches each awaiting category. "other" has
+// no spec field — those chips are informational only.
+const AWAITING_CATEGORY_TO_SPEC = {
+  cpu: 'form-spec-cpu',
+  gpu: 'form-spec-gpu',
+  ram: 'form-spec-ram',
+  storage: 'form-spec-storage',
+  psu: 'form-spec-psu',
+  motherboard: 'form-spec-mobo',
+  cooler: 'form-spec-cooler-model',
+  case: 'form-spec-case'
+};
+
+// Human-readable rendering of a ticket's missingComponents value — accepts
+// the new JSON-array shape, a legacy plain string, or empty. Used in the
+// dashboard card and anywhere else the awaiting list surfaces.
+window.NeoQcFormatMissing = formatMissingComponentsHuman;
+function formatMissingComponentsHuman(raw) {
+  const list = parseAwaitingComponents(raw);
+  if (!list.length) return 'Parts unspecified';
+  return list.map(a => {
+    const cat = a.category === 'other' ? '' : a.category.toUpperCase();
+    if (cat && a.note) return `${cat} — ${a.note}`;
+    return cat || a.note || '';
+  }).filter(Boolean).join(', ');
+}
+
+function parseAwaitingComponents(raw) {
+  // Accepts: array (new shape), JSON-string of an array, plain legacy string.
+  if (!raw) return [];
+  if (Array.isArray(raw)) {
+    return raw.filter(a => a && a.category).map(a => ({ category: a.category, note: a.note || null }));
+  }
+  if (typeof raw === 'string') {
+    const trimmed = raw.trim();
+    if (!trimmed) return [];
+    if (trimmed.startsWith('[')) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (Array.isArray(parsed)) return parsed.filter(a => a && a.category);
+      } catch (_) {}
+    }
+    // Legacy free-text: preserve as a single "other" entry so nothing is lost.
+    return [{ category: 'other', note: trimmed }];
+  }
+  return [];
+}
+
+function markSpecFieldAwaiting(category, note) {
+  const fid = AWAITING_CATEGORY_TO_SPEC[category];
+  if (!fid) return;
+  const input = document.getElementById(fid);
+  if (!input) return;
+  input.dataset.awaiting = '1';
+  input.disabled = true;
+  input.removeAttribute('required');
+  // Prefill the note as the intended-model spec value if the field is blank —
+  // when the part arrives, technician removes the chip and the model is
+  // already there. The pink "⏳ Awaiting" label badge is the visual cue.
+  if (note && !input.value) input.value = note;
+  // Label badge: find the sibling label and append a small pill if not there.
+  const container = input.closest('.form-group');
+  if (container) {
+    let badge = container.querySelector('.awaiting-badge');
+    if (!badge) {
+      badge = document.createElement('span');
+      badge.className = 'awaiting-badge';
+      badge.style.cssText = 'display:inline-block;margin-left:6px;padding:1px 6px;background:rgba(231,1,78,0.15);color:var(--primary-pink);font-size:0.65rem;font-weight:700;letter-spacing:0.05em;border-radius:3px;text-transform:uppercase;';
+      badge.textContent = '⏳ Awaiting';
+      const label = container.querySelector('label');
+      if (label) label.appendChild(badge);
+    }
+  }
+}
+
+function unmarkSpecFieldAwaiting(category) {
+  const fid = AWAITING_CATEGORY_TO_SPEC[category];
+  if (!fid) return;
+  const input = document.getElementById(fid);
+  if (!input) return;
+  delete input.dataset.awaiting;
+  input.disabled = false;
+  // Re-add required on fields that were originally required (asterisked in HTML).
+  const container = input.closest('.form-group');
+  if (container) {
+    const label = container.querySelector('label');
+    if (label && label.textContent.includes('*')) input.setAttribute('required', 'required');
+    const badge = container.querySelector('.awaiting-badge');
+    if (badge) badge.remove();
+  }
+  // Do NOT auto-clear the prefilled note on removal — when the part arrives
+  // the tech typically wants that value to become the actual spec. They can
+  // clear it manually if they want to type something different.
+}
+
+function renderAwaitingChips() {
+  const listEl = document.getElementById('awaiting-chips-list');
+  if (!listEl) return;
+  listEl.innerHTML = '';
+
+  // First reset every spec field so removals actually take effect
+  Object.keys(AWAITING_CATEGORY_TO_SPEC).forEach(unmarkSpecFieldAwaiting);
+
+  awaitingComponentsList.forEach((entry, idx) => {
+    const chip = document.createElement('span');
+    chip.style.cssText = 'display:inline-flex;align-items:center;gap:6px;padding:3px 8px 3px 10px;background:rgba(231,1,78,0.12);color:var(--primary-pink);border-radius:12px;font-size:0.75rem;font-weight:600;';
+    const label = entry.category.toUpperCase() + (entry.note ? ' — ' + entry.note : '');
+    chip.textContent = label;
+    const rm = document.createElement('button');
+    rm.type = 'button';
+    rm.textContent = '×';
+    rm.title = 'Remove';
+    rm.style.cssText = 'border:none;background:transparent;color:var(--primary-pink);font-size:1rem;line-height:1;cursor:pointer;padding:0 2px;';
+    rm.addEventListener('click', () => {
+      awaitingComponentsList.splice(idx, 1);
+      renderAwaitingChips();
+    });
+    chip.appendChild(rm);
+    listEl.appendChild(chip);
+    markSpecFieldAwaiting(entry.category, entry.note);
+  });
+
+  // Sync the hidden legacy input so any code path that still reads
+  // #form-missing-components as a string sees a sensible summary.
+  const legacyInput = document.getElementById('form-missing-components');
+  if (legacyInput) {
+    legacyInput.value = awaitingComponentsList
+      .map(a => (a.category === 'other' && a.note) ? a.note : a.category.toUpperCase() + (a.note ? ' (' + a.note + ')' : ''))
+      .join(', ');
+  }
+}
+
+// Fire a background web lookup for a catalog entry that has price_inr = null,
+// upsert the found price back into Supabase, and update the local matcher +
+// specFieldMatches so the ticket ends up carrying a real price. Fire-and-
+// forget: never blocks the UI, silent on failure (the ticket still saves
+// fine with a null price — this just enriches when it works).
+async function fillMissingPrice(catalogHit, field) {
+  if (!catalogHit || !catalogHit.matchedName || catalogHit.priceInr != null) return;
+  if (priceLookupTried.has(catalogHit.sku)) return;
+  priceLookupTried.add(catalogHit.sku);
+  if (!window.NeoQcWebLookup || !supabaseClient) return;
+  try {
+    const result = await window.NeoQcWebLookup.lookup(
+      catalogHit.matchedName,
+      catalogHit.category,
+      (url) => ipcRenderer.invoke('catalog:fetch-url', { url }),
+      supabaseClient
+    );
+    if (!result || !result.found || result.price_inr == null) return;
+    const foundPrice = Number(result.price_inr);
+    if (!isFinite(foundPrice) || foundPrice <= 0) return;
+    // Update the ORIGINAL row (by its real sku) with the found price,
+    // separately from the WEB-<slug> row consolidate_and_upsert wrote.
+    supabaseClient.from('component_prices')
+      .update({ price_inr: foundPrice, updated_at: new Date().toISOString() })
+      .eq('sku', catalogHit.sku)
+      .then(({ error }) => { if (error) console.warn('price-fill update failed:', error.message); });
+    // Keep local matcher entry consistent
+    if (catalogMatcher && catalogMatcher._entries) {
+      const entry = catalogMatcher._entries.find(e => e.sku === catalogHit.sku);
+      if (entry) entry.priceInr = foundPrice;
+    }
+    // If the field still holds this pick, upgrade its stored price so the
+    // ticket save carries it into the report's cost breakdown.
+    const match = specFieldMatches[field.inputId];
+    if (match && match.sku === catalogHit.sku) match.priceInr = foundPrice;
+    console.log(`Price filled for ${catalogHit.sku}: ₹${foundPrice}`);
+  } catch (e) {
+    console.warn('fillMissingPrice failed:', e.message);
+  }
+}
+
 function setupSpecsAutocomplete() {
   loadComponentDatabase(); // fallback lists — see loadCatalogCacheFromDisk()/syncCatalogCache() for the primary source
 
@@ -236,23 +422,47 @@ function setupSpecsAutocomplete() {
       list.appendChild(row);
     };
 
-    // Always-available manual entry: the spec fields save whatever free text
-    // is typed, but nothing in the UI said so — technicians hitting a part
-    // that's missing from the catalog (and from the online lookup) thought
-    // they were stuck. This row makes "just use what I typed" an explicit,
-    // clickable choice at the bottom of every suggestion list.
+    // Always-available manual entry. Two things happen on click:
+    //   1. Immediate: field is filled with the typed text, dropdown closes
+    //      — the technician is never blocked, editing continues instantly.
+    //   2. Background (fire-and-forget): the typed part is upserted to
+    //      Supabase `component_prices` as MANUAL-<slug> with needs_review=true
+    //      and added to the in-memory catalogMatcher so it's immediately
+    //      searchable this session. Next technician on any machine sees the
+    //      new part in autocomplete without needing to type it again.
     const renderManualRow = (query) => {
       const row = document.createElement('div');
       row.className = 'autocomplete-item autocomplete-manual-entry';
       row.style.opacity = '0.85';
       row.style.borderTop = '1px dashed rgba(15, 23, 42, 0.15)';
-      row.textContent = `✏️ Use "${query}" as typed (manual entry)`;
+      row.textContent = `✏️ Use "${query}" — add to catalog for next time`;
       row.addEventListener('mousedown', (e) => {
         e.preventDefault();
         input.value = query;
-        delete specFieldMatches[field.inputId]; // no catalog SKU behind this text — honest manual entry
         list.classList.add('hidden');
         list.innerHTML = '';
+        const slug = query.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80);
+        const manualSku = 'MANUAL-' + slug;
+        specFieldMatches[field.inputId] = {
+          sku: manualSku, priceInr: null, category: field.category,
+          confidence: 1, manualEntry: true
+        };
+        // Immediately add to the local matcher so this session sees it
+        if (catalogMatcher && catalogMatcher.addEntry) {
+          catalogMatcher.addEntry({ sku: manualSku, name: query, category: field.category, price_inr: null });
+        }
+        // Background upsert — never blocks the UI. Failure is logged but
+        // silent (technician's ticket is fine either way).
+        if (supabaseClient) {
+          const now = new Date().toISOString();
+          supabaseClient.from('component_prices').upsert({
+            sku: manualSku, name: query, category: field.category,
+            price_inr: null, source: 'manual-entry', source_method: 'technician-typed',
+            fetched_at: now, updated_at: now, needs_review: true
+          }, { onConflict: 'sku' }).then(({ error }) => {
+            if (error) console.warn('manual-entry upsert failed:', error.message);
+          });
+        }
       });
       list.appendChild(row);
     };
@@ -274,15 +484,23 @@ function setupSpecsAutocomplete() {
         if (results.length > 0) {
           list.classList.remove('hidden');
           results.forEach(res => {
-            const priceLabel = res.priceInr != null ? `₹${Math.round(res.priceInr).toLocaleString('en-IN')}` : '';
             // Display + store WITHOUT the manufacturer part code — nobody
             // wants "(100-100001277WOF)" on dropdowns, specs, or reports.
             // The SKU keeps the exact identity; matching handles clean names.
             const displayName = window.NeoQcMatcher && window.NeoQcMatcher.cleanName
               ? window.NeoQcMatcher.cleanName(res.matchedName) : res.matchedName;
+            // ~780 catalog rows have price_inr = NULL (they were ₹0 / out of
+            // stock at scrape time). Mark them clearly and trigger a
+            // background web lookup when picked, so the ticket ends up with
+            // a real price without the technician having to hit "Search
+            // Online" manually.
+            const priceLabel = res.priceInr != null
+              ? `₹${Math.round(res.priceInr).toLocaleString('en-IN')}`
+              : '🔎 price pending';
             renderItem(displayName, priceLabel, () => {
               input.value = displayName;
               specFieldMatches[field.inputId] = { sku: res.sku, priceInr: res.priceInr, category: res.category, confidence: res.confidence };
+              if (res.priceInr == null) fillMissingPrice(res, field);
             });
           });
         }
@@ -320,8 +538,21 @@ function setupSpecsAutocomplete() {
       if (val.length >= 3) renderManualRow(val);
     };
 
-    input.addEventListener('input', updateSuggestions);
-    input.addEventListener('focus', updateSuggestions);
+    // Debounce keystrokes: scoring 8,000+ catalog entries on every character
+    // (with re-render + DOM writes) made typing feel laggy. 120 ms is fast
+    // enough that a natural pause after a word triggers results, and slow
+    // enough that a burst of typing collapses to a single evaluation.
+    let debounceTimer = null;
+    const debounced = () => {
+      clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(updateSuggestions, 120);
+    };
+    input.addEventListener('input', debounced);
+    input.addEventListener('focus', () => {
+      // Focus should re-open a list only when there's already text — otherwise
+      // just landing in the field fires the matcher over the whole catalog.
+      if (input.value.trim()) updateSuggestions();
+    });
     input.addEventListener('blur', () => {
       // Clear as well as hide: an empty list is display:none via the
       // :empty rule, so a stale hidden list can never paint its border
@@ -827,7 +1058,7 @@ function renderDashboard() {
 
         ${isAwaitingParts ? `
           <div class="card-missing-parts">
-            ⚠️ <strong>Awaiting:</strong> ${t.missingComponents || 'Parts unspecified'}
+            ⚠️ <strong>Awaiting:</strong> ${formatMissingComponentsHuman(t.missingComponents)}
           </div>
         ` : ''}
 
@@ -974,6 +1205,13 @@ function openTicketModal(ticketId = null) {
     coolerModelInput.removeAttribute('required');
   }
 
+  // Reset the awaiting-components state so a stale chip list from a previous
+  // ticket doesn't bleed into a fresh one.
+  awaitingComponentsList.length = 0;
+  const awaitingEditor = document.getElementById('awaiting-components-editor');
+  if (awaitingEditor) awaitingEditor.classList.add('hidden');
+  renderAwaitingChips();
+
   const printBtn = document.getElementById('btn-print-report');
   const deleteBtn = document.getElementById('btn-delete-ticket');
   const title = document.getElementById('modal-title');
@@ -1050,9 +1288,14 @@ function openTicketModal(ticketId = null) {
 
       const partsToggle = document.getElementById('form-missing-components-toggle');
       partsToggle.checked = ticket.missingComponentsToggle;
-      const partsInput = document.getElementById('form-missing-components');
-      partsInput.disabled = !ticket.missingComponentsToggle;
-      partsInput.value = ticket.missingComponents || '';
+      // Load the multi-part awaiting list (parses both new array shape and
+      // legacy string). Repaints chips + syncs target spec fields.
+      awaitingComponentsList.length = 0;
+      const parsed = parseAwaitingComponents(ticket.missingComponents);
+      parsed.forEach(entry => awaitingComponentsList.push(entry));
+      const editor = document.getElementById('awaiting-components-editor');
+      if (editor) editor.classList.toggle('hidden', !ticket.missingComponentsToggle);
+      renderAwaitingChips();
 
       // Set physical checkboxes
       document.getElementById('check-cpu-ram-ssd').checked = ticket.buildChecks.cpuRamSsd;
@@ -1962,7 +2205,12 @@ async function handleTicketFormSubmit(e) {
   const technician = document.getElementById('form-technician').value;
 
   const missingComponentsToggle = document.getElementById('form-missing-components-toggle').checked;
-  const missingComponents = document.getElementById('form-missing-components').value;
+  // Serialize the multi-part array. Store as JSON string so the existing
+  // TEXT column in Supabase carries it without a migration; loaders handle
+  // both new (array/JSON) and legacy (plain string) shapes.
+  const missingComponents = (missingComponentsToggle && awaitingComponentsList.length)
+    ? JSON.stringify(awaitingComponentsList)
+    : '';
 
   const existingTicket = editingTicketId ? appState.tickets.find(t => t.id === editingTicketId) : null;
   const oldQc = existingTicket ? (existingTicket.qcChecks || {}) : {};
@@ -2023,10 +2271,15 @@ async function handleTicketFormSubmit(e) {
     const isQcComplete = qcChecks.physCabinet && qcChecks.physMobo && qcChecks.physRam && qcChecks.physScrews &&
                          qcChecks.softWindows && qcChecks.softDrivers && qcChecks.softBios &&
                          qcChecks.portUsb && qcChecks.portVideo && qcChecks.portAudio && qcChecks.portWifi;
-    
-    const isDiagLogged = diagnostics.cpuTempAvg !== null && diagnostics.gpuTempAvg !== null && diagnostics.cinebench !== null;
-    
-    if (isQcComplete && isDiagLogged) {
+
+    // Completion gate: the tech signing off on every QC checkbox IS the
+    // intent-of-user signal. Do not hold completion hostage to diagnostic
+    // sampling — iGPU-only builds have no FurMark → gpuTempAvg stays null,
+    // and AMD sensor names can defeat the temp regex on some boards. Diag
+    // values are still saved when present; they just no longer gate the
+    // completion status. Fixed 2026-07-14: field-reported tickets that
+    // clearly said 100% + 100% weren't moving to the Completed column.
+    if (isQcComplete) {
       status = 'completed';
     } else if (qcChecks.physCabinet || diagnostics.cpuTempAvg !== null) {
       status = 'qc_testing';
@@ -2159,7 +2412,7 @@ async function handleTicketFormSubmit(e) {
         addEventLog(updatedTicket, `Deadline changed: ${oldDate} → ${newDate} UTC`, techName);
       }
       if (!existingTicket.missingComponentsToggle && updatedTicket.missingComponentsToggle && updatedTicket.missingComponents) {
-        addEventLog(updatedTicket, `Awaiting parts: "${updatedTicket.missingComponents}"`, techName);
+        addEventLog(updatedTicket, `Awaiting parts: "${formatMissingComponentsHuman(updatedTicket.missingComponents)}"`, techName);
       } else if (existingTicket.missingComponentsToggle && !updatedTicket.missingComponentsToggle) {
         addEventLog(updatedTicket, `Parts constraint resolved — all components received`, techName);
       }
@@ -3160,13 +3413,44 @@ function setupEventListeners() {
     }
   });
 
-  // Missing components details toggling inputs
+  // Awaiting Components v2 — multi-part chip UI linked to target spec fields.
+  // Toggle: show/hide the editor. When unchecked all chips are dropped and
+  // any target spec fields we had disabled are re-enabled.
   const componentsToggle = document.getElementById('form-missing-components-toggle');
+  const awaitingEditor = document.getElementById('awaiting-components-editor');
   componentsToggle.addEventListener('change', () => {
-    const input = document.getElementById('form-missing-components');
-    input.disabled = !componentsToggle.checked;
-    if (!componentsToggle.checked) input.value = '';
+    if (componentsToggle.checked) {
+      awaitingEditor.classList.remove('hidden');
+    } else {
+      awaitingEditor.classList.add('hidden');
+      awaitingComponentsList.length = 0;
+      renderAwaitingChips();
+    }
   });
+
+  const addAwaitingBtn = document.getElementById('btn-add-awaiting');
+  const awaitingCatSelect = document.getElementById('awaiting-category-select');
+  const awaitingNoteInput = document.getElementById('awaiting-note-input');
+  if (addAwaitingBtn) {
+    addAwaitingBtn.addEventListener('click', () => {
+      const category = awaitingCatSelect.value;
+      const note = awaitingNoteInput.value.trim();
+      // Prevent duplicate category chips — one awaiting entry per category.
+      if (category !== 'other' && awaitingComponentsList.some(a => a.category === category)) {
+        alert(`${category.toUpperCase()} is already listed as awaiting. Remove the existing entry first if you want to change it.`);
+        return;
+      }
+      awaitingComponentsList.push({ category, note: note || null });
+      awaitingNoteInput.value = '';
+      renderAwaitingChips();
+    });
+  }
+  // Enter in the note field triggers Add
+  if (awaitingNoteInput) {
+    awaitingNoteInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); addAwaitingBtn.click(); }
+    });
+  }
 
   // Lock transitions checker on physical build checkbox clicks
   const buildCheckboxes = ['check-cpu-ram-ssd', 'check-mobo-case', 'check-cooler', 'check-cables', 'check-posted'];
@@ -3266,7 +3550,11 @@ function setupEventListeners() {
     await executeDiagnosticsWorkflow(true);
   });
 
-  // Compute Price-to-Performance (shells to ppi_sync.py via main process)
+  // Compute Price-to-Performance. v1.4.4 — runs pure-JS via ppi-sync.js first
+  // (no Python required, works on every build-room PC — the "no python
+  // installed" field bug is fixed here). Falls back to the legacy Python
+  // ppi:compute IPC only if the JS deps aren't loaded (defensive; the
+  // packaged app always ships ppi.js + ppi-sync.js now).
   const ppiBtn = document.getElementById('btn-compute-ppi');
   if (ppiBtn) {
     ppiBtn.addEventListener('click', async () => {
@@ -3274,21 +3562,45 @@ function setupEventListeners() {
         alert('Save the ticket first — PPI needs a stored ticket with specs.');
         return;
       }
-      // The dedicated PPI use-case selector (9 canonical use cases). Was
-      // previously wired to #modal-usecase-select — the Cinebench
-      // gaming/studio toggle — so "studio" mapped to no known use case and
-      // silently fell back to office weights, and the technician had no way
-      // to pick the real intended use.
       const useCaseSel = document.getElementById('modal-ppi-usecase');
       const useCase = useCaseSel ? useCaseSel.value : 'gaming-1440p';
       ppiBtn.disabled = true;
       ppiBtn.textContent = 'Computing…';
       try {
-        const res = await ipcRenderer.invoke('ppi:compute', { ticketId: editingTicketId, useCase });
-        if (res && res.success) {
-          await loadAndRenderPpi(editingTicketId);
-        } else {
-          alert('PPI compute failed: ' + ((res && res.error) || 'unknown error'));
+        const ticket = appState.tickets.find(t => t.id === editingTicketId);
+        var ok = false;
+        if (window.NeoQcPpiSync && window.NeoQcPpi && catalogMatcher && ticket && ticket.specs) {
+          try {
+            var ticketPrices = ticket.specPrices || (ticket.specs && ticket.specs.__prices) || {};
+            const jsRes = await window.NeoQcPpiSync.computePpi({
+              ticketSpecs: ticket.specs,
+              catalogMatcher: catalogMatcher,
+              useCase: useCase,
+              ticketPrices: ticketPrices
+            });
+            if (jsRes && jsRes.success) {
+              if (supabaseClient) {
+                await window.NeoQcPpiSync.upsertTicketPpi(supabaseClient, editingTicketId, jsRes.payload);
+              }
+              await loadAndRenderPpi(editingTicketId);
+              ok = true;
+            } else if (jsRes && jsRes.error) {
+              // Real error (e.g. no spec matched). Do NOT silently fall back
+              // to Python — the user needs to see this so they can fix specs.
+              alert('PPI compute failed: ' + jsRes.error);
+              return;
+            }
+          } catch (e) {
+            console.error('JS PPI failed, falling back to Python:', e);
+          }
+        }
+        if (!ok) {
+          const res = await ipcRenderer.invoke('ppi:compute', { ticketId: editingTicketId, useCase });
+          if (res && res.success) {
+            await loadAndRenderPpi(editingTicketId);
+          } else {
+            alert('PPI compute failed: ' + ((res && res.error) || 'unknown error'));
+          }
         }
       } catch (e) {
         alert('PPI compute failed: ' + e.message);
@@ -4677,35 +4989,75 @@ function checkSpecsMatch() {
   const ticket = appState.tickets.find(t => t.id === ticketId);
   if (!ticket || !detectedSpecs) return;
 
-  const targetMobo = (ticket.specs && ticket.specs.mobo || '').toLowerCase().trim();
-  const targetCpu = (ticket.specs && ticket.specs.cpu || '').toLowerCase().trim();
-  const targetGpu = (ticket.specs && ticket.specs.gpu || '').toLowerCase().trim();
-  const targetRam = (ticket.specs && ticket.specs.ram || '').toLowerCase().trim();
-  const targetStorage = (ticket.specs && ticket.specs.storage || '').toLowerCase().trim();
+  // v1.4.4 fix — cross-check via token-set scoring instead of naive substring.
+  // Retail names ("ASUS PRIME B650M-A WIFI DDR5 mATX Motherboard") and WMIC
+  // detections ("PRIME B650M-A WIFI") share the model tokens but neither is a
+  // strict substring of the other, so `.includes()` reported MISMATCH on
+  // genuinely-matching builds. NeoQcMatcher.score() ignores vendor / noise
+  // words, weights model numbers, and returns a 0–1 similarity we can gate on.
+  var scoreFn = (window.NeoQcMatcher && window.NeoQcMatcher.score) || null;
+  var tokenize = (window.NeoQcMatcher && window.NeoQcMatcher.tokenize) || null;
 
-  const detMobo = (detectedSpecs.motherboard || '').toLowerCase().trim();
-  const detCpu = (detectedSpecs.cpu || '').toLowerCase().trim();
-  const detGpu = (detectedSpecs.dgpu || detectedSpecs.gpu || '').toLowerCase().trim();
-  const detRam = (detectedSpecs.ram || '').toLowerCase().trim();
-  const detStorage = (detectedSpecs.storage || '').toLowerCase().trim();
+  function tokenMatch(target, detected) {
+    if (!target) return true; // no target set → nothing to mismatch
+    if (!detected) return false;
+    var a = String(target).toLowerCase().trim();
+    var b = String(detected).toLowerCase().trim();
+    if (!a || !b) return !a;
+    // Fast path: exact / substring hit (handles perfectly-typed specs).
+    if (a === b || a.indexOf(b) !== -1 || b.indexOf(a) !== -1) return true;
+    if (!scoreFn || !tokenize) {
+      // Fallback: any shared 4+ char word wins (still better than the old logic).
+      var aw = a.split(/\W+/).filter(function (w) { return w.length >= 4; });
+      for (var i = 0; i < aw.length; i++) if (b.indexOf(aw[i]) !== -1) return true;
+      return false;
+    }
+    // Symmetric coverage: score how much of the SHORTER side is covered by
+    // the LONGER side. Retail names are long and WMIC names are short, so
+    // matching in one direction alone is unreliable (see v1.4.1 note about
+    // matcher direction). 0.55 mirrors the catalog-match SUGGEST threshold.
+    var at = tokenize(a), bt = tokenize(b);
+    if (!at.length || !bt.length) return false;
+    var sAB = scoreFn(at, new Set(bt));
+    var sBA = scoreFn(bt, new Set(at));
+    return Math.max(sAB, sBA) >= 0.55;
+  }
 
-  // Basic matching
-  const moboMatch = targetMobo === '' || detMobo.includes(targetMobo) || targetMobo.includes(detMobo);
-  const cpuMatch = targetCpu === '' || detCpu.includes(targetCpu) || targetCpu.includes(detCpu);
-  const gpuMatch = targetGpu === '' || detGpu.includes(targetGpu) || targetGpu.includes(detGpu);
-  const ramMatch = targetRam === '' || detRam.includes(targetRam) || targetRam.includes(detRam);
-  const storageMatch = targetStorage === '' || detStorage.includes(targetStorage) || targetStorage.includes(detStorage);
+  const targetMobo = ticket.specs && ticket.specs.mobo || '';
+  const targetCpu = ticket.specs && ticket.specs.cpu || '';
+  const targetGpu = ticket.specs && ticket.specs.gpu || '';
+  const targetRam = ticket.specs && ticket.specs.ram || '';
+  const targetStorage = ticket.specs && ticket.specs.storage || '';
+
+  const detMobo = detectedSpecs.motherboard || '';
+  const detCpu = detectedSpecs.cpu || '';
+  const detGpu = detectedSpecs.dgpu || detectedSpecs.gpu || '';
+  const detRam = detectedSpecs.ram || '';
+  const detStorage = detectedSpecs.storage || '';
+
+  const moboMatch = tokenMatch(targetMobo, detMobo);
+  const cpuMatch = tokenMatch(targetCpu, detCpu);
+  const gpuMatch = tokenMatch(targetGpu, detGpu);
+  const ramMatch = tokenMatch(targetRam, detRam);
+  const storageMatch = tokenMatch(targetStorage, detStorage);
+
+  var mismatches = [];
+  if (!moboMatch) mismatches.push('motherboard');
+  if (!cpuMatch) mismatches.push('CPU');
+  if (!gpuMatch) mismatches.push('GPU');
+  if (!ramMatch) mismatches.push('RAM');
+  if (!storageMatch) mismatches.push('storage');
 
   const matchStatusEl = document.getElementById('specs-match-status');
   if (matchStatusEl) {
     matchStatusEl.classList.remove('hidden');
-    if (moboMatch && cpuMatch && gpuMatch && ramMatch && storageMatch) {
+    if (!mismatches.length) {
       matchStatusEl.textContent = '✅ Specs Verification: MATCH SUCCESS';
       matchStatusEl.style.background = 'rgba(16, 185, 129, 0.15)';
       matchStatusEl.style.color = '#10b981';
       matchStatusEl.style.borderColor = 'rgba(16, 185, 129, 0.3)';
     } else {
-      matchStatusEl.textContent = '⚠️ Specs Verification: MISMATCH DETECTED';
+      matchStatusEl.textContent = '⚠️ Specs Verification: MISMATCH DETECTED — ' + mismatches.join(', ');
       matchStatusEl.style.background = 'rgba(239, 68, 68, 0.15)';
       matchStatusEl.style.color = '#ef4444';
       matchStatusEl.style.borderColor = 'rgba(239, 68, 68, 0.3)';

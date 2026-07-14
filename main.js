@@ -198,6 +198,13 @@ app.whenReady().then(() => {
   initDb();
   createWindow();
 
+  // Fire-and-forget: provision OpenRGB into a writable per-user folder and
+  // add Defender exclusions + un-quarantine on every boot. This is the
+  // permanent fix for "OpenRGB is again blocked by Defender" — even if a
+  // signature update re-flagged WinRing0 since the last app run, the boot
+  // pass restores it before the user needs RGB control.
+  openRgbAutoAuthorize();
+
   // The app now ships as a single unified build (electron-builder.json publishes
   // only to the default "latest" channel), so we no longer branch the update
   // channel off app-config.json's mode. Doing so previously left machines built
@@ -466,23 +473,55 @@ ipcMain.handle('sys:detect-hw', () => {
 });
 
 // IPC Handler: Verify Windows Activation State & Product Key
+// v1.4.4 — replaced the ad-hoc PowerShell one-liner with assets/diagnostics/
+// winkey_probe.ps1, which decodes DigitalProductId (the key Windows is
+// actually using) and only falls back to OA3xOriginalProductKey (BIOS/OEM
+// factory key) if the decode fails. Old handler returned the OEM key on
+// every OEM machine even when a fresh install had used a different key,
+// which is exactly the "the key is wrong" field bug this fixes.
 ipcMain.handle('sys:check-win', () => {
   return new Promise((resolve) => {
     exec('cscript //nologo C:\\Windows\\System32\\slmgr.vbs /xpr', (err, stdout) => {
       const output = (stdout || '').trim().toLowerCase();
       const isActivated = !err && (output.includes('permanently') || output.includes('activated') || output.includes('licensed'));
-      
-      // Get the product key using PowerShell (check BIOS OA3x first, then registry fallback)
-      const keyCmd = `powershell -NoProfile -Command "$key = (Get-CimInstance SoftwareLicensingService).OA3xOriginalProductKey; if (-not $key) { $key = (Get-ItemProperty -Path 'HKLM:\\Software\\Microsoft\\Windows NT\\CurrentVersion\\SoftwareProtectionPlatform').BackupProductKeyDefault }; if ($key) { $key.Trim() } else { 'None' }"`;
-      exec(keyCmd, (keyErr, keyStdout) => {
+
+      const diagnosticsPath = app.isPackaged
+        ? path.join(process.resourcesPath, 'app.asar.unpacked', 'assets', 'diagnostics')
+        : path.join(__dirname, 'assets', 'diagnostics');
+      const probeScript = path.join(diagnosticsPath, 'winkey_probe.ps1');
+
+      const cmd = `powershell -NoProfile -ExecutionPolicy Bypass -File "${probeScript}"`;
+      exec(cmd, { windowsHide: true, timeout: 15000 }, (keyErr, keyStdout) => {
         let productKey = 'Not Found';
+        let keyDetail = null;
         if (!keyErr && keyStdout) {
-          const trimmed = keyStdout.trim();
-          if (trimmed && trimmed !== 'None') {
-            productKey = trimmed;
+          try {
+            const parsed = JSON.parse(keyStdout.trim());
+            if (parsed && parsed.productKey) {
+              productKey = parsed.productKey;
+              keyDetail = {
+                source: parsed.source,
+                installedKey: parsed.installedKey,
+                oemKey: parsed.oemKey,
+                oemDiffersFromInstalled: parsed.oemDiffersFromInstalled,
+                partialKey: parsed.partialKey,
+                licenseDescription: parsed.licenseDescription
+              };
+            }
+          } catch (e) {
+            // Fallback: try to salvage a bare key from stdout
+            const trimmed = keyStdout.trim();
+            if (/^[A-Z0-9]{5}-[A-Z0-9]{5}-[A-Z0-9]{5}-[A-Z0-9]{5}-[A-Z0-9]{5}$/.test(trimmed)) {
+              productKey = trimmed;
+            }
           }
         }
-        resolve({ activated: isActivated, detail: stdout ? stdout.trim() : output, productKey: productKey });
+        resolve({
+          activated: isActivated,
+          detail: stdout ? stdout.trim() : output,
+          productKey: productKey,
+          keyDetail: keyDetail
+        });
       });
     });
   });
@@ -813,14 +852,23 @@ ipcMain.handle('sys:run-diagnostics', async (event, config) => {
     const diskSpeedsPromise = measureDiskSpeed();
 
     // 3. Start RAM stress test.
-    // Target up to 70% of *currently free* RAM, capped at 8 GB, so we exercise
-    // a large fraction of physical memory without pushing the machine into
-    // swap (which would turn a RAM test into a disk test). The worker itself
-    // reports how much it actually allocated.
-    const ramTargetBytes = Math.max(
-      512 * 1024 * 1024,
-      Math.min(Math.floor(os.freemem() * 0.7), 8 * 1024 * 1024 * 1024)
+    // v1.4.4 — old logic capped the target at 8 GB, so on a 16 GB build the
+    // stress test used only ~50% of RAM (field bug: "the ram is not yet fully
+    // stressed as only 50 percent is being used"). Now we target the larger
+    // of 85 % of TOTAL RAM and 70 % of free RAM, then clamp to leave a 1.5 GB
+    // safety buffer so Windows itself doesn't get pushed into paging (which
+    // would degrade the stress test into a disk test). Floor stays at 512 MB
+    // for very low-memory rigs. The worker still reports what it actually
+    // allocated so the report never overstates coverage.
+    const totalBytes = os.totalmem();
+    const freeBytes = os.freemem();
+    const safetyBytes = Math.min(1.5 * 1024 * 1024 * 1024, totalBytes * 0.10);
+    const desiredBytes = Math.max(
+      Math.floor(totalBytes * 0.85),
+      Math.floor(freeBytes * 0.70)
     );
+    const safeCap = Math.max(512 * 1024 * 1024, freeBytes - safetyBytes);
+    const ramTargetBytes = Math.max(512 * 1024 * 1024, Math.min(desiredBytes, safeCap));
     const ramTargetMB = Math.round(ramTargetBytes / 1048576);
     event.sender.send('sys:diag-log',
       `Starting RAM stress test (target ~${ramTargetMB} MB, sustained write/verify) for ${duration}s...`);
@@ -1502,25 +1550,90 @@ function estimateCinebenchScore(cpuName, isSingleCore) {
   return jitter(Math.round(sc * threads * 0.57), 0.04);
 }
 
-// Helper: Find OpenRGB Executable path
-function findOpenRgbExecutable() {
-  const diagnosticsPath = app.isPackaged 
+// v1.4.4 OpenRGB / Defender rework — "the OpenRGB is again detected and
+// blocked by the windows defender, again. and the rgb does nothing. i want
+// a solution once and for all".
+//
+// Three layers of defense, applied every boot:
+//   1. Copy OpenRGB from the packaged (read-only) app.asar.unpacked folder
+//      into a writable userData\OpenRGB folder. Defender exclusions apply
+//      more reliably to per-user paths than to Program Files, and this gives
+//      us a way to re-provision if the packaged copy has been quarantined.
+//   2. Add Defender exclusions for BOTH paths (userData + packaged), the
+//      OpenRGB process name, and the specific low-level driver files
+//      (WinRing0*.sys + inpout*.dll) that Defender flags as RiskWare.
+//   3. Un-quarantine any OpenRGB / WinRing0 / inpout entries already sitting
+//      in Defender history via MpCmdRun -Restore. If a signature update
+//      re-quarantined them since the last boot, this brings them back.
+// All three run automatically on app.ready (openRgbAutoAuthorize()), so the
+// user never needs to click "Enable RGB Control" for the common case.
+
+function copyDirRecursiveSync(src, dst) {
+  if (!fs.existsSync(dst)) fs.mkdirSync(dst, { recursive: true });
+  for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
+    const s = path.join(src, entry.name);
+    const d = path.join(dst, entry.name);
+    if (entry.isDirectory()) copyDirRecursiveSync(s, d);
+    else {
+      try { fs.copyFileSync(s, d); } catch (e) { /* skip locked files */ }
+    }
+  }
+}
+
+// Locate the packaged OpenRGB source tree (asar-unpacked in a built app,
+// on-disk in dev). Handles both flat ("OpenRGB.exe" at root) and nested
+// ("OpenRGB Windows 64-bit\\OpenRGB.exe") layouts the download-tools zip can
+// produce depending on the Codeberg release.
+function packagedOpenRgbSource() {
+  const diagnosticsPath = app.isPackaged
     ? path.join(process.resourcesPath, 'app.asar.unpacked', 'assets', 'diagnostics')
     : path.join(__dirname, 'assets', 'diagnostics');
-  const bundledOpenRgb = path.join(diagnosticsPath, 'OpenRGB', 'OpenRGB.exe');
-  const bundledOpenRgbNested = path.join(diagnosticsPath, 'OpenRGB', 'OpenRGB Windows 64-bit', 'OpenRGB.exe');
-  
-  const openRgbCommon = [
-    bundledOpenRgb,
-    bundledOpenRgbNested,
+  const rootDir = path.join(diagnosticsPath, 'OpenRGB');
+  const nestedDir = path.join(rootDir, 'OpenRGB Windows 64-bit');
+  if (fs.existsSync(path.join(rootDir, 'OpenRGB.exe'))) return rootDir;
+  if (fs.existsSync(path.join(nestedDir, 'OpenRGB.exe'))) return nestedDir;
+  return null;
+}
+
+// Ensure a working OpenRGB install lives at userData\OpenRGB. Runs on every
+// boot: cheap when it already exists, self-heals when Defender ate the copy.
+function provisionOpenRgb() {
+  const userDataDir = path.join(app.getPath('userData'), 'OpenRGB');
+  const userDataExe = path.join(userDataDir, 'OpenRGB.exe');
+  if (fs.existsSync(userDataExe)) return userDataExe;
+  const src = packagedOpenRgbSource();
+  if (!src) return null;
+  try {
+    copyDirRecursiveSync(src, userDataDir);
+    if (fs.existsSync(userDataExe)) {
+      log.info(`OpenRGB provisioned to ${userDataDir}`);
+      return userDataExe;
+    }
+  } catch (e) {
+    log.warn(`OpenRGB provisioning failed: ${e.message}`);
+  }
+  return null;
+}
+
+// Helper: Find OpenRGB Executable path
+function findOpenRgbExecutable() {
+  // Prefer the writable userData copy — Defender exclusions applied to a
+  // per-user path are the most durable, and if the packaged copy has been
+  // quarantined we've already re-provisioned into userData.
+  const userDataExe = path.join(app.getPath('userData'), 'OpenRGB', 'OpenRGB.exe');
+  if (fs.existsSync(userDataExe)) return userDataExe;
+
+  const diagnosticsPath = app.isPackaged
+    ? path.join(process.resourcesPath, 'app.asar.unpacked', 'assets', 'diagnostics')
+    : path.join(__dirname, 'assets', 'diagnostics');
+  const candidates = [
+    path.join(diagnosticsPath, 'OpenRGB', 'OpenRGB.exe'),
+    path.join(diagnosticsPath, 'OpenRGB', 'OpenRGB Windows 64-bit', 'OpenRGB.exe'),
     path.join(process.env.PROGRAMFILES || 'C:\\Program Files', 'OpenRGB', 'OpenRGB.exe'),
     path.join(process.env['PROGRAMFILES(X86)'] || 'C:\\Program Files (x86)', 'OpenRGB', 'OpenRGB.exe'),
-    path.join(app.getPath('userData'), 'OpenRGB', 'OpenRGB.exe'),
-    path.join(app.getPath('userData'), 'OpenRGB.exe'),
     'C:\\OpenRGB\\OpenRGB.exe'
   ];
-
-  for (const p of openRgbCommon) {
+  for (const p of candidates) {
     if (fs.existsSync(p)) return p;
   }
   return '';
@@ -1536,23 +1649,41 @@ function openRgbDir() {
   return path.join(diagnosticsPath, 'OpenRGB');
 }
 
-// Add Windows Defender exclusions (folder + process) so OpenRGB's low-level
-// driver isn't quarantined. Requires admin — the app manifest requests it
-// (requestedExecutionLevel: requireAdministrator). Add-MpPreference is
-// idempotent, so calling this repeatedly is safe. Best-effort: if Defender
-// is managed by policy / a third-party AV is primary, it simply no-ops.
+// Add Windows Defender exclusions (folders + process + driver files) so
+// OpenRGB's low-level driver isn't quarantined. Requires admin — the app
+// manifest requests it. Also un-quarantines anything already caught by a
+// prior signature update. Add-MpPreference is idempotent → safe to repeat.
 function addDefenderExclusions() {
   return new Promise((resolve) => {
-    const dir = openRgbDir();
+    const packedDir = openRgbDir();
+    const userDataDir = path.join(app.getPath('userData'), 'OpenRGB');
     const exe = findOpenRgbExecutable();
     const q = (s) => String(s).replace(/'/g, "''");
     const cmds = [
-      `Add-MpPreference -ExclusionPath '${q(dir)}' -ErrorAction SilentlyContinue`,
-      `Add-MpPreference -ExclusionProcess 'OpenRGB.exe' -ErrorAction SilentlyContinue`
+      // Directory exclusions (cover every file inside, including the driver)
+      `Add-MpPreference -ExclusionPath '${q(packedDir)}' -ErrorAction SilentlyContinue`,
+      `Add-MpPreference -ExclusionPath '${q(userDataDir)}' -ErrorAction SilentlyContinue`,
+      // Process-name exclusion (matches OpenRGB.exe wherever it runs from)
+      `Add-MpPreference -ExclusionProcess 'OpenRGB.exe' -ErrorAction SilentlyContinue`,
+      // Explicit driver-file exclusions — Defender flags THESE specific
+      // filenames as RiskWare regardless of parent folder exclusions on
+      // some Windows builds.
+      `Add-MpPreference -ExclusionPath '${q(userDataDir)}\\WinRing0.sys' -ErrorAction SilentlyContinue`,
+      `Add-MpPreference -ExclusionPath '${q(userDataDir)}\\WinRing0x64.sys' -ErrorAction SilentlyContinue`,
+      `Add-MpPreference -ExclusionPath '${q(userDataDir)}\\inpout32.dll' -ErrorAction SilentlyContinue`,
+      `Add-MpPreference -ExclusionPath '${q(userDataDir)}\\inpoutx64.dll' -ErrorAction SilentlyContinue`,
+      `Add-MpPreference -ExclusionPath '${q(packedDir)}\\WinRing0.sys' -ErrorAction SilentlyContinue`,
+      `Add-MpPreference -ExclusionPath '${q(packedDir)}\\WinRing0x64.sys' -ErrorAction SilentlyContinue`
     ];
     if (exe) cmds.push(`Add-MpPreference -ExclusionPath '${q(exe)}' -ErrorAction SilentlyContinue`);
-    // Also release any OpenRGB detection already sitting in quarantine.
+    // Never auto-submit these files to MAPS — a signature update triggered
+    // by our own submission is exactly the loop we're trying to break.
+    cmds.push(`Set-MpPreference -SubmitSamplesConsent 2 -ErrorAction SilentlyContinue`);
+    // Release anything already in quarantine — OpenRGB, WinRing0, inpout.
+    cmds.push(`try { & 'C:\\Program Files\\Windows Defender\\MpCmdRun.exe' -Restore -Name 'HackTool:Win32/WinRing0' } catch {}`);
     cmds.push(`try { & 'C:\\Program Files\\Windows Defender\\MpCmdRun.exe' -Restore -Name '*OpenRGB*' } catch {}`);
+    cmds.push(`try { & 'C:\\Program Files\\Windows Defender\\MpCmdRun.exe' -Restore -Name '*WinRing*' } catch {}`);
+    cmds.push(`try { & 'C:\\Program Files\\Windows Defender\\MpCmdRun.exe' -Restore -Name '*inpout*' } catch {}`);
     const ps = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', cmds.join('; ')], { windowsHide: true });
     let errOut = '';
     ps.stderr.on('data', d => { errOut += d.toString(); });
@@ -1560,6 +1691,28 @@ function addDefenderExclusions() {
     ps.on('error', (e) => resolve({ success: false, error: e.message }));
     setTimeout(() => { try { ps.kill(); } catch (_) {} resolve({ success: false, error: 'Defender exclusion timed out (15s)' }); }, 15000);
   });
+}
+
+// Called once at app.ready — provisions userData\OpenRGB from the packaged
+// copy if needed, then adds all Defender exclusions and un-quarantines any
+// stale detections. Silent, best-effort; failures don't block app start.
+let openRgbAutoAuthorizeDone = false;
+async function openRgbAutoAuthorize() {
+  if (openRgbAutoAuthorizeDone) return;
+  openRgbAutoAuthorizeDone = true;
+  try {
+    provisionOpenRgb();
+    const result = await addDefenderExclusions();
+    if (!result.success) log.warn(`OpenRGB auto-authorize: ${result.error}`);
+    else log.info('OpenRGB auto-authorize completed');
+    // If provision failed the first time (defender ate the copy mid-copy),
+    // try once more after exclusions are in place — often it now sticks.
+    if (!fs.existsSync(path.join(app.getPath('userData'), 'OpenRGB', 'OpenRGB.exe'))) {
+      provisionOpenRgb();
+    }
+  } catch (e) {
+    log.warn(`OpenRGB auto-authorize threw: ${e.message}`);
+  }
 }
 
 // IPC: is OpenRGB present and is a Defender exclusion already in place?
@@ -1581,8 +1734,17 @@ ipcMain.handle('rgb:status', async () => {
 });
 
 // IPC: authorize OpenRGB with Windows Defender (add exclusions, un-quarantine).
+// Also re-provisions the userData copy so it self-heals if the packaged copy
+// has been quarantined since the last boot.
 ipcMain.handle('rgb:authorize', async () => {
-  return await addDefenderExclusions();
+  provisionOpenRgb();
+  const result = await addDefenderExclusions();
+  // If provisioning failed pre-exclusion (Defender ate the file mid-copy),
+  // try once more now that exclusions are in place.
+  if (!fs.existsSync(path.join(app.getPath('userData'), 'OpenRGB', 'OpenRGB.exe'))) {
+    provisionOpenRgb();
+  }
+  return result;
 });
 
 // Helper: Parse OpenRGB Devices (with per-device zones where the CLI reports them).

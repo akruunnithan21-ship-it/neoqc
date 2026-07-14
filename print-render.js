@@ -184,7 +184,19 @@
     setText('print-serial-mobo', serials.mobo || serials.motherboard || '—');
     setText('print-serial-cabinet', serials.cabinet || '—');
 
-    var missingParts = ticket.missingParts || ticket.pendingParts || '';
+    // Prefer the ticket's multi-part awaiting list (v1.4.4+). Fall back to
+    // legacy top-level string fields. Format cleanly for the customer copy.
+    var missingParts = '';
+    if (ticket.missingComponents) {
+      if (typeof window !== 'undefined' && window.NeoQcFormatMissing) {
+        missingParts = window.NeoQcFormatMissing(ticket.missingComponents);
+      } else {
+        missingParts = typeof ticket.missingComponents === 'string'
+          ? ticket.missingComponents
+          : JSON.stringify(ticket.missingComponents);
+      }
+    }
+    missingParts = missingParts || ticket.missingParts || ticket.pendingParts || '';
     if (missingParts && $('print-missing-parts')) {
       setText('print-missing-parts-text', missingParts);
       show('print-missing-parts');
