@@ -137,14 +137,14 @@
 
 /* ─── Sections ──────────────────────────────────────────────────────────── */
 
-#print-report-container .print-section { margin-bottom: 8px; }
+#print-report-container .print-section { margin-bottom: 6px; }
 #print-report-container .print-section h3 {
   font-size: 10.5pt;
   font-family: 'Space Grotesk', sans-serif;
   border-bottom: 1px solid #999;
   border-left: 4px solid #E7014E;
   padding: 0 0 2px 7px;
-  margin: 0 0 6px 0;
+  margin: 0 0 5px 0;
   letter-spacing: 0.02em;
 }
 
@@ -254,7 +254,8 @@
 }
 #print-report-container .print-event-table td {
   border: 1px solid #ccc;
-  padding: 3px 8px;
+  padding: 2px 8px;
+  font-size: 7.5pt;
 }
 #print-report-container .print-event-table tr:nth-child(even) td {
   background: #fafafa !important;
@@ -301,6 +302,162 @@
   color: #555;
   white-space: nowrap;
   min-width: 190px;
+}
+#print-report-container .print-sparkline-stats {
+  font-size: 7pt;
+  color: #666;
+  font-family: 'JetBrains Mono', monospace;
+  margin-left: 8px;
+  white-space: nowrap;
+}
+
+/* ─── Warranty grid (page 1) ────────────────────────────────────────────── */
+
+#print-report-container .print-warranty-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 5px;
+}
+#print-report-container .print-warranty-cell {
+  border: 1px solid #ccc;
+  border-top: 2px solid #E7014E;
+  padding: 3px 6px 4px 6px;
+  background: #fafafa;
+  border-radius: 0 0 2px 2px;
+}
+#print-report-container .print-warranty-cell .pwl {
+  font-size: 5.8pt;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #666;
+}
+#print-report-container .print-warranty-cell .pwv {
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 8.5pt;
+  font-weight: 700;
+  color: #000;
+  line-height: 1.05;
+  margin: 1px 0 2px 0;
+}
+#print-report-container .print-warranty-cell .pws {
+  font-size: 6pt;
+  color: #333;
+  line-height: 1.25;
+}
+
+/* ─── SSD deep-dive (page 3) ────────────────────────────────────────────── */
+
+#print-report-container .print-ssd-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 6px;
+}
+#print-report-container .print-ssd-idcard {
+  border: 1px solid #ccc;
+  border-top: 3px solid #E7014E;
+  padding: 5px 8px 6px 8px;
+  background: #fafafa;
+}
+#print-report-container .print-ssd-idcard .pssd-title {
+  font-size: 7pt;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #666;
+  font-weight: 700;
+  margin-bottom: 3px;
+  border-bottom: 1px dashed #ccc;
+  padding-bottom: 2px;
+}
+#print-report-container .print-table-tight td {
+  padding: 2px 3px;
+  font-size: 7.8pt;
+}
+#print-report-container .print-table-tight td:first-child {
+  color: #555;
+  width: 44%;
+  white-space: nowrap;
+}
+#print-report-container .print-ssd-verdict {
+  margin-top: 6px;
+  border: 1px solid #999;
+  border-left: 4px solid #E7014E;
+  padding: 6px 10px;
+  background: #f8f8f8;
+}
+#print-report-container .print-ssd-verdict-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 3px;
+}
+#print-report-container .print-ssd-verdict-badge {
+  display: inline-block;
+  padding: 1px 8px;
+  border: 1px solid #000;
+  font-size: 7.5pt;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  background: #fff;
+}
+#print-report-container .print-ssd-verdict-badge.pass { background: #E7014E; color: #fff; border-color: #E7014E; }
+#print-report-container .print-ssd-verdict-badge.mixed { background: #fff3cd; color: #6b4b00; border-color: #6b4b00; }
+#print-report-container .print-ssd-verdict-badge.below { background: #e0e0e0; }
+#print-report-container .print-ssd-reasons {
+  margin: 3px 0 0 14px;
+  padding: 0;
+  font-size: 7.5pt;
+  color: #333;
+  line-height: 1.4;
+}
+#print-report-container .print-ssd-reasons li { margin-bottom: 2px; }
+
+/* ─── PPI empty-state placeholder (page 4) ──────────────────────────────── */
+
+#print-report-container .print-ppi-empty {
+  border: 1px dashed #999;
+  padding: 8px 10px;
+  font-size: 8pt;
+  color: #444;
+  background: #fafafa;
+  margin-top: 4px;
+}
+
+/* ─── Cost breakdown + upgrade path (page 4) ────────────────────────────── */
+
+#print-report-container .print-cost-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 8pt;
+}
+#print-report-container .print-cost-table th,
+#print-report-container .print-cost-table td {
+  border: 1px solid #ccc;
+  padding: 2px 8px;
+  font-size: 7.5pt;
+}
+#print-report-container .print-cost-table th {
+  background: #f2f2f2 !important;
+  text-align: left;
+  font-weight: 700;
+}
+#print-report-container .print-cost-table tfoot td {
+  background: #fafafa !important;
+  font-size: 9pt;
+}
+#print-report-container .print-upgrade-list {
+  margin: 3px 0 0 16px;
+  padding: 0;
+  font-size: 7.5pt;
+  color: #222;
+  line-height: 1.4;
+}
+#print-report-container .print-upgrade-list li { margin-bottom: 2px; }
+#print-report-container .print-subtitle {
+  font-size: 7.5pt;
+  color: #666;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin: 6px 0 2px 0;
 }
 
 /* ─── Ghosted measured-vs-reference benchmark bars ──────────────────────── */
@@ -352,21 +509,21 @@
 
 #print-report-container .print-ppi-headline {
   display: flex;
-  gap: 14px;
+  gap: 12px;
   align-items: stretch;
-  margin-bottom: 8px;
+  margin-bottom: 5px;
 }
 #print-report-container .print-ppi-index-tile {
   border: 2px solid #000;
-  padding: 8px 16px;
+  padding: 6px 14px;
   text-align: center;
-  min-width: 110px;
+  min-width: 95px;
 }
 #print-report-container .print-ppi-index-tile .ppi-big {
   font-family: 'Space Grotesk', sans-serif;
-  font-size: 20pt;
+  font-size: 17pt;
   font-weight: 700;
-  line-height: 1.05;
+  line-height: 1;
 }
 #print-report-container .print-ppi-index-tile .ppi-cap {
   font-size: 6.5pt;
@@ -376,9 +533,10 @@
 }
 #print-report-container .print-ppi-meta {
   flex: 1;
-  font-size: 8.5pt;
+  font-size: 7.8pt;
+  line-height: 1.35;
 }
-#print-report-container .print-ppi-meta p { margin: 2px 0; }
+#print-report-container .print-ppi-meta p { margin: 1px 0; }
 #print-report-container .print-ppi-flags {
   font-size: 7.5pt;
   color: #333;
@@ -390,10 +548,10 @@
 #print-report-container .print-provenance {
   border: 1px solid #999;
   border-left: 4px solid #E7014E;
-  padding: 7px 10px;
-  font-size: 7.5pt;
+  padding: 5px 9px;
+  font-size: 7pt;
   color: #333;
-  line-height: 1.5;
+  line-height: 1.4;
 }
 #print-report-container .print-provenance strong { color: #000; }
 #print-report-container .print-integrity {
@@ -417,7 +575,7 @@
 #print-report-container .print-footer {
   display: flex;
   justify-content: space-between;
-  margin-top: 26px;
+  margin-top: 12px;
   align-items: flex-end;
 }
 #print-report-container .signature-line p {

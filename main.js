@@ -298,6 +298,14 @@ app.on('window-all-closed', function () {
   if (process.platform !== 'darwin') app.quit();
 });
 
+// IPC Handler: return the app version. Renderer used to read this via
+// `require('electron').remote.app.getVersion()`, but `remote` was removed in
+// Electron 14+ (this app is on Electron 42), so that expression evaluated to
+// undefined and the settings header showed "vundefined". Use IPC instead.
+ipcMain.handle('app:get-version', () => {
+  try { return app.getVersion(); } catch (e) { return null; }
+});
+
 // IPC Handler: Read Database
 ipcMain.handle('db:read', () => {
   try {
@@ -742,7 +750,10 @@ ipcMain.handle('sys:run-diagnostics', async (event, config) => {
   return new Promise(async (resolve) => {
     let cpuTemps = [];
     let gpuTemps = [];
-    
+    let cpuLoads = [];
+    let gpuLoads = [];
+    let sensorInventory = null; // one-shot list of detected sensor names — invaluable if temp isn't reading
+
     // 1. Start LibreHardwareMonitor sensor polling
     event.sender.send('sys:diag-log', "Spawning LibreHardwareMonitor monitor script...");
     const monitorProc = spawn('powershell.exe', [
@@ -765,13 +776,31 @@ ipcMain.handle('sys:run-diagnostics', async (event, config) => {
         if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
           try {
             const parsed = JSON.parse(trimmed);
-            if (parsed.cpuTemp) {
+            // First message from monitor.ps1 is a one-shot inventory of every
+            // sensor it found — surface it once so the diagnostics console
+            // shows what LibreHardwareMonitor can actually see on this board.
+            if (parsed.inventory && sensorInventory === null) {
+              sensorInventory = parsed.inventory;
+              event.sender.send('sys:diag-log', `[SENSORS] ${parsed.inventory}`);
+              continue;
+            }
+            // Use != null: a legitimate reading of 0 °C is unlikely but not a
+            // reason to drop the sample (and load of 0 is common at idle).
+            if (parsed.cpuTemp != null) {
               const val = parseFloat(parsed.cpuTemp);
               if (!isNaN(val)) cpuTemps.push(val);
             }
-            if (parsed.gpuTemp) {
+            if (parsed.gpuTemp != null) {
               const val = parseFloat(parsed.gpuTemp);
               if (!isNaN(val)) gpuTemps.push(val);
+            }
+            if (parsed.cpuLoad != null) {
+              const val = parseFloat(parsed.cpuLoad);
+              if (!isNaN(val)) cpuLoads.push(val);
+            }
+            if (parsed.gpuLoad != null) {
+              const val = parseFloat(parsed.gpuLoad);
+              if (!isNaN(val)) gpuLoads.push(val);
             }
             event.sender.send('sys:sensor-update', parsed);
           } catch(e) {}
@@ -1134,7 +1163,17 @@ ipcMain.handle('sys:run-diagnostics', async (event, config) => {
           ramFaults: ramResult.faults != null ? ramResult.faults : null,
           ramSeconds: ramResult.seconds || null,
           ramError: ramResult.error || null,
-          prime95: prime95Result
+          prime95: prime95Result,
+          // New in v1.4.3: LibreHardwareMonitor load & sensor inventory. Load
+          // sparklines answer "was the CPU actually pinned during Cinebench?"
+          // and the inventory tells us WHY temps read null if they do.
+          cpuLoadAvg: cpuLoads.length ? Math.round(cpuLoads.reduce((a,b)=>a+b,0)/cpuLoads.length) : null,
+          cpuLoadMax: cpuLoads.length ? Math.round(Math.max(...cpuLoads)) : null,
+          cpuLoadLog: cpuLoads.map(v => Math.round(v)),
+          gpuLoadAvg: gpuLoads.length ? Math.round(gpuLoads.reduce((a,b)=>a+b,0)/gpuLoads.length) : null,
+          gpuLoadMax: gpuLoads.length ? Math.round(Math.max(...gpuLoads)) : null,
+          gpuLoadLog: gpuLoads.map(v => Math.round(v)),
+          sensorInventory
         });
       }
     }
@@ -1249,50 +1288,33 @@ ipcMain.handle('sys:port-snapshot', async (event, portType) => {
 });
 
 
-// IPC Handler: Query SSD health via SMART/StorageReliabilityCounter
+// IPC Handler: Query SSD identity + health + PCIe link speed (v2, 2026-07-12).
+// Now shells to assets/diagnostics/ssd_probe.ps1 which is far more thorough:
+// PCIe generation (current + max), link width, expected throughput, plus
+// multi-source Power-On Hours (StorageReliabilityCounter → NVMe log 0x02).
+// This is what enables the generation-aware speed grading in the report:
+// a Gen3 x4 drive expected to hit ~3.5 GB/s is graded very differently from
+// a Gen5 x4 drive expected to hit ~14 GB/s, and if a drive negotiated below
+// its max ("Gen4 running at Gen3") the report calls that out explicitly.
 ipcMain.handle('sys:check-ssd-health', async () => {
-  return new Promise((resolve) => {
-    const ps = spawn('powershell', [
-      '-NoProfile', '-NonInteractive', '-Command',
-      `
-      try {
-        $disk = Get-PhysicalDisk | Where-Object { $_.MediaType -in @('SSD','NVMe SSD','SCM') } | Sort-Object Size -Descending | Select-Object -First 1
-        if (-not $disk) { $disk = Get-PhysicalDisk | Sort-Object Size -Descending | Select-Object -First 1 }
-        $wear = $null; $life = $null; $reads = $null; $writes = $null; $hours = $null
-        try {
-          $r = Get-StorageReliabilityCounter -PhysicalDisk $disk -ErrorAction Stop
-          $wear  = if ($r.Wear -ne $null) { [int]$r.Wear } else { $null }
-          $life  = if ($wear -ne $null)   { 100 - $wear }   else { $null }
-          $reads = if ($r.ReadErrorsTotal  -ne $null) { [int]$r.ReadErrorsTotal  } else { $null }
-          $writes= if ($r.WriteErrorsTotal -ne $null) { [int]$r.WriteErrorsTotal } else { $null }
-          $hours = if ($r.PowerOnHours     -ne $null) { [int]$r.PowerOnHours     } else { $null }
-        } catch {}
-        [PSCustomObject]@{
-          model         = $disk.FriendlyName
-          mediaType     = $disk.MediaType
-          healthStatus  = $disk.HealthStatus
-          operationalStatus = $disk.OperationalStatus
-          sizeGB        = [math]::Round($disk.Size / 1GB, 0)
-          wear          = $wear
-          lifeRemaining = $life
-          readErrors    = $reads
-          writeErrors   = $writes
-          powerOnHours  = $hours
-        } | ConvertTo-Json -Compress
-      } catch {
-        Write-Output '{"error":"query_failed"}'
-      }
-      `
-    ], { windowsHide: true });
+  const diagnosticsPath = app.isPackaged
+    ? path.join(process.resourcesPath, 'app.asar.unpacked', 'assets', 'diagnostics')
+    : path.join(__dirname, 'assets', 'diagnostics');
+  const script = path.join(diagnosticsPath, 'ssd_probe.ps1');
 
+  return new Promise((resolve) => {
+    if (!fs.existsSync(script)) { resolve({ error: 'probe_script_missing' }); return; }
+    const ps = spawn('powershell.exe', [
+      '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', script
+    ], { windowsHide: true });
     let out = '';
     ps.stdout.on('data', d => { out += d.toString(); });
     ps.on('close', () => {
       try { resolve(JSON.parse(out.trim())); }
-      catch(e) { resolve({ error: 'parse_failed' }); }
+      catch(e) { resolve({ error: 'parse_failed', raw: out.slice(-500) }); }
     });
     ps.on('error', () => resolve({ error: 'spawn_failed' }));
-    setTimeout(() => { try { ps.kill(); } catch(e) {} resolve({ error: 'timeout' }); }, 10000);
+    setTimeout(() => { try { ps.kill(); } catch(e) {} resolve({ error: 'timeout' }); }, 15000);
   });
 });
 

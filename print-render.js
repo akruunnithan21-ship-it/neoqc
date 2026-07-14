@@ -224,13 +224,36 @@
     setText('print-ram-detail', d.ramDetail || (d.ramStress !== undefined ? String(d.ramStress) : '--'));
     if ($('print-ram-result')) $('print-ram-result').innerHTML = d.ramStress !== undefined ? badge(ramPass) : '--';
 
-    // ── Sparklines ──
+    // ── Sparklines (temp + load) ──
+    // Temp lines answer "did it stay under the QC ceiling?"; load lines answer
+    // "was the CPU actually pinned when Cinebench ran?" — a stress test that
+    // shows 30% load means Cinebench never opened, not that the CPU is amazing.
     var cpuLog = d.cpuTempLog || [];
     var gpuLog = d.gpuTempLog || [];
-    if (cpuLog.length > 1 || gpuLog.length > 1) {
+    var cpuLoadLog = d.cpuLoadLog || [];
+    var gpuLoadLog = d.gpuLoadLog || [];
+    if (cpuLog.length > 1 || gpuLog.length > 1 || cpuLoadLog.length > 1 || gpuLoadLog.length > 1) {
       show('print-sparklines');
       if ($('print-cpu-sparkline') && cpuLog.length > 1) $('print-cpu-sparkline').innerHTML = buildSparkline(cpuLog, cpuThresh);
       if ($('print-gpu-sparkline') && gpuLog.length > 1) $('print-gpu-sparkline').innerHTML = buildSparkline(gpuLog, gpuThresh);
+      var statSummary = function (arr, unit) {
+        if (!arr.length) return '';
+        var min = Math.min.apply(null, arr), max = Math.max.apply(null, arr);
+        var avg = Math.round(arr.reduce(function (s, v) { return s + v; }, 0) / arr.length);
+        return 'min ' + min + unit + ' · avg ' + avg + unit + ' · max ' + max + unit;
+      };
+      setText('print-cpu-sparkline-stats', statSummary(cpuLog, '°C'));
+      setText('print-gpu-sparkline-stats', statSummary(gpuLog, '°C'));
+      if (cpuLoadLog.length > 1) {
+        var lr = $('print-cpu-load-row'); if (lr) lr.style.display = 'flex';
+        if ($('print-cpu-load-sparkline')) $('print-cpu-load-sparkline').innerHTML = buildSparkline(cpuLoadLog, 90);
+        setText('print-cpu-load-stats', statSummary(cpuLoadLog, '%'));
+      }
+      if (gpuLoadLog.length > 1) {
+        var gr = $('print-gpu-load-row'); if (gr) gr.style.display = 'flex';
+        if ($('print-gpu-load-sparkline')) $('print-gpu-load-sparkline').innerHTML = buildSparkline(gpuLoadLog, 95);
+        setText('print-gpu-load-stats', statSummary(gpuLoadLog, '%'));
+      }
     }
 
     // ── Benchmarks ──
@@ -271,16 +294,72 @@
       }
     }
 
-    // ── SSD health ──
+    // ── SSD deep-dive (identity + PCIe link + generation-aware grade) ──
     var ssdH = d.ssdHealth;
     if (ssdH && !ssdH.error) {
       show('print-ssd-health-section');
-      setText('print-ssd-model', ssdH.model || '--');
-      setText('print-ssd-type', ssdH.mediaType || '--');
-      setText('print-ssd-health', ssdH.healthStatus || '--');
-      setText('print-ssd-life', ssdH.lifeRemaining != null ? ssdH.lifeRemaining + '%' : 'N/A');
-      setText('print-ssd-hours', ssdH.powerOnHours != null ? ssdH.powerOnHours + ' hrs' : 'N/A');
-      setText('print-ssd-size', ssdH.size ? Math.round(ssdH.size / 1e9) + ' GB' : '--');
+      // Identity card
+      setText('print-ssd-model', ssdH.model || '—');
+      setText('print-ssd-size', ssdH.sizeGB ? ssdH.sizeGB + ' GB' : (ssdH.size ? Math.round(ssdH.size / 1e9) + ' GB' : '—'));
+      var busLabel = ssdH.busType ? (ssdH.mediaType || 'SSD') + ' · ' + ssdH.busType : (ssdH.mediaType || '—');
+      setText('print-ssd-type', busLabel);
+      setText('print-ssd-firmware', ssdH.firmwareVersion || '—');
+      setText('print-ssd-serial', ssdH.serialNumber || '—');
+
+      // Interface & Link Speed
+      var grader = (typeof window !== 'undefined' && window.NeoQcSsdGrade)
+        ? window.NeoQcSsdGrade : (typeof global !== 'undefined' ? global.NeoQcSsdGrade : null);
+      var grade = grader ? grader.grade(ssdH, ssdR, ssdW) : null;
+      setText('print-ssd-class', grade ? grade.classLabel : (ssdH.mediaType || '—'));
+      var pcieText = '—';
+      if (ssdH.pcieCurrentGen) {
+        pcieText = 'Gen ' + ssdH.pcieCurrentGen + ' × ' + (ssdH.pcieCurrentWidth || '?');
+        if (ssdH.pcieMaxGen && ssdH.pcieMaxGen > ssdH.pcieCurrentGen) {
+          pcieText += '  (max Gen ' + ssdH.pcieMaxGen + ')';
+        }
+      } else if (ssdH.busType === 'SATA' || (ssdH.mediaType && ssdH.mediaType === 'SSD' && !ssdH.pcieCurrentGen)) {
+        pcieText = 'SATA link (no PCIe reporting)';
+      }
+      setText('print-ssd-pcie', pcieText);
+      setText('print-ssd-expected', ssdH.expectedMBps ? '~' + ssdH.expectedMBps.toLocaleString() + ' MB/s peak' : '—');
+      setText('print-ssd-mread', ssdR != null ? ssdR.toLocaleString() + ' MB/s' : 'not measured');
+      setText('print-ssd-mwrite', ssdW != null ? ssdW.toLocaleString() + ' MB/s' : 'not measured');
+
+      // Health & endurance
+      setText('print-ssd-health', ssdH.healthStatus || '—');
+      setText('print-ssd-life', ssdH.lifeRemaining != null ? ssdH.lifeRemaining + '%' : '—');
+      var hoursText = '—';
+      if (ssdH.powerOnHours != null && ssdH.powerOnHours > 0) {
+        hoursText = ssdH.powerOnHours.toLocaleString() + ' hrs';
+        if (ssdH.powerOnHoursSource === 'StorageNode(NVMe log 0x02)') hoursText += ' (NVMe log)';
+      } else if (ssdH.powerOnHoursSource === 'not-exposed') {
+        hoursText = 'Not exposed by drive controller';
+      }
+      setText('print-ssd-hours', hoursText);
+      setText('print-ssd-rerr', ssdH.readErrors != null ? ssdH.readErrors.toLocaleString() : '—');
+      setText('print-ssd-werr', ssdH.writeErrors != null ? ssdH.writeErrors.toLocaleString() : '—');
+
+      // Verdict box with tier-appropriate reasoning
+      if (grade && $('print-ssd-verdict-box')) {
+        var badgeEl = $('print-ssd-verdict-badge');
+        var summaryEl = $('print-ssd-verdict-summary');
+        var readOk = grade.readVerdict === 'pass', writeOk = grade.writeVerdict === 'pass';
+        var badgeClass = readOk && writeOk ? 'pass' : (readOk || writeOk ? 'mixed' : 'below');
+        var badgeText = readOk && writeOk ? '✓ AT SPEC' : (readOk || writeOk ? '~ MIXED' : '✗ BELOW SPEC');
+        if (grade.readVerdict == null) {
+          badgeClass = 'mixed';
+          badgeText = '— NOT GRADED';
+        }
+        if (badgeEl) { badgeEl.className = 'print-ssd-verdict-badge ' + badgeClass; badgeEl.textContent = badgeText; }
+        var summary = 'For a ' + grade.classLabel + ' drive, healthy floor is ~' +
+                       (grade.readOK ? grade.readOK.toLocaleString() : '—') + ' MB/s read / ~' +
+                       (grade.writeOK ? grade.writeOK.toLocaleString() : '—') + ' MB/s write.';
+        if (summaryEl) summaryEl.textContent = summary;
+        var reasonsEl = $('print-ssd-reasons');
+        if (reasonsEl) {
+          reasonsEl.innerHTML = (grade.reasons || []).map(function (r) { return '<li>' + esc(r) + '</li>'; }).join('');
+        }
+      }
     }
 
     // ── Prime95 ──
@@ -351,15 +430,12 @@
         '<tr><td colspan="3" class="dr-muted">No ports enumerated.</td></tr>';
     }
 
-    // ── PPI (page 3) ──
+    // ── PPI (page 4) — ALWAYS visible; shows a placeholder if not computed ──
     if (ppiRow && ppiRow.index != null) {
-      show('print-ppi-section');
       setText('print-ppi-index', String(ppiRow.index));
-      setText('print-ppi-fit', ppiRow.customer_fit_score != null ? Math.round(ppiRow.customer_fit_score * 100) + '%' : '--');
-      setText('print-ppi-usecases', (ppiRow.use_cases || []).join(', ') || '--');
+      setText('print-ppi-fit', ppiRow.customer_fit_score != null ? Math.round(ppiRow.customer_fit_score * 100) + '%' : '—');
+      setText('print-ppi-usecases', (ppiRow.use_cases || []).join(', ') || '—');
 
-      // per-component bars — scored categories get a ratio-to-best bar,
-      // unscored ones are listed honestly instead of hidden
       var pcs = ppiRow.per_component_scores || {};
       var compBars = [];
       var unscored = [];
@@ -377,14 +453,13 @@
         compEl.classList.remove('hidden');
       }
 
-      // same-price alternatives table
       var comps = ppiRow.in_range_comparisons || {};
       var altRows = [];
       Object.keys(comps).forEach(function (cat) {
         (comps[cat] || []).slice(0, 3).forEach(function (e) {
           var delta = e.delta_vs_own != null ? e.delta_vs_own : 0;
           altRows.push('<tr><td>' + esc(cleanName(e.name)) + '</td><td>' + esc(cat.toUpperCase()) + '</td><td>₹' +
-            (e.price_inr != null ? Math.round(e.price_inr).toLocaleString('en-IN') : '--') + '</td><td>' +
+            (e.price_inr != null ? Math.round(e.price_inr).toLocaleString('en-IN') : '—') + '</td><td>' +
             (delta >= 0 ? '+' : '') + delta + ' pts</td></tr>');
         });
       });
@@ -396,6 +471,59 @@
       if ($('print-ppi-flags')) {
         $('print-ppi-flags').innerHTML = (ppiRow.flags || []).map(function (f) { return '<div>⚠ ' + esc(f) + '</div>'; }).join('');
       }
+
+      // Recommended upgrade path — highest-delta same-price swaps
+      var upgList = [];
+      Object.keys(comps).forEach(function (cat) {
+        var top = (comps[cat] || [])[0];
+        if (!top) return;
+        var delta = top.delta_vs_own != null ? top.delta_vs_own : 0;
+        if (delta > 0) {
+          upgList.push({ cat: cat, entry: top, delta: delta });
+        }
+      });
+      upgList.sort(function (a, b) { return b.delta - a.delta; });
+      if (upgList.length && $('print-upgrade-list')) {
+        $('print-upgrade-list').innerHTML = upgList.slice(0, 4).map(function (u) {
+          return '<li><strong>' + esc(u.cat.toUpperCase()) + ':</strong> switch to <strong>' + esc(cleanName(u.entry.name)) +
+                 '</strong> for the same ₹' + (u.entry.price_inr != null ? Math.round(u.entry.price_inr).toLocaleString('en-IN') : '—') +
+                 ' — gains +' + u.delta.toFixed(1) + ' pts of same-price performance.</li>';
+        }).join('');
+        show('print-upgrade-section');
+      }
+    } else {
+      // Never computed — show a friendly placeholder so page 4 isn't a big
+      // blank rectangle for tickets where the tech forgot to hit Compute.
+      var emptyNote = $('print-ppi-empty-note');
+      if (emptyNote) emptyNote.classList.remove('hidden');
+    }
+
+    // ── Build cost breakdown ──
+    // Sum retail prices per component (from the local matcher's specFieldMatches
+    // if present; otherwise from the last stored PPI's comparisons for
+    // reference). Falls through silently if no prices are known.
+    var costRows = [];
+    var totalCost = 0;
+    var specNames = {
+      cpu: specs.cpu, gpu: specs.gpu, ram: specs.ram, storage: specs.storage,
+      psu: specs.psu, motherboard: specs.mobo || specs.motherboard,
+      cooler: specs.cooler || specs.coolerModel, case: specs.case || specs.cabinet
+    };
+    var priceMap = ticket.specPrices || ticket.specFieldPrices || (specs && specs.__prices) || null;
+    // If ticket carries a componentPrices map ({cpu: 42000, gpu: 55000, ...})
+    // sum it up — matches app.js's stored specFieldMatches shape.
+    Object.keys(specNames).forEach(function (cat) {
+      var name = specNames[cat];
+      if (!name) return;
+      var price = priceMap && priceMap[cat] != null ? priceMap[cat] : null;
+      if (price != null) totalCost += Number(price);
+      costRows.push('<tr><td>' + esc(cat.toUpperCase()) + '</td><td>' + esc(cleanName(name)) +
+                    '</td><td style="text-align:right;">' + (price != null ? '₹' + Math.round(price).toLocaleString('en-IN') : '<span style="color:#888;">not priced</span>') + '</td></tr>');
+    });
+    if (costRows.length && $('print-cost-body')) {
+      $('print-cost-body').innerHTML = costRows.join('');
+      setText('print-cost-total', totalCost > 0 ? '₹' + Math.round(totalCost).toLocaleString('en-IN') : '—');
+      show('print-cost-section');
     }
 
     // ── Activity log ──

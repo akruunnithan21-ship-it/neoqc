@@ -1606,9 +1606,36 @@
       <div id="print-checklist-container" class="print-checklist-grid"></div>
     </div>
 
+    <!-- ── HANDOFF & WARRANTY ── -->
+    <div class="print-section">
+      <h3>Handoff &amp; Warranty Terms</h3>
+      <div class="print-warranty-grid">
+        <div class="print-warranty-cell">
+          <div class="pwl">Assembly Workmanship</div>
+          <div class="pwv">6 months</div>
+          <div class="pws">Neo Tokyo covers assembly, cable routing, thermal paste application &amp; cooling mount.</div>
+        </div>
+        <div class="print-warranty-cell">
+          <div class="pwl">Windows &amp; Driver Setup</div>
+          <div class="pwv">30 days</div>
+          <div class="pws">Reinstall / re-activation / driver conflict at no charge during this window.</div>
+        </div>
+        <div class="print-warranty-cell">
+          <div class="pwl">Component Warranty</div>
+          <div class="pwv">Manufacturer</div>
+          <div class="pws">Each part follows its brand's own warranty; serial numbers above are the reference.</div>
+        </div>
+        <div class="print-warranty-cell">
+          <div class="pwl">Service Turnaround</div>
+          <div class="pwv">≤ 72 hrs</div>
+          <div class="pws">Any covered issue is diagnosed within 3 working days from receipt at the shop.</div>
+        </div>
+      </div>
+    </div>
+
     <div class="print-page-footline">
-      <span>NEO TOKYO — Quality Control Certificate</span>
-      <span>Page 1 of 3</span>
+      <span>NEO TOKYO — Quality Control Certificate · retain this document; verify with the Integrity Code on page 4</span>
+      <span>Page 1 of 4</span>
     </div>
     </div><!-- /print-page-1 -->
 
@@ -1655,10 +1682,22 @@
         <div class="print-sparkline-row">
           <span class="print-sparkline-label">CPU °C over test duration →</span>
           <span id="print-cpu-sparkline"></span>
+          <span id="print-cpu-sparkline-stats" class="print-sparkline-stats"></span>
         </div>
         <div class="print-sparkline-row">
           <span class="print-sparkline-label">GPU °C over test duration →</span>
           <span id="print-gpu-sparkline"></span>
+          <span id="print-gpu-sparkline-stats" class="print-sparkline-stats"></span>
+        </div>
+        <div class="print-sparkline-row" id="print-cpu-load-row" style="display:none;">
+          <span class="print-sparkline-label">CPU % load — was it actually pinned? →</span>
+          <span id="print-cpu-load-sparkline"></span>
+          <span id="print-cpu-load-stats" class="print-sparkline-stats"></span>
+        </div>
+        <div class="print-sparkline-row" id="print-gpu-load-row" style="display:none;">
+          <span class="print-sparkline-label">GPU % load during FurMark →</span>
+          <span id="print-gpu-load-sparkline"></span>
+          <span id="print-gpu-load-stats" class="print-sparkline-stats"></span>
         </div>
       </div>
     </div>
@@ -1739,23 +1778,48 @@
       </table>
     </div>
 
-    <!-- ── SSD HEALTH ── -->
+    <!-- ── SSD DEEP-DIVE (identity, PCIe link, performance grade, health) ── -->
     <div id="print-ssd-health-section" class="print-section hidden">
-      <h3>SSD Drive Health Report (S.M.A.R.T. Data)</h3>
-      <table class="print-table-fields">
-        <tr>
-          <td><strong>Drive Model</strong></td><td id="print-ssd-model">--</td>
-          <td><strong>Media Type</strong></td><td id="print-ssd-type">--</td>
-        </tr>
-        <tr>
-          <td><strong>Health Status</strong></td><td id="print-ssd-health">--</td>
-          <td><strong>Estimated Life Remaining</strong></td><td id="print-ssd-life">--</td>
-        </tr>
-        <tr>
-          <td><strong>Power-On Hours</strong></td><td id="print-ssd-hours">--</td>
-          <td><strong>Capacity</strong></td><td id="print-ssd-size">--</td>
-        </tr>
-      </table>
+      <h3>Primary Storage — Identity, Link &amp; Health Analysis</h3>
+      <div class="print-ssd-grid">
+        <div class="print-ssd-idcard">
+          <div class="pssd-title">Drive Identity</div>
+          <table class="print-table-fields print-table-tight">
+            <tr><td>Model</td><td id="print-ssd-model">--</td></tr>
+            <tr><td>Capacity</td><td id="print-ssd-size">--</td></tr>
+            <tr><td>Media / Bus</td><td id="print-ssd-type">--</td></tr>
+            <tr><td>Firmware</td><td id="print-ssd-firmware">--</td></tr>
+            <tr><td>Serial</td><td id="print-ssd-serial" style="font-family:monospace;font-size:7pt;">--</td></tr>
+          </table>
+        </div>
+        <div class="print-ssd-idcard">
+          <div class="pssd-title">Interface &amp; Link Speed</div>
+          <table class="print-table-fields print-table-tight">
+            <tr><td>Class</td><td id="print-ssd-class">--</td></tr>
+            <tr><td>PCIe Link</td><td id="print-ssd-pcie">--</td></tr>
+            <tr><td>Expected Peak</td><td id="print-ssd-expected">--</td></tr>
+            <tr><td>Measured Read</td><td id="print-ssd-mread">--</td></tr>
+            <tr><td>Measured Write</td><td id="print-ssd-mwrite">--</td></tr>
+          </table>
+        </div>
+        <div class="print-ssd-idcard">
+          <div class="pssd-title">Health &amp; Endurance</div>
+          <table class="print-table-fields print-table-tight">
+            <tr><td>Health Status</td><td id="print-ssd-health">--</td></tr>
+            <tr><td>Life Remaining</td><td id="print-ssd-life">--</td></tr>
+            <tr><td>Power-On Hours</td><td id="print-ssd-hours">--</td></tr>
+            <tr><td>Read Errors</td><td id="print-ssd-rerr">--</td></tr>
+            <tr><td>Write Errors</td><td id="print-ssd-werr">--</td></tr>
+          </table>
+        </div>
+      </div>
+      <div id="print-ssd-verdict-box" class="print-ssd-verdict">
+        <div class="print-ssd-verdict-head">
+          <span id="print-ssd-verdict-badge" class="print-ssd-verdict-badge">--</span>
+          <span id="print-ssd-verdict-summary">--</span>
+        </div>
+        <ul id="print-ssd-reasons" class="print-ssd-reasons"></ul>
+      </div>
     </div>
 
     <!-- ── PORT & CONNECTIVITY ENUMERATION ── -->
@@ -1781,30 +1845,53 @@
     </div>
 
     <!-- ── PRICE-TO-PERFORMANCE ── -->
-    <div id="print-ppi-section" class="print-section hidden">
+    <div id="print-ppi-section" class="print-section">
       <h3>Price-to-Performance Analysis</h3>
       <div class="print-ppi-headline">
         <div class="print-ppi-index-tile">
-          <div class="ppi-big" id="print-ppi-index">--</div>
+          <div class="ppi-big" id="print-ppi-index">—</div>
           <div class="ppi-cap">PPI Index / 100</div>
         </div>
         <div class="print-ppi-meta">
-          <p><strong>Use-Case Fit:</strong> <span id="print-ppi-fit">--</span></p>
-          <p><strong>Evaluated For:</strong> <span id="print-ppi-usecases">--</span></p>
-          <p><strong>How to read this:</strong> each scored component is compared only against parts
-             available at the same price (±15%) — 100 means "the best performance money buys at this
-             exact price". Components without an objective benchmark are shown unscored, never guessed.</p>
+          <p><strong>Use-Case Fit:</strong> <span id="print-ppi-fit">—</span> &nbsp;·&nbsp; <strong>Evaluated For:</strong> <span id="print-ppi-usecases">—</span></p>
+          <p style="margin-top:2px;">Each scored component is compared against parts available at the same price (±15%). 100 = "best performance money buys at this exact price". Components without a benchmark are shown unscored — never guessed.</p>
         </div>
+      </div>
+      <div id="print-ppi-empty-note" class="print-ppi-empty hidden">
+        Price-to-Performance has not been computed for this build. Open the ticket in the admin app and click
+        <strong>Compute Price-Performance</strong>, choose the customer's intended use case, then reprint.
       </div>
       <div id="print-ppi-component-bars" class="print-bars hidden"></div>
       <div id="print-ppi-alternatives" class="hidden" style="margin-top:8px;">
+        <div class="print-subtitle">Same-price alternatives found in the current catalog</div>
         <table class="print-event-table">
-          <thead><tr><th>Same-Price Alternative</th><th>Category</th><th>Price</th><th>vs. Installed</th></tr></thead>
+          <thead><tr><th>Alternative Component</th><th>Category</th><th>Price</th><th>vs. Installed</th></tr></thead>
           <tbody id="print-ppi-alt-body"></tbody>
         </table>
       </div>
       <div id="print-ppi-flags" class="print-ppi-flags"></div>
-      <p class="print-note">Reference scores: PassMark&reg; (passmark.com), attribution required. Prices: pcstudio.in + live retailer lookups. Your results may vary.</p>
+      <p class="print-note">Reference scores: PassMark&reg; (passmark.com), attribution required. Prices: pcstudio.in + live retailer lookups. Your results may vary depending on workload, thermal environment and driver revision.</p>
+    </div>
+
+    <!-- ── COST BREAKDOWN + UPGRADE PATH (2-column) ── -->
+    <div class="print-two-col print-section">
+      <div id="print-cost-section" class="hidden">
+        <h3>Build Cost Breakdown</h3>
+        <table class="print-cost-table">
+          <thead><tr><th>Category</th><th>Component</th><th style="text-align:right;">Price</th></tr></thead>
+          <tbody id="print-cost-body"></tbody>
+          <tfoot>
+            <tr><td colspan="2" style="text-align:right;"><strong>Total (catalog reference)</strong></td>
+                <td style="text-align:right;"><strong id="print-cost-total">—</strong></td></tr>
+          </tfoot>
+        </table>
+        <p class="print-note">Retail prices from the internal component catalog, last synced from supplier. Actual purchase price may differ due to bundles or GST.</p>
+      </div>
+      <div id="print-upgrade-section" class="hidden">
+        <h3>Recommended Upgrade Path</h3>
+        <p class="print-note" style="margin-top:0;margin-bottom:3px;">Highest-value swaps for the selected use case, based on same-price alternatives priced in the catalog.</p>
+        <ul id="print-upgrade-list" class="print-upgrade-list"></ul>
+      </div>
     </div>
 
     <!-- ── ACTIVITY LOG ── -->
@@ -1853,18 +1940,21 @@
     <div class="glass-slab modal-card" style="max-width: 650px; width: 100%; padding: 30px; border-radius: 20px;">
       <div class="modal-header" style="border-bottom: 1px solid var(--glass-border); padding-bottom: 15px; margin-bottom: 20px;">
         <h2 style="font-family: 'Syncopate', sans-serif; font-size: 1.3rem; color: var(--primary-pink); letter-spacing: 0.05em; margin: 0;">NEO QC UPDATED</h2>
-        <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; font-weight: 700; background: rgba(231, 1, 78, 0.1); color: var(--primary-pink); padding: 4px 8px; border-radius: 4px;">v1.4.2</span>
+        <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; font-weight: 700; background: rgba(231, 1, 78, 0.1); color: var(--primary-pink); padding: 4px 8px; border-radius: 4px;">v1.4.3</span>
       </div>
       <div class="modal-body" style="font-size: 0.92rem; line-height: 1.6; color: var(--text-dark); max-height: 420px; overflow-y: auto; padding-right: 5px;">
-        <p style="margin-top: 0;">An update has been installed. Here are the key improvements in NeoQC <strong>v1.4.2</strong>:</p>
+        <p style="margin-top: 0;">An update has been installed. Here are the key improvements in NeoQC <strong>v1.4.3</strong>:</p>
         <ul style="padding-left: 20px; display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px;">
-          <li><strong>Print / PDF Fixed</strong>: Report generation no longer fails with "pc is not defined" — printing and Save-PDF work again from the completed-builds table and the ticket modal.</li>
-          <li><strong>Clean Component Names</strong>: Manufacturer part codes like "(100-100001277WOF)" are stripped everywhere you see components — dropdowns, ticket specs, the completed-builds table, customer views and the printed report — while meaningful details like "(White)", "(32Gbx1)" or "(2023)" are kept.</li>
-          <li><strong>Update Check On Landing</strong>: Returning to the mode-selector screen now re-checks for updates automatically (rate-limited), so machines that stay open for days still pick up new versions without a restart.</li>
+          <li><strong>CPU Temperature Chart Fixed</strong>: The QC report's CPU-over-time graph is no longer blank on AMD Ryzen systems (a 9950X, 9800X3D, etc. now shows a proper curve alongside the GPU one). Also captures CPU + GPU % load to prove the stress test actually pinned the hardware.</li>
+          <li><strong>SSD Power-On Hours &amp; PCIe Generation</strong>: The report now shows a full drive deep-dive — PCIe generation (current + max), link width, expected peak throughput, plus power-on hours labelled honestly when the drive controller doesn't expose them (no more misleading "N/A").</li>
+          <li><strong>Generation-Aware SSD Speed Grading</strong>: SATA, NVMe Gen3, Gen4, and Gen5 drives are graded against class-appropriate targets — no more false "QC FAIL" on drives that are performing perfectly for their class. Also flags "Gen4 drive negotiated at Gen3" (wrong slot) and explains likely causes when speeds are below tier (thermal throttle, SLC cache exhaustion, chipset lanes vs CPU-direct, SATA on a 3 Gbps port).</li>
+          <li><strong>Report v2 — 4 dense pages</strong>: New Handoff &amp; Warranty grid on page 1, CPU/GPU load sparklines on page 2, full SSD deep-dive card on page 3, and page 4 is now packed with the Price-to-Performance panel (always visible with a friendly note if not computed), a Build Cost Breakdown with total, and a Recommended Upgrade Path derived from same-price alternatives.</li>
+          <li><strong>Version Badge Fix</strong>: The Settings header no longer shows "vundefined" — the modern Electron IPC path replaces a deprecated Electron API call.</li>
+          <li><strong>Theme Accent Dropdown</strong>: Options are now readable in dark mode (the non-selected items appeared greyed out / "disabled" before).</li>
         </ul>
       </div>
       <div class="modal-footer" style="border-top: 1px solid var(--glass-border); padding-top: 15px; display: flex; justify-content: flex-end; margin-top: 20px;">
-        <button id="btn-close-changelog" class="primary-pink-btn" style="padding: 10px 24px; font-weight: 700; font-size: 0.95rem;">Launch NeoQC v1.4.2</button>
+        <button id="btn-close-changelog" class="primary-pink-btn" style="padding: 10px 24px; font-weight: 700; font-size: 0.95rem;">Launch NeoQC v1.4.3</button>
       </div>
     </div>
   </div>
@@ -1873,6 +1963,7 @@
   <script src="shared/icons.js"></script>
   <script src="shared/diagnostics-render.js"></script>
   <script src="shared/matcher.js"></script>
+  <script src="ssd-grading.js"></script>
   <script src="web-lookup.js"></script>
   <script src="print-render.js"></script>
   <script src="app.js"></script>

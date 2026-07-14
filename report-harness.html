@@ -30,6 +30,8 @@
 <div class="harness-note">NeoQC report harness — real markup from index.html + real print-render.js + mock ticket. Each white sheet = one printed A4 page.</div>
 <div id="mount">loading…</div>
 
+<script src="shared/matcher.js"></script>
+<script src="ssd-grading.js"></script>
 <script src="print-render.js"></script>
 <script>
 const MOCK_TICKET = {
@@ -56,6 +58,7 @@ const MOCK_TICKET = {
     portAudio: true, portWifi: false
   },
   missingParts: '',
+  specPrices: { cpu: 42500, gpu: 96450, ram: 12800, storage: 18500, psu: 8990, motherboard: 24200, cooler: 5900, case: 8500 },
   events: [
     { timestamp: '2026-07-08T10:05:00Z', message: 'Ticket created', by: 'Ananthakrishnan' },
     { timestamp: '2026-07-09T12:10:00Z', message: 'Assembly complete, system posted', by: 'Ananthakrishnan' },
@@ -68,9 +71,19 @@ const MOCK_TICKET = {
     gpuTempMin: 33, gpuTempAvg: 64, gpuTempMax: 71,
     cpuTempLog: [38,45,58,66,71,74,76,78,79,78,77,76,75,74,73],
     gpuTempLog: [33,40,52,60,64,66,68,70,71,70,69,68,67,66,65],
+    cpuLoadLog: [4,12,55,88,95,98,99,100,99,99,98,99,100,99,98],
+    gpuLoadLog: [2,10,45,85,92,96,98,99,99,98,98,99,99,98,97],
     ramStress: 'passed', ramDetail: '80% allocation, 2 pass — 0 errors',
-    cinebench: 17840, furmark: 9860, ssdRead: 7080, ssdWrite: 6420,
-    ssdHealth: { model: 'Samsung 990 Pro 2TB', mediaType: 'NVMe SSD', healthStatus: 'OK', lifeRemaining: 99, powerOnHours: 14, size: 2e12 },
+    cinebench: 41890, furmark: 9860, ssdRead: 7080, ssdWrite: 6420,
+    ssdHealth: {
+      model: 'Samsung 990 Pro 2TB', mediaType: 'NVMe SSD', busType: 'NVMe',
+      healthStatus: 'Healthy', operationalStatus: 'OK',
+      sizeGB: 2000, firmwareVersion: '4B2QJXD7', serialNumber: 'S7DFNJ0X123456A',
+      wear: 1, lifeRemaining: 99, readErrors: 0, writeErrors: 0,
+      powerOnHours: 14, powerOnHoursSource: 'StorageReliabilityCounter',
+      pcieCurrentGen: 4, pcieMaxGen: 4, pcieCurrentWidth: 4, pcieMaxWidth: 4,
+      expectedMBps: 7092
+    },
     prime95: {
       overallResult: 'pass', durationActualSec: 3600, workerCount: 16,
       workers: Array.from({length:16}, () => ({errors: 0, roundingWarnings: 0})),
@@ -126,7 +139,11 @@ const MOCK_SETTINGS = {
   cpuMaxTemp: 85, gpuMaxTemp: 80, minCinebench: 15000, minFurmark: 8000, minSsdRead: 5000, minSsdWrite: 4000
 };
 
-fetch('index.html')
+// Use fetch with an ABSOLUTE URL so this also works when opened via file:// —
+// otherwise fetch('index.html') fails with "Failed to parse URL from
+// index.html" because relative URLs can't resolve against a file: origin.
+const indexUrl = new URL('index.html', document.baseURI).href;
+fetch(indexUrl)
   .then(r => r.text())
   .then(html => {
     const doc = new DOMParser().parseFromString(html, 'text/html');
@@ -137,7 +154,8 @@ fetch('index.html')
     document.title = 'harness-ready';
   })
   .catch(e => {
-    document.getElementById('mount').textContent = 'HARNESS ERROR: ' + e.message;
+    document.getElementById('mount').textContent = 'HARNESS ERROR: ' + e.message +
+      '\n\nTip: this file uses fetch() to load the report markup — if you opened it directly (file://), your browser may block that. Serve the repo folder over http and open http://localhost:PORT/report-harness.html.';
     document.title = 'harness-error';
   });
 </script>

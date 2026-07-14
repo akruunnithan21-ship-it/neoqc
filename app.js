@@ -2088,6 +2088,27 @@ async function handleTicketFormSubmit(e) {
     windowsActivationState: document.getElementById('modal-activation-status').textContent === 'Unverified' ? (existingTicket && existingTicket.specs ? (existingTicket.specs.windowsActivationState || 'Unverified') : 'Unverified') : document.getElementById('modal-activation-status').textContent
   };
 
+  // Persist per-category prices captured during autocomplete pick, so the
+  // printed report's Build Cost Breakdown works without a second Supabase
+  // round-trip. Structure mirrors the form field IDs → normalised category
+  // keys used by the report. Preserves existing prices when an old ticket
+  // is re-saved without re-picking (edit didn't touch that field).
+  var fieldToCat = {
+    'form-spec-cpu':'cpu', 'form-spec-gpu':'gpu', 'form-spec-ram':'ram',
+    'form-spec-storage':'storage', 'form-spec-psu':'psu',
+    'form-spec-mobo':'motherboard', 'form-spec-cooler-model':'cooler',
+    'form-spec-case':'case'
+  };
+  var storedPrices = (existingTicket && existingTicket.specPrices) ? Object.assign({}, existingTicket.specPrices) : {};
+  Object.keys(fieldToCat).forEach(function (fid) {
+    var m = specFieldMatches[fid];
+    if (m && m.priceInr != null) storedPrices[fieldToCat[fid]] = m.priceInr;
+  });
+  updatedTicket.specPrices = storedPrices;
+  // Nested copy inside specs so cross-machine Supabase sync carries it too
+  // without needing a new `spec_prices` column on the tickets table.
+  updatedTicket.specs.__prices = storedPrices;
+
   if (detectedCpuVal !== '--' && detectedCpuVal !== 'Not detected') {
     updatedTicket.detectedSpecs = {
       cpu: detectedCpuVal,
@@ -2743,16 +2764,24 @@ function openSettingsModal() {
   const urgentEl = document.getElementById('settings-urgent-hours');
   if (urgentEl) urgentEl.value = appState.settings.urgentHours || 48;
 
-  // App version — header badge + sidebar label
+  // App version — header badge + sidebar label. The old code used
+  // `require('electron').remote.app.getVersion()`, but `electron.remote` was
+  // removed in Electron 14+ (this app is on Electron 42), so the expression
+  // returned undefined and the badge showed "vundefined". Ask the main
+  // process via IPC instead. Falls back to '—' if the call fails.
   const verEl = document.getElementById('settings-app-version');
   const sideVerEl = document.getElementById('settings-sidebar-ver');
-  if (window.require) {
+  (async () => {
     try {
-      const ver = 'v' + window.require('electron').remote?.app?.getVersion?.();
-      if (verEl) verEl.textContent = ver;
-      if (sideVerEl) sideVerEl.textContent = ver;
-    } catch(_) {}
-  }
+      const v = await ipcRenderer.invoke('app:get-version');
+      const label = v ? 'v' + v : 'v—';
+      if (verEl) verEl.textContent = label;
+      if (sideVerEl) sideVerEl.textContent = label;
+    } catch (_) {
+      if (verEl) verEl.textContent = 'v—';
+      if (sideVerEl) sideVerEl.textContent = 'v—';
+    }
+  })();
 
   // Reset active tab in settings modal
   document.querySelectorAll('.settings-tab-btn').forEach(btn => btn.classList.remove('active'));
@@ -3570,6 +3599,7 @@ async function syncFromCloud() {
           diagnostics: dbRow.diagnostics,
           serials: dbRow.serials,
           specs: dbRow.specs,
+          specPrices: (dbRow.specs && dbRow.specs.__prices) || null,
           status: dbRow.status,
           completedAt: dbRow.completed_at
         };
@@ -4509,7 +4539,17 @@ function renderSsdHealthCard(prefix, h) {
   if (model) model.textContent = h.model || 'Unknown Drive';
   if (type)  type.textContent  = h.mediaType || 'SSD';
   if (life)  life.textContent  = lifeRemaining != null ? `${lifeRemaining}%` : 'N/A (no SMART)';
-  if (hours) hours.textContent = h.powerOnHours != null ? `${h.powerOnHours.toLocaleString()} hrs` : 'N/A';
+  // Distinguish "0 hours" (drive says so) from "not exposed by this controller"
+  // — the v1.4.3 SSD probe labels the source so we can tell the difference.
+  if (hours) {
+    if (h.powerOnHours != null && h.powerOnHours > 0) {
+      hours.textContent = `${h.powerOnHours.toLocaleString()} hrs`;
+    } else if (h.powerOnHoursSource === 'not-exposed') {
+      hours.textContent = 'Not reported by drive';
+    } else {
+      hours.textContent = 'N/A';
+    }
+  }
 
   const barPct = lifeRemaining != null ? Math.max(0, Math.min(100, lifeRemaining)) : 0;
   if (bar) {

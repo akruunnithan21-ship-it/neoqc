@@ -2885,7 +2885,21 @@
   .settings-input:focus, .settings-select:focus {
     border-color: var(--primary-pink);
   }
-  .settings-select option { background: var(--dark-bg, #12121e); }
+  /* Explicit color as well as background: the OS-provided <option> default
+     was rendering the non-selected items in a very dark grey on dark themes,
+     making them look "disabled" when they were fully selectable. */
+  .settings-select option {
+    background: #12121e;
+    color: #f0f0f0;
+    padding: 6px 10px;
+  }
+  body.dark-mode .settings-select option {
+    background: #12121e;
+    color: #f0f0f0;
+  }
+  .settings-select option:disabled {
+    color: #666;
+  }
   .settings-field-note {
     font-size: 0.73rem;
     color: var(--text-muted);
