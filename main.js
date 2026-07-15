@@ -399,76 +399,70 @@ ipcMain.handle('file:read-text', (event, filePath) => {
 
 // IPC Handler: Auto-Detect System Specs via native Windows PowerShell commands (Dependency-Free!)
 ipcMain.handle('sys:detect-hw', () => {
-  return new Promise((resolve) => {
-    const hwSpecs = { cpu: '', gpu: '', ram: '', storage: '', motherboard: '' };
+  // v1.4.5 rewrite — was nested callbacks with no timeouts; a single hung
+  // PowerShell exec would leave the promise unresolved forever, leaving the
+  // modal fields at their initial "--" placeholders (the field-reported
+  // "Auto-Detect doesn't populate anything" bug). Now every WMI probe runs
+  // in parallel with a hard 10 s timeout, and each field falls back to
+  // "Failed to detect" on any failure so the UI shows the actual failure
+  // instead of a stale "--".
+  const runPs = (command, timeoutMs = 10000) => new Promise((res) => {
+    let settled = false;
+    const done = (val) => { if (!settled) { settled = true; res(val); } };
+    const child = exec('powershell -NoProfile -Command "' + command.replace(/"/g, '\\"') + '"',
+      { windowsHide: true, timeout: timeoutMs },
+      (err, stdout) => done(err ? '' : (stdout || '').trim()));
+    setTimeout(() => { try { child.kill(); } catch(_){} done(''); }, timeoutMs + 500);
+  });
 
-    // Get CPU Name
-    exec('powershell -Command "(Get-CimInstance Win32_Processor).Name"', (err, stdout) => {
-      if (!err && stdout) hwSpecs.cpu = stdout.trim();
+  return new Promise(async (resolve) => {
+    try {
+      const [cpuOut, gpuOut, mbOut, ramOut, ssdOut, diskOut] = await Promise.all([
+        runPs("(Get-CimInstance Win32_Processor).Name"),
+        runPs("Get-CimInstance Win32_VideoController | Select-Object -ExpandProperty Name"),
+        runPs("$mb=Get-CimInstance Win32_BaseBoard; ($mb.Manufacturer + ' ' + $mb.Product).Trim()"),
+        runPs("[Math]::Round((Get-CimInstance Win32_PhysicalMemory | Measure-Object -Property Capacity -Sum).Sum / 1GB)"),
+        runPs("(Get-PhysicalDisk | Where-Object MediaType -eq 'SSD' | Select-Object -First 1).FriendlyName"),
+        runPs("(Get-PhysicalDisk | Select-Object -First 1).FriendlyName")
+      ]);
 
-      // Get GPU Names (both Integrated and Discrete)
-      exec('powershell -Command "Get-CimInstance Win32_VideoController | Select-Object -ExpandProperty Name"', (err, stdout) => {
-        let igpu = "None";
-        let dgpu = "None";
-        if (!err && stdout) {
-          const lines = stdout.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
-          const igpuKeywords = ['intel', 'graphics', 'uhd', 'iris', 'hd', 'amd radeon(tm)', 'radeon tm', 'integrated'];
-          
-          for (const name of lines) {
-            const lowerName = name.toLowerCase();
-            const hasIgpuKeyword = igpuKeywords.some(k => lowerName.includes(k));
-            const hasDgpuKeyword = lowerName.includes('nvidia') || lowerName.includes('geforce') || lowerName.includes('rtx') || lowerName.includes('gtx') || lowerName.includes('quadro') || lowerName.includes('radeon pro') || lowerName.includes('rx') || lowerName.includes('xt');
-            
-            if (hasDgpuKeyword) {
-              dgpu = name;
-            } else if (hasIgpuKeyword) {
-              igpu = name;
-            } else {
-              if (lowerName.includes('microsoft basic display adapter')) {
-                // Ignore
-              } else {
-                igpu = name; // fallback
-              }
-            }
-          }
-          
-          if (lines.length === 1 && igpu === "None" && dgpu === "None") {
-            const name = lines[0];
-            if (name.toLowerCase().includes('nvidia') || name.toLowerCase().includes('rtx') || name.toLowerCase().includes('rx')) {
-              dgpu = name;
-            } else {
-              igpu = name;
-            }
-          }
+      // GPU parsing — split multi-line into iGPU / dGPU
+      let igpu = "None", dgpu = "None";
+      if (gpuOut) {
+        const lines = gpuOut.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+        const iKw = ['intel', 'uhd', 'iris', 'radeon(tm)', 'radeon tm', 'integrated', 'vega'];
+        const dKw = ['nvidia', 'geforce', 'rtx', 'gtx', 'quadro', 'radeon pro', ' rx ', 'radeon rx'];
+        for (const name of lines) {
+          const l = name.toLowerCase();
+          if (l.includes('microsoft basic display')) continue;
+          const isD = dKw.some(k => l.includes(k));
+          const isI = iKw.some(k => l.includes(k));
+          if (isD) dgpu = name;
+          else if (isI) igpu = name;
+          else igpu = name;
         }
-        hwSpecs.igpu = igpu;
-        hwSpecs.dgpu = dgpu;
+      }
 
-        // Get Motherboard Product
-        exec('powershell -Command "(Get-CimInstance Win32_BaseBoard).Product"', (mbErr, mbStdout) => {
-          if (!mbErr && mbStdout) hwSpecs.motherboard = mbStdout.trim();
+      const ramLine = ramOut ? ramOut.replace(/[^0-9]/g, '') + " GB" : "";
+      const storage = ssdOut ? (ssdOut + " (SSD)") : diskOut;
 
-          // Get RAM capacity (Summed and converted to GB)
-          exec('powershell -Command "[Math]::Round((Get-CimInstance Win32_PhysicalMemory | Measure-Object -Property Capacity -Sum).Sum / 1GB)"', (err, stdout) => {
-            if (!err && stdout) hwSpecs.ram = stdout.trim() + " GB DDR" + (stdout.trim() > 16 ? "4/DDR5" : "");
-
-            // Get primary SSD/Disk friendly name
-            exec('powershell -Command "(Get-PhysicalDisk | Where-Object MediaType -eq \'SSD\' | Select-Object -First 1).FriendlyName"', (err, stdout) => {
-              if (!err && stdout && stdout.trim()) {
-                hwSpecs.storage = stdout.trim() + " (SSD)";
-              } else {
-                exec('powershell -Command "(Get-PhysicalDisk | Select-Object -First 1).FriendlyName"', (err, stdout) => {
-                  if (!err && stdout) hwSpecs.storage = stdout.trim();
-                  resolve(hwSpecs);
-                });
-                return;
-              }
-              resolve(hwSpecs);
-            });
-          });
-        });
+      resolve({
+        cpu: cpuOut || 'Failed to detect',
+        gpu: dgpu !== 'None' ? dgpu : igpu,
+        igpu: igpu,
+        dgpu: dgpu,
+        ram: ramLine || 'Failed to detect',
+        storage: storage || 'Failed to detect',
+        motherboard: mbOut || 'Failed to detect'
       });
-    });
+      return;
+    } catch (e) {
+      resolve({
+        cpu: 'Detection error: ' + e.message,
+        gpu: 'None', igpu: 'None', dgpu: 'None',
+        ram: 'Failed to detect', storage: 'Failed to detect', motherboard: 'Failed to detect'
+      });
+    }
   });
 });
 
@@ -739,47 +733,22 @@ ipcMain.handle('sys:run-diagnostics', async (event, config) => {
   const hasMonitor = fs.existsSync(monitorScript) && fs.existsSync(dllPath);
   const hasP95 = fs.existsSync(p95Exe);
 
-  // If we are in simulated/mock mode or if binaries are missing, run simulation fallback
-  const isMock = !hasCb || !hasFm || !hasMonitor;
-  if (isMock) {
-    event.sender.send('sys:diag-log', "No embedded binaries found or running in mock mode. Commencing simulated diagnostics...");
-    const diskSpeeds = await measureDiskSpeed();
-    
-    // Simulate progress updates
-    let progress = 0;
-    const stepDuration = Math.max(500, Math.round((duration * 1000) / 5)); // 5 steps scaled to duration, min 500ms
-    return new Promise((resolve) => {
-      const interval = setInterval(() => {
-        progress += 20;
-        event.sender.send('sys:diag-log', `Mock progress: ${progress}%...`);
-        
-        // Mock temperature update
-        event.sender.send('sys:sensor-update', {
-          cpuTemp: Math.round(35 + Math.random() * 45),
-          gpuTemp: Math.round(40 + Math.random() * 38)
-        });
-        
-         if (progress >= 100) {
-          clearInterval(interval);
-          resolve({
-            success: true,
-            mock: true,
-            cpuTempMin: 35,
-            cpuTempMax: 85,
-            cpuTempAvg: 68,
-            gpuTempMin: 40,
-            gpuTempMax: 78,
-            gpuTempAvg: 70,
-            cinebenchScore: 14850,
-            furmarkScore: 9250,
-            ssdRead: diskSpeeds.read,
-            ssdWrite: diskSpeeds.write,
-            ramPassed: true,
-            prime95: runPrime95 ? mockPrime95Result(prime95Duration) : { overallResult: 'not-run' }
-          });
-        }
-      }, stepDuration);
-    });
+  // v1.4.5 — the old mock fallback fabricated cpuTempAvg / cinebench /
+  // furmark / ramPassed with hardcoded round numbers whenever a diagnostic
+  // binary was missing. That data then flowed into the QC report as if it
+  // were real. User: "i want real data in these tests and not some place
+  // holder stats or made up stats." Now: if any required tool is missing,
+  // we HARD-FAIL with a clear message listing exactly what's missing so
+  // the tech knows what to install (or run download-tools.js for). No
+  // fabricated numbers can reach the report.
+  const missing = [];
+  if (!hasCb) missing.push('Cinebench.exe (assets/diagnostics/Cinebench/)');
+  if (!hasFm) missing.push('FurMark.exe (assets/diagnostics/FurMark/FurMark_win64/)');
+  if (!hasMonitor) missing.push('LibreHardwareMonitorLib.dll + monitor.ps1 (assets/diagnostics/LibreHardwareMonitor/)');
+  if (missing.length) {
+    const msg = 'Diagnostic binaries missing — refusing to run with placeholder data. Install / extract:\n\n  • ' + missing.join('\n  • ') + '\n\nRun `node download-tools.js` in the project root to fetch + extract everything at once.';
+    event.sender.send('sys:diag-log', '[ERROR] ' + msg.replace(/\n/g, ' '));
+    return { success: false, error: msg, missing: missing };
   }
 
   event.sender.send('sys:diag-log', "Initiating embedded diagnostics...");

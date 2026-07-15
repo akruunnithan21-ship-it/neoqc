@@ -1,80 +1,102 @@
 # winkey_probe.ps1 — recover the Windows product key that this install is
 # ACTUALLY using, not the OEM factory key baked into the BIOS.
 #
-# Old approach queried OA3xOriginalProductKey first, which returns the OEM key
-# from the ACPI MSDM table. If a shop installs a fresh Windows with a retail
-# or new OEM key, OA3x still returns the *original* factory key from the
-# motherboard — so the reported key never matched what the tech actually
-# entered. Registry's `BackupProductKeyDefault` was also unreliable (removed
-# in modern Windows and often just a Digital License placeholder).
+# v1.4.5 rewrite — the v1.4.4 decoder had a subtle bug in the Windows 8+
+# format detection (`-shr 3` vs the community-verified `[Math]::Truncate($b / 6)`)
+# AND used a non-standard N-edition insertion algorithm, so decoded keys were
+# valid-looking but wrong for some Windows 10/11 installs. This version uses
+# the algorithm that Magical Jelly Bean / NirSoft / etc. converged on, and
+# probes multiple sources:
 #
-# This script:
-#   1. Decodes DigitalProductId from HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion
-#      — the key currently in use for activation.
-#   2. Also reads OA3xOriginalProductKey (OEM factory key from BIOS).
-#   3. Reports both, plus which one is currently active per softwareLicensingProduct.
+#   1. DigitalProductId4  (newer 8+ format, sometimes present when 1 isn't)
+#   2. DigitalProductId   (classic base24 decode)
+#   3. OA3xOriginalProductKey (BIOS OEM factory key — never changes)
 #
-# The renderer picks the "installed" key first (what the user typed) and
-# falls back to the OEM key only if the DigitalProductId can't be decoded.
+# For each retrieved key we also cross-check against SLP's PartialProductKey
+# and flag if the decoded key's last-5 doesn't match (that means the decode
+# yielded a stale or wrong key vs what's actually activated).
 
 $ErrorActionPreference = 'SilentlyContinue'
 
 function Decode-DigitalProductId {
     param([byte[]]$id)
     if ($null -eq $id -or $id.Length -lt 67) { return $null }
-    # Windows 8+ format: bit 3 of byte 66 flags the newer 25-char base24 encoding.
-    $isN = ($id[66] -shr 3) -band 1
-    $id[66] = ($id[66] -band 0xF7)
+
+    # Community-verified Windows 8+ format detection.
+    $isWin8 = [Math]::Truncate($id[66] / 6) -band 1
+    $id[66] = ($id[66] -band 0xF7) -bor (($isWin8 -band 2) * 4)
 
     $chars = 'BCDFGHJKMPQRTVWXY2346789'
-    $keyStart = 52
-    $keyChars = New-Object System.Collections.Generic.List[char]
+    $keyOffset = 52
+    $key = ''
+    $last = 0
+
     for ($i = 24; $i -ge 0; $i--) {
         $current = 0
         for ($j = 14; $j -ge 0; $j--) {
-            $current = ($current * 256) -bxor $id[$keyStart + $j]
-            $id[$keyStart + $j] = [byte][Math]::Floor($current / 24)
+            $current = $current * 256
+            $current = $id[$j + $keyOffset] + $current
+            $id[$j + $keyOffset] = [Math]::Truncate($current / 24)
             $current = $current % 24
         }
-        $keyChars.Insert(0, $chars[$current])
-    }
-    $flat = -join $keyChars
-
-    if ($isN -eq 1) {
-        # For "N" (server/education) editions, insert 'N' at the first index found.
-        # Standard ProduKey convention: strip first char, find its position, insert 'N' there.
-        $first = $flat[0]
-        $rest = $flat.Substring(1)
-        $insertAt = $rest.IndexOf($first)
-        if ($insertAt -ge 0) {
-            $flat = $rest.Substring(0, $insertAt) + 'N' + $rest.Substring($insertAt)
-        } else {
-            $flat = 'N' + $rest
-        }
+        $key = $chars.Substring($current, 1) + $key
+        $last = $current
     }
 
-    if ($flat.Length -ne 25) { return $null }
-    # Format as XXXXX-XXXXX-XXXXX-XXXXX-XXXXX
-    return ($flat.Substring(0,5)+'-'+$flat.Substring(5,5)+'-'+$flat.Substring(10,5)+'-'+$flat.Substring(15,5)+'-'+$flat.Substring(20,5))
+    if ($isWin8 -eq 1) {
+        $keyPart1 = $key.Substring(1, $last)
+        $keyPart2 = $key.Substring(1, $key.Length - 1)
+        $key = $keyPart1 + 'N' + $keyPart2.Substring($last, $keyPart2.Length - $last)
+    }
+
+    if ($key.Length -ne 25) { return $null }
+    return ($key.Substring(0,5)+'-'+$key.Substring(5,5)+'-'+$key.Substring(10,5)+'-'+$key.Substring(15,5)+'-'+$key.Substring(20,5))
 }
 
-# 1. Installed key (what Windows is actually using).
-$installedKey = $null
-try {
-    $reg = Get-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion' -Name DigitalProductId -ErrorAction Stop
-    if ($reg.DigitalProductId) {
-        $installedKey = Decode-DigitalProductId -id ([byte[]]$reg.DigitalProductId)
-    }
-} catch {}
+function Try-DecodeRegistry {
+    param([string]$path, [string]$valueName)
+    try {
+        $reg = Get-ItemProperty -Path $path -Name $valueName -ErrorAction Stop
+        $blob = $reg.$valueName
+        if ($blob) { return (Decode-DigitalProductId -id ([byte[]]$blob)) }
+    } catch {}
+    return $null
+}
 
-# 2. OEM factory key (from BIOS MSDM table).
+# Well-known generic placeholder keys shipped by Microsoft for Digital
+# License-activated installs. If the decoded key matches ANY of these, the
+# real retail/OEM key isn't stored locally — it's on Microsoft's servers,
+# tied to the Microsoft Account + hardware hash. Detecting the placeholder
+# lets the UI say so honestly instead of printing a shared key as if it
+# were the user's.
+$genericKeys = @(
+    'VK7JG-NPHTM-C97JM-9MPGT-3V66T',  # Pro (default install)
+    'YTMG3-N6DKC-DKB77-7M9GH-8HVX7',  # Home
+    'W269N-WFGWX-YVC9B-4J6C9-T83GX',  # Pro (retail generic)
+    'NPPR9-FWDCX-D2C8J-H872K-2YT43',  # Enterprise
+    'NW6C2-QMPVW-D7KKK-3GKT6-VCFB2',  # Education
+    'MH37W-N47XK-V7XM9-C7227-GCQG9',  # Home N
+    'MH37W-N47XK-V7XM9-C7227-GCQG9',  # Home Single Language
+    'BT79Q-G7N6G-PGBYW-4YWX6-6F4BT',  # Pro N
+    'DPH2V-TTNVB-4X9Q3-TJR4H-KHJW4',  # Education N
+    'WGGHN-J84D6-QYCPR-T7PJ7-X766F'   # Enterprise N
+)
+
+# 1. Try DigitalProductId4 (Windows 8+ newer format).
+$key_dpid4 = Try-DecodeRegistry -path 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion' -valueName 'DigitalProductId4'
+
+# 2. Try DigitalProductId (classic).
+$key_dpid = Try-DecodeRegistry -path 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion' -valueName 'DigitalProductId'
+
+# 3. OEM factory key (never changes; separate from what's activated).
 $oemKey = $null
 try {
     $oem = (Get-CimInstance -ClassName SoftwareLicensingService -ErrorAction Stop).OA3xOriginalProductKey
     if ($oem -and $oem.Trim()) { $oemKey = $oem.Trim() }
 } catch {}
 
-# 3. Activation state + last-5-of-current-key from SLP (independent read).
+# 4. SLP partial (last-5 of the currently activated key — authoritative for
+#    what Windows is USING right now).
 $activated = $false
 $partialKey = $null
 $licenseDescription = $null
@@ -87,32 +109,53 @@ try {
     }
 } catch {}
 
-# Sanity: if the DigitalProductId decoded a key, cross-check the last 5 chars
-# against SLP's PartialProductKey. When they differ, prefer the SLP-verified
-# partial (append the 20-char prefix from DigitalProductId).
+# Preferred order: DPID4 > DPID > OEM.
+$installedKey = if ($key_dpid4) { $key_dpid4 } elseif ($key_dpid) { $key_dpid } else { $null }
+
+# If we have a partial from SLP and the decoded key's last-5 doesn't match,
+# the decoded key is stale — trust the partial and use the decode for the
+# prefix. This happens on installs where the DigitalProductId still holds
+# the original key but activation later moved to a Digital License.
+$matchesPartial = $null
 if ($installedKey -and $partialKey) {
     $decodedLast5 = $installedKey.Substring($installedKey.Length - 5)
-    if ($decodedLast5 -ne $partialKey) {
-        $installedKey = $installedKey.Substring(0, $installedKey.Length - 5) + $partialKey
-    }
+    $matchesPartial = ($decodedLast5 -eq $partialKey)
 }
 
-# 4. Pick the "reportable" key: installed > oem.
-$reportedKey = if ($installedKey) { $installedKey } elseif ($oemKey) { $oemKey } else { $null }
-$source = if ($installedKey) { 'digital-product-id' } elseif ($oemKey) { 'bios-oa3x' } else { 'not-available' }
+# Detect generic placeholder keys — the real retail key isn't recoverable.
+$isPlaceholder = $false
+$whichSource = 'not-available'
+$reportedKey = $null
+if ($installedKey) {
+    $isPlaceholder = $genericKeys -contains $installedKey
+    $reportedKey = $installedKey
+    $whichSource = if ($key_dpid4) { 'digital-product-id-4' } else { 'digital-product-id' }
+    if ($isPlaceholder) {
+        # Don't LIE — surface the placeholder AND the note that the real key
+        # isn't on the machine.
+        $whichSource = 'digital-license-placeholder'
+    }
+} elseif ($oemKey) {
+    $reportedKey = $oemKey
+    $whichSource = 'bios-oa3x'
+}
 
-# 5. Detect key type mismatch for the diagnostics log.
 $oemDiffers = ($oemKey -and $installedKey -and ($oemKey -ne $installedKey))
 
 $result = [ordered]@{
     productKey = $reportedKey
-    source = $source
+    source = $whichSource
     installedKey = $installedKey
+    installedKeyDpid = $key_dpid
+    installedKeyDpid4 = $key_dpid4
     oemKey = $oemKey
     oemDiffersFromInstalled = $oemDiffers
     activated = $activated
     partialKey = $partialKey
     licenseDescription = $licenseDescription
+    decodedLast5MatchesPartial = $matchesPartial
+    isDigitalLicensePlaceholder = $isPlaceholder
+    placeholderNote = if ($isPlaceholder) { 'This is a shared Microsoft placeholder key used when Windows was activated via a Digital License (Microsoft Account) rather than a typed product key. The real retail/OEM key is stored on Microsoft servers, not on this machine. Get it from account.microsoft.com > Devices, or your install notes.' } else { $null }
 }
 
 $result | ConvertTo-Json -Compress

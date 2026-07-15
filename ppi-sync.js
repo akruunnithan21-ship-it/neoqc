@@ -144,6 +144,11 @@
     // on file" flag because the catalog snapshot happened at a bad time.
     // Shape: { cpu: 42000, gpu: 78000, ram: 5500, ... }
     var ticketPrices = opts.ticketPrices || {};
+    // v1.4.5 — the caller passes the IPC fetch bridge + supabaseClient so
+    // we can do live retailer lookups for any null-priced pick. Without
+    // these two, we still compute but skip the auto-lookup.
+    var fetchUrl = opts.fetchUrl || null;
+    var supabaseClient = opts.supabaseClient || null;
 
     if (!window.NeoQcPpi) throw new Error('ppi.js not loaded');
     if (!window.NeoQcMatcher) throw new Error('matcher.js not loaded');
@@ -191,6 +196,45 @@
         componentPrices[sku] = Object.assign({}, componentPrices[sku], { price_inr: Number(stored) });
       }
     });
+
+    // v1.4.5 — for any build-spec SKU that STILL has no price after the
+    // ticketPrices backfill, run a live web-lookup (mdcomputers, primeabgb,
+    // vishalperipherals, computechstore, vedantcomputers) and average the
+    // real market price. Removes the persistent "gpu: no price on file"
+    // flag on the PPI panel when the catalog was scraped when the item
+    // was out-of-stock (₹0 → NULL). Best-effort: if the network is down
+    // or no site has the item, we simply skip and the flag stays.
+    var lookupTasks = [];
+    Object.keys(buildSpecs).forEach(function (category) {
+      var sku = buildSpecs[category];
+      var entry = componentPrices[sku];
+      if (!entry || entry.price_inr != null) return;
+      if (!window.NeoQcWebLookup || !window.NeoQcWebLookup.lookup) return;
+      if (!fetchUrl) return; // need the IPC bridge — main process must be reachable
+      lookupTasks.push(
+        (async function () {
+          try {
+            var res = await window.NeoQcWebLookup.lookup(entry.name, category, fetchUrl, supabaseClient);
+            if (res && res.found && res.price_inr != null) {
+              var newPrice = Number(res.price_inr);
+              componentPrices[sku] = Object.assign({}, entry, { price_inr: newPrice });
+              // Also patch the live catalog matcher so subsequent PPI runs
+              // in this session see the price without another lookup.
+              if (catalogMatcher && catalogMatcher._entries) {
+                var live = catalogMatcher._entries.find(function (e) { return e.sku === sku; });
+                if (live) live.priceInr = newPrice;
+              }
+              flagsExtra.push(category + ': price filled from live retailer lookup — ' + (res.price_sample_size || 1) + ' listing(s), avg ₹' + Math.round(newPrice));
+            }
+          } catch (e) {
+            console.warn('PPI web-lookup for ' + category + ' failed:', e.message);
+          }
+        })()
+      );
+    });
+    if (lookupTasks.length) {
+      await Promise.all(lookupTasks);
+    }
 
     if (!Object.keys(buildSpecs).length) {
       return {

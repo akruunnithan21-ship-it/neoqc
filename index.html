@@ -1960,23 +1960,20 @@
     <div class="glass-slab modal-card" style="max-width: 650px; width: 100%; padding: 30px; border-radius: 20px;">
       <div class="modal-header" style="border-bottom: 1px solid var(--glass-border); padding-bottom: 15px; margin-bottom: 20px;">
         <h2 style="font-family: 'Syncopate', sans-serif; font-size: 1.3rem; color: var(--primary-pink); letter-spacing: 0.05em; margin: 0;">NEO QC UPDATED</h2>
-        <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; font-weight: 700; background: rgba(231, 1, 78, 0.1); color: var(--primary-pink); padding: 4px 8px; border-radius: 4px;">v1.4.4</span>
+        <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; font-weight: 700; background: rgba(231, 1, 78, 0.1); color: var(--primary-pink); padding: 4px 8px; border-radius: 4px;">v1.4.5</span>
       </div>
       <div class="modal-body" style="font-size: 0.92rem; line-height: 1.6; color: var(--text-dark); max-height: 420px; overflow-y: auto; padding-right: 5px;">
-        <p style="margin-top: 0;">An update has been installed. Here are the key improvements in NeoQC <strong>v1.4.4</strong>:</p>
+        <p style="margin-top: 0;">An update has been installed. Here are the key improvements in NeoQC <strong>v1.4.5</strong>:</p>
         <ul style="padding-left: 20px; display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px;">
-          <li><strong>Price-to-Performance now runs on every PC</strong>: PPI is a pure-JS engine — no Python required. The "no python installed" error on build-room machines is gone. Same math as before, same use-cases, same ratio-to-best scoring — just ported to run in the app itself.</li>
-          <li><strong>Windows product key retrieval fixed</strong>: The reported key now decodes DigitalProductId (what Windows actually uses) instead of returning the OEM factory key baked into BIOS. Matches what the tech installed, cross-checked against the last-5 activation partial.</li>
-          <li><strong>OpenRGB survives Defender — permanently</strong>: On every boot the app provisions its own writable copy of OpenRGB in per-user storage, adds Defender exclusions for the folder, process, and low-level driver files (WinRing0*.sys / inpout*.dll), and un-quarantines anything a signature update already ate. If Defender re-flags it, the next launch self-heals.</li>
-          <li><strong>RAM stress now uses your full memory</strong>: The 8 GB cap is gone — the stress test targets 85 % of installed RAM (with a safety buffer so Windows itself doesn't page). No more "only 50 % used" on a 16 GB build.</li>
-          <li><strong>Completed tickets move to Completed</strong>: The completion gate no longer requires every diagnostic value to be non-null (iGPU-only builds have no FurMark GPU temp, sensor-name quirks can drop CPU temp). When every QC checkbox is ticked, the ticket completes.</li>
-          <li><strong>Client-side parts cross-check</strong>: The "MISMATCH DETECTED" false positive is fixed. Verification now scores token overlap (via the shared matcher) instead of raw substring — so "ASUS PRIME B650M-A WIFI DDR5 mATX Motherboard" correctly matches the WMIC-detected "PRIME B650M-A WIFI". The status pill also names which component actually mismatched.</li>
-          <li><strong>Faster autocomplete + smarter manual entry</strong>: 120 ms debounce so the 8 000-item catalog scorer doesn't run on every keystroke. Manual entries fire-and-forget upsert to the shared catalog so the next tech to type the same thing finds it. Null-price catalog rows show "🔎 price pending" and auto-fill from the retailer network on pick.</li>
-          <li><strong>Multi-part Awaiting Components</strong>: Replaced the single free-text "missing parts" field with a proper chip UI — pick a category, add a note, and the matching spec input gets an "⏳ Awaiting" badge + is un-required until the part arrives.</li>
+          <li><strong>Auto-Detect Local Specs now actually fills the widgets</strong>: The detection is now parallel with per-probe timeouts — one hung PowerShell call can no longer wedge the whole flow. Failed fields show "Failed to detect" honestly instead of a stale "--".</li>
+          <li><strong>Completed tickets promote LIVE on the dashboard</strong>: The completion recompute now runs on every dashboard render, not just at form save. Legacy tickets that were stuck at "QC Stress Testing" with everything ticked promote to Completed the next time you open the dashboard — no need to re-open + re-save each one.</li>
+          <li><strong>Windows product key decoder rewritten</strong>: The v1.4.4 decoder used a non-standard Win8+ detection bit that mis-decoded some Windows 10/11 installs. This version uses the community-verified algorithm (matches NirSoft ProduKey / Magical Jelly Bean output) and probes DigitalProductId4 in addition to DigitalProductId. When the decoded key is a shared Microsoft Digital License placeholder, the UI now says so clearly instead of printing a generic key as if it were yours.</li>
+          <li><strong>PPI auto-fetches missing prices from the internet</strong>: When a component in the build has no price in the catalog, PPI now runs a live retailer lookup (mdcomputers, primeabgb, vishalperipherals, computechstore, vedantcomputers), averages the results, and uses the real market price. The "gpu: no price on file" flag goes away automatically when the internet has the answer.</li>
+          <li><strong>Diagnostic tests refuse to run with placeholder data</strong>: If a required tool (Cinebench, FurMark, LibreHardwareMonitor) is missing, the app now hard-fails with a clear message listing exactly what's missing — instead of fabricating cpuTempAvg / cinebench / furmark stats to fill the report. No more made-up numbers.</li>
         </ul>
       </div>
       <div class="modal-footer" style="border-top: 1px solid var(--glass-border); padding-top: 15px; display: flex; justify-content: flex-end; margin-top: 20px;">
-        <button id="btn-close-changelog" class="primary-pink-btn" style="padding: 10px 24px; font-weight: 700; font-size: 0.95rem;">Launch NeoQC v1.4.4</button>
+        <button id="btn-close-changelog" class="primary-pink-btn" style="padding: 10px 24px; font-weight: 700; font-size: 0.95rem;">Launch NeoQC v1.4.5</button>
       </div>
     </div>
   </div>

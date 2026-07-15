@@ -966,6 +966,39 @@ function renderDashboard() {
   grid.innerHTML = '';
   archiveTable.innerHTML = '';
 
+  // v1.4.5 — LIVE recompute of ticket.status from its checks on every render.
+  // v1.4.4's completion fix only ran inside handleTicketFormSubmit, so any
+  // legacy ticket that already had status='qc_testing' stored stayed there
+  // forever unless the tech re-opened + re-saved it. Now: if every QC + build
+  // check is ticked, promote to 'completed' automatically here (and persist,
+  // so the promotion sticks across restarts). Same logic as the submit path
+  // but applied to every ticket in memory. Read-only for tickets whose checks
+  // aren't all done — never demotes a ticket from completed.
+  var _promotedTickets = [];
+  appState.tickets.forEach(function (t) {
+    if (!t || !t.buildChecks || !t.qcChecks) return;
+    if (t.status === 'completed') return;
+    var b = t.buildChecks, q = t.qcChecks;
+    var buildAll = b.cpuRamSsd && b.moboCase && b.cooler && b.cables && b.posted;
+    var qcAll = q.physCabinet && q.physMobo && q.physRam && q.physScrews &&
+                q.softWindows && q.softDrivers && q.softBios &&
+                q.portUsb && q.portVideo && q.portAudio && q.portWifi;
+    if (buildAll && qcAll) {
+      t.status = 'completed';
+      if (!t.completedAt) t.completedAt = new Date().toISOString();
+      t.updatedAt = new Date().toISOString();
+      _promotedTickets.push(t);
+    }
+  });
+  if (_promotedTickets.length) {
+    // Persist promotions locally + push to cloud so they survive restart and
+    // reach the customer dashboard immediately.
+    saveDatabase().catch(function (e) { console.warn('Auto-complete local persist failed:', e); });
+    _promotedTickets.forEach(function (t) {
+      syncTicketToCloud(t).catch(function (e) { console.warn('Auto-complete cloud sync failed:', e); });
+    });
+  }
+
   const activeTickets = appState.tickets.filter(t => t.status !== 'completed');
   const completedTickets = appState.tickets.filter(t => t.status === 'completed');
 
@@ -2544,10 +2577,29 @@ async function setupClientMode() {
       detectedWinKey = result.productKey;
       if (winKeyVal) winKeyVal.textContent = result.productKey;
       if (winKeyContainer) winKeyContainer.classList.remove('hidden');
+      // v1.4.5 — surface the "this is a Microsoft placeholder key" note when
+      // the probe detects Digital License activation, so the tech doesn't
+      // print a shared generic key on the QC report thinking it's the real
+      // retail key. Also lets them know where to actually find it.
+      if (result.keyDetail && result.keyDetail.isDigitalLicensePlaceholder) {
+        var note = document.getElementById('client-win-key-note');
+        if (!note && winKeyContainer && winKeyContainer.parentNode) {
+          note = document.createElement('div');
+          note.id = 'client-win-key-note';
+          note.style.cssText = 'margin-top:6px;padding:8px;background:rgba(255,193,7,0.12);border:1px solid rgba(255,193,7,0.4);border-radius:6px;font-size:0.72rem;color:#b8860b;';
+          winKeyContainer.parentNode.appendChild(note);
+        }
+        if (note) {
+          note.textContent = '⚠ Digital License placeholder — this is a shared Microsoft key. The real retail/OEM key you entered isn\'t stored on this machine (activation is tied to your Microsoft Account server-side). Get it from account.microsoft.com › Devices, or your install notes.';
+        }
+      } else {
+        var existingNote = document.getElementById('client-win-key-note');
+        if (existingNote) existingNote.remove();
+      }
     } else {
       detectedWinKey = '';
     }
-    
+
     checkClientFormReady();
   });
 
@@ -3531,8 +3583,29 @@ function setupEventListeners() {
         const keyBadge = document.getElementById('modal-activation-key');
         if (keyBadge) {
           keyBadge.textContent = winKey;
+          // v1.4.5 — Digital License placeholder warning (see the
+          // client-side handler for the same annotation). Prevents the
+          // shared Microsoft placeholder key from being saved as if it
+          // were the tech's real retail key.
+          if (result.keyDetail && result.keyDetail.isDigitalLicensePlaceholder) {
+            keyBadge.style.color = '#b8860b';
+            keyBadge.title = 'Digital License placeholder — this is a shared Microsoft key, not your real retail key. Get the real one from account.microsoft.com › Devices or your install notes.';
+            var container = keyBadge.parentElement;
+            if (container && !container.querySelector('.win-key-placeholder-note')) {
+              var note = document.createElement('div');
+              note.className = 'win-key-placeholder-note';
+              note.style.cssText = 'margin-top:4px;font-size:0.7rem;color:#b8860b;font-family:inherit;';
+              note.textContent = '⚠ Placeholder key — real retail key on account.microsoft.com';
+              container.appendChild(note);
+            }
+          } else {
+            keyBadge.style.color = '';
+            keyBadge.title = '';
+            var existingNote = keyBadge.parentElement && keyBadge.parentElement.querySelector('.win-key-placeholder-note');
+            if (existingNote) existingNote.remove();
+          }
         }
-        
+
         if (result.activated) {
           document.getElementById('qc-soft-windows').checked = true;
         }
@@ -3576,7 +3649,13 @@ function setupEventListeners() {
               ticketSpecs: ticket.specs,
               catalogMatcher: catalogMatcher,
               useCase: useCase,
-              ticketPrices: ticketPrices
+              ticketPrices: ticketPrices,
+              // v1.4.5 — pass the fetch bridge + supabase client so missing
+              // prices get auto-filled from a live retailer scrape before
+              // scoring. Kills the persistent "no price on file" flag when
+              // the internet has the answer.
+              fetchUrl: function (url) { return ipcRenderer.invoke('catalog:fetch-url', { url: url }); },
+              supabaseClient: supabaseClient
             });
             if (jsRes && jsRes.success) {
               if (supabaseClient) {
