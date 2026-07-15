@@ -1842,6 +1842,30 @@
       </div>
     </div>
 
+    <!-- ── DRIVE BENCHMARK (per-SSD DiskSpd numbers, v1.4.6+) ── -->
+    <div id="print-drivebench-section" class="print-section hidden">
+      <h3>Drive Benchmark — CrystalDiskMark-comparable Methodology (Microsoft DiskSpd)</h3>
+      <table class="print-event-table" style="width:100%;">
+        <thead>
+          <tr>
+            <th style="width:22%;">Drive</th>
+            <th style="width:20%;">Interface</th>
+            <th style="width:13%;">SEQ1M Read</th>
+            <th style="width:13%;">SEQ1M Write</th>
+            <th style="width:13%;">RND4K Read</th>
+            <th style="width:13%;">RND4K Write</th>
+            <th style="width:6%;">Grade</th>
+          </tr>
+        </thead>
+        <tbody id="print-drivebench-body"></tbody>
+      </table>
+      <div style="font-size:7pt;color:#666;margin-top:4px;">
+        SEQ1M Q8T1 + RND4K Q32T1, 1 GiB test file, cache bypassed (-Sh).
+        RND4K IOPS shown in parentheses. Grade compares SEQ to
+        class-appropriate targets (SATA / NVMe Gen3-5).
+      </div>
+    </div>
+
     <!-- ── PORT & CONNECTIVITY ENUMERATION ── -->
     <div id="print-ports-section" class="print-section hidden">
       <h3>Port &amp; Connectivity — Recognised by Windows</h3>
@@ -1960,20 +1984,20 @@
     <div class="glass-slab modal-card" style="max-width: 650px; width: 100%; padding: 30px; border-radius: 20px;">
       <div class="modal-header" style="border-bottom: 1px solid var(--glass-border); padding-bottom: 15px; margin-bottom: 20px;">
         <h2 style="font-family: 'Syncopate', sans-serif; font-size: 1.3rem; color: var(--primary-pink); letter-spacing: 0.05em; margin: 0;">NEO QC UPDATED</h2>
-        <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; font-weight: 700; background: rgba(231, 1, 78, 0.1); color: var(--primary-pink); padding: 4px 8px; border-radius: 4px;">v1.4.5</span>
+        <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; font-weight: 700; background: rgba(231, 1, 78, 0.1); color: var(--primary-pink); padding: 4px 8px; border-radius: 4px;">v1.4.6</span>
       </div>
       <div class="modal-body" style="font-size: 0.92rem; line-height: 1.6; color: var(--text-dark); max-height: 420px; overflow-y: auto; padding-right: 5px;">
-        <p style="margin-top: 0;">An update has been installed. Here are the key improvements in NeoQC <strong>v1.4.5</strong>:</p>
+        <p style="margin-top: 0;">An update has been installed. Here are the key improvements in NeoQC <strong>v1.4.6</strong>:</p>
         <ul style="padding-left: 20px; display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px;">
-          <li><strong>Auto-Detect Local Specs now actually fills the widgets</strong>: The detection is now parallel with per-probe timeouts — one hung PowerShell call can no longer wedge the whole flow. Failed fields show "Failed to detect" honestly instead of a stale "--".</li>
-          <li><strong>Completed tickets promote LIVE on the dashboard</strong>: The completion recompute now runs on every dashboard render, not just at form save. Legacy tickets that were stuck at "QC Stress Testing" with everything ticked promote to Completed the next time you open the dashboard — no need to re-open + re-save each one.</li>
-          <li><strong>Windows product key decoder rewritten</strong>: The v1.4.4 decoder used a non-standard Win8+ detection bit that mis-decoded some Windows 10/11 installs. This version uses the community-verified algorithm (matches NirSoft ProduKey / Magical Jelly Bean output) and probes DigitalProductId4 in addition to DigitalProductId. When the decoded key is a shared Microsoft Digital License placeholder, the UI now says so clearly instead of printing a generic key as if it were yours.</li>
-          <li><strong>PPI auto-fetches missing prices from the internet</strong>: When a component in the build has no price in the catalog, PPI now runs a live retailer lookup (mdcomputers, primeabgb, vishalperipherals, computechstore, vedantcomputers), averages the results, and uses the real market price. The "gpu: no price on file" flag goes away automatically when the internet has the answer.</li>
-          <li><strong>Diagnostic tests refuse to run with placeholder data</strong>: If a required tool (Cinebench, FurMark, LibreHardwareMonitor) is missing, the app now hard-fails with a clear message listing exactly what's missing — instead of fabricating cpuTempAvg / cinebench / furmark stats to fill the report. No more made-up numbers.</li>
+          <li><strong>Real SSD benchmark — CrystalDiskMark-comparable methodology</strong>: The old 25 MB fs.writeFileSync "SSD test" was actually measuring Windows' RAM cache — the numbers on the QC certificate were RAM speed, not drive speed. Replaced with <em>Microsoft DiskSpd</em> (the same I/O engine CrystalDiskMark is built on), bundled at ~1 MB. Runs the SEQ1M Q8T1 + RND4K Q32T1 profile per drive at 1 GiB cache-bypassed. Numbers now match what CDM reports on the same hardware.</li>
+          <li><strong>Every SSD in the build gets benchmarked</strong>: Multi-drive builds (boot NVMe + data SATA) now show one row per drive on the QC report — no more "measured wrong SSD" issues. Serial iteration so PCIe lane contention can't skew results.</li>
+          <li><strong>New Drive Benchmark card on page 3 of the QC certificate</strong>: SEQ1M read/write, RND4K read/write, RND4K IOPS, and a pass/mixed/below verdict badge per drive. Verdict grades against class-appropriate targets (SATA / NVMe Gen3-5) — no more false QC fails on genuinely-fast drives.</li>
+          <li><strong>Placeholder fallback deleted</strong>: The old fallback silently returned <code>{ read: 3500, write: 3000 }</code> on any error. If DiskSpd is missing or a drive can't be benchmarked, the report shows "RUN FAILED" with the reason. Never fabricates numbers.</li>
+          <li><strong>Temp file always cleaned up</strong>: The 1 GiB benchmark test file is deleted after every run — pass or fail — so a customer's drive never ships with a stray <code>neoqc_cdm_bench.tmp</code> on it.</li>
         </ul>
       </div>
       <div class="modal-footer" style="border-top: 1px solid var(--glass-border); padding-top: 15px; display: flex; justify-content: flex-end; margin-top: 20px;">
-        <button id="btn-close-changelog" class="primary-pink-btn" style="padding: 10px 24px; font-weight: 700; font-size: 0.95rem;">Launch NeoQC v1.4.5</button>
+        <button id="btn-close-changelog" class="primary-pink-btn" style="padding: 10px 24px; font-weight: 700; font-size: 0.95rem;">Launch NeoQC v1.4.6</button>
       </div>
     </div>
   </div>

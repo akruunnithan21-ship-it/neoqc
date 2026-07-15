@@ -374,6 +374,54 @@
       }
     }
 
+    // ── Drive Benchmark (v1.4.6+ per-SSD DiskSpd numbers) ──
+    var driveBenchmarks = d.driveBenchmarks;
+    if (driveBenchmarks && driveBenchmarks.length && $('print-drivebench-body')) {
+      show('print-drivebench-section');
+      var graderDb = (typeof window !== 'undefined' && window.NeoQcSsdGrade)
+        ? window.NeoQcSsdGrade : (typeof global !== 'undefined' ? global.NeoQcSsdGrade : null);
+      $('print-drivebench-body').innerHTML = driveBenchmarks.map(function (row) {
+        if (row.verdict === 'RUN FAILED') {
+          return '<tr>' +
+            '<td>' + esc(row.drive || '?') + ' — ' + esc(row.model || 'Unknown drive') + '</td>' +
+            '<td colspan="5" style="color:#c00;">' + esc(row.error || 'Benchmark run failed') + '</td>' +
+            '<td>--</td></tr>';
+        }
+        // Grade against ssd-grading.js tiers. Synthesize an ssd-health-like
+        // object from what we already know about the drive.
+        var pseudoHealth = {
+          busType: row.busType,
+          mediaType: row.mediaType || 'SSD',
+          pcieCurrentGen: row.pcieGen,
+          pcieCurrentWidth: row.pcieWidth,
+          expectedMBps: row.expectedMBps
+        };
+        var grade = graderDb ? graderDb.grade(pseudoHealth, row.seqRead, row.seqWrite) : null;
+        var iface = row.busType === 'NVMe' && row.pcieGen
+          ? 'NVMe Gen' + row.pcieGen + ' × ' + (row.pcieWidth || '?')
+          : (row.busType || 'Unknown');
+        var badgeText = '--', badgeClass = '';
+        if (grade) {
+          var rOk = grade.readVerdict === 'pass', wOk = grade.writeVerdict === 'pass';
+          badgeText = (rOk && wOk) ? '✓' : ((rOk || wOk) ? '~' : '✗');
+          badgeClass = (rOk && wOk) ? 'pass' : ((rOk || wOk) ? 'mixed' : 'below');
+        }
+        var iopsCell = function (mb, iops) {
+          return mb.toLocaleString() + ' MB/s<br><span style="font-size:6.5pt;color:#666;">' +
+            (iops != null ? iops.toLocaleString() + ' IOPS' : '') + '</span>';
+        };
+        return '<tr>' +
+          '<td><strong>' + esc(row.drive) + '</strong> ' + esc(row.model || '') + '</td>' +
+          '<td>' + esc(iface) + '</td>' +
+          '<td>' + row.seqRead.toLocaleString() + ' MB/s</td>' +
+          '<td>' + row.seqWrite.toLocaleString() + ' MB/s</td>' +
+          '<td>' + iopsCell(row.rnd4kRead, row.rnd4kReadIops) + '</td>' +
+          '<td>' + iopsCell(row.rnd4kWrite, row.rnd4kWriteIops) + '</td>' +
+          '<td><span class="print-ssd-verdict-badge ' + badgeClass + '">' + badgeText + '</span></td>' +
+        '</tr>';
+      }).join('');
+    }
+
     // ── Prime95 ──
     var p95 = d.prime95;
     var p95Pass = null;

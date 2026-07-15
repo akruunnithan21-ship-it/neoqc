@@ -35,6 +35,17 @@ const TOOLS = [
     name: 'Prime95',
     url: 'https://download.mersenne.ca/gimps/v30/30.19/p95v3019b20.win64.zip',
     destFolder: 'Prime95'
+  },
+  {
+    // Microsoft DiskSpd — MIT-licensed, ~1 MB, the same I/O engine
+    // CrystalDiskMark builds on. Replaces the old in-JS 25 MB
+    // fs.writeFileSync/readFileSync "SSD test" that only measured Windows'
+    // write-back cache. Now bench numbers actually reflect the drive.
+    // We report the results on the QC certificate as
+    // "CrystalDiskMark-comparable methodology (Microsoft DiskSpd)".
+    name: 'DiskSpd',
+    url: 'https://github.com/microsoft/diskspd/releases/download/v2.2/DiskSpd.zip',
+    destFolder: 'DiskSpd'
   }
 ];
 
@@ -114,6 +125,10 @@ async function start() {
       checkFile = path.join(outDir, 'OpenRGB.exe');
     } else if (tool.name === 'Prime95') {
       checkFile = path.join(outDir, 'prime95.exe');
+    } else if (tool.name === 'DiskSpd') {
+      // DiskSpd.zip extracts to amd64/diskspd.exe (also x86/, ARM64/).
+      // main.js's runDriveBenchmark() checks both amd64/ and root for the exe.
+      checkFile = path.join(outDir, 'amd64', 'diskspd.exe');
     } else {
       checkFile = path.join(outDir, 'LibreHardwareMonitorLib.dll');
     }

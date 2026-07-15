@@ -96,6 +96,22 @@ const MOCK_TICKET = {
       storage: { model: 'Samsung 990 Pro', interface: 'NVMe Gen4', sizeGB: 2000, healthStatus: 'OK', lifeRemaining: 99, powerOnHours: 14 }
     },
     ramDetail: '6144 MB stressed for 600s — 0 fault(s)',
+    driveBenchmarks: [
+      {
+        drive: 'C:', model: 'Samsung 990 Pro 2TB', busType: 'NVMe', mediaType: 'NVMe SSD',
+        pcieGen: 4, pcieWidth: 4, expectedMBps: 7092, testSize: '1 GiB',
+        seqRead: 7080, seqWrite: 6420, rnd4kRead: 92, rnd4kWrite: 278,
+        rnd4kReadIops: 23500, rnd4kWriteIops: 71100,
+        ranAt: '2026-07-10T13:15:00Z', tool: 'Microsoft DiskSpd 2.2'
+      },
+      {
+        drive: 'D:', model: 'Crucial MX500 1TB', busType: 'SATA', mediaType: 'SSD',
+        pcieGen: null, pcieWidth: null, expectedMBps: 550, testSize: '1 GiB',
+        seqRead: 545, seqWrite: 512, rnd4kRead: 38, rnd4kWrite: 105,
+        rnd4kReadIops: 9700, rnd4kWriteIops: 26900,
+        ranAt: '2026-07-10T13:16:00Z', tool: 'Microsoft DiskSpd 2.2'
+      }
+    ],
     portScan: {
       ranAt: '2026-07-10T13:00:00Z',
       usbControllers: [

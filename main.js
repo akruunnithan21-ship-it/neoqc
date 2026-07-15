@@ -591,34 +591,168 @@ ipcMain.handle('sys:print-pdf', async (event, filename) => {
 
 const crypto = require('crypto');
 
-// Quick sequential disk speed benchmark (reads/writes a 25MB buffer in os.tmpdir())
-async function measureDiskSpeed() {
-  const tempDir = os.tmpdir();
-  const tempFile = path.join(tempDir, 'neoqc_speedtest.bin');
+// v1.4.6 — replaced the old 25 MB fs.writeFileSync/readFileSync "SSD test"
+// (which measured Windows' write-back cache, not the drive) with a real
+// benchmark powered by Microsoft DiskSpd — the same I/O engine
+// CrystalDiskMark builds on. Bundled in assets/diagnostics/DiskSpd/ via
+// download-tools.js. Results are shown on the QC certificate as
+// "CrystalDiskMark-comparable methodology (Microsoft DiskSpd)".
+//
+// enumerateSsdVolumes() → runDriveBenchmark(vol) per drive, serial (not
+// parallel — parallel would contend for PCIe lanes and skew numbers).
+
+function diskSpdExe() {
+  const diagnosticsPath = app.isPackaged
+    ? path.join(process.resourcesPath, 'app.asar.unpacked', 'assets', 'diagnostics')
+    : path.join(__dirname, 'assets', 'diagnostics');
+  const candidates = [
+    path.join(diagnosticsPath, 'DiskSpd', 'amd64', 'diskspd.exe'),
+    path.join(diagnosticsPath, 'DiskSpd', 'diskspd.exe'),
+    // Optional user override — Settings can set pathDiskSpd
+    // (resolved by the caller via resolveExecutable).
+  ];
+  for (const p of candidates) if (fs.existsSync(p)) return p;
+  return '';
+}
+
+// Query the SSD enumerator script and parse its JSON array.
+function enumerateSsdVolumes() {
+  return new Promise((resolve) => {
+    const diagnosticsPath = app.isPackaged
+      ? path.join(process.resourcesPath, 'app.asar.unpacked', 'assets', 'diagnostics')
+      : path.join(__dirname, 'assets', 'diagnostics');
+    const script = path.join(diagnosticsPath, 'ssd_enumerate.ps1');
+    if (!fs.existsSync(script)) return resolve([]);
+    exec(`powershell -NoProfile -ExecutionPolicy Bypass -File "${script}"`,
+      { windowsHide: true, timeout: 15000 },
+      (err, stdout) => {
+        if (err || !stdout) return resolve([]);
+        try {
+          const parsed = JSON.parse(stdout.trim());
+          resolve(Array.isArray(parsed) ? parsed : []);
+        } catch (_) { resolve([]); }
+      });
+  });
+}
+
+// Parse a DiskSpd "-Rtext" run's Total IO block. DiskSpd emits:
+//   total:       10661920768 |        10168 |    3383.78 |    3383.78
+// Groups captured: bytes, IOs, MiB/s, IOPS. We only need the last two.
+function parseDiskSpdTotal(stdout) {
+  if (!stdout) return null;
+  // Scope to the "Total IO" section only — the "Read IO" / "Write IO"
+  // sections have identical `total:` rows but with 0 in one direction for
+  // pure-read/pure-write runs. Total IO always has the real number.
+  const totalSectionMatch = stdout.match(/Total IO[\s\S]*?total:\s*(\d+)\s*\|\s*(\d+)\s*\|\s*([\d.]+)\s*\|\s*([\d.]+)/);
+  if (!totalSectionMatch) return null;
+  return {
+    bytes: parseInt(totalSectionMatch[1], 10),
+    ios: parseInt(totalSectionMatch[2], 10),
+    mibPerSec: parseFloat(totalSectionMatch[3]),
+    iops: parseFloat(totalSectionMatch[4])
+  };
+}
+
+// Run one DiskSpd phase against a specific file. Returns { mibPerSec, iops }
+// or null on failure. Never fabricates values.
+function runDiskSpdPhase({ exe, testFile, blockSize, queueDepth, durationSec, isWrite, random }) {
+  return new Promise((resolve) => {
+    // Flags:
+    //   -c<size>  create test file of this size (only used first call; DiskSpd
+    //             is happy to reuse an existing file so subsequent phases can
+    //             skip creation, but keeping -c is idempotent)
+    //   -b<size>  block size per I/O (1M / 4K)
+    //   -o<n>     outstanding I/O per thread (queue depth)
+    //   -t1       one thread — CDM uses one thread per column
+    //   -d<sec>   duration in seconds
+    //   -Sh       bypass software cache + hardware write cache
+    //             (this is the critical flag — without it we'd repeat the
+    //              measureDiskSpeed() bug of measuring RAM)
+    //   -w<pct>   percentage of writes (0 = pure read, 100 = pure write)
+    //   -r        random (omit for sequential)
+    //   -Rtext    text results format (matches the row we regex above)
+    const args = [
+      '-c1G', `-b${blockSize}`, `-o${queueDepth}`, '-t1',
+      `-d${durationSec}`, '-Sh', `-w${isWrite ? 100 : 0}`, '-Rtext'
+    ];
+    if (random) args.push('-r');
+    args.push(testFile);
+
+    let stdout = '';
+    let settled = false;
+    const done = (val) => { if (!settled) { settled = true; resolve(val); } };
+    const child = spawn(exe, args, { windowsHide: true });
+    child.stdout.on('data', d => { stdout += d.toString(); });
+    child.on('close', () => done(parseDiskSpdTotal(stdout)));
+    child.on('error', () => done(null));
+    // Hard-kill 30 s past the requested duration in case DiskSpd wedges.
+    setTimeout(() => {
+      try { child.kill(); } catch (_) {}
+      done(parseDiskSpdTotal(stdout));
+    }, (durationSec + 30) * 1000);
+  });
+}
+
+// Full 4-phase Standard-profile bench for one drive. Never fabricates data —
+// returns { verdict: 'RUN FAILED', error } on any failure.
+async function runDriveBenchmark(vol, exe) {
+  const testFile = path.join(vol.drive + '\\', 'neoqc_cdm_bench.tmp');
+  const REQUIRED_FREE_GB = 2; // Standard profile writes 1 GiB, leave slack.
+  const started = new Date().toISOString();
+
+  // Refuse the run on a drive that can't fit the test file cleanly.
+  if (vol.freeGB != null && vol.freeGB < REQUIRED_FREE_GB) {
+    return {
+      drive: vol.drive, model: vol.model, busType: vol.busType,
+      pcieGen: vol.pcieGen, pcieWidth: vol.pcieWidth,
+      verdict: 'RUN FAILED',
+      error: `Drive ${vol.drive} has ${vol.freeGB} GB free — need ≥${REQUIRED_FREE_GB} GB for the 1 GiB benchmark.`,
+      ranAt: started, tool: 'Microsoft DiskSpd 2.2'
+    };
+  }
+
   try {
-    const sizeBytes = 25 * 1024 * 1024; // 25 MB
-    const buffer = Buffer.alloc(sizeBytes, 'N'); // fast allocation
-    
-    // Measure Write
-    const t0 = Date.now();
-    fs.writeFileSync(tempFile, buffer);
-    const t1 = Date.now();
-    const writeTimeSec = ((t1 - t0) / 1000) || 0.001;
-    const writeSpeed = Math.round((sizeBytes / (1024 * 1024)) / writeTimeSec); // MB/s
-    
-    // Measure Read
-    const t2 = Date.now();
-    const readBuffer = fs.readFileSync(tempFile);
-    const t3 = Date.now();
-    const readTimeSec = ((t3 - t2) / 1000) || 0.001;
-    const readSpeed = Math.round((sizeBytes / (1024 * 1024)) / readTimeSec); // MB/s
-    
-    try { fs.unlinkSync(tempFile); } catch(e) {}
-    
-    return { read: readSpeed, write: writeSpeed };
-  } catch (err) {
-    console.error("Disk speed test error:", err);
-    return { read: 3500, write: 3000 }; // fallback
+    // Four phases (CDM's default Standard columns): SEQ1M Q8T1 read/write +
+    // RND4K Q32T1 read/write. 10 s per phase = ~40 s per drive.
+    const seqRead   = await runDiskSpdPhase({ exe, testFile, blockSize: '1M', queueDepth: 8,  durationSec: 10, isWrite: false, random: false });
+    const seqWrite  = await runDiskSpdPhase({ exe, testFile, blockSize: '1M', queueDepth: 8,  durationSec: 10, isWrite: true,  random: false });
+    const rnd4kRead = await runDiskSpdPhase({ exe, testFile, blockSize: '4K', queueDepth: 32, durationSec: 10, isWrite: false, random: true });
+    const rnd4kWrite= await runDiskSpdPhase({ exe, testFile, blockSize: '4K', queueDepth: 32, durationSec: 10, isWrite: true,  random: true });
+
+    if (!seqRead || !seqWrite || !rnd4kRead || !rnd4kWrite) {
+      return {
+        drive: vol.drive, model: vol.model, busType: vol.busType,
+        pcieGen: vol.pcieGen, pcieWidth: vol.pcieWidth,
+        verdict: 'RUN FAILED',
+        error: 'DiskSpd produced no parseable output for one or more phases.',
+        ranAt: started, tool: 'Microsoft DiskSpd 2.2'
+      };
+    }
+
+    return {
+      drive: vol.drive,
+      model: vol.model,
+      busType: vol.busType,
+      mediaType: vol.mediaType,
+      pcieGen: vol.pcieGen,
+      pcieWidth: vol.pcieWidth,
+      expectedMBps: vol.expectedMBps,
+      testSize: '1 GiB',
+      // Round MiB/s to integer MB/s for report display. Consumers
+      // treat MiB/s ≈ MB/s (industry standard on QC reports).
+      seqRead:  Math.round(seqRead.mibPerSec),
+      seqWrite: Math.round(seqWrite.mibPerSec),
+      rnd4kRead:  Math.round(rnd4kRead.mibPerSec),
+      rnd4kWrite: Math.round(rnd4kWrite.mibPerSec),
+      rnd4kReadIops:  Math.round(rnd4kRead.iops),
+      rnd4kWriteIops: Math.round(rnd4kWrite.iops),
+      ranAt: started,
+      tool: 'Microsoft DiskSpd 2.2 (CrystalDiskMark-comparable methodology)'
+    };
+  } finally {
+    // ALWAYS delete the test file — pass or fail — so a customer drive
+    // never ships with a stray 1 GiB neoqc_cdm_bench.tmp on it.
+    try { fs.rmSync(testFile, { force: true }); } catch (_) {}
   }
 }
 
@@ -816,9 +950,46 @@ ipcMain.handle('sys:run-diagnostics', async (event, config) => {
       }
     });
 
-    // 2. Start SSD test
-    event.sender.send('sys:diag-log', "Running SSD speed benchmark...");
-    const diskSpeedsPromise = measureDiskSpeed();
+    // 2. Start SSD benchmark (v1.4.6 — real DiskSpd per drive, was RAM cache).
+    // Enumerate every SSD volume then benchmark them serially so PCIe lane
+    // contention can't skew results. Fire-and-forget the promise here so the
+    // Cinebench/FurMark/RAM work can start; we await the result later.
+    event.sender.send('sys:diag-log', "Enumerating SSD volumes for benchmark...");
+    const diskSpeedsPromise = (async () => {
+      const dsExe = diskSpdExe();
+      if (!dsExe) {
+        event.sender.send('sys:diag-log', "[SSD] DiskSpd missing — run `node download-tools.js` in the project root. Skipping SSD benchmark for this run.");
+        return { driveBenchmarks: [], ssdRead: null, ssdWrite: null, missing: 'diskspd' };
+      }
+      const volumes = await enumerateSsdVolumes();
+      if (!volumes.length) {
+        event.sender.send('sys:diag-log', "[SSD] No SSD volumes detected on this system.");
+        return { driveBenchmarks: [], ssdRead: null, ssdWrite: null, missing: 'no-ssd' };
+      }
+      const results = [];
+      for (let i = 0; i < volumes.length; i++) {
+        const vol = volumes[i];
+        event.sender.send('sys:diag-log',
+          `[SSD] Benchmarking ${vol.model} on ${vol.drive} (${i + 1} of ${volumes.length}) — SEQ1M + RND4K, ~40 s…`);
+        const row = await runDriveBenchmark(vol, dsExe);
+        if (row.verdict === 'RUN FAILED') {
+          event.sender.send('sys:diag-log', `[SSD] ${vol.drive} failed: ${row.error}`);
+        } else {
+          event.sender.send('sys:diag-log',
+            `[SSD] ${vol.drive} done — SEQ read ${row.seqRead} MB/s, write ${row.seqWrite} MB/s, RND4K read ${row.rnd4kRead} MB/s.`);
+        }
+        results.push(row);
+      }
+      // Keep the legacy summary fields (drive 0 SEQ numbers) so
+      // settings-threshold validation and the existing SSD score cells still
+      // work without a schema change. ssd-grading.js still consumes these too.
+      const primary = results.find(r => r.verdict !== 'RUN FAILED') || null;
+      return {
+        driveBenchmarks: results,
+        ssdRead:  primary ? primary.seqRead  : null,
+        ssdWrite: primary ? primary.seqWrite : null
+      };
+    })();
 
     // 3. Start RAM stress test.
     // v1.4.4 — old logic capped the target at 8 GB, so on a 16 GB build the
@@ -1148,7 +1319,7 @@ ipcMain.handle('sys:run-diagnostics', async (event, config) => {
         try { monitorProc.kill(); } catch(e) {}
         try { dismisserProc && dismisserProc.kill(); } catch(e) {}
         
-        const diskSpeeds = await diskSpeedsPromise;
+        const diskResult = await diskSpeedsPromise;
         const ramResult = await ramPromise;
 
         const validCpuTemps = cpuTemps.filter(t => typeof t === 'number' && !isNaN(t));
@@ -1173,8 +1344,13 @@ ipcMain.handle('sys:run-diagnostics', async (event, config) => {
           gpuTempLog: validGpuTemps.map(t => Math.round(t)),
           cinebenchScore,
           furmarkScore,
-          ssdRead: diskSpeeds.read,
-          ssdWrite: diskSpeeds.write,
+          ssdRead: diskResult.ssdRead,
+          ssdWrite: diskResult.ssdWrite,
+          // v1.4.6 — full per-drive DiskSpd results. Report renders this as
+          // a Drive Benchmark card on page 3 (see print-render.js). If empty
+          // (DiskSpd missing or no SSD detected), the report falls back to
+          // the legacy SEQ cells above.
+          driveBenchmarks: diskResult.driveBenchmarks,
           ramPassed: ramResult.success,
           ramAllocatedMB: ramResult.allocatedMB || null,
           ramFaults: ramResult.faults != null ? ramResult.faults : null,
