@@ -261,10 +261,27 @@
         emptyState('Not yet computed for this build.') +
         '</div>';
     }
-    var flags = (row.flags || []).map(function (f) {
-      var isBottleneck = /bottleneck/i.test(f);
-      return '<div class="dr-ppi-flag">' + icon(isBottleneck ? 'bottleneck' : 'warning') + '<span>' + esc(f) + '</span></div>';
+    // Only CPU + GPU have objective (PassMark) benchmarks, so RAM/PSU/case/
+    // motherboard/storage/cooler come back "unscored". That's expected, not an
+    // error — collapse those into one calm note instead of a stack of ⚠ lines.
+    // Positive notes ("best performer ✓") are dropped from the warning list.
+    var benchUnscored = [];
+    var realFlags = [];
+    (row.flags || []).forEach(function (f) {
+      var mm = /^([a-z]+): no objective benchmark exists/i.exec(f);
+      if (mm) { benchUnscored.push(mm[1].toUpperCase()); return; }
+      if (/best performer|best-in-band|✓/i.test(f)) return; // positive, not a warning
+      realFlags.push(f);
+    });
+    var flags = realFlags.map(function (f) {
+      var isBottleneck = /bottleneck|limiting/i.test(f);
+      var isInfo = /price filled|filled from live retailer/i.test(f);
+      var cls = isInfo ? ' dr-ppi-flag-info' : '';
+      return '<div class="dr-ppi-flag' + cls + '">' + icon(isBottleneck ? 'bottleneck' : (isInfo ? 'price-tag' : 'warning')) + '<span>' + esc(f) + '</span></div>';
     }).join('');
+    var benchNote = benchUnscored.length
+      ? '<div class="dr-muted" style="margin-top:8px; font-size:0.72rem; line-height:1.5;">Index is scored on <strong>CPU + GPU</strong> (the components with objective benchmarks). ' + esc(benchUnscored.join(', ')) + ' have no performance benchmark, so they’re not counted — this is normal.</div>'
+      : '';
 
     var comparisons = row.in_range_comparisons || row.inRangeComparisons || {};
     var stripCode = (typeof global !== 'undefined' && global.NeoQcMatcher && global.NeoQcMatcher.cleanName)
@@ -288,8 +305,9 @@
       '<div class="dr-card-header">' + icon('price-tag') + '<span class="dr-card-title">Price-to-Performance Index</span></div>' +
       '<div class="dr-ppi-index">' + esc(row.index != null ? row.index : '—') + '<span class="dr-muted" style="font-size:0.4em;"> / 100</span></div>' +
       (fitPct !== null ? '<div class="dr-row"><span class="dr-row-label">' + icon('target') + ' Fit for selected use-case</span><span class="dr-row-value">' + fitPct + '%</span></div>' : '') +
-      (row.use_cases || row.useCases ? '<div class="dr-row"><span class="dr-row-label">Use-case</span><span class="dr-row-value">' + esc((row.use_cases || row.useCases || []).join(', ')) + '</span></div>' : '') +
+      (row.use_cases || row.useCases ? '<div class="dr-row"><span class="dr-row-label">Use-case</span><span class="dr-row-value">' + esc((row.use_cases || row.useCases || []).map(function (u) { return String(u).replace(/-/g, ' ').toUpperCase(); }).join(', ')) + '</span></div>' : '') +
       (flags || '') +
+      (benchNote || '') +
       (compHtml || '') +
       '</div>';
   }

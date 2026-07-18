@@ -60,7 +60,9 @@
     'content-creation': { cpu: 10000, gpu: 6000 }
   };
 
-  var BOTTLENECK_RATIO = 1.6;
+  // Held in an object (not a bare primitive) so the Settings PPI-tuning panel
+  // can mutate it live and the scoring code below sees the new value.
+  var TUNING = { bottleneckRatio: 1.6 };
 
   // Legacy UI aliases → canonical use-case keys (mirrors ppi_sync.py's map).
   var USE_CASE_ALIASES = {
@@ -265,9 +267,9 @@
         var gpuFit = avg(gpuFits);
         var weaker = Math.min(cpuFit, gpuFit);
         if (weaker < 1.5) {
-          if (gpuFit / Math.max(cpuFit, 1e-6) < 1 / BOTTLENECK_RATIO) {
+          if (gpuFit / Math.max(cpuFit, 1e-6) < 1 / TUNING.bottleneckRatio) {
             flags.push('GPU is the limiting component for the selected use-case (CPU has headroom)');
-          } else if (cpuFit / Math.max(gpuFit, 1e-6) < 1 / BOTTLENECK_RATIO) {
+          } else if (cpuFit / Math.max(gpuFit, 1e-6) < 1 / TUNING.bottleneckRatio) {
             flags.push('CPU is the limiting component for the selected use-case (GPU has headroom)');
           }
         }
@@ -292,6 +294,8 @@
     USE_CASE_WEIGHTS: USE_CASE_WEIGHTS,
     USE_CASE_ALIASES: USE_CASE_ALIASES,
     MIN_RECOMMENDED: MIN_RECOMMENDED,
+    CPU_ST_EMPHASIS: CPU_ST_EMPHASIS,
+    TUNING: TUNING,
     CATEGORY_TO_BUCKET: CATEGORY_TO_BUCKET
   };
 

@@ -183,6 +183,39 @@ function createWindow() {
   });
 
   mainWindow.loadFile('index.html');
+
+  // Dev mode: NEOQC_DEV=1 opens DevTools and watches renderer files for changes,
+  // reloading the window on save. Zero-setup live-reload for the "edit in VS Code,
+  // see it instantly" loop. Set NEOQC_DEV=1 in the environment (run `npm run dev`).
+  if (process.env.NEOQC_DEV === '1') {
+    try {
+      mainWindow.webContents.openDevTools({ mode: 'detach' });
+      const watched = ['index.html', 'app.js', 'style.css', 'print-report.css',
+        'print-render.js', 'web-lookup.js', 'ppi.js', 'ppi-sync.js',
+        'ssd-grading.js', 'shared', 'assets/component-data'];
+      let pending = null;
+      const scheduleReload = (label) => {
+        if (pending) clearTimeout(pending);
+        pending = setTimeout(() => {
+          pending = null;
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            log.info(`[dev-reload] ${label} changed — reloading renderer`);
+            mainWindow.webContents.reloadIgnoringCache();
+          }
+        }, 150);
+      };
+      watched.forEach(rel => {
+        const abs = path.join(__dirname, rel);
+        if (!fs.existsSync(abs)) return;
+        try {
+          fs.watch(abs, { recursive: fs.statSync(abs).isDirectory() }, (_evt, name) => {
+            if (name && /(\.html|\.css|\.js|\.json)$/i.test(name)) scheduleReload(rel + '/' + name);
+          });
+        } catch (e) { log.warn(`[dev-reload] cannot watch ${rel}: ${e.message}`); }
+      });
+      log.info('[dev-reload] watching renderer files (NEOQC_DEV=1)');
+    } catch (e) { log.error('[dev-reload] setup failed:', e); }
+  }
 }
 
 app.whenReady().then(() => {
@@ -394,6 +427,111 @@ ipcMain.handle('file:read-text', (event, filePath) => {
   } catch (err) {
     console.error("Read File Error:", err);
     return null;
+  }
+});
+
+// IPC Handler: Extract text from a PDF invoice so the renderer can parse the
+// line items and auto-fill the Target Build Specs. Uses pdfjs-dist's LEGACY
+// build, which is built to run in Node with no web worker (pdf-parse's bundled
+// pdfjs fails the "fake worker" setup on real invoices under modern Node).
+//
+// Invoices are tabular, so we reconstruct visual lines from each text item's
+// Y coordinate (transform[5]) — items sharing a row are grouped and joined
+// left-to-right by X (transform[4]). This preserves "Description ... Rate ...
+// Total" as one line, which the renderer parser (invoice-import.js) relies on.
+// Pure JS — no native binary, packs fine inside app.asar.
+ipcMain.handle('invoice:parse-pdf', async (event, filePath) => {
+  try {
+    if (!filePath || !fs.existsSync(filePath)) {
+      return { ok: false, error: 'File not found: ' + filePath };
+    }
+    const pdfjs = require('pdfjs-dist/legacy/build/pdf.js');
+    const data = new Uint8Array(fs.readFileSync(filePath));
+    const doc = await pdfjs.getDocument({
+      data,
+      useWorkerFetch: false,
+      isEvalSupported: false,
+      useSystemFonts: true
+    }).promise;
+
+    const pageTexts = [];
+    for (let p = 1; p <= doc.numPages; p++) {
+      const page = await doc.getPage(p);
+      const content = await page.getTextContent();
+      // Group items into rows by Y (2px tolerance), then order left-to-right.
+      const rows = [];
+      content.items.forEach(it => {
+        if (!it.str || !it.str.trim()) return;
+        const y = Math.round(it.transform[5]);
+        const x = it.transform[4];
+        let row = rows.find(r => Math.abs(r.y - y) <= 2);
+        if (!row) { row = { y: y, items: [] }; rows.push(row); }
+        row.items.push({ x: x, str: it.str });
+      });
+      rows.sort((a, b) => b.y - a.y); // top of page first (PDF origin is bottom-left)
+      const lines = rows.map(r => {
+        r.items.sort((a, b) => a.x - b.x);
+        return r.items.map(i => i.str).join(' ').replace(/\s{2,}/g, ' ').trim();
+      });
+      pageTexts.push(lines.join('\n'));
+    }
+    return { ok: true, text: pageTexts.join('\n'), pages: doc.numPages };
+  } catch (err) {
+    log.error('invoice:parse-pdf failed:', err);
+    return { ok: false, error: err.message };
+  }
+});
+
+// Resolve the bundled, offline OCR asset directory (worker/core/traineddata).
+// asarUnpacked, so in a packaged build it lives beside app.asar.
+function ocrAssetDir() {
+  const base = __dirname.replace(/app\.asar([\\/]|$)/, 'app.asar.unpacked$1');
+  return path.join(base, 'assets', 'ocr');
+}
+
+// IPC Handler: OCR rendered invoice page images. This runs in the MAIN process
+// (real Node) because the Electron renderer's V8 cannot create the Node
+// worker_threads Worker that tesseract.js needs ("V8 platform ... does not
+// support creating Workers"). The renderer rasterises the PDF pages to PNG
+// (Chromium canvas) and ships the image buffers here; we OCR them fully offline
+// with the bundled tesseract.js + eng.traineddata — nothing to install on the
+// shop PC. Progress is streamed back over 'invoice:ocr-progress'.
+ipcMain.handle('invoice:ocr-images', async (event, images) => {
+  try {
+    if (!images || !images.length) return { ok: false, error: 'No page images supplied.' };
+    const { createWorker } = require('tesseract.js');
+    const dir = ocrAssetDir();
+    const send = (status, progress) => {
+      try { event.sender.send('invoice:ocr-progress', { status, progress: (typeof progress === 'number' ? progress : null) }); } catch (e) {}
+    };
+    // Offline traineddata loading in Electron is fiddly: tesseract's env detector
+    // reports 'electron' (not 'node'), so its langPath branch tries to fetch() the
+    // local file and fails ("Only absolute URLs are supported"). We sidestep that
+    // by using its CACHE-read path instead — that always uses fs.readFile (the
+    // Node adapter) regardless of env. So we point cachePath at our bundled dir
+    // (which holds eng.traineddata) with cacheMethod 'readOnly': it reads the file
+    // from disk and never fetches or writes. Verified offline.
+    const worker = await createWorker('eng', 1, {
+      cachePath: dir,        // dir holds eng.traineddata → read via fs, no fetch
+      cacheMethod: 'readOnly', // read from cachePath, never write
+      gzip: false,
+      logger: m => { if (m && m.status) send(m.status, m.progress); }
+    });
+    try {
+      let text = '';
+      for (let i = 0; i < images.length; i++) {
+        send('recognizing page ' + (i + 1) + '/' + images.length, null);
+        const buf = Buffer.isBuffer(images[i]) ? images[i] : Buffer.from(images[i]);
+        const res = await worker.recognize(buf);
+        text += (res.data.text || '') + '\n';
+      }
+      return { ok: true, text };
+    } finally {
+      try { await worker.terminate(); } catch (e) {}
+    }
+  } catch (err) {
+    log.error('invoice:ocr-images failed:', err);
+    return { ok: false, error: err.message };
   }
 });
 

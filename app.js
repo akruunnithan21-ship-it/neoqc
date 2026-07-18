@@ -131,6 +131,52 @@ const priceLookupTried = new Set();
 // normalised into a single {category:'other', note} entry on load.
 const awaitingComponentsList = [];
 
+// Component condition / damage report — [{ category, condition:'doa'|'damaged',
+// note }]. Persisted on the ticket as `damagedComponents` and nested inside
+// specs.__damaged so cross-machine Supabase sync carries it without a schema
+// change (same trick as specs.__prices / specs.__detected).
+const damagedComponentsList = [];
+const DAMAGE_CATEGORY_LABEL = {
+  cpu: 'CPU', gpu: 'GPU', ram: 'RAM', storage: 'Storage', psu: 'PSU',
+  motherboard: 'Motherboard', cooler: 'Cooler', case: 'Case', other: 'Other'
+};
+
+// True if this ticket currently has any DOA/damaged parts flagged.
+function hasDamagedComponents(ticket) {
+  var list = ticket && (ticket.damagedComponents || (ticket.specs && ticket.specs.__damaged));
+  return Array.isArray(list) && list.length > 0;
+}
+
+function renderDamagedComponents() {
+  var listEl = document.getElementById('damage-list');
+  var badge = document.getElementById('damage-status-badge');
+  if (!listEl) return;
+  listEl.innerHTML = '';
+  damagedComponentsList.forEach(function (entry, idx) {
+    var row = document.createElement('div');
+    row.className = 'damage-item';
+    var tagClass = entry.condition === 'doa' ? 'tag-doa' : 'tag-damaged';
+    var tagText = entry.condition === 'doa' ? 'DOA' : 'DAMAGED';
+    row.innerHTML =
+      '<span class="damage-tag ' + tagClass + '">' + tagText + '</span>' +
+      '<span class="damage-part">' + (DAMAGE_CATEGORY_LABEL[entry.category] || entry.category) + '</span>' +
+      '<span class="damage-desc">' + (entry.note ? escapeHtmlLite(entry.note) : '<em>no description</em>') + '</span>' +
+      '<button type="button" class="damage-remove" data-idx="' + idx + '">Remove</button>';
+    row.querySelector('.damage-remove').addEventListener('click', function () {
+      damagedComponentsList.splice(idx, 1);
+      renderDamagedComponents();
+    });
+    listEl.appendChild(row);
+  });
+  if (badge) badge.classList.toggle('hidden', damagedComponentsList.length === 0);
+}
+
+function escapeHtmlLite(s) {
+  return String(s).replace(/[&<>"]/g, function (c) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
+  });
+}
+
 // Which target-build-spec input matches each awaiting category. "other" has
 // no spec field — those chips are informational only.
 const AWAITING_CATEGORY_TO_SPEC = {
@@ -587,11 +633,256 @@ function setupSpecsAutocomplete() {
   });
 }
 
+// ==========================================================================
+// INVOICE IMPORT — fill Target Build Spec fields from a matched invoice build
+// (see invoice-import.js for the parse + catalog-match logic).
+// ==========================================================================
+const CATEGORY_TO_SPEC_FIELD = {
+  cpu: 'form-spec-cpu', gpu: 'form-spec-gpu', ram: 'form-spec-ram',
+  storage: 'form-spec-storage', psu: 'form-spec-psu', motherboard: 'form-spec-mobo',
+  case: 'form-spec-case', cooler: 'form-spec-cooler-model'
+};
+
+// Fill one target spec field from an invoice match. Mirrors what an autocomplete
+// pick does: sets input.value + specFieldMatches[fieldId]. Returns a status
+// string ('filled' | 'skipped-awaiting' | 'no-field').
+function fillTargetSpecFromInvoice(category, entry) {
+  const fieldId = CATEGORY_TO_SPEC_FIELD[category];
+  if (!fieldId) return 'no-field';
+  const input = document.getElementById(fieldId);
+  if (!input) return 'no-field';
+  // Don't clobber a field the tech marked as "awaiting" (disabled) — the part
+  // isn't in hand yet, even if it's on the invoice.
+  if (input.disabled || input.getAttribute('data-awaiting') === '1') return 'skipped-awaiting';
+
+  // Cooler: flip the type radio off "stock" so the model input is visible +
+  // required before we fill it. AIO/liquid vs air inferred from the name.
+  if (category === 'cooler') {
+    const nm = (entry.matchedName || entry.rawLine || '');
+    const isAio = /\b(aio|liquid|kraken|freezer|ml\d{3}|(240|280|360)\s*mm)\b/i.test(nm);
+    const radio = document.querySelector(`input[name="form-spec-cooler-type"][value="${isAio ? 'aio' : 'air'}"]`);
+    if (radio && !radio.checked) { radio.checked = true; radio.dispatchEvent(new Event('change')); }
+  }
+
+  input.value = entry.displayName || entry.matchedName || entry.rawLine;
+  if (entry.sku) {
+    specFieldMatches[fieldId] = {
+      sku: entry.sku, priceInr: entry.priceInr, category: category,
+      confidence: entry.confidence, fromInvoice: true
+    };
+  } else {
+    // No catalog hit — honest manual entry, no fabricated sku/price.
+    specFieldMatches[fieldId] = {
+      sku: null, priceInr: null, category: category, manualEntry: true, fromInvoice: true
+    };
+  }
+  return 'filled';
+}
+
+// Background component-compatibility ("synergy") check. Reads the current target
+// spec field values, runs the rules in compat-check.js, and renders any socket /
+// RAM-generation disparities so the technician notices. Fully guarded — a fault
+// here must never block the form.
+function renderConfigSynergy() {
+  try {
+    const box = document.getElementById('config-synergy-warnings');
+    if (!box || !window.NeoQcCompat) return;
+    const get = (id) => { const el = document.getElementById(id); return el ? (el.value || '').trim() : ''; };
+    const specs = {
+      cpu: get('form-spec-cpu'),
+      motherboard: get('form-spec-mobo'),
+      ram: get('form-spec-ram')
+    };
+    const warnings = window.NeoQcCompat.check(specs) || [];
+    if (!warnings.length) { box.classList.add('hidden'); box.innerHTML = ''; return; }
+    box.classList.remove('hidden');
+    box.innerHTML =
+      '<div class="synergy-title">⚡ Compatibility check</div>' +
+      warnings.map(function (w) {
+        const cls = w.level === 'error' ? 'synergy-error' : 'synergy-warn';
+        const icon = w.level === 'error' ? '⛔' : '⚠️';
+        return '<div class="synergy-item ' + cls + '">' + icon + ' <span>' + escapeHtmlLite(w.msg) + '</span></div>';
+      }).join('');
+  } catch (e) { console.warn('synergy check failed (non-fatal):', e); }
+}
+
+// Apply a full invoice build result to the form, return a summary for the UI.
+function applyInvoiceBuild(build) {
+  const summary = { filled: [], review: [], manual: [], skipped: [] };
+  Object.keys(build.results).forEach(category => {
+    const entry = build.results[category];
+    const outcome = fillTargetSpecFromInvoice(category, entry);
+    if (outcome === 'skipped-awaiting') { summary.skipped.push(category); return; }
+    if (outcome !== 'filled') return;
+    if (entry.status === 'matched') summary.filled.push({ category, entry });
+    else if (entry.status === 'review') summary.review.push({ category, entry });
+    else summary.manual.push({ category, entry });
+  });
+  return summary;
+}
+
+// ==========================================================================
+// PPI ENGINE — Use-Case Tuning (Settings). Lets staff edit the Price-
+// Performance Index knobs (per-use-case component weights, min-recommended
+// PassMark thresholds, single-thread emphasis, bottleneck ratio) with no code
+// change. Persisted in appState.settings.ppiConfig and applied to the live
+// window.NeoQcPpi tables — mutated IN PLACE so ppi.js's closures see them.
+// ==========================================================================
+const PPI_WEIGHT_KEYS = ['cpu', 'gpu', 'ram', 'storage', 'other'];
+let PPI_ENGINE_DEFAULTS = null; // pristine snapshot, captured once before any override
+
+// Read the engine's current tables into a plain editable config object.
+function ppiConfigFromEngine() {
+  const P = window.NeoQcPpi;
+  const out = { version: 1, useCases: {}, bottleneckRatio: (P && P.TUNING && P.TUNING.bottleneckRatio) || 1.6 };
+  if (!P) return out;
+  Object.keys(P.USE_CASE_WEIGHTS).forEach(uc => {
+    const w = P.USE_CASE_WEIGHTS[uc] || {};
+    const m = P.MIN_RECOMMENDED[uc] || {};
+    const st = P.CPU_ST_EMPHASIS ? P.CPU_ST_EMPHASIS[uc] : null;
+    out.useCases[uc] = {
+      cpu: +w.cpu || 0, gpu: +w.gpu || 0, ram: +w.ram || 0, storage: +w.storage || 0, other: +w.other || 0,
+      minCpu: +m.cpu || 0, minGpu: +m.gpu || 0, st: st != null ? +st : 0.4
+    };
+  });
+  return out;
+}
+
+// Write a config object back into the engine's live tables (in place).
+function applyPpiConfig(cfg) {
+  const P = window.NeoQcPpi;
+  if (!P || !cfg || !cfg.useCases) return;
+  const clear = (o) => { if (o) Object.keys(o).forEach(k => delete o[k]); };
+  clear(P.USE_CASE_WEIGHTS); clear(P.MIN_RECOMMENDED); clear(P.CPU_ST_EMPHASIS);
+  Object.keys(cfg.useCases).forEach(uc => {
+    const r = cfg.useCases[uc];
+    P.USE_CASE_WEIGHTS[uc] = { cpu: +r.cpu || 0, gpu: +r.gpu || 0, ram: +r.ram || 0, storage: +r.storage || 0, other: +r.other || 0 };
+    P.MIN_RECOMMENDED[uc] = { cpu: +r.minCpu || 0, gpu: +r.minGpu || 0 };
+    if (P.CPU_ST_EMPHASIS) P.CPU_ST_EMPHASIS[uc] = r.st != null ? +r.st : 0.4;
+  });
+  if (P.TUNING && cfg.bottleneckRatio) P.TUNING.bottleneckRatio = +cfg.bottleneckRatio || 1.6;
+}
+
+// Boot: capture pristine defaults, seed the saved config if absent, apply it.
+function initPpiTuning() {
+  if (!window.NeoQcPpi) return;
+  if (!PPI_ENGINE_DEFAULTS) PPI_ENGINE_DEFAULTS = ppiConfigFromEngine();
+  if (!appState.settings) appState.settings = {};
+  if (!appState.settings.ppiConfig || !appState.settings.ppiConfig.useCases) {
+    appState.settings.ppiConfig = JSON.parse(JSON.stringify(PPI_ENGINE_DEFAULTS));
+  }
+  applyPpiConfig(appState.settings.ppiConfig);
+}
+
+function ppiRowSum(r) { return PPI_WEIGHT_KEYS.reduce((s, k) => s + (+r[k] || 0), 0); }
+
+// Pretty display label for a use-case key: "gaming-1080p" → "GAMING 1080P",
+// "ai-ml" → "AI ML", "content-creation" → "CONTENT CREATION". The raw key
+// (data-uc) stays canonical for the engine; this is display-only.
+function ppiUseCaseLabel(uc) { return String(uc).replace(/-/g, ' ').toUpperCase(); }
+
+function paintPpiSum(cell) {
+  const sum = parseFloat(cell.textContent);
+  const ok = Math.abs(sum - 1) < 0.001;
+  cell.style.color = ok ? 'var(--status-completed, #10b981)' : 'var(--primary-pink)';
+  cell.style.fontWeight = '700';
+  cell.title = ok ? 'Weights sum to 1.00' : 'Weights should sum to 1.00';
+}
+
+function renderPpiConfigTable() {
+  const body = document.getElementById('ppi-tuning-body');
+  if (!body) return;
+  if (!appState.settings.ppiConfig) initPpiTuning();
+  const cfg = appState.settings.ppiConfig;
+  body.innerHTML = '';
+  Object.keys(cfg.useCases).forEach(uc => {
+    const r = cfg.useCases[uc];
+    const tr = document.createElement('tr');
+    const cell = (field, val, step) => `<td><input type="number" step="${step}" class="ppi-cell-input" data-uc="${uc}" data-field="${field}" value="${val}"></td>`;
+    tr.innerHTML =
+      `<td class="ppi-usecase-name">${ppiUseCaseLabel(uc)}</td>` +
+      cell('cpu', r.cpu, '0.05') + cell('gpu', r.gpu, '0.05') + cell('ram', r.ram, '0.05') +
+      cell('storage', r.storage, '0.05') + cell('other', r.other, '0.05') +
+      `<td class="ppi-sum-cell" data-uc="${uc}">${ppiRowSum(r).toFixed(2)}</td>` +
+      cell('minCpu', r.minCpu, '500') + cell('minGpu', r.minGpu, '500') + cell('st', r.st, '0.05') +
+      `<td><button class="text-btn text-crimson ppi-remove-uc" data-uc="${uc}">Remove</button></td>`;
+    body.appendChild(tr);
+  });
+  body.querySelectorAll('.ppi-sum-cell').forEach(c => paintPpiSum(c));
+  const brInput = document.getElementById('ppi-bottleneck-ratio');
+  if (brInput) brInput.value = cfg.bottleneckRatio != null ? cfg.bottleneckRatio : 1.6;
+
+  body.querySelectorAll('.ppi-cell-input').forEach(inp => {
+    inp.addEventListener('input', () => {
+      const uc = inp.getAttribute('data-uc');
+      const field = inp.getAttribute('data-field');
+      const v = parseFloat(inp.value);
+      cfg.useCases[uc][field] = isNaN(v) ? 0 : v;
+      if (PPI_WEIGHT_KEYS.includes(field)) {
+        const sc = body.querySelector(`.ppi-sum-cell[data-uc="${uc}"]`);
+        if (sc) { sc.textContent = ppiRowSum(cfg.useCases[uc]).toFixed(2); paintPpiSum(sc); }
+      }
+    });
+  });
+  body.querySelectorAll('.ppi-remove-uc').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const uc = btn.getAttribute('data-uc');
+      if (Object.keys(cfg.useCases).length <= 1) { alert('At least one use case must remain.'); return; }
+      if (confirm(`Remove use case "${uc}"? PPI will no longer offer it.`)) {
+        delete cfg.useCases[uc];
+        renderPpiConfigTable();
+      }
+    });
+  });
+}
+
+// Attached once (from setupEventListeners). The table itself is (re)rendered on
+// each settings open via renderPpiConfigTable().
+function setupPpiTuningHandlers() {
+  const addBtn = document.getElementById('btn-ppi-add-usecase');
+  if (addBtn) addBtn.addEventListener('click', () => {
+    const input = document.getElementById('new-ppi-usecase');
+    const name = (input.value || '').trim().toLowerCase().replace(/\s+/g, '-');
+    if (!name) return;
+    if (!appState.settings.ppiConfig) initPpiTuning();
+    const cfg = appState.settings.ppiConfig;
+    if (cfg.useCases[name]) { alert('That use case already exists.'); return; }
+    cfg.useCases[name] = { cpu: 0.2, gpu: 0.4, ram: 0.1, storage: 0.1, other: 0.2, minCpu: 10000, minGpu: 8000, st: 0.4 };
+    input.value = '';
+    renderPpiConfigTable();
+  });
+
+  const saveBtn = document.getElementById('btn-ppi-save');
+  if (saveBtn) saveBtn.addEventListener('click', async () => {
+    const cfg = appState.settings.ppiConfig;
+    if (!cfg) return;
+    const br = parseFloat(document.getElementById('ppi-bottleneck-ratio').value);
+    cfg.bottleneckRatio = isNaN(br) ? 1.6 : br;
+    const bad = Object.keys(cfg.useCases).filter(uc => Math.abs(ppiRowSum(cfg.useCases[uc]) - 1) >= 0.01);
+    if (bad.length && !confirm(`These use cases don't sum to 1.00: ${bad.join(', ')}.\nSave anyway? (PPI normalises internally, but 1.00 keeps the weights meaningful.)`)) return;
+    applyPpiConfig(cfg);
+    await saveDatabase();
+    const status = document.getElementById('ppi-tuning-status');
+    if (status) { status.classList.remove('hidden'); status.style.color = 'var(--status-completed, #10b981)'; status.textContent = '✓ PPI tuning saved and applied to the engine.'; }
+  });
+
+  const resetBtn = document.getElementById('btn-ppi-reset');
+  if (resetBtn) resetBtn.addEventListener('click', async () => {
+    if (!PPI_ENGINE_DEFAULTS) PPI_ENGINE_DEFAULTS = ppiConfigFromEngine();
+    if (!confirm('Reset all PPI tuning back to the built-in engine defaults?')) return;
+    appState.settings.ppiConfig = JSON.parse(JSON.stringify(PPI_ENGINE_DEFAULTS));
+    applyPpiConfig(appState.settings.ppiConfig);
+    await saveDatabase();
+    renderPpiConfigTable();
+    const status = document.getElementById('ppi-tuning-status');
+    if (status) { status.classList.remove('hidden'); status.style.color = 'var(--text-muted)'; status.textContent = 'Reset to defaults.'; }
+  });
+}
+
 // App Global State
 let appState = {
   tickets: [],
   technicians: ["Adhil", "Amal", "Ananthakrishnan", "Athul"],
-  rivalBenchmarks: [],
   settings: {
     supabaseUrl: "",
     supabaseAnonKey: "",
@@ -618,6 +909,15 @@ document.addEventListener('DOMContentLoaded', async () => {
   const bootStart = Date.now();
 
   await loadDatabase();
+  initPpiTuning(); // seed + apply saved PPI engine tuning before any PPI compute
+  // Restore remembered dark/light choice (admin app only — persisted in settings).
+  if (appState.settings && appState.settings.darkMode === true) {
+    document.body.classList.add('dark-mode');
+    document.body.classList.remove('light-mode');
+  } else if (appState.settings && appState.settings.darkMode === false) {
+    document.body.classList.add('light-mode');
+    document.body.classList.remove('dark-mode');
+  }
   setSplashStatus('Preparing workspace…');
   setupEventListeners();
   injectInlineIcons();
@@ -681,12 +981,8 @@ async function loadDatabase() {
   // Securely initialize missing properties to prevent runtime script crashes
   if (!appState.tickets) appState.tickets = [];
   if (!appState.technicians) appState.technicians = ["Adhil", "Amal", "Ananthakrishnan", "Athul"];
-  if (!appState.rivalBenchmarks) appState.rivalBenchmarks = [
-    { id: "1", name: "Ryzen 5 7600 + RTX 4060", cpu: "Ryzen 5 7600", gpu: "RTX 4060", cinebenchR23: 13800, readSpeed: 5000, writeSpeed: 4000, price: "₹18,500 (~$210)" },
-    { id: "2", name: "Intel i7-14700K + RTX 4070 Ti", cpu: "Core i7-14700K", gpu: "RTX 4070 Ti Super", cinebenchR23: 35000, readSpeed: 7000, writeSpeed: 6000, price: "₹68,000 (~$820)" }
-  ];
 
-  // Database migration & normalization for default rival configs and new build checks
+  // Database migration & normalization for new build checks
   let databaseNeedsSaving = false;
   
   if (appState.tickets && appState.tickets.length > 0) {
@@ -702,22 +998,6 @@ async function loadDatabase() {
     });
   }
 
-  if (appState.rivalBenchmarks && appState.rivalBenchmarks.length > 0) {
-    appState.rivalBenchmarks.forEach(rival => {
-      if (rival.id === "1") {
-        if (rival.cinebenchR23 === 14500 || !rival.price) {
-          rival.cinebenchR23 = 13800;
-          rival.price = "₹18,500 (~$210)";
-          databaseNeedsSaving = true;
-        }
-      } else if (rival.id === "2") {
-        if (!rival.price) {
-          rival.price = "₹68,000 (~$820)";
-          databaseNeedsSaving = true;
-        }
-      }
-    });
-  }
   if (databaseNeedsSaving) {
     await saveDatabase();
   }
@@ -1051,8 +1331,11 @@ function renderDashboard() {
       const isUrgent = checkIsUrgent(t.deadline);
       const statusText = getStatusLabelText(t.status);
 
+      const damaged = hasDamagedComponents(t);
+      const damagedCount = damaged ? (t.damagedComponents || (t.specs && t.specs.__damaged) || []).length : 0;
+
       const card = document.createElement('div');
-      card.className = `glass-slab ticket-card ${t.status} ${isUrgent ? 'urgent' : ''}`;
+      card.className = `glass-slab ticket-card ${t.status} ${isUrgent ? 'urgent' : ''} ${damaged ? 'has-damage' : ''}`;
       card.innerHTML = `
         <div class="ticket-card-header">
           <span class="card-id">#${t.id.slice(-6)}</span>
@@ -1061,6 +1344,7 @@ function renderDashboard() {
             <span class="card-status-dot ${t.status}"></span>
           </div>
         </div>
+        ${damaged ? `<div class="card-damage-banner">⚠ DOA / Damaged Components (${damagedCount})</div>` : ''}
         <h3 class="card-cust-name">${t.customerName}</h3>
         <div style="margin-bottom:14px;">
           <span class="tech-chip">
@@ -1245,6 +1529,10 @@ function openTicketModal(ticketId = null) {
   if (awaitingEditor) awaitingEditor.classList.add('hidden');
   renderAwaitingChips();
 
+  // Reset the damage report too (stale entries must not carry over).
+  damagedComponentsList.length = 0;
+  renderDamagedComponents();
+
   const printBtn = document.getElementById('btn-print-report');
   const deleteBtn = document.getElementById('btn-delete-ticket');
   const title = document.getElementById('modal-title');
@@ -1329,6 +1617,13 @@ function openTicketModal(ticketId = null) {
       const editor = document.getElementById('awaiting-components-editor');
       if (editor) editor.classList.toggle('hidden', !ticket.missingComponentsToggle);
       renderAwaitingChips();
+
+      // Load the damage report for this ticket (damagedComponents field, or the
+      // specs.__damaged mirror that cross-machine sync carries).
+      damagedComponentsList.length = 0;
+      const dmg = ticket.damagedComponents || (ticket.specs && ticket.specs.__damaged);
+      if (Array.isArray(dmg)) dmg.forEach(e => damagedComponentsList.push(e));
+      renderDamagedComponents();
 
       // Set physical checkboxes
       document.getElementById('check-cpu-ram-ssd').checked = ticket.buildChecks.cpuRamSsd;
@@ -1454,6 +1749,9 @@ function openTicketModal(ticketId = null) {
 
   // Validate diagnostics thresholds to update input border styles (red/green)
   validateDiagnosticsThresholds();
+
+  // Show any component-compatibility disparities for the loaded specs.
+  renderConfigSynergy();
 
   modal.classList.add('active');
 }
@@ -2220,7 +2518,21 @@ function setupPortsChecker() {
 // Save ticket form data
 async function handleTicketFormSubmit(e) {
   e.preventDefault();
-  
+
+  // The form is `novalidate` (native HTML5 required-field validation silently
+  // refuses to submit when a required field isn't focusable — e.g. empty specs
+  // you intend to fill when parts arrive — with no message, which read as
+  // "new tickets can't be created"). We validate here instead, clearly, and
+  // only block on the genuinely-essential customer name. Specs can be added
+  // later over the ticket's lifecycle (that's the whole awaiting-parts flow).
+  const _custName = (document.getElementById('form-customer-name').value || '').trim();
+  if (!_custName) {
+    alert('Please enter a customer name to create the ticket.');
+    document.getElementById('form-customer-name').focus();
+    return;
+  }
+
+  try {
   const id = document.getElementById('form-ticket-id').value || 't_' + Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
   const createdAt = document.getElementById('form-created-at').value || new Date().toISOString();
   
@@ -2395,6 +2707,12 @@ async function handleTicketFormSubmit(e) {
   // without needing a new `spec_prices` column on the tickets table.
   updatedTicket.specs.__prices = storedPrices;
 
+  // Component condition / damage report. Stored on the ticket AND mirrored into
+  // specs.__damaged so the JSONB specs column carries it cross-machine (no
+  // schema change). Empty array when nothing is flagged.
+  updatedTicket.damagedComponents = damagedComponentsList.slice();
+  updatedTicket.specs.__damaged = damagedComponentsList.slice();
+
   if (detectedCpuVal !== '--' && detectedCpuVal !== 'Not detected') {
     updatedTicket.detectedSpecs = {
       cpu: detectedCpuVal,
@@ -2473,6 +2791,11 @@ async function handleTicketFormSubmit(e) {
   editingTicketId = null;
   hideConflictBanner();
   renderDashboard();
+  } catch (err) {
+    // Never fail silently — surface the reason so a save problem is visible.
+    console.error('Ticket save failed:', err);
+    alert('Could not save the ticket: ' + (err && err.message ? err.message : err));
+  }
 }
 
 // Duplicate Serial checking
@@ -3001,25 +3324,8 @@ function openSettingsModal() {
     techList.appendChild(li);
   });
 
-  // Render Rival Configs
-  const rivalsBody = document.getElementById('settings-rivals-table-body');
-  rivalsBody.innerHTML = '';
-  appState.rivalBenchmarks.forEach(rival => {
-    const row = document.createElement('tr');
-    row.innerHTML = `
-      <td>${rival.name}</td>
-      <td>${rival.price || '--'}</td>
-      <td>${rival.cinebenchR23}</td>
-      <td>${rival.readSpeed}</td>
-      <td>${rival.writeSpeed}</td>
-      <td><button class="text-btn text-crimson remove-rival-btn">Remove</button></td>
-    `;
-    row.querySelector('.remove-rival-btn').addEventListener('click', () => {
-      appState.rivalBenchmarks = appState.rivalBenchmarks.filter(r => r.id !== rival.id);
-      openSettingsModal(); // Refresh
-    });
-    rivalsBody.appendChild(row);
-  });
+  // Render PPI Engine use-case tuning table (replaces the old rival DB).
+  renderPpiConfigTable();
 
   document.getElementById('settings-supabase-url').value = appState.settings.supabaseUrl || '';
   document.getElementById('settings-supabase-key').value = appState.settings.supabaseAnonKey || '';
@@ -3249,10 +3555,14 @@ function setupEventListeners() {
     });
   }
 
-  // Theme change toggle
-  document.getElementById('btn-toggle-theme').addEventListener('click', () => {
-    document.body.classList.toggle('dark-mode');
-    document.body.classList.toggle('light-mode');
+  // Theme change toggle — remembers the choice (admin app only; persisted in
+  // settings so it survives relaunches).
+  document.getElementById('btn-toggle-theme').addEventListener('click', async () => {
+    const isDark = document.body.classList.toggle('dark-mode');
+    document.body.classList.toggle('light-mode', !isDark);
+    if (!appState.settings) appState.settings = {};
+    appState.settings.darkMode = isDark;
+    try { await saveDatabase(); } catch (e) {}
   });
 
   // Settings modals
@@ -3382,32 +3692,8 @@ function setupEventListeners() {
     }
   });
 
-  // Add rival config
-  document.getElementById('btn-add-rival').addEventListener('click', () => {
-    const name = document.getElementById('new-rival-name').value.trim();
-    const price = document.getElementById('new-rival-price').value.trim();
-    const cb = parseInt(document.getElementById('new-rival-cb').value);
-    const read = parseInt(document.getElementById('new-rival-read').value);
-    const write = parseInt(document.getElementById('new-rival-write').value);
-
-    if (name && !isNaN(cb)) {
-      const newRival = {
-        id: 'r_' + Date.now().toString(36),
-        name,
-        price: price || '--',
-        cinebenchR23: cb,
-        readSpeed: read || 5000,
-        writeSpeed: write || 4000
-      };
-      appState.rivalBenchmarks.push(newRival);
-      document.getElementById('new-rival-name').value = '';
-      document.getElementById('new-rival-price').value = '';
-      document.getElementById('new-rival-cb').value = '';
-      document.getElementById('new-rival-read').value = '';
-      document.getElementById('new-rival-write').value = '';
-      openSettingsModal();
-    }
-  });
+  // PPI tuning panel handlers (add use-case / save / reset).
+  setupPpiTuningHandlers();
 
   // Ticket create/edit actions
   document.getElementById('btn-new-ticket').addEventListener('click', () => openTicketModal());
@@ -3465,6 +3751,125 @@ function setupEventListeners() {
     }
   });
 
+  // Invoice PDF → auto-fill Target Build Specs.
+  const importInvoiceBtn = document.getElementById('btn-import-invoice');
+  if (importInvoiceBtn) {
+    const statusEl = document.getElementById('invoice-import-status');
+    const setInvoiceStatus = (html, kind) => {
+      if (!statusEl) return;
+      statusEl.classList.remove('hidden');
+      statusEl.innerHTML = html;
+      const palette = {
+        info:  ['rgba(59,130,246,0.10)', 'rgba(59,130,246,0.35)', '#1d4ed8'],
+        ok:    ['rgba(16,185,129,0.10)', 'rgba(16,185,129,0.35)', '#047857'],
+        warn:  ['rgba(245,158,11,0.12)', 'rgba(245,158,11,0.40)', '#b45309'],
+        error: ['rgba(239,68,68,0.10)', 'rgba(239,68,68,0.40)', '#b91c1c']
+      };
+      const c = palette[kind] || palette.info;
+      statusEl.style.background = c[0];
+      statusEl.style.border = '1px solid ' + c[1];
+      statusEl.style.color = c[2];
+    };
+    const catLabel = { cpu: 'CPU', gpu: 'GPU', ram: 'RAM', storage: 'Storage', psu: 'PSU', motherboard: 'Motherboard', case: 'Case', cooler: 'Cooler' };
+
+    importInvoiceBtn.addEventListener('click', async () => {
+      const oldText = importInvoiceBtn.textContent;
+      try {
+        const filePath = await ipcRenderer.invoke('dialog:open-file', [{ name: 'PDF Invoice', extensions: ['pdf'] }]);
+        if (!filePath) return;
+        importInvoiceBtn.disabled = true;
+        importInvoiceBtn.textContent = '⏳ Reading invoice…';
+        setInvoiceStatus('Extracting text from the invoice…', 'info');
+
+        if (!window.NeoQcInvoiceImport) {
+          setInvoiceStatus('❌ Invoice import module not loaded.', 'error');
+          return;
+        }
+
+        // Text-first: fast path for normal (text-based) PDFs. Many invoice
+        // generators (including the NeoTokyo template) embed text as glyph-only
+        // subset fonts with no Unicode mapping, so extraction yields nothing
+        // usable — fall back to OCR, which reads the rendered page visually.
+        let invoiceText = '';
+        const parsed = await ipcRenderer.invoke('invoice:parse-pdf', filePath);
+        if (parsed && parsed.ok) invoiceText = parsed.text || '';
+
+        const usable = window.NeoQcInvoiceOcr
+          ? window.NeoQcInvoiceOcr.textIsUsable(invoiceText)
+          : (invoiceText.replace(/[^A-Za-z0-9]/g, '').length >= 40);
+
+        if (!usable) {
+          if (!window.NeoQcInvoiceOcr) {
+            setInvoiceStatus('❌ This PDF has no readable text and the OCR module is not loaded.', 'error');
+            return;
+          }
+          importInvoiceBtn.textContent = '⏳ Reading invoice (OCR)…';
+          setInvoiceStatus('This invoice has no extractable text — reading it visually with OCR. This can take 10–30 seconds…', 'info');
+          try {
+            invoiceText = await window.NeoQcInvoiceOcr.extractTextByOcr(filePath, (status, progress) => {
+              const pct = progress != null ? ` ${Math.round(progress * 100)}%` : '';
+              setInvoiceStatus(`OCR: ${status}${pct}…`, 'info');
+            });
+          } catch (ocrErr) {
+            console.error('OCR failed:', ocrErr);
+            setInvoiceStatus('❌ OCR failed: ' + ocrErr.message, 'error');
+            return;
+          }
+        }
+
+        if (!invoiceText || !invoiceText.trim()) {
+          setInvoiceStatus('⚠️ Could not read any text from this invoice, even with OCR. If it is a scanned photo, try a clearer scan.', 'warn');
+          return;
+        }
+
+        const build = window.NeoQcInvoiceImport.buildFromInvoice(invoiceText, catalogMatcher, {});
+        if (!Object.keys(build.results).length) {
+          setInvoiceStatus('⚠️ No recognizable PC components were found in this invoice. You can still type them in manually. (Scanned/image-only PDFs have no extractable text.)', 'warn');
+          return;
+        }
+
+        const summary = applyInvoiceBuild(build);
+        renderConfigSynergy(); // surface any socket/RAM mismatch from the imported build
+
+        // Build a readable summary of what got filled, its price, and what needs a look.
+        const rupee = (n) => (n != null ? '₹' + Math.round(n).toLocaleString('en-IN') : '—');
+        let priceTotal = 0;
+        const line = (icon, item) => {
+          const e = item.entry;
+          if (e.priceInr != null) priceTotal += e.priceInr;
+          const priceStr = e.priceInr != null
+            ? ` — <strong>${rupee(e.priceInr)}</strong>${e.priceSource === 'catalog' ? ' <span style="opacity:0.6;">(catalog est.)</span>' : ''}`
+            : '';
+          const conf = e.confidence ? ` <span style="opacity:0.6;">(${Math.round(e.confidence * 100)}% match)</span>` : '';
+          return `<div style="margin-top:4px;">${icon} <strong>${catLabel[item.category] || item.category}:</strong> ${e.displayName || e.matchedName}${priceStr}${conf}</div>`;
+        };
+        let html = `<strong>✓ Auto-filled ${summary.filled.length + summary.review.length + summary.manual.length} field(s) from the invoice.</strong>`;
+        summary.filled.forEach(it => { html += line('✅', it); });
+        if (summary.review.length) {
+          html += `<div style="margin-top:8px;"><strong>Please verify these lower-confidence matches:</strong></div>`;
+          summary.review.forEach(it => { html += line('🟡', it); });
+        }
+        if (summary.manual.length) {
+          html += `<div style="margin-top:8px;"><strong>Not found in catalog — filled as typed on the invoice:</strong></div>`;
+          summary.manual.forEach(it => { html += line('✏️', it); });
+        }
+        html += `<div style="margin-top:8px; padding-top:6px; border-top:1px dashed currentColor;"><strong>Components subtotal (from invoice): ${rupee(priceTotal)}</strong></div>`;
+        if (summary.skipped.length) {
+          html += `<div style="margin-top:8px; opacity:0.75;">Skipped (marked awaiting): ${summary.skipped.map(c => catLabel[c] || c).join(', ')}</div>`;
+        }
+        html += `<div style="margin-top:8px; opacity:0.7; font-size:0.72rem;">Prices are the per-unit rate read off the invoice. Review every field before saving — invoice wording is matched to the catalog automatically, but always confirm it's the right part.</div>`;
+        const kind = (summary.review.length || summary.manual.length) ? 'warn' : 'ok';
+        setInvoiceStatus(html, kind);
+      } catch (err) {
+        console.error('Invoice import failed:', err);
+        setInvoiceStatus('❌ Invoice import failed: ' + err.message, 'error');
+      } finally {
+        importInvoiceBtn.disabled = false;
+        importInvoiceBtn.textContent = oldText;
+      }
+    });
+  }
+
   // Awaiting Components v2 — multi-part chip UI linked to target spec fields.
   // Toggle: show/hide the editor. When unchecked all chips are dropped and
   // any target spec fields we had disabled are re-enabled.
@@ -3503,6 +3908,39 @@ function setupEventListeners() {
       if (e.key === 'Enter') { e.preventDefault(); addAwaitingBtn.click(); }
     });
   }
+
+  // Component condition / damage report — add DOA/damaged part.
+  const addDamageBtn = document.getElementById('btn-add-damage');
+  const damageCatSelect = document.getElementById('damage-category-select');
+  const damageCondSelect = document.getElementById('damage-condition-select');
+  const damageNoteInput = document.getElementById('damage-note-input');
+  if (addDamageBtn) {
+    addDamageBtn.addEventListener('click', () => {
+      const category = damageCatSelect.value;
+      const condition = damageCondSelect.value;
+      const note = damageNoteInput.value.trim();
+      damagedComponentsList.push({ category, condition, note: note || null });
+      damageNoteInput.value = '';
+      renderDamagedComponents();
+    });
+  }
+  if (damageNoteInput) {
+    damageNoteInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); addDamageBtn.click(); }
+    });
+  }
+
+  // Background compatibility check — re-run (debounced) whenever the CPU,
+  // motherboard, or RAM field changes.
+  let _synergyTimer = null;
+  const _synergyDebounced = () => {
+    if (_synergyTimer) clearTimeout(_synergyTimer);
+    _synergyTimer = setTimeout(renderConfigSynergy, 250);
+  };
+  ['form-spec-cpu', 'form-spec-mobo', 'form-spec-ram'].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener('input', _synergyDebounced);
+  });
 
   // Lock transitions checker on physical build checkbox clicks
   const buildCheckboxes = ['check-cpu-ram-ssd', 'check-mobo-case', 'check-cooler', 'check-cables', 'check-posted'];
@@ -3644,7 +4082,15 @@ function setupEventListeners() {
         var ok = false;
         if (window.NeoQcPpiSync && window.NeoQcPpi && catalogMatcher && ticket && ticket.specs) {
           try {
-            var ticketPrices = ticket.specPrices || (ticket.specs && ticket.specs.__prices) || {};
+            var ticketPrices = Object.assign({}, ticket.specPrices || (ticket.specs && ticket.specs.__prices) || {});
+            // Merge in live form picks (invoice auto-fill or manual selection),
+            // so a real price the tech just set is used even before re-saving —
+            // kills spurious "no price on file" flags on the PPI panel.
+            var _fieldToCat = { 'form-spec-cpu': 'cpu', 'form-spec-gpu': 'gpu', 'form-spec-ram': 'ram', 'form-spec-storage': 'storage', 'form-spec-psu': 'psu', 'form-spec-mobo': 'motherboard', 'form-spec-cooler-model': 'cooler', 'form-spec-case': 'case' };
+            Object.keys(_fieldToCat).forEach(function (fid) {
+              var m = specFieldMatches[fid];
+              if (m && m.priceInr != null) ticketPrices[_fieldToCat[fid]] = m.priceInr;
+            });
             const jsRes = await window.NeoQcPpiSync.computePpi({
               ticketSpecs: ticket.specs,
               catalogMatcher: catalogMatcher,
@@ -3658,10 +4104,21 @@ function setupEventListeners() {
               supabaseClient: supabaseClient
             });
             if (jsRes && jsRes.success) {
-              if (supabaseClient) {
-                await window.NeoQcPpiSync.upsertTicketPpi(supabaseClient, editingTicketId, jsRes.payload);
+              // Render straight from the computed payload — do NOT depend on a
+              // Supabase round-trip to show the result. Previously we upserted
+              // to ticket_ppi then re-read it via loadAndRenderPpi(); if that
+              // write/read failed or lagged, the panel rendered null and it
+              // looked like "PPI didn't compute / no prices". Now the panel
+              // shows the fresh result immediately; Supabase is best-effort.
+              ppiCacheByTicket[editingTicketId] = jsRes.payload;
+              const ppiPanelEl = document.getElementById('modal-ppi-panel');
+              if (ppiPanelEl && window.NeoQcDiagnosticsRender) {
+                ppiPanelEl.innerHTML = window.NeoQcDiagnosticsRender.renderPpiPanel(jsRes.payload);
               }
-              await loadAndRenderPpi(editingTicketId);
+              if (supabaseClient) {
+                window.NeoQcPpiSync.upsertTicketPpi(supabaseClient, editingTicketId, jsRes.payload)
+                  .catch(e => console.warn('ticket_ppi upsert failed (panel already shown):', e.message));
+              }
               ok = true;
             } else if (jsRes && jsRes.error) {
               // Real error (e.g. no spec matched). Do NOT silently fall back
@@ -3749,10 +4206,10 @@ function setupEventListeners() {
               // Ensure critical fields exist
               if (!parsed.tickets) parsed.tickets = [];
               if (!parsed.technicians) parsed.technicians = ["Adhil", "Amal", "Ananthakrishnan", "Athul"];
-              if (!parsed.rivalBenchmarks) parsed.rivalBenchmarks = [];
               if (!parsed.settings) parsed.settings = appState.settings;
-              
+
               appState = parsed;
+              initPpiTuning(); // re-seed/apply PPI tuning from the restored settings
               await saveDatabase();
               renderDashboard();
               alert("Database restored successfully!");
@@ -3778,11 +4235,7 @@ function setupEventListeners() {
         appState = {
           tickets: [],
           technicians: ["Adhil", "Amal", "Ananthakrishnan", "Athul"],
-          rivalBenchmarks: [
-            { id: "1", name: "Ryzen 5 7600 + RTX 4060", cpu: "Ryzen 5 7600", gpu: "RTX 4060", cinebenchR23: 13800, readSpeed: 5000, writeSpeed: 4000, price: "₹18,500 (~$210)" },
-            { id: "2", name: "Intel i7-14700K + RTX 4070 Ti", cpu: "Core i7-14700K", gpu: "RTX 4070 Ti Super", cinebenchR23: 35000, readSpeed: 7000, writeSpeed: 6000, price: "₹68,000 (~$820)" }
-          ],
-          settings: { 
+          settings: {
             supabaseUrl: "https://ggsxkhenzdhaachubrsc.supabase.co", 
             supabaseAnonKey: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imdnc3hraGVuemRoYWFjaHVicnNjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE3MTEwNjEsImV4cCI6MjA5NzI4NzA2MX0.bDhUK-qJSgcBEcNdEdOaZGg5vsUF6jH2gbSRQaMhjBo", 
             pathHwInfo: "", 
@@ -3809,6 +4262,7 @@ function setupEventListeners() {
             contactInfo: "kochi@neotokyo.in"
           }
         };
+        initPpiTuning(); // seed default PPI tuning into the fresh settings
         await saveDatabase();
         renderDashboard();
         alert("Database has been factory reset.");
@@ -3821,6 +4275,25 @@ function setupEventListeners() {
   document.getElementById('search-input').addEventListener('input', renderDashboard);
   document.getElementById('filter-status').addEventListener('change', renderDashboard);
   document.getElementById('filter-tech').addEventListener('change', renderDashboard);
+
+  // Collapsible Completed / Passed Systems — gives active tickets more room when
+  // there are many. Remembers the collapsed state in settings.
+  const archiveToggle = document.getElementById('archive-toggle');
+  if (archiveToggle) {
+    const slab = archiveToggle.closest('.archive-slab');
+    if (slab && appState.settings && appState.settings.archiveCollapsed) {
+      slab.classList.add('collapsed');
+      archiveToggle.setAttribute('aria-expanded', 'false');
+    }
+    archiveToggle.addEventListener('click', async () => {
+      if (!slab) return;
+      const collapsed = slab.classList.toggle('collapsed');
+      archiveToggle.setAttribute('aria-expanded', String(!collapsed));
+      if (!appState.settings) appState.settings = {};
+      appState.settings.archiveCollapsed = collapsed;
+      try { await saveDatabase(); } catch (e) {}
+    });
+  }
 
   setupFormCalculations();
   setupSerialVerification();
@@ -3910,6 +4383,14 @@ function startCloudPolling() {
 async function syncTicketToCloud(ticket) {
   if (!supabaseClient) return;
   try {
+    // The tickets table has no detected_specs column, but specs is JSONB and
+    // already syncs — so nest the client-detected hardware inside specs.__detected
+    // (mirrors the specs.__prices pattern). This is what makes the admin's
+    // "System Hardware Specs (Verification)" panel receive what the testing
+    // client auto-detected. Without this, detectedSpecs never left the client.
+    const specsPayload = Object.assign({}, ticket.specs || {});
+    if (ticket.detectedSpecs) specsPayload.__detected = ticket.detectedSpecs;
+
     const { error } = await supabaseClient
       .from('tickets')
       .upsert({
@@ -3926,7 +4407,7 @@ async function syncTicketToCloud(ticket) {
         qc_checks: ticket.qcChecks,
         diagnostics: ticket.diagnostics,
         serials: ticket.serials,
-        specs: ticket.specs,
+        specs: specsPayload,
         status: ticket.status,
         completed_at: ticket.completedAt
       });
@@ -3991,6 +4472,8 @@ async function syncFromCloud() {
           serials: dbRow.serials,
           specs: dbRow.specs,
           specPrices: (dbRow.specs && dbRow.specs.__prices) || null,
+          detectedSpecs: dbRow.detectedSpecs || (dbRow.specs && dbRow.specs.__detected) || null,
+          damagedComponents: dbRow.damagedComponents || (dbRow.specs && dbRow.specs.__damaged) || null,
           status: dbRow.status,
           completedAt: dbRow.completed_at
         };
@@ -4820,7 +5303,9 @@ async function loadAndRenderPpi(ticketId) {
   const panel = document.getElementById('modal-ppi-panel');
   const R = window.NeoQcDiagnosticsRender;
   if (!panel || !R) return;
-  panel.innerHTML = R.renderPpiPanel(null);
+  // Prefer an in-session computed result so a Supabase hiccup can't blank a
+  // PPI that was just calculated. Falls through to the empty state otherwise.
+  panel.innerHTML = R.renderPpiPanel(ppiCacheByTicket[ticketId] || null);
   if (!supabaseClient || !ticketId) return;
   try {
     const { data, error } = await supabaseClient
@@ -4956,6 +5441,10 @@ function applyAccentColor(color) {
   let primaryRgb = '231, 1, 78';
   
   switch (color) {
+    case 'red':
+      primary = '#ef4444';
+      primaryRgb = '239, 68, 68';
+      break;
     case 'purple':
       primary = '#8b5cf6';
       primaryRgb = '139, 92, 246';
@@ -4984,9 +5473,9 @@ function applyAccentColor(color) {
   const logoGrad = document.getElementById('logo-grad');
   if (logoGrad) {
     logoGrad.innerHTML = `
-      <stop offset="0%" stop-color="${color === 'purple' ? '#a78bfa' : color === 'cyan' ? '#22d3ee' : color === 'gold' ? '#fbbf24' : color === 'green' ? '#34d399' : '#ff1a75'}" />
+      <stop offset="0%" stop-color="${color === 'red' ? '#f87171' : color === 'purple' ? '#a78bfa' : color === 'cyan' ? '#22d3ee' : color === 'gold' ? '#fbbf24' : color === 'green' ? '#34d399' : '#ff1a75'}" />
       <stop offset="50%" stop-color="${primary}" />
-      <stop offset="100%" stop-color="${color === 'purple' ? '#6d28d9' : color === 'cyan' ? '#0891b2' : color === 'gold' ? '#d97706' : color === 'green' ? '#059669' : '#b3003b'}" />
+      <stop offset="100%" stop-color="${color === 'red' ? '#b91c1c' : color === 'purple' ? '#6d28d9' : color === 'cyan' ? '#0891b2' : color === 'gold' ? '#d97706' : color === 'green' ? '#059669' : '#b3003b'}" />
     `;
   }
 }

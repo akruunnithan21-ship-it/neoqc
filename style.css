@@ -13,8 +13,9 @@
     --text-muted: #64748B;
     --stat-text: #000000;
     
-    /* Glassmorphism settings */
-    --glass-bg: rgba(255, 255, 255, 0.45);
+    /* Glassmorphism — less transparent than before (net: 0.38 → 0.47) so
+       content behind the glass reads clearly. */
+    --glass-bg: rgba(255, 255, 255, 0.47);
     --glass-border: rgba(255, 255, 255, 0.8);
     --glass-shadow: 0 8px 32px 0 rgba(15, 23, 42, 0.04);
     --card-shadow: 0 4px 20px 0 rgba(15, 23, 42, 0.03);
@@ -29,17 +30,46 @@
   
   body.dark-mode {
     --bg-color: #0B0F19;
-    --bg-gradient: linear-gradient(135deg, #0B0F19 0%, #151A26 100%);
-    --text-dark: #F8FAFC;
-    --text-muted: #94A3B8;
+    --bg-gradient: linear-gradient(140deg, #0A0E17 0%, #121826 55%, #0D1220 100%);
+    --text-dark: #F1F5FB;
+    /* Brighter muted tone for readability/contrast on dark (was #94A3B8) */
+    --text-muted: #AEBAcc;
     --stat-text: #ffffff;
-    
-    --glass-bg: rgba(15, 23, 42, 0.45);
-    --glass-border: rgba(255, 255, 255, 0.08);
-    --glass-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.25);
-    --card-shadow: 0 4px 20px 0 rgba(0, 0, 0, 0.15);
+
+    /* Less transparent (net 0.38 → 0.47); border + highlights tuned for an
+       organic, luminous slab look in dark mode. */
+    --glass-bg: rgba(17, 24, 39, 0.47);
+    --glass-border: rgba(255, 255, 255, 0.10);
+    --glass-shadow: 0 10px 40px 0 rgba(0, 0, 0, 0.35);
+    --card-shadow: 0 6px 28px 0 rgba(0, 0, 0, 0.22);
+    --glass-highlight: rgba(255, 255, 255, 0.06);
   }
-  
+
+  /* Organic, fluid glass in dark mode — a soft luminous top edge, richer colour
+     bleed through the blur, and springy transitions so panels feel alive. */
+  body.dark-mode .glass-slab,
+  body.dark-mode .form-section,
+  body.dark-mode .stat-pill,
+  body.dark-mode .ticket-card,
+  body.dark-mode .modal-content,
+  body.dark-mode .settings-modal-content,
+  body.dark-mode .glass-card,
+  body.dark-mode .dr-card {
+    box-shadow: var(--glass-shadow), inset 0 1px 0 var(--glass-highlight);
+    backdrop-filter: blur(22px) saturate(140%);
+    -webkit-backdrop-filter: blur(22px) saturate(140%);
+    transition: transform 0.55s cubic-bezier(0.16, 1, 0.3, 1),
+                box-shadow 0.55s cubic-bezier(0.16, 1, 0.3, 1),
+                border-color 0.4s ease, background 0.45s ease;
+  }
+  body.dark-mode .glass-slab:hover,
+  body.dark-mode .form-section:hover,
+  body.dark-mode .glass-card:hover {
+    box-shadow: 0 14px 48px 0 rgba(0, 0, 0, 0.42),
+                inset 0 1px 0 rgba(255, 255, 255, 0.09);
+    border-color: rgba(255, 255, 255, 0.14);
+  }
+
   /* Custom Window Titlebar (Frameless Shell Styling) */
   .custom-titlebar {
     display: flex;
@@ -281,6 +311,49 @@
 
   #splash-screen.splash-fade-out {
     opacity: 0;
+  }
+
+  /* Slow-moving aurora of brand colours drifting behind the glass on the splash
+     and landing screens — subtle, organic motion (not a static wash). */
+  #splash-screen::before,
+  #mode-selector-screen::before {
+    content: '';
+    position: absolute;
+    inset: -25%;
+    z-index: 0;
+    pointer-events: none;
+    background:
+      radial-gradient(620px 520px at 22% 28%, rgba(231, 1, 78, 0.11), transparent 60%),
+      radial-gradient(580px 500px at 78% 68%, rgba(59, 130, 246, 0.10), transparent 60%),
+      radial-gradient(520px 440px at 62% 18%, rgba(139, 92, 246, 0.08), transparent 60%),
+      radial-gradient(560px 480px at 30% 82%, rgba(6, 182, 212, 0.07), transparent 60%);
+    filter: blur(10px);
+    animation: aurora-drift 22s ease-in-out infinite;
+    will-change: transform;
+  }
+  body.dark-mode #splash-screen::before,
+  body.dark-mode #mode-selector-screen::before {
+    background:
+      radial-gradient(620px 520px at 22% 28%, rgba(231, 1, 78, 0.20), transparent 60%),
+      radial-gradient(580px 500px at 78% 68%, rgba(59, 130, 246, 0.16), transparent 60%),
+      radial-gradient(520px 440px at 62% 18%, rgba(139, 92, 246, 0.15), transparent 60%),
+      radial-gradient(560px 480px at 30% 82%, rgba(6, 182, 212, 0.12), transparent 60%);
+  }
+  /* Keep splash/landing CONTENT above the drifting aurora layer — but NOT the
+     decorative .ambient-glow blobs, which must stay position:absolute (out of
+     flow). Overriding them to relative pushed them into the flex column and
+     knocked the card off-centre. */
+  #splash-screen > *:not(.ambient-glow),
+  #mode-selector-screen > *:not(.ambient-glow) { position: relative; z-index: 1; }
+  #splash-screen > .ambient-glow,
+  #mode-selector-screen > .ambient-glow { z-index: 1; }
+
+  @keyframes aurora-drift {
+    0%   { transform: translate(0, 0) scale(1) rotate(0deg); }
+    25%  { transform: translate(3%, -2.5%) scale(1.08) rotate(1.2deg); }
+    50%  { transform: translate(-2.5%, 3%) scale(1.05) rotate(-1deg); }
+    75%  { transform: translate(2%, 2%) scale(1.09) rotate(0.8deg); }
+    100% { transform: translate(0, 0) scale(1) rotate(0deg); }
   }
 
   /* Staged entrance: each splash element rises in sequence so the longer
@@ -977,7 +1050,40 @@
   .archive-header {
     margin-bottom: 16px;
   }
-  
+
+  /* Collapsible completed section — frees vertical room when there are many
+     active tickets. Toggled via the header button. */
+  .archive-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    background: none;
+    border: none;
+    padding: 0;
+    cursor: pointer;
+    text-align: left;
+    color: inherit;
+  }
+  .archive-chevron {
+    font-size: 1.1rem;
+    color: var(--text-muted);
+    transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .archive-slab.collapsed .archive-chevron { transform: rotate(-90deg); }
+  .archive-collapsible {
+    overflow: hidden;
+    max-height: 2400px;
+    opacity: 1;
+    transition: max-height 0.45s cubic-bezier(0.16, 1, 0.3, 1),
+                opacity 0.3s ease, margin 0.3s ease;
+  }
+  .archive-slab.collapsed .archive-collapsible {
+    max-height: 0;
+    opacity: 0;
+    margin-top: -8px;
+  }
+
   .table-container {
     overflow-x: auto;
     width: 100%;
@@ -1185,7 +1291,58 @@
   body.dark-mode .form-section h3 {
     text-shadow: 0 0 10px rgba(255, 255, 255, 0.12), 0 0 2px rgba(255, 255, 255, 0.3);
   }
-  
+
+  /* Section heading paired with a right-aligned action button. The dashed
+     divider moves to this row so it spans the full panel width, and the h3's
+     own divider is suppressed. */
+  .section-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    flex-wrap: wrap;
+    margin-bottom: 14px;
+    padding-bottom: 10px;
+    border-bottom: 1px dashed var(--glass-border);
+  }
+  .form-section .section-header h3 {
+    margin: 0;
+    padding: 0;
+    border-bottom: none;
+  }
+  .section-action-btn {
+    padding: 7px 14px;
+    font-size: 0.76rem;
+    font-weight: 600;
+    border-radius: 8px;
+    letter-spacing: 0.01em;
+    white-space: nowrap;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  /* Muted helper paragraph under a section heading. */
+  .panel-info-text {
+    font-family: 'Hanken Grotesk', sans-serif;
+    font-size: 0.82rem;
+    line-height: 1.55;
+    color: var(--text-muted);
+    margin: 0 0 16px;
+    max-width: 70ch;
+  }
+
+  /* Invoice auto-fill status / summary box (colours set inline by JS). */
+  .invoice-import-status {
+    margin: 2px 0 16px;
+    padding: 12px 14px;
+    border-radius: 10px;
+    font-family: 'Hanken Grotesk', sans-serif;
+    font-size: 0.8rem;
+    line-height: 1.55;
+  }
+  .invoice-import-status strong { font-weight: 700; }
+
   .form-grid-3 {
     display: grid;
     grid-template-columns: 1fr 1fr 1fr;
@@ -1511,7 +1668,172 @@
     background: rgba(255, 255, 255, 0.05);
     border-color: rgba(255, 255, 255, 0.08);
   }
-  
+
+  /* ── PPI Engine tuning table ─────────────────────────────────────────── */
+  .ppi-tuning-scroll {
+    overflow-x: auto;
+    padding-bottom: 4px;
+  }
+  .ppi-tuning-table {
+    min-width: 720px;
+    font-size: 0.8rem;
+  }
+  .ppi-tuning-table th {
+    text-align: center;
+    font-size: 0.68rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: var(--text-muted);
+    white-space: nowrap;
+  }
+  .ppi-tuning-table td {
+    text-align: center;
+    padding: 6px 6px;
+  }
+  .ppi-tuning-table .ppi-col-usecase,
+  .ppi-tuning-table .ppi-usecase-name {
+    text-align: left;
+  }
+  .ppi-usecase-name {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.76rem;
+    font-weight: 600;
+    color: var(--text-dark);
+    white-space: nowrap;
+  }
+  .ppi-cell-input {
+    width: 62px;
+    padding: 5px 6px;
+    text-align: center;
+    background: rgba(15, 23, 42, 0.04);
+    border: 1px solid rgba(15, 23, 42, 0.10);
+    border-radius: 6px;
+    color: var(--text-dark);
+    font-size: 0.78rem;
+    font-family: 'JetBrains Mono', monospace;
+    outline: none;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  }
+  .ppi-cell-input:focus {
+    border-color: var(--primary-pink);
+    box-shadow: 0 0 0 2px rgba(var(--primary-pink-rgb), 0.15);
+  }
+  body.dark-mode .ppi-cell-input {
+    background: rgba(255, 255, 255, 0.05);
+    border-color: rgba(255, 255, 255, 0.10);
+  }
+  .ppi-sum-cell {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.78rem;
+  }
+  .ppi-add-row {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+  .ppi-tuning-footer {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+  .ppi-tuning-actions {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+  }
+
+  /* ── Component condition / damage report ─────────────────────────────── */
+  .damage-add-row {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+  .damage-badge {
+    background: rgba(239, 68, 68, 0.14);
+    color: #ef4444;
+    border: 1px solid rgba(239, 68, 68, 0.45);
+    padding: 4px 11px;
+    border-radius: 20px;
+    font-size: 0.66rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    white-space: nowrap;
+  }
+  .damage-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 9px 12px;
+    border-radius: 9px;
+    background: rgba(239, 68, 68, 0.06);
+    border: 1px solid rgba(239, 68, 68, 0.25);
+    font-size: 0.8rem;
+    color: var(--text-dark);
+  }
+  .damage-item .damage-tag {
+    font-weight: 700;
+    text-transform: uppercase;
+    font-size: 0.64rem;
+    letter-spacing: 0.03em;
+    padding: 2px 8px;
+    border-radius: 5px;
+    white-space: nowrap;
+  }
+  .damage-item .tag-doa { background: #ef4444; color: #fff; }
+  .damage-item .tag-damaged { background: #F59E0B; color: #1a1205; }
+  .damage-item .damage-part { font-weight: 600; white-space: nowrap; }
+  .damage-item .damage-desc { color: var(--text-muted); flex: 1; }
+  .damage-item .damage-remove {
+    margin-left: auto;
+    color: #ef4444;
+    cursor: pointer;
+    background: none;
+    border: none;
+    font-size: 0.75rem;
+    font-weight: 600;
+  }
+
+  /* ── Component compatibility ("synergy") warnings ────────────────────── */
+  .synergy-warnings {
+    margin-top: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .synergy-title {
+    font-size: 0.7rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+    margin-bottom: 2px;
+  }
+  .synergy-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 8px 11px;
+    border-radius: 8px;
+    font-size: 0.8rem;
+    line-height: 1.45;
+  }
+  .synergy-item.synergy-error {
+    background: rgba(239, 68, 68, 0.10);
+    border: 1px solid rgba(239, 68, 68, 0.35);
+    color: #ef4444;
+  }
+  .synergy-item.synergy-warn {
+    background: rgba(245, 158, 11, 0.10);
+    border: 1px solid rgba(245, 158, 11, 0.35);
+    color: #b45309;
+  }
+  body.dark-mode .synergy-item.synergy-warn { color: #fbbf24; }
+
   .client-container {
     flex-grow: 1;
     overflow-y: auto;
@@ -2782,15 +3104,21 @@
     border: none;
     border-radius: 8px;
     cursor: pointer;
-    color: var(--text-muted);
+    /* Dedicated readable colour (was --text-muted, too faint in the sidebar) */
+    color: #475569;
     font-weight: 600;
     font-size: 0.82rem;
     font-family: 'Space Grotesk', sans-serif;
     transition: background 0.15s, color 0.15s;
   }
+  body.dark-mode .settings-tab-btn { color: #C7D3E4; }
   .settings-tab-btn:hover {
     background: rgba(255,255,255,0.05);
     color: var(--text-dark);
+  }
+  body.dark-mode .settings-tab-btn:hover {
+    background: rgba(255,255,255,0.08);
+    color: #FFFFFF;
   }
   .settings-tab-btn.active {
     background: rgba(231, 1, 78, 0.12) !important;
@@ -2912,6 +3240,29 @@
     padding: 1px 5px;
     border-radius: 3px;
     font-size: 0.7rem;
+  }
+
+  /* Dark-mode settings readability — dense settings text is the most-used view,
+     so push contrast above the base muted tone and clarify inputs. */
+  body.dark-mode .settings-section-desc,
+  body.dark-mode .settings-field-note,
+  body.dark-mode .panel-info-text {
+    color: #BAC6D8;
+  }
+  body.dark-mode .settings-label,
+  body.dark-mode .settings-toggle-label {
+    color: #EDF2F9;
+  }
+  body.dark-mode .settings-input,
+  body.dark-mode .settings-select,
+  body.dark-mode .ppi-cell-input {
+    background: rgba(255, 255, 255, 0.07);
+    color: #F1F5FB;
+    border-color: rgba(255, 255, 255, 0.14);
+  }
+  body.dark-mode .settings-input::placeholder,
+  body.dark-mode .ppi-cell-input::placeholder {
+    color: #7C8AA0;
   }
 
   /* 2-column field grid */
@@ -3136,11 +3487,16 @@
   position: relative;
   overflow: hidden;
   border-left: 4px solid rgba(255, 255, 255, 0.1) !important;
-  transition: transform 0.25s cubic-bezier(0.25, 1, 0.5, 1),
-              box-shadow 0.25s ease,
+  /* Flex column so the meta footer pins to the bottom — keeps footers aligned
+     across cards of different heights in the same grid row. */
+  display: flex;
+  flex-direction: column;
+  transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1),
+              box-shadow 0.28s ease,
               border-color 0.25s ease,
               border-left-width 0.2s ease !important;
 }
+.ticket-card .card-meta-footer { margin-top: auto; }
 
 /* Status-specific left border color */
 .ticket-card.awaiting   { border-left-color: var(--status-awaiting) !important; }
@@ -3148,6 +3504,19 @@
 .ticket-card.waiting_qc { border-left-color: #8B5CF6 !important; }
 .ticket-card.qc_testing { border-left-color: var(--status-testing) !important; }
 .ticket-card.completed  { border-left-color: var(--status-completed) !important; }
+.ticket-card.has-damage { border-left-color: var(--status-urgent) !important; }
+
+.card-damage-banner {
+  background: rgba(239, 68, 68, 0.12);
+  color: #ef4444;
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  border-radius: 7px;
+  padding: 5px 10px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  margin-bottom: 10px;
+}
 
 .ticket-card::before {
   content: '';

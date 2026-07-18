@@ -1,6 +1,6 @@
 {
   "name": "neo-qc",
-  "version": "1.4.6",
+  "version": "1.4.7",
   "description": "PC Assembly Workflow & Quality Control Tracker for Neo Tokyo Kochi",
   "main": "main.js",
   "scripts": {
@@ -53,6 +53,8 @@
   "dependencies": {
     "electron-log": "^5.4.4",
     "electron-updater": "^6.8.9",
-    "fuse.js": "^7.4.2"
+    "fuse.js": "^7.4.2",
+    "pdfjs-dist": "^3.11.174",
+    "tesseract.js": "^5.1.1"
   }
 }
