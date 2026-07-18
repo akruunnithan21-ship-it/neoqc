@@ -1345,6 +1345,7 @@ function renderDashboard() {
           </div>
         </div>
         ${damaged ? `<div class="card-damage-banner">⚠ DOA / Damaged Components (${damagedCount})</div>` : ''}
+        ${ticketQueryCounts[t.id] ? `<div class="card-query-banner"><span class="tq-card-badge">💬 ${ticketQueryCounts[t.id]} sales quer${ticketQueryCounts[t.id] > 1 ? 'ies' : 'y'} awaiting reply</span></div>` : ''}
         <h3 class="card-cust-name">${t.customerName}</h3>
         <div style="margin-bottom:14px;">
           <span class="tech-chip">
@@ -1697,8 +1698,10 @@ function openTicketModal(ticketId = null) {
       // Saved diagnostics panels (passport / Prime95) + precomputed PPI
       renderSavedDiagnosticsPanels(ticket);
       loadAndRenderPpi(ticket.id);
+      loadTicketQueries(ticket.id);
     }
   } else {
+    hideTicketQueriesSection();
     title.textContent = "Create Service Ticket";
     document.getElementById('form-ticket-id').value = '';
     document.getElementById('form-created-at').value = '';
@@ -4336,6 +4339,7 @@ function initSupabase() {
       console.log("Supabase Client initialized successfully.");
       setupRealtimeListener();
       startCloudPolling();
+      loadTicketQueryCounts();
     } catch (err) {
       console.error("Failed to initialize Supabase Client:", err);
       supabaseClient = null;
@@ -5630,5 +5634,160 @@ function checkSpecsMatch() {
       matchStatusEl.style.color = '#ef4444';
       matchStatusEl.style.borderColor = 'rgba(239, 68, 68, 0.3)';
     }
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+//  SALES QUERIES (v1.4.8) — technician side
+//  Sales raise questions from the dashboard Staff View (writes to the
+//  ticket_queries table: { id, ticket_id, question, answer, status }).
+//  The concerning technician answers them here, inside the ticket.
+// ═══════════════════════════════════════════════════════════
+
+let ticketQueryCounts = {};   // { ticket_id: awaitingCount } — for card badges
+
+function hideTicketQueriesSection() {
+  const sec = document.getElementById('modal-queries-section');
+  if (sec) sec.style.display = 'none';
+}
+
+async function loadTicketQueries(ticketId) {
+  const sec  = document.getElementById('modal-queries-section');
+  const list = document.getElementById('modal-queries-list');
+  if (!sec || !list) return;
+  if (!supabaseClient) { hideTicketQueriesSection(); return; }
+  try {
+    const { data, error } = await supabaseClient
+      .from('ticket_queries')
+      .select('*')
+      .eq('ticket_id', ticketId)
+      .order('created_at', { ascending: true });
+    if (error) throw error;
+    if (!data || data.length === 0) { hideTicketQueriesSection(); return; }
+    sec.style.display = '';
+    renderTicketQueries(data);
+  } catch (err) {
+    // Table missing or unreachable — stay quiet, just hide the section.
+    console.warn('Ticket queries unavailable:', err.message);
+    hideTicketQueriesSection();
+  }
+}
+
+function renderTicketQueries(rows) {
+  const list = document.getElementById('modal-queries-list');
+  const countEl = document.getElementById('modal-queries-count');
+  const awaiting = rows.filter(q => q.status !== 'resolved' && !q.answer).length;
+  if (countEl) {
+    countEl.textContent = awaiting > 0 ? `${awaiting} awaiting reply` : 'all answered';
+    countEl.className = 'tq-count ' + (awaiting > 0 ? 'awaiting' : 'done');
+  }
+  list.innerHTML = rows.map(q => {
+    const resolved = q.status === 'resolved';
+    const when = fmtQueryTime(q.created_at);
+    const answerArea = q.answer
+      ? `<div class="tq-answer"><span class="tq-ans-label">🔧 Your reply</span><div class="tq-ans-text">${escapeHtmlLite(q.answer)}</div>
+           <button class="tq-link" data-edit="${q.id}">Edit reply</button></div>`
+      : `<div class="tq-reply-box" data-box="${q.id}">
+           <textarea class="tq-reply-input" data-input="${q.id}" rows="2" placeholder="Type your reply to sales…"></textarea>
+           <button class="tq-send-btn" data-send="${q.id}">Send reply →</button>
+         </div>`;
+    return `<div class="tq-item ${resolved ? 'resolved' : ''} ${!q.answer && !resolved ? 'open' : ''}">
+      <div class="tq-q">
+        <span class="tq-q-label">🛍️ Sales asked</span>
+        <span class="tq-time">${when}</span>
+        <div class="tq-q-text">${escapeHtmlLite(q.question)}</div>
+      </div>
+      ${answerArea}
+      <div class="tq-foot">
+        ${resolved ? '<span class="tq-resolved">✓ Resolved</span>'
+                   : `<button class="tq-link tq-resolve" data-resolve="${q.id}">Mark resolved</button>`}
+        ${resolved ? `<button class="tq-link" data-reopen="${q.id}">Reopen</button>` : ''}
+      </div>
+    </div>`;
+  }).join('');
+
+  // Wire controls
+  list.querySelectorAll('[data-send]').forEach(b =>
+    b.addEventListener('click', () => submitTechAnswer(b.dataset.send)));
+  list.querySelectorAll('[data-resolve]').forEach(b =>
+    b.addEventListener('click', () => setQueryStatus(b.dataset.resolve, 'resolved')));
+  list.querySelectorAll('[data-reopen]').forEach(b =>
+    b.addEventListener('click', () => setQueryStatus(b.dataset.reopen, 'open')));
+  list.querySelectorAll('[data-edit]').forEach(b =>
+    b.addEventListener('click', () => beginEditReply(b.dataset.edit)));
+}
+
+async function submitTechAnswer(id) {
+  const input = document.querySelector(`[data-input="${id}"]`);
+  if (!input) return;
+  const answer = input.value.trim();
+  if (!answer) { input.focus(); return; }
+  if (!supabaseClient) return;
+  const btn = document.querySelector(`[data-send="${id}"]`);
+  if (btn) { btn.disabled = true; btn.textContent = 'Sending…'; }
+  try {
+    const { error } = await supabaseClient
+      .from('ticket_queries')
+      .update({ answer, status: 'answered' })
+      .eq('id', id);
+    if (error) throw error;
+    if (editingTicketId) loadTicketQueries(editingTicketId);
+    loadTicketQueryCounts();
+  } catch (err) {
+    if (btn) { btn.disabled = false; btn.textContent = 'Send reply →'; }
+    alert('Could not send reply: ' + err.message);
+  }
+}
+
+async function setQueryStatus(id, status) {
+  if (!supabaseClient) return;
+  try {
+    const { error } = await supabaseClient.from('ticket_queries').update({ status }).eq('id', id);
+    if (error) throw error;
+    if (editingTicketId) loadTicketQueries(editingTicketId);
+    loadTicketQueryCounts();
+  } catch (err) {
+    alert('Could not update query: ' + err.message);
+  }
+}
+
+// Turn an answered query back into an editable reply box.
+function beginEditReply(id) {
+  const item = document.querySelector(`[data-edit="${id}"]`);
+  if (!item) return;
+  const wrap = item.closest('.tq-item');
+  const answerDiv = wrap.querySelector('.tq-answer');
+  const current = wrap.querySelector('.tq-ans-text')?.textContent || '';
+  answerDiv.outerHTML = `<div class="tq-reply-box" data-box="${id}">
+      <textarea class="tq-reply-input" data-input="${id}" rows="2">${escapeHtmlLite(current)}</textarea>
+      <button class="tq-send-btn" data-send="${id}">Update reply →</button>
+    </div>`;
+  const box = wrap.querySelector(`[data-send="${id}"]`);
+  if (box) box.addEventListener('click', () => submitTechAnswer(id));
+  wrap.querySelector(`[data-input="${id}"]`)?.focus();
+}
+
+function fmtQueryTime(iso) {
+  if (!iso) return '';
+  try {
+    return new Date(iso).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
+  } catch { return ''; }
+}
+
+// Fetch open-query counts for all tickets → drives the card badges.
+async function loadTicketQueryCounts() {
+  if (!supabaseClient) return;
+  try {
+    const { data, error } = await supabaseClient
+      .from('ticket_queries').select('ticket_id, status, answer');
+    if (error) throw error;
+    const map = {};
+    (data || []).forEach(q => {
+      if (q.status !== 'resolved' && !q.answer) map[q.ticket_id] = (map[q.ticket_id] || 0) + 1;
+    });
+    ticketQueryCounts = map;
+    if (typeof renderDashboard === 'function') renderDashboard();
+  } catch (err) {
+    // table missing / offline — leave badges off
   }
 }

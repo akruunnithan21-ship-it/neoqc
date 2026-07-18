@@ -250,6 +250,7 @@ function initSalesView() {
   document.getElementById('btn-logout').addEventListener('click', logout);
   document.getElementById('filter-status').addEventListener('change', renderTable);
   document.getElementById('filter-search').addEventListener('input', renderTable);
+  initQueryUI();
 
   // Check if already unlocked this session
   if (sessionStorage.getItem(SESSION_KEY) === '1') {
@@ -273,6 +274,7 @@ async function unlockSales() {
   document.getElementById('pin-gate').classList.add('hidden');
   document.getElementById('sales-content').classList.remove('hidden');
   await loadAllTickets();
+  loadQueryCounts();
   subscribeSales();
 }
 
@@ -374,6 +376,7 @@ function renderTable() {
       <td class="cell-tech">${escHtml(t.technician || 'Unassigned')}</td>
       <td class="cell-deadline ${deadlineCls}">${fmtDate(t.status === 'completed' ? t.completed_at : t.deadline)}</td>
       <td>${qcHtml}</td>
+      <td class="cell-query">${queryBtnHtml(t, shortId)}</td>
     </tr>`;
   }).join('');
 }
@@ -453,3 +456,170 @@ document.addEventListener('DOMContentLoaded', () => {
   initCustomerView();
   initSalesView();
 });
+
+// ═══════════════════════════════════════════════════════════
+//  QUERY SYSTEM (v1.4.8) — sales posts, technician replies
+//  Sales staff raise a question against a build here; it surfaces
+//  inside the ticket in the admin app, where the technician replies.
+// ═══════════════════════════════════════════════════════════
+
+// Backed by the existing ticket_queries table:
+//   { id, ticket_id, question, answer, status:'open'|'answered'|'resolved', created_at }
+// Sales asks a question here; the technician fills in the answer from inside
+// the ticket modal in the admin app.
+let queryCounts = {};        // { ticket_id: { awaiting, answered, total } }
+let qmTicketId  = null;
+let qmChannel   = null;
+
+function queryBtnHtml(t, shortId) {
+  const c = queryCounts[t.id] || { awaiting: 0, answered: 0, total: 0 };
+  const label = `#${shortId} · ${escHtml(t.customer_name || '')}`;
+  let badge = '';
+  if (c.awaiting > 0)      badge = `<span class="qm-badge open" title="Awaiting technician reply">${c.awaiting}</span>`;
+  else if (c.answered > 0) badge = `<span class="qm-badge done" title="Answered">✓</span>`;
+  return `<button class="qm-open-btn" data-tid="${escHtml(t.id)}" data-label="${label}" title="Open queries">💬${badge}</button>`;
+}
+
+// status/answer → is this query still awaiting a technician reply?
+function qIsAwaiting(q) { return q.status !== 'resolved' && !q.answer; }
+function qIsAnswered(q) { return q.status !== 'resolved' && !!q.answer; }
+
+async function loadQueryCounts() {
+  if (!db) return;
+  try {
+    const { data, error } = await db.from('ticket_queries').select('ticket_id, status, answer');
+    if (error) throw error;
+    const map = {};
+    (data || []).forEach(q => {
+      const m = map[q.ticket_id] || (map[q.ticket_id] = { awaiting: 0, answered: 0, total: 0 });
+      m.total++;
+      if (qIsAwaiting(q)) m.awaiting++;
+      else if (qIsAnswered(q)) m.answered++;
+    });
+    queryCounts = map;
+    renderTable();
+  } catch (err) {
+    console.warn('Query counts unavailable:', err.message);
+  }
+}
+
+function initQueryUI() {
+  // Row buttons (event delegation — rows are re-rendered constantly)
+  document.getElementById('sales-body').addEventListener('click', e => {
+    const btn = e.target.closest('.qm-open-btn');
+    if (btn) openQueryModal(btn.dataset.tid, btn.dataset.label);
+  });
+  document.getElementById('qm-close').addEventListener('click', closeQueryModal);
+  document.getElementById('query-modal').addEventListener('click', e => {
+    if (e.target.id === 'query-modal') closeQueryModal();
+  });
+  document.getElementById('qm-send').addEventListener('click', sendQuery);
+  document.getElementById('qm-message').addEventListener('keydown', e => {
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) sendQuery();
+  });
+}
+
+async function openQueryModal(ticketId, label) {
+  qmTicketId = ticketId;
+  document.getElementById('qm-ticket-label').textContent = label || ticketId;
+  document.getElementById('qm-status').textContent = '';
+  document.getElementById('query-modal').classList.remove('hidden');
+  document.getElementById('qm-message').focus();
+  await loadThread();
+  // Live updates while the modal is open (needs realtime enabled on the table;
+  // harmless no-op otherwise — a refresh on close still reconciles counts).
+  if (qmChannel) db.removeChannel(qmChannel);
+  qmChannel = db.channel('tq-' + ticketId)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'ticket_queries', filter: `ticket_id=eq.${ticketId}` },
+        () => { loadThread(); })
+    .subscribe();
+}
+
+function closeQueryModal() {
+  document.getElementById('query-modal').classList.add('hidden');
+  qmTicketId = null;
+  if (qmChannel) { db.removeChannel(qmChannel); qmChannel = null; }
+  loadQueryCounts();
+}
+
+async function loadThread() {
+  const thread = document.getElementById('qm-thread');
+  try {
+    const { data, error } = await db.from('ticket_queries')
+      .select('*').eq('ticket_id', qmTicketId).order('created_at', { ascending: true });
+    if (error) throw error;
+    renderThread(data || []);
+  } catch (err) {
+    thread.innerHTML = `<div class="qm-empty">Couldn't load queries. ${escHtml(err.message)}</div>`;
+  }
+}
+
+function renderThread(rows) {
+  const thread = document.getElementById('qm-thread');
+  if (!rows.length) {
+    thread.innerHTML = '<div class="qm-empty">No queries yet. Ask the technician anything about this build.</div>';
+    return;
+  }
+  thread.innerHTML = rows.map(q => {
+    const resolved = q.status === 'resolved';
+    const answerBlock = q.answer
+      ? `<div class="qm-msg tech">
+           <div class="qm-msg-head"><span class="qm-who">🔧 Technician replied</span></div>
+           <div class="qm-body">${escHtml(q.answer)}</div>
+         </div>`
+      : `<div class="qm-awaiting">⏳ Awaiting technician reply…</div>`;
+    return `<div class="qm-item ${resolved ? 'resolved' : ''}">
+      <div class="qm-msg sales">
+        <div class="qm-msg-head">
+          <span class="qm-who">🛍️ Sales asked</span>
+          <span class="qm-time">${fmtDateTime(q.created_at)}</span>
+        </div>
+        <div class="qm-body">${escHtml(q.question)}</div>
+      </div>
+      ${answerBlock}
+      <div class="qm-item-foot">
+        ${resolved ? '<span class="qm-resolved-tag">✓ Resolved</span>' : ''}
+        <button class="qm-resolve" data-id="${q.id}" data-val="${resolved ? 'open' : 'resolved'}">${resolved ? '↩ Reopen' : '✓ Mark resolved'}</button>
+      </div>
+    </div>`;
+  }).join('');
+  thread.querySelectorAll('.qm-resolve').forEach(b =>
+    b.addEventListener('click', () => setStatus(b.dataset.id, b.dataset.val)));
+  thread.scrollTop = thread.scrollHeight;
+}
+
+async function sendQuery() {
+  const msgEl  = document.getElementById('qm-message');
+  const status = document.getElementById('qm-status');
+  const question = msgEl.value.trim();
+  if (!question) { status.textContent = 'Type a question first.'; return; }
+  status.textContent = 'Sending…';
+  try {
+    const { error } = await db.from('ticket_queries').insert({
+      ticket_id: qmTicketId, question, status: 'open'
+    });
+    if (error) throw error;
+    msgEl.value = '';
+    status.textContent = 'Sent — the technician will see it inside the ticket.';
+    await loadThread();
+  } catch (err) {
+    status.textContent = 'Could not send: ' + err.message;
+  }
+}
+
+async function setStatus(id, newStatus) {
+  try {
+    const { error } = await db.from('ticket_queries').update({ status: newStatus }).eq('id', id);
+    if (error) throw error;
+    await loadThread();
+  } catch (err) {
+    document.getElementById('qm-status').textContent = 'Update failed: ' + err.message;
+  }
+}
+
+function fmtDateTime(iso) {
+  if (!iso) return '';
+  try {
+    return new Date(iso).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
+  } catch { return ''; }
+}

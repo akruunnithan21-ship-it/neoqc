@@ -4151,3 +4151,72 @@ body.dark-mode .autocomplete-list::-webkit-scrollbar-thumb:hover {
   0% { transform: translate(0, 0) scale(1); }
   100% { transform: translate(60px, 40px) scale(1.25); }
 }
+
+/* ══════════════════════════════════════════════════════
+   SALES QUERIES (v1.4.8) — technician side, inside ticket modal
+   ══════════════════════════════════════════════════════ */
+.tq-section .tq-count {
+  font-size: 0.68rem; font-weight: 700; padding: 2px 9px; border-radius: 999px;
+  margin-left: 8px; vertical-align: middle;
+}
+.tq-count.awaiting { background: rgba(245,158,11,0.18); color: #d97706; border: 1px solid rgba(245,158,11,0.4); }
+.tq-count.done     { background: rgba(34,197,94,0.15);  color: #16a34a; border: 1px solid rgba(34,197,94,0.35); }
+
+.tq-list { display: flex; flex-direction: column; gap: 12px; }
+.tq-item {
+  border: 1px solid var(--glass-border); border-radius: 12px;
+  padding: 12px 14px; background: rgba(127,127,160,0.05);
+  border-left: 3px solid transparent;
+}
+.tq-item.open     { border-left-color: #f59e0b; }   /* needs a reply */
+.tq-item.resolved { opacity: 0.6; }
+
+.tq-q-label, .tq-ans-label {
+  font-size: 0.72rem; font-weight: 700; letter-spacing: 0.02em;
+}
+.tq-q-label { color: var(--primary-pink); }
+.tq-ans-label { color: #7c5cff; }
+.tq-time { font-size: 0.66rem; color: var(--text-muted); margin-left: 8px; }
+.tq-q-text {
+  font-size: 0.9rem; color: var(--text-dark); margin-top: 5px; line-height: 1.45;
+  white-space: pre-wrap; word-break: break-word;
+}
+
+.tq-answer {
+  margin-top: 10px; padding: 9px 11px; border-radius: 10px;
+  background: rgba(124,92,255,0.10); border: 1px solid rgba(124,92,255,0.28);
+}
+.tq-ans-text { font-size: 0.88rem; color: var(--text-dark); margin: 4px 0 6px; white-space: pre-wrap; word-break: break-word; }
+
+.tq-reply-box { margin-top: 10px; display: flex; flex-direction: column; gap: 6px; }
+.tq-reply-input {
+  width: 100%; resize: vertical; min-height: 42px;
+  border: 1px solid var(--glass-border); border-radius: 8px;
+  background: var(--glass-bg); color: var(--text-dark);
+  font-family: inherit; font-size: 0.85rem; padding: 8px 10px; outline: none;
+}
+.tq-reply-input:focus { border-color: var(--primary-pink); box-shadow: 0 0 0 3px rgba(231,1,78,0.12); }
+.tq-send-btn {
+  align-self: flex-end;
+  background: var(--primary-pink); color: #fff; border: none;
+  border-radius: 999px; padding: 6px 16px; font-size: 0.8rem; font-weight: 700;
+  cursor: pointer; transition: background 0.2s, transform 0.1s;
+}
+.tq-send-btn:hover:not(:disabled) { background: var(--primary-pink-hover); }
+.tq-send-btn:disabled { opacity: 0.6; cursor: default; }
+
+.tq-foot { display: flex; align-items: center; justify-content: flex-end; gap: 12px; margin-top: 8px; }
+.tq-resolved { font-size: 0.72rem; font-weight: 700; color: #16a34a; }
+.tq-link {
+  background: none; border: none; color: var(--text-muted);
+  font-size: 0.72rem; cursor: pointer; padding: 2px 4px; text-decoration: underline;
+}
+.tq-link:hover { color: var(--text-dark); }
+
+/* Awaiting-query badge on dashboard ticket cards */
+.tq-card-badge {
+  display: inline-flex; align-items: center; gap: 4px;
+  background: rgba(245,158,11,0.16); color: #d97706;
+  border: 1px solid rgba(245,158,11,0.4);
+  border-radius: 999px; padding: 1px 9px; font-size: 0.68rem; font-weight: 700;
+}

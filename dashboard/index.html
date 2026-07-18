@@ -112,6 +112,7 @@
               <th>Technician</th>
               <th>Deadline</th>
               <th>QC</th>
+              <th>Query</th>
             </tr>
           </thead>
           <tbody id="sales-body"></tbody>
@@ -121,6 +122,29 @@
     </div>
 
   </main>
+
+  <!-- ─────────────────────────── QUERY MODAL (sales ↔ technician) ─── -->
+  <div id="query-modal" class="qm-overlay hidden">
+    <div class="qm-panel glass">
+      <div class="qm-head">
+        <div>
+          <div class="qm-title">💬 Build Queries</div>
+          <div class="qm-sub" id="qm-ticket-label">—</div>
+        </div>
+        <button id="qm-close" class="btn-ghost" title="Close">✕</button>
+      </div>
+      <div id="qm-thread" class="qm-thread">
+        <div class="qm-empty">No queries yet. Ask the technician anything about this build.</div>
+      </div>
+      <div class="qm-composer">
+        <div class="qm-send-row">
+          <textarea id="qm-message" class="qm-message" rows="2" placeholder="Ask the concerning technician a question…" maxlength="1000"></textarea>
+          <button id="qm-send" class="btn-primary">Send&nbsp;→</button>
+        </div>
+        <div id="qm-status" class="qm-statusmsg"></div>
+      </div>
+    </div>
+  </div>
 
   <!-- LOADING RING -->
   <div id="loading-overlay" class="loading-overlay hidden">

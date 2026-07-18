@@ -168,9 +168,11 @@ body {
 .lookup-row {
   display: flex;
   gap: 10px;
+  flex-wrap: wrap;
 }
 .lookup-input {
-  flex: 1;
+  flex: 1 1 180px;
+  min-width: 0;
   background: rgba(255,255,255,0.06);
   border: 1px solid var(--glass-border);
   border-radius: var(--radius-sm);
@@ -342,9 +344,10 @@ body {
 .pin-icon { font-size: 2rem; margin-bottom: 14px; }
 .pin-title { font-size: 1.2rem; font-weight: 700; margin-bottom: 6px; }
 .pin-sub { color: var(--text-muted); font-size: 0.85rem; margin-bottom: 20px; }
-.pin-row { display: flex; gap: 8px; }
+.pin-row { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; align-items: stretch; }
 .pin-input {
-  flex: 1;
+  flex: 1 1 150px;
+  min-width: 0;
   background: rgba(255,255,255,0.06);
   border: 1px solid var(--glass-border);
   border-radius: var(--radius-sm);
@@ -562,3 +565,250 @@ body {
   .sc-meta { grid-template-columns: 1fr 1fr; }
   #sales-table td, #sales-table th { padding: 9px 10px; }
 }
+
+/* ══════════════════════════════════════════════════════
+   v1.4.8 — ORGANIC POLISH
+   Softer light, layered depth, living colour. Additive layer:
+   overrides earlier rules where it needs to, breaks nothing.
+   ══════════════════════════════════════════════════════ */
+
+:root {
+  --radius:      18px;
+  --radius-sm:   11px;
+  --pink2:       #ff5aa0;   /* warmer companion to --pink for gradients */
+  --violet:      #7c5cff;   /* cool counterpoint for the aurora */
+  --glass-hi:    rgba(255,255,255,0.10);           /* top-edge highlight */
+  --card-shadow: 0 18px 50px -22px rgba(0,0,0,0.85);
+}
+
+/* Living aurora backdrop — soft organic blobs, fixed behind everything,
+   never intercept clicks. */
+body {
+  background:
+    radial-gradient(140% 120% at 50% -10%, #10101f 0%, var(--bg) 55%) fixed;
+  position: relative;
+}
+body::before {
+  content: '';
+  position: fixed;
+  inset: -20% -10% -10%;
+  z-index: -2;
+  pointer-events: none;
+  background:
+    radial-gradient(38% 42% at 12% 8%,  rgba(233,30,140,0.20) 0%, transparent 70%),
+    radial-gradient(34% 40% at 88% 4%,  rgba(124,92,255,0.16) 0%, transparent 70%),
+    radial-gradient(46% 50% at 78% 88%, rgba(233,30,140,0.12) 0%, transparent 72%),
+    radial-gradient(40% 44% at 6% 96%,  rgba(124,92,255,0.10) 0%, transparent 72%);
+  filter: blur(14px) saturate(120%);
+  animation: aurora-drift 26s ease-in-out infinite alternate;
+}
+@keyframes aurora-drift {
+  0%   { transform: translate3d(0,0,0)      scale(1);    }
+  50%  { transform: translate3d(1.5%,1%,0)  scale(1.05); }
+  100% { transform: translate3d(-1.5%,-1%,0) scale(1.02); }
+}
+
+/* Glass: layered translucency + a lit top edge + real depth */
+.glass {
+  background:
+    linear-gradient(180deg, var(--glass-hi) 0%, transparent 22%),
+    var(--glass);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius);
+  box-shadow: var(--card-shadow);
+  -webkit-backdrop-filter: blur(16px) saturate(130%);
+  backdrop-filter: blur(16px) saturate(130%);
+}
+
+/* Hero title: let the whole thing carry a soft pink→violet wash */
+.hero-title {
+  background: linear-gradient(100deg, var(--text) 0%, #ffd3e6 42%, var(--pink) 72%, var(--violet) 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.hero-title span { -webkit-text-fill-color: var(--pink); }
+
+/* Primary button: gradient pill with a soft pink glow that lifts on hover */
+.btn-primary {
+  background: linear-gradient(135deg, var(--pink2) 0%, var(--pink) 55%, #c9003f 100%);
+  border-radius: 999px;
+  box-shadow: 0 8px 22px -8px var(--pink-glow), inset 0 1px 0 rgba(255,255,255,0.22);
+}
+.btn-primary:hover  { opacity: 1; transform: translateY(-2px); box-shadow: 0 14px 30px -10px var(--pink-glow), inset 0 1px 0 rgba(255,255,255,0.28); }
+.btn-primary:active { transform: translateY(0); }
+
+/* Inputs: a gentle glow ring on focus instead of just a border flip */
+.lookup-input:focus,
+.pin-input:focus,
+.filter-input:focus {
+  border-color: var(--pink);
+  box-shadow: 0 0 0 4px var(--pink-dim), 0 0 22px -6px var(--pink-glow);
+}
+
+/* Progress stepper — organic, colour-coded, alive */
+.stepper { gap: 4px; }
+.step:not(:last-child)::after {
+  height: 3px; border-radius: 3px; top: 15px;
+  background: var(--glass-border);
+}
+.step.done:not(:last-child)::after,
+.step.active:not(:last-child)::after {
+  background: linear-gradient(90deg, var(--pink) 0%, var(--pink2) 100%);
+}
+.step-circle {
+  width: 32px; height: 32px;
+  box-shadow: 0 4px 12px -6px rgba(0,0,0,0.6);
+}
+.step.done .step-circle {
+  background: linear-gradient(135deg, var(--pink2), var(--pink));
+  border-color: transparent;
+  box-shadow: 0 6px 16px -6px var(--pink-glow);
+}
+.step.active .step-circle {
+  border-color: var(--pink);
+  box-shadow: 0 0 0 4px var(--pink-dim), 0 0 18px -4px var(--pink-glow);
+  animation: step-pulse 2.4s ease-in-out infinite;
+}
+@keyframes step-pulse {
+  0%,100% { box-shadow: 0 0 0 4px var(--pink-dim),               0 0 18px -4px var(--pink-glow); }
+  50%     { box-shadow: 0 0 0 7px rgba(233,30,140,0.06), 0 0 26px -2px var(--pink-glow); }
+}
+
+/* Meta chips + QC pill: rounder, softer, colour-coded depth */
+.sc-meta {
+  background: linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.02));
+  border-radius: var(--radius-sm);
+}
+.sc-meta-item .value { color: #fff; }
+.sc-qc { border-radius: var(--radius-sm); }
+
+/* Status badge: give the pill a little life */
+.status-badge { box-shadow: 0 2px 10px -4px rgba(0,0,0,0.5); }
+
+/* Respect users who prefer calm */
+@media (prefers-reduced-motion: reduce) {
+  body::before, .step.active .step-circle { animation: none; }
+}
+
+/* ══════════════════════════════════════════════════════
+   QUERY SYSTEM — sales row button, modal, colour-coded thread
+   ══════════════════════════════════════════════════════ */
+
+.cell-query { text-align: center; }
+.qm-open-btn {
+  position: relative;
+  background: rgba(255,255,255,0.05);
+  border: 1px solid var(--glass-border);
+  border-radius: 999px;
+  padding: 5px 11px;
+  font-size: 0.95rem;
+  cursor: pointer;
+  transition: border-color .2s, background .2s, transform .1s;
+}
+.qm-open-btn:hover  { border-color: var(--pink); background: var(--pink-dim); }
+.qm-open-btn:active { transform: scale(0.94); }
+.qm-badge {
+  position: absolute; top: -6px; right: -6px;
+  min-width: 17px; height: 17px; padding: 0 4px;
+  border-radius: 999px; font-size: 0.62rem; font-weight: 800;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: #fff; box-shadow: 0 2px 6px -1px rgba(0,0,0,0.6);
+}
+.qm-badge.open { background: linear-gradient(135deg, var(--amber), #d97706); animation: qm-nudge 2s ease-in-out infinite; }
+.qm-badge.done { background: var(--green); }
+@keyframes qm-nudge { 0%,100%{transform:translateY(0);} 50%{transform:translateY(-2px);} }
+
+/* Modal */
+.qm-overlay {
+  position: fixed; inset: 0; z-index: 300;
+  display: flex; align-items: center; justify-content: center;
+  padding: 20px;
+  background: rgba(4,4,10,0.66);
+  -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
+}
+.qm-overlay.hidden { display: none; }
+.qm-panel {
+  width: 100%; max-width: 560px;
+  max-height: 88vh; display: flex; flex-direction: column;
+  padding: 22px 22px 18px;
+}
+.qm-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
+.qm-title { font-size: 1.15rem; font-weight: 700; }
+.qm-sub { font-family: 'JetBrains Mono', monospace; font-size: 0.78rem; color: var(--text-muted); margin-top: 3px; }
+
+.qm-thread {
+  flex: 1; overflow-y: auto; min-height: 120px;
+  display: flex; flex-direction: column; gap: 12px;
+  padding: 4px 4px 8px;
+}
+.qm-empty { color: var(--text-muted); font-size: 0.86rem; text-align: center; padding: 30px 10px; }
+
+/* One Q&A exchange = a question + its answer + a resolve control */
+.qm-item {
+  display: flex; flex-direction: column; gap: 8px;
+  padding: 12px; border-radius: 14px;
+  background: rgba(255,255,255,0.02);
+  border: 1px solid var(--glass-border);
+}
+.qm-item.resolved { opacity: 0.62; }
+.qm-item-foot { display: flex; align-items: center; justify-content: flex-end; gap: 10px; }
+.qm-awaiting {
+  align-self: flex-start; max-width: 82%;
+  font-size: 0.82rem; color: var(--amber);
+  background: var(--amber-dim); border: 1px dashed rgba(245,158,11,0.4);
+  border-radius: 12px; padding: 8px 12px;
+}
+.qm-msg {
+  max-width: 82%;
+  border-radius: 14px;
+  padding: 10px 13px;
+  border: 1px solid var(--glass-border);
+  animation: qm-pop 0.18s ease;
+}
+@keyframes qm-pop { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+/* Sales question — right aligned, pink family */
+.qm-msg.sales {
+  align-self: flex-end;
+  background: linear-gradient(135deg, rgba(233,30,140,0.20), rgba(233,30,140,0.10));
+  border-color: rgba(233,30,140,0.35);
+}
+/* Technician reply — left aligned, cool violet family */
+.qm-msg.tech {
+  align-self: flex-start;
+  background: linear-gradient(135deg, rgba(124,92,255,0.18), rgba(124,92,255,0.08));
+  border-color: rgba(124,92,255,0.35);
+}
+.qm-msg.resolved { opacity: 0.6; }
+.qm-msg-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 5px; }
+.qm-who  { font-size: 0.78rem; font-weight: 700; color: var(--text); }
+.qm-time { font-size: 0.66rem; color: var(--text-muted); white-space: nowrap; }
+.qm-body { font-size: 0.9rem; line-height: 1.45; color: var(--text); white-space: pre-wrap; word-break: break-word; }
+.qm-msg-foot { display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin-top: 6px; min-height: 4px; }
+.qm-resolved-tag { font-size: 0.66rem; color: var(--green); font-weight: 700; }
+.qm-resolve {
+  background: transparent; border: 1px solid var(--glass-border);
+  color: var(--text-muted); border-radius: 999px;
+  font-size: 0.68rem; padding: 3px 9px; cursor: pointer; transition: color .2s, border-color .2s;
+}
+.qm-resolve:hover { color: var(--text); border-color: var(--text-muted); }
+
+/* Composer */
+.qm-composer { border-top: 1px solid var(--glass-border); padding-top: 14px; margin-top: 6px; }
+.qm-name {
+  width: 100%; margin-bottom: 8px;
+  background: rgba(255,255,255,0.06); border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm); color: var(--text);
+  font-family: inherit; font-size: 0.85rem; padding: 8px 12px; outline: none;
+}
+.qm-send-row { display: flex; gap: 8px; align-items: stretch; }
+.qm-message {
+  flex: 1 1 auto; min-width: 0; resize: vertical;
+  background: rgba(255,255,255,0.06); border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm); color: var(--text);
+  font-family: inherit; font-size: 0.9rem; padding: 10px 12px; outline: none;
+  transition: border-color .2s, box-shadow .2s;
+}
+.qm-message:focus, .qm-name:focus { border-color: var(--pink); box-shadow: 0 0 0 3px var(--pink-dim); }
+.qm-send-row .btn-primary { align-self: stretch; white-space: nowrap; }
+.qm-statusmsg { font-size: 0.75rem; color: var(--text-muted); margin-top: 8px; min-height: 14px; }

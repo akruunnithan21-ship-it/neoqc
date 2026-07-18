@@ -622,6 +622,12 @@
         <input type="hidden" id="form-created-at">
 
         <div class="modal-body">
+          <!-- SALES QUERIES — questions raised by the sales team; technician answers here -->
+          <div class="form-section tq-section" id="modal-queries-section" style="display:none;">
+            <h3>💬 Sales Queries <span id="modal-queries-count" class="tq-count"></span></h3>
+            <div id="modal-queries-list" class="tq-list"></div>
+          </div>
+
           <!-- BASIC INFO TAB/SECTION -->
           <div class="form-section">
             <h3>📋 Basic Details</h3>
@@ -2038,21 +2044,18 @@
     <div class="glass-slab modal-card" style="max-width: 650px; width: 100%; padding: 30px; border-radius: 20px;">
       <div class="modal-header" style="border-bottom: 1px solid var(--glass-border); padding-bottom: 15px; margin-bottom: 20px;">
         <h2 style="font-family: 'Syncopate', sans-serif; font-size: 1.3rem; color: var(--primary-pink); letter-spacing: 0.05em; margin: 0;">NEO QC UPDATED</h2>
-        <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; font-weight: 700; background: rgba(231, 1, 78, 0.1); color: var(--primary-pink); padding: 4px 8px; border-radius: 4px;">v1.4.7</span>
+        <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; font-weight: 700; background: rgba(231, 1, 78, 0.1); color: var(--primary-pink); padding: 4px 8px; border-radius: 4px;">v1.4.8</span>
       </div>
       <div class="modal-body" style="font-size: 0.92rem; line-height: 1.6; color: var(--text-dark); max-height: 420px; overflow-y: auto; padding-right: 5px;">
-        <p style="margin-top: 0;">An update has been installed. Here are the key improvements in NeoQC <strong>v1.4.7</strong>:</p>
+        <p style="margin-top: 0;">An update has been installed. Here are the key improvements in NeoQC <strong>v1.4.8</strong>:</p>
         <ul style="padding-left: 20px; display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px;">
-          <li><strong>Fixed: new tickets couldn't be created</strong>: The form used native "required" fields that Chromium refuses to submit — silently, with no message — when a spec field is empty (e.g. parts not in yet). Replaced with clear in-app validation: only a customer name is required, and specs can be filled as parts arrive.</li>
-          <li><strong>Auto-fill Target Build from a PDF invoice (with on-device OCR)</strong>: Attach the customer invoice — it reads the components and prices (OCR works even on our own image-based NeoTokyo invoices, fully offline) and matches each part to the catalogue, showing a per-component price summary.</li>
-          <li><strong>DOA / Damaged component tracking</strong>: A "Component Condition Report" on the ticket — flag parts that arrived dead or damaged, describe the issue, add multiple. Flagged builds show a red DOA / Damaged badge on the card.</li>
-          <li><strong>Live compatibility ("synergy") check</strong>: As you enter CPU / motherboard / RAM, the app flags socket and DDR-generation mismatches (AM5 CPU on an AM4 board, DDR4 RAM in a DDR5-only board, …).</li>
-          <li><strong>PPI engine — fixed & tunable</strong>: The Price-Performance Index now always shows its score and prices (no more blank panel from a cloud round-trip), and a new <em>PPI Engine — Use-Case Tuning</em> panel in Settings lets you edit the weights and thresholds directly.</li>
-          <li><strong>UI/UX polish</strong>: Dark mode is remembered and gets richer, more organic glass; the Completed section is collapsible for busier boards; clearer settings text; a slow animated colour backdrop on the splash and landing screens.</li>
+          <li><strong>New: Sales ↔ Technician queries</strong>: Sales staff can raise a question against any build from the dashboard Staff View. It appears right inside the ticket, and the concerning technician replies from there — colour-coded Q&amp;A, an "awaiting reply" badge on the ticket card, and a resolve toggle when it's sorted.</li>
+          <li><strong>Beautified customer Track-Order page</strong>: A softer, more organic look — a living aurora backdrop, layered glass, a colour-coded animated progress tracker, and gradient accents.</li>
+          <li><strong>Fixed: Staff View "Enter" button</strong>: The PIN button no longer sticks out past its card on narrower screens — it now stays neatly aligned at every width.</li>
         </ul>
       </div>
       <div class="modal-footer" style="border-top: 1px solid var(--glass-border); padding-top: 15px; display: flex; justify-content: flex-end; margin-top: 20px;">
-        <button id="btn-close-changelog" class="primary-pink-btn" style="padding: 10px 24px; font-weight: 700; font-size: 0.95rem;">Launch NeoQC v1.4.7</button>
+        <button id="btn-close-changelog" class="primary-pink-btn" style="padding: 10px 24px; font-weight: 700; font-size: 0.95rem;">Launch NeoQC v1.4.8</button>
       </div>
     </div>
   </div>

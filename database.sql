@@ -206,3 +206,45 @@ ALTER TABLE public.component_prices
 -- diagnostics.ramDetail  -- e.g. "Prime95 Blend, 1200s, 0 errors across 8 workers"
 -- diagnostics.ramQuickCheck -- optional preliminary, non-authoritative result from ram-stress-worker.js
 -- ==========================================================================
+
+-- ==========================================================================
+-- ticket_queries  (v1.4.8) — sales↔technician Q&A per ticket
+-- Sales staff post a QUESTION from the dashboard Staff View; the concerning
+-- technician writes the ANSWER from inside the ticket modal in the admin app.
+--
+-- This table ALREADY EXISTS in Supabase with the columns below (it was
+-- created in an earlier session and left unused). v1.4.8 wires it up as-is
+-- — no migration needed. The CREATE here is idempotent documentation.
+--
+--   id         BIGSERIAL / int  PRIMARY KEY
+--   ticket_id  TEXT             -> tickets.id
+--   question   TEXT             -- raised by sales
+--   answer     TEXT             -- filled in by the technician (null until answered)
+--   status     TEXT             -- 'open' (awaiting answer) | 'answered' | 'resolved'
+--   created_at TIMESTAMPTZ      DEFAULT now()
+-- ==========================================================================
+CREATE TABLE IF NOT EXISTS public.ticket_queries (
+  id          BIGSERIAL PRIMARY KEY,
+  ticket_id   TEXT        NOT NULL,
+  question    TEXT        NOT NULL,
+  answer      TEXT,
+  status      TEXT        NOT NULL DEFAULT 'open',
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_ticket_queries_ticket
+  ON public.ticket_queries (ticket_id, created_at);
+
+-- The app writes with the anon key (as it does for tickets/component_prices),
+-- so ticket_queries needs permissive RLS. Run these only if writes are denied:
+-- ALTER TABLE public.ticket_queries ENABLE ROW LEVEL SECURITY;
+-- DROP POLICY IF EXISTS tq_read ON public.ticket_queries;
+-- DROP POLICY IF EXISTS tq_write ON public.ticket_queries;
+-- CREATE POLICY tq_read  ON public.ticket_queries FOR SELECT USING (true);
+-- CREATE POLICY tq_write ON public.ticket_queries FOR ALL USING (true) WITH CHECK (true);
+
+-- Optional: instant updates on both surfaces
+-- ALTER PUBLICATION supabase_realtime ADD TABLE public.ticket_queries;
+
+-- Optional future enhancement: track who asked/answered by name
+-- ALTER TABLE public.ticket_queries ADD COLUMN IF NOT EXISTS asked_by TEXT;
+-- ALTER TABLE public.ticket_queries ADD COLUMN IF NOT EXISTS answered_by TEXT;
