@@ -812,3 +812,40 @@ body::before {
 .qm-message:focus, .qm-name:focus { border-color: var(--pink); box-shadow: 0 0 0 3px var(--pink-dim); }
 .qm-send-row .btn-primary { align-self: stretch; white-space: nowrap; }
 .qm-statusmsg { font-size: 0.75rem; color: var(--text-muted); margin-top: 8px; min-height: 14px; }
+
+/* ══════════════════════════════════════════════════════
+   STAFF VIEW — BREATHING ROOM (v1.4.8.1)
+   The 8-column table was living inside the 880px customer
+   column. Give the staff view its own wider, airier layout.
+   ══════════════════════════════════════════════════════ */
+
+#view-sales.view {
+  max-width: 1280px;          /* customer view stays 880px */
+  padding-top: 48px;
+}
+
+.sales-toolbar { margin-bottom: 26px; gap: 16px; }
+.sales-title   { font-size: 1.45rem; letter-spacing: 0.01em; }
+
+.stats-row  { margin-bottom: 26px; gap: 10px; }
+.stat-chip  { padding: 7px 18px; font-size: 0.8rem; }
+
+.table-wrapper {
+  box-shadow: var(--card-shadow);
+}
+#sales-table thead th {
+  padding: 15px 20px;
+  letter-spacing: 0.09em;
+}
+#sales-table td {
+  padding: 17px 20px;
+  font-size: 0.87rem;
+}
+.cell-customer { font-size: 0.92rem; }
+
+/* keep the airy spacing from collapsing on small screens */
+@media (max-width: 720px) {
+  #view-sales.view { padding-top: 28px; }
+  #sales-table thead th { padding: 11px 12px; }
+  #sales-table td { padding: 12px 12px; }
+}
