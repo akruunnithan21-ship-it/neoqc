@@ -245,6 +245,8 @@ CREATE INDEX IF NOT EXISTS idx_ticket_queries_ticket
 -- Optional: instant updates on both surfaces
 -- ALTER PUBLICATION supabase_realtime ADD TABLE public.ticket_queries;
 
--- Optional future enhancement: track who asked/answered by name
--- ALTER TABLE public.ticket_queries ADD COLUMN IF NOT EXISTS asked_by TEXT;
+-- v1.4.8.x: who in sales asked the query — RUN THIS ONCE in the SQL editor.
+-- (The dashboard degrades gracefully until then: sends without the name.)
+ALTER TABLE public.ticket_queries ADD COLUMN IF NOT EXISTS asked_by TEXT;
+-- Optional future enhancement:
 -- ALTER TABLE public.ticket_queries ADD COLUMN IF NOT EXISTS answered_by TEXT;

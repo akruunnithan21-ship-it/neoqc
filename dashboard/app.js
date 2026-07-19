@@ -517,6 +517,9 @@ function initQueryUI() {
   document.getElementById('qm-message').addEventListener('keydown', e => {
     if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) sendQuery();
   });
+  const nameEl = document.getElementById('qm-name');
+  nameEl.value = localStorage.getItem('neoqc-sales-name') || '';
+  nameEl.addEventListener('change', () => localStorage.setItem('neoqc-sales-name', nameEl.value.trim()));
 }
 
 async function openQueryModal(ticketId, label) {
@@ -571,7 +574,7 @@ function renderThread(rows) {
     return `<div class="qm-item ${resolved ? 'resolved' : ''}">
       <div class="qm-msg sales">
         <div class="qm-msg-head">
-          <span class="qm-who">🛍️ Sales asked</span>
+          <span class="qm-who">🛍️ ${q.asked_by ? escHtml(q.asked_by) + ' (sales) asked' : 'Sales asked'}</span>
           <span class="qm-time">${fmtDateTime(q.created_at)}</span>
         </div>
         <div class="qm-body">${escHtml(q.question)}</div>
@@ -590,14 +593,25 @@ function renderThread(rows) {
 
 async function sendQuery() {
   const msgEl  = document.getElementById('qm-message');
+  const nameEl = document.getElementById('qm-name');
   const status = document.getElementById('qm-status');
   const question = msgEl.value.trim();
+  const askedBy  = nameEl.value.trim();
   if (!question) { status.textContent = 'Type a question first.'; return; }
+  localStorage.setItem('neoqc-sales-name', askedBy);
   status.textContent = 'Sending…';
   try {
-    const { error } = await db.from('ticket_queries').insert({
-      ticket_id: qmTicketId, question, status: 'open'
+    let { error } = await db.from('ticket_queries').insert({
+      ticket_id: qmTicketId, question, status: 'open',
+      ...(askedBy ? { asked_by: askedBy } : {})
     });
+    // Graceful fallback: asked_by column not added to Supabase yet
+    if (error && /asked_by/.test(error.message)) {
+      ({ error } = await db.from('ticket_queries').insert({
+        ticket_id: qmTicketId, question, status: 'open'
+      }));
+      if (!error) console.warn('ticket_queries.asked_by column missing — name not stored. Run: ALTER TABLE public.ticket_queries ADD COLUMN IF NOT EXISTS asked_by TEXT;');
+    }
     if (error) throw error;
     msgEl.value = '';
     status.textContent = 'Sent — the technician will see it inside the ticket.';

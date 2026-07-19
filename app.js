@@ -5693,7 +5693,7 @@ function renderTicketQueries(rows) {
          </div>`;
     return `<div class="tq-item ${resolved ? 'resolved' : ''} ${!q.answer && !resolved ? 'open' : ''}">
       <div class="tq-q">
-        <span class="tq-q-label">🛍️ Sales asked</span>
+        <span class="tq-q-label">🛍️ ${q.asked_by ? escapeHtmlLite(q.asked_by) + ' (sales) asked' : 'Sales asked'}</span>
         <span class="tq-time">${when}</span>
         <div class="tq-q-text">${escapeHtmlLite(q.question)}</div>
       </div>
