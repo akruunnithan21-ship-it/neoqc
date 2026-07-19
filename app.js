@@ -1345,7 +1345,7 @@ function renderDashboard() {
           </div>
         </div>
         ${damaged ? `<div class="card-damage-banner">⚠ DOA / Damaged Components (${damagedCount})</div>` : ''}
-        ${ticketQueryCounts[t.id] ? `<div class="card-query-banner"><span class="tq-card-badge">💬 ${ticketQueryCounts[t.id]} sales quer${ticketQueryCounts[t.id] > 1 ? 'ies' : 'y'} awaiting reply</span></div>` : ''}
+        ${ticketQueryCounts[t.id] ? `<div class="card-query-banner"><span>💬 ${ticketQueryCounts[t.id]} sales quer${ticketQueryCounts[t.id] > 1 ? 'ies' : 'y'} awaiting reply</span><span class="cqb-cta">Reply ›</span></div>` : ''}
         <h3 class="card-cust-name">${t.customerName}</h3>
         <div style="margin-bottom:14px;">
           <span class="tech-chip">

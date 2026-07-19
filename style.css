@@ -4213,10 +4213,25 @@ body.dark-mode .autocomplete-list::-webkit-scrollbar-thumb:hover {
 }
 .tq-link:hover { color: var(--text-dark); }
 
-/* Awaiting-query badge on dashboard ticket cards */
-.tq-card-badge {
-  display: inline-flex; align-items: center; gap: 4px;
-  background: rgba(245,158,11,0.16); color: #d97706;
-  border: 1px solid rgba(245,158,11,0.4);
-  border-radius: 999px; padding: 1px 9px; font-size: 0.68rem; font-weight: 700;
+/* Awaiting-query banner on dashboard ticket cards — same visual language
+   as .card-damage-banner (full-width strip under the header), amber. */
+.card-query-banner {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  background: rgba(245,158,11,0.12);
+  color: #d97706;
+  border: 1px solid rgba(245,158,11,0.35);
+  border-radius: 7px;
+  padding: 5px 10px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  margin-bottom: 10px;
 }
+.card-query-banner .cqb-cta {
+  flex-shrink: 0;
+  opacity: 0.8;
+  font-size: 0.66rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+body.dark-mode .card-query-banner { color: #fcd34d; }
