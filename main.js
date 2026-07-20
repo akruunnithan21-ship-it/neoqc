@@ -1658,6 +1658,36 @@ function hwinfoEnrich() {
   });
 }
 
+// v1.7.0 — PHYSICAL port certification.
+//
+// Windows has no idea which socket is on the case front panel. What it does
+// expose is a socket fingerprint (hub + port). So we snapshot, let the tech
+// plug into a NAMED port, snapshot again, and the newly-arrived device tells
+// us which socket that is — then we push real data through it.
+function runPortTestScript(args) {
+  const diagnosticsPath = app.isPackaged
+    ? path.join(process.resourcesPath, 'app.asar.unpacked', 'assets', 'diagnostics')
+    : path.join(__dirname, 'assets', 'diagnostics');
+  const script = path.join(diagnosticsPath, 'port_test.ps1');
+  return new Promise((resolve) => {
+    if (!fs.existsSync(script)) { resolve({ ok: false, error: 'port_test.ps1 missing' }); return; }
+    const ps = spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', script].concat(args), { windowsHide: true });
+    let out = '', errOut = '';
+    ps.stdout.on('data', d => { out += d.toString(); });
+    ps.stderr.on('data', d => { errOut += d.toString(); });
+    ps.on('close', () => {
+      try { resolve({ ok: true, data: JSON.parse(out.trim()) }); }
+      catch (e) { resolve({ ok: false, error: (errOut || 'unparseable port_test output').slice(-600) }); }
+    });
+    ps.on('error', e => resolve({ ok: false, error: e.message }));
+    setTimeout(() => { try { ps.kill(); } catch (_) {} resolve({ ok: false, error: 'port test timed out' }); }, 120000);
+  });
+}
+
+ipcMain.handle('sys:port-snapshot2', async () => runPortTestScript(['-Mode', 'snapshot']));
+ipcMain.handle('sys:port-iotest', async (event, driveLetter, sizeMB) =>
+  runPortTestScript(['-Mode', 'iotest', '-DriveLetter', String(driveLetter || ''), '-SizeMB', String(sizeMB || 48)]));
+
 ipcMain.handle('sys:enumerate-ports', async () => {
   const diagnosticsPath = app.isPackaged
     ? path.join(process.resourcesPath, 'app.asar.unpacked', 'assets', 'diagnostics')

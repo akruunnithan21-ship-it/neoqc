@@ -2043,6 +2043,13 @@ function handleClientTicketSelect() {
 
   // Populate target specs (part codes stripped for display)
   const cleanSpec = (s) => (window.NeoQcMatcher && window.NeoQcMatcher.cleanName ? window.NeoQcMatcher.cleanName(s || '') : (s || '')) || '--';
+  // Case-port certification list for THIS ticket (defaults on first open).
+  casePorts = (ticket.diagnostics && Array.isArray(ticket.diagnostics.casePorts) && ticket.diagnostics.casePorts.length)
+    ? ticket.diagnostics.casePorts
+    : portCertDefaults();
+  renderCasePorts();
+  try { renderMoboPorts(ticket.diagnostics && ticket.diagnostics.portScan); } catch (_) {}
+
   document.getElementById('c-target-mobo').textContent = cleanSpec(ticket.specs && ticket.specs.mobo);
   document.getElementById('c-target-cpu').textContent = cleanSpec(ticket.specs && ticket.specs.cpu);
   document.getElementById('c-target-gpu').textContent = cleanSpec(ticket.specs && ticket.specs.gpu);
@@ -2290,6 +2297,9 @@ async function savePortScanResult(data) {
 
   if (!ticket.diagnostics) ticket.diagnostics = {};
   ticket.diagnostics.portScan = { ...data, ranAt: new Date().toISOString() };
+  // Rear-I/O reference list sits beside the case-port certification so the two
+  // are never mistaken for each other.
+  try { renderMoboPorts(data); } catch (_) {}
 
   if (!ticket.qcChecks) ticket.qcChecks = {};
   ticket.qcChecks.portUsb = (data.usbControllers || []).length > 0;
@@ -6312,4 +6322,263 @@ document.addEventListener('keydown', (e) => {
       applySpecOverrideAll();
     }
   }
+});
+
+// ═══════════════════════════════════════════════════════════
+//  CASE PORT CERTIFICATION (v1.7.0)
+//
+//  The question this answers: "does the USB port on the front of the case
+//  actually work?" Windows cannot answer it — nothing in WMI/PnP records
+//  whether a socket is on the case or the rear I/O panel. What Windows DOES
+//  expose is a socket fingerprint (parent hub + Port_#/Hub_#).
+//
+//  So the flow is physical and honest:
+//    1. baseline snapshot of everything currently connected
+//    2. technician plugs the drive into ONE named port
+//    3. poll until a NEW device appears — that device's socket fingerprint IS
+//       the port being tested, which also proves the socket is live
+//    4. write + read back real data through it (unbuffered, so no cache lies)
+//
+//  No new device => the port is dead. Data corruption => the port is faulty.
+//  Nothing is ever assumed to pass.
+// ═══════════════════════════════════════════════════════════
+const PORTCERT_TYPES = {
+  'usb-a':      { icon: '🔌', name: 'USB-A',          dataCapable: true },
+  'usb-c':      { icon: '⚡', name: 'USB-C',          dataCapable: true },
+  'headphone':  { icon: '🎧', name: 'Headphone jack', dataCapable: false },
+  'mic':        { icon: '🎙️', name: 'Microphone jack', dataCapable: false },
+  'cardreader': { icon: '💾', name: 'Card reader',    dataCapable: true }
+};
+
+let casePorts = [];        // [{ id, type, label, status, detail, socketKey, speed... }]
+let portCertRunner = null; // active guided test state
+
+function portCertSave() {
+  if (!editingClientTicketId()) return;
+  const t = appState.tickets.find(x => x.id === editingClientTicketId());
+  if (!t) return;
+  t.diagnostics = t.diagnostics || {};
+  t.diagnostics.casePorts = casePorts;
+  t.updatedAt = new Date().toISOString();
+  saveDatabase();
+  syncTicketToCloud(t);
+}
+
+function editingClientTicketId() {
+  const sel = document.getElementById('client-ticket-select');
+  return sel ? sel.value : null;
+}
+
+function portCertDefaults() {
+  return [
+    { id: 'p1', type: 'usb-a', label: 'Front USB-A #1', status: 'untested' },
+    { id: 'p2', type: 'usb-a', label: 'Front USB-A #2', status: 'untested' },
+    { id: 'p3', type: 'usb-c', label: 'Front USB-C',    status: 'untested' },
+    { id: 'p4', type: 'headphone', label: 'Front headphone jack', status: 'untested' }
+  ];
+}
+
+function renderCasePorts() {
+  const list = document.getElementById('portcert-case-list');
+  const summary = document.getElementById('portcert-summary');
+  if (!list) return;
+  if (!casePorts.length) {
+    list.innerHTML = '<div class="portcert-empty">No case ports added yet. Add each port on the case you want certified.</div>';
+  } else {
+    list.innerHTML = casePorts.map(p => {
+      const meta = PORTCERT_TYPES[p.type] || { icon: '🔌', name: p.type };
+      const cls = p.status === 'pass' ? 'pass' : p.status === 'fail' ? 'fail' : 'untested';
+      const chip = p.status === 'pass' ? '✓ WORKING' : p.status === 'fail' ? '✗ FAILED' : 'NOT TESTED';
+      return `<div class="portcert-row ${cls}">
+        <span class="portcert-icon">${meta.icon}</span>
+        <div class="portcert-info">
+          <div class="portcert-label">${escapeHtmlLite(p.label)}</div>
+          <div class="portcert-detail">${escapeHtmlLite(p.detail || meta.name + ' — awaiting physical test')}</div>
+        </div>
+        <span class="portcert-chip ${cls}">${chip}</span>
+        <button type="button" class="portcert-test-btn" data-test-port="${p.id}">Test</button>
+        <button type="button" class="portcert-del" data-del-port="${p.id}" title="Remove">✕</button>
+      </div>`;
+    }).join('');
+  }
+  const passed = casePorts.filter(p => p.status === 'pass').length;
+  if (summary) {
+    summary.textContent = `${passed} / ${casePorts.length} certified`;
+    summary.className = 'portcert-summary' + (casePorts.length && passed === casePorts.length ? ' all-good' : '');
+  }
+}
+
+// Rear I/O, listed purely as context so the two are never confused.
+function renderMoboPorts(portScan) {
+  const el = document.getElementById('portcert-mobo-list');
+  if (!el) return;
+  const ctrls = (portScan && portScan.usbControllers) || [];
+  if (!ctrls.length) { el.innerHTML = '<div class="portcert-empty">Run “Scan Ports” above to list motherboard controllers.</div>'; return; }
+  el.innerHTML = ctrls.map(c =>
+    `<div class="portcert-mobo-row"><span class="portcert-icon">🖥️</span><div class="portcert-info">
+      <div class="portcert-label">${escapeHtmlLite(c.name || 'USB controller')}</div>
+      <div class="portcert-detail">${escapeHtmlLite(c.generation || 'USB')} · ${escapeHtmlLite(c.status || 'OK')}</div>
+    </div></div>`).join('');
+}
+
+// ── Guided test engine ─────────────────────────────────────
+function portStep(msg, pct) {
+  const s = document.getElementById('portcert-step');
+  const f = document.getElementById('portcert-runner-fill');
+  if (s) s.innerHTML = msg;
+  if (f) f.style.width = (pct || 0) + '%';
+}
+
+function snapshotKeys(snap) {
+  const set = new Set();
+  ((snap && snap.usbDevices) || []).forEach(d => set.add(d.instanceId));
+  return set;
+}
+
+async function portTakeSnapshot() {
+  const r = await ipcRenderer.invoke('sys:port-snapshot2');
+  return (r && r.ok) ? r.data : null;
+}
+
+async function startPortTest(portId) {
+  const port = casePorts.find(p => p.id === portId);
+  if (!port) return;
+  const meta = PORTCERT_TYPES[port.type] || {};
+  const runner = document.getElementById('portcert-runner');
+  const nextBtn = document.getElementById('btn-portcert-next');
+  if (runner) runner.classList.remove('hidden');
+
+  portCertRunner = { portId, phase: 'baseline', cancelled: false };
+
+  if (meta.dataCapable) {
+    portStep(`<strong>Step 1 — unplug the test drive.</strong><br>Make sure your test pendrive/SSD is <em>not</em> connected anywhere, then press Continue.`, 10);
+  } else {
+    portStep(`<strong>Step 1 — unplug your headphones.</strong><br>Make sure nothing is in <em>${escapeHtmlLite(port.label)}</em>, then press Continue.`, 10);
+  }
+  if (nextBtn) nextBtn.textContent = 'Continue';
+  portCertRunner.onNext = async () => {
+    portStep('Taking a baseline snapshot of connected devices…', 25);
+    const base = await portTakeSnapshot();
+    if (!base) { finishPortTest(port, false, 'Could not read device list from Windows.'); return; }
+    portCertRunner.baseline = base;
+    portCertRunner.baseKeys = snapshotKeys(base);
+    portCertRunner.baseAudio = new Set((base.audioEndpoints || []).map(a => a.instanceId));
+
+    if (meta.dataCapable) {
+      portStep(`<strong>Step 2 — plug the drive into “${escapeHtmlLite(port.label)}” now.</strong><br>Use that exact socket. Detecting…`, 45);
+    } else {
+      portStep(`<strong>Step 2 — plug headphones into “${escapeHtmlLite(port.label)}” now.</strong><br>Detecting…`, 45);
+    }
+    if (nextBtn) nextBtn.disabled = true;
+    await pollForPortDevice(port, meta);
+    if (nextBtn) nextBtn.disabled = false;
+  };
+}
+
+async function pollForPortDevice(port, meta) {
+  const DEADLINE = 30000, INTERVAL = 1200;
+  const started = Date.now();
+  while (Date.now() - started < DEADLINE) {
+    if (portCertRunner && portCertRunner.cancelled) return;
+    await new Promise(r => setTimeout(r, INTERVAL));
+    const snap = await portTakeSnapshot();
+    if (!snap) continue;
+
+    if (meta.dataCapable) {
+      const fresh = (snap.usbDevices || []).filter(d => !portCertRunner.baseKeys.has(d.instanceId));
+      if (fresh.length) {
+        const dev = fresh[0];
+        // Which drive letter did it bring? That's what we push data through.
+        const disks = snap.usbDisks || [];
+        const baseLetters = new Set();
+        (portCertRunner.baseline.usbDisks || []).forEach(d => (d.driveLetters || []).forEach(l => baseLetters.add(l)));
+        let letter = null;
+        disks.forEach(d => (d.driveLetters || []).forEach(l => { if (!baseLetters.has(l)) letter = l; }));
+
+        port.socketKey = dev.socketKey;
+        port.deviceName = dev.busDesc || dev.name;
+
+        if (!letter) {
+          finishPortTest(port, false,
+            `Device detected on socket ${dev.location || '?'} but Windows gave it no drive letter — the port powers the device but data isn’t usable.`);
+          return;
+        }
+        portStep(`Detected on socket <code>${escapeHtmlLite(dev.location || '?')}</code> (${escapeHtmlLite(letter)}:). Writing and reading back real data…`, 75);
+        const io = await ipcRenderer.invoke('sys:port-iotest', letter, 48);
+        if (!io || !io.ok || !io.data || !io.data.ok) {
+          const err = (io && io.data && io.data.error) || (io && io.error) || 'I/O test failed';
+          finishPortTest(port, false, `Device appeared but data transfer failed: ${err}`);
+          return;
+        }
+        const d = io.data;
+        port.writeMBps = d.writeMBps; port.readMBps = d.readMBps;
+        finishPortTest(port, true,
+          `Verified on socket ${dev.location || '?'} — wrote & read back ${d.testedMB} MB intact · ${d.writeMBps} MB/s write, ${d.readMBps} MB/s read`);
+        return;
+      }
+    } else {
+      const freshAudio = (snap.audioEndpoints || []).filter(a => !portCertRunner.baseAudio.has(a.instanceId));
+      if (freshAudio.length) {
+        port.deviceName = freshAudio[0].name;
+        finishPortTest(port, true, `Jack detected the plug — Windows registered “${freshAudio[0].name}”.`);
+        return;
+      }
+    }
+  }
+  finishPortTest(port, false, meta.dataCapable
+    ? 'Nothing appeared within 30 s. This port is not delivering a working connection (check the internal header cable).'
+    : 'No jack-detection event within 30 s. Either the jack is not wired, or this audio driver does not report jack presence.');
+}
+
+function finishPortTest(port, passed, detail) {
+  port.status = passed ? 'pass' : 'fail';
+  port.detail = detail;
+  port.testedAt = new Date().toISOString();
+  renderCasePorts();
+  portCertSave();
+  portStep(passed ? `✅ <strong>${escapeHtmlLite(port.label)} works.</strong> ${escapeHtmlLite(detail)}`
+                  : `❌ <strong>${escapeHtmlLite(port.label)} failed.</strong> ${escapeHtmlLite(detail)}`, 100);
+  const nextBtn = document.getElementById('btn-portcert-next');
+  if (nextBtn) { nextBtn.textContent = 'Done'; nextBtn.disabled = false; }
+  portCertRunner = { done: true, onNext: () => {
+    const r = document.getElementById('portcert-runner');
+    if (r) r.classList.add('hidden');
+    portCertRunner = null;
+  }};
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  const caseList = document.getElementById('portcert-case-list');
+  if (caseList) {
+    caseList.addEventListener('click', (e) => {
+      const t = e.target.closest('[data-test-port]');
+      if (t) { startPortTest(t.dataset.testPort); return; }
+      const d = e.target.closest('[data-del-port]');
+      if (d) {
+        casePorts = casePorts.filter(p => p.id !== d.dataset.delPort);
+        renderCasePorts(); portCertSave();
+      }
+    });
+  }
+  const addBtn = document.getElementById('btn-portcert-add');
+  if (addBtn) addBtn.addEventListener('click', () => {
+    const type = document.getElementById('portcert-add-type').value;
+    const labelEl = document.getElementById('portcert-add-label');
+    const meta = PORTCERT_TYPES[type] || {};
+    const label = (labelEl.value || '').trim() || (meta.name + ' #' + (casePorts.length + 1));
+    casePorts.push({ id: 'p' + Date.now().toString(36), type, label, status: 'untested' });
+    labelEl.value = '';
+    renderCasePorts(); portCertSave();
+  });
+  const nextBtn = document.getElementById('btn-portcert-next');
+  if (nextBtn) nextBtn.addEventListener('click', () => {
+    if (portCertRunner && typeof portCertRunner.onNext === 'function') portCertRunner.onNext();
+  });
+  const cancelBtn = document.getElementById('btn-portcert-cancel');
+  if (cancelBtn) cancelBtn.addEventListener('click', () => {
+    if (portCertRunner) portCertRunner.cancelled = true;
+    portCertRunner = null;
+    const r = document.getElementById('portcert-runner');
+    if (r) r.classList.add('hidden');
+  });
 });

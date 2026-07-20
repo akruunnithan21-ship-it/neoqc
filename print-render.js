@@ -439,6 +439,18 @@
       }
     }
 
+    // ── Case port certification (v1.7.0) ──
+    // Only ports physically proven with a real plug-in + data transfer appear.
+    var cports = d.casePorts || [];
+    if (cports.length && $('print-caseports-body')) {
+      show('print-caseports-section');
+      $('print-caseports-body').innerHTML = cports.map(function (p) {
+        var res = p.status === 'pass' ? 'PASS' : p.status === 'fail' ? 'FAIL' : 'not tested';
+        return '<tr><td><strong>' + esc(p.label || '') + '</strong></td><td>' + res +
+               '</td><td>' + esc(p.detail || '—') + '</td></tr>';
+      }).join('');
+    }
+
     // ── Full hardware inventory (v1.5.1): brand / model / part no. / SERIAL ──
     // Proves exactly which physical hardware shipped. Customer-supplied parts
     // are tagged so the certificate distinguishes them from parts we sold.

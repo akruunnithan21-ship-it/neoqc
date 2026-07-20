@@ -382,6 +382,63 @@
                   <div id="port-enum-results"></div>
                 </div>
 
+                <!-- ═══ v1.7.0 — PHYSICAL CASE PORT CERTIFICATION ═══
+                     Windows cannot tell a front-panel socket from a rear one.
+                     So we prove each port by having the technician plug a drive
+                     into a NAMED port: the newly-arrived device reveals the
+                     socket, then we push real data through it. -->
+                <div class="portcert-card" id="portcert-card">
+                  <div class="portcert-head">
+                    <div>
+                      <div class="portcert-title">🔌 Case Port Certification</div>
+                      <div class="portcert-sub">Physically prove every port on the case actually works — not just that Windows sees a controller.</div>
+                    </div>
+                    <span id="portcert-summary" class="portcert-summary">0 / 0 certified</span>
+                  </div>
+
+                  <div class="portcert-explain">
+                    <strong>Why this is a separate test.</strong> Front-panel USB, Type-C and audio jacks on the case connect to the motherboard through internal headers. Windows only reports the controller — it has no idea which socket is on the case. A port can look perfectly healthy in Device Manager and still be dead because the header cable is loose or mis-seated. The only truthful check is to plug something into that exact socket and move real data through it.
+                  </div>
+
+                  <div class="portcert-group">
+                    <div class="portcert-group-head">
+                      <span class="portcert-group-title">Case / front-panel ports</span>
+                      <span class="portcert-group-tag tag-case">these are what we certify</span>
+                    </div>
+                    <div id="portcert-case-list" class="portcert-list"></div>
+                    <div class="portcert-add">
+                      <select id="portcert-add-type" class="settings-select">
+                        <option value="usb-a">USB-A port</option>
+                        <option value="usb-c">USB-C port</option>
+                        <option value="headphone">Headphone jack</option>
+                        <option value="mic">Microphone jack</option>
+                        <option value="cardreader">Card reader</option>
+                      </select>
+                      <input id="portcert-add-label" class="portcert-input" placeholder="Label (e.g. Front top-left)" maxlength="40">
+                      <button type="button" id="btn-portcert-add" class="secondary-btn">+ Add port</button>
+                    </div>
+                  </div>
+
+                  <div class="portcert-group">
+                    <div class="portcert-group-head">
+                      <span class="portcert-group-title">Motherboard / rear I/O</span>
+                      <span class="portcert-group-tag tag-mobo">reference only — not required</span>
+                    </div>
+                    <div class="portcert-mobo-note">Rear ports come straight off the motherboard and are covered by the system scan above. They don't depend on case wiring, so they aren't part of the case certification.</div>
+                    <div id="portcert-mobo-list" class="portcert-list"></div>
+                  </div>
+
+                  <!-- Guided test strip -->
+                  <div id="portcert-runner" class="portcert-runner hidden">
+                    <div class="portcert-runner-step" id="portcert-step">Ready.</div>
+                    <div class="portcert-runner-bar"><div id="portcert-runner-fill" class="portcert-runner-fill"></div></div>
+                    <div class="portcert-runner-actions">
+                      <button type="button" id="btn-portcert-next" class="primary-pink-btn">Continue</button>
+                      <button type="button" id="btn-portcert-cancel" class="secondary-btn">Cancel</button>
+                    </div>
+                  </div>
+                </div>
+
                 <!-- RGB Sync v2 — per-device / per-zone control -->
                 <div class="dr-card scan-item-card" data-port-card="rgb">
                   <div class="dr-card-header">
@@ -1981,6 +2038,16 @@
     </div>
 
     <!-- ── DRIVE BENCHMARK (per-SSD DiskSpd numbers, v1.4.6+) ── -->
+    <!-- v1.7.0 — physically certified case ports -->
+    <div id="print-caseports-section" class="print-section hidden">
+      <h3>Case Port Certification — Physically Tested</h3>
+      <table class="inv-print-table">
+        <thead><tr><th style="width:26%;">Port</th><th style="width:14%;">Result</th><th style="width:60%;">Evidence</th></tr></thead>
+        <tbody id="print-caseports-body"></tbody>
+      </table>
+      <p style="font-size:7pt;color:#666;margin-top:4px;">Each port was certified by plugging a device into that exact socket and transferring real data through it. Windows cannot distinguish a case port from a rear I/O port on its own, so anything not listed here was not physically verified.</p>
+    </div>
+
     <!-- v1.5.1 — full hardware inventory with serial numbers -->
     <div id="print-inventory-section" class="print-section hidden">
       <h3>Hardware Inventory &amp; Serial Numbers</h3>
@@ -2134,11 +2201,13 @@
     <div class="glass-slab modal-card" style="max-width: 650px; width: 100%; padding: 30px; border-radius: 20px;">
       <div class="modal-header" style="border-bottom: 1px solid var(--glass-border); padding-bottom: 15px; margin-bottom: 20px;">
         <h2 style="font-family: 'Syncopate', sans-serif; font-size: 1.3rem; color: var(--primary-pink); letter-spacing: 0.05em; margin: 0;">NEO QC UPDATED</h2>
-        <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; font-weight: 700; background: rgba(231, 1, 78, 0.1); color: var(--primary-pink); padding: 4px 8px; border-radius: 4px;">v1.6.0</span>
+        <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; font-weight: 700; background: rgba(231, 1, 78, 0.1); color: var(--primary-pink); padding: 4px 8px; border-radius: 4px;">v1.7.0</span>
       </div>
       <div class="modal-body" style="font-size: 0.92rem; line-height: 1.6; color: var(--text-dark); max-height: 420px; overflow-y: auto; padding-right: 5px;">
-        <p style="margin-top: 0;">An update has been installed. Here are the key improvements in NeoQC <strong>v1.6.0</strong>:</p>
+        <p style="margin-top: 0;">An update has been installed. Here are the key improvements in NeoQC <strong>v1.7.0</strong>:</p>
         <ul style="padding-left: 20px; display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px;">
+          <li><strong>New: Case Port Certification</strong> — physically prove the ports on the case actually work. Windows can't tell a front-panel socket from a rear one, so the app walks you through it: unplug, plug your pendrive into the named port, and it detects the exact socket that device arrived on, then writes and reads back real data through it. A port only passes if a device appeared <em>and</em> the data round-tripped intact. Nothing detected = honest fail (usually a loose internal header cable). Front-panel ports and motherboard rear I/O are now clearly separated, and every certified port is printed on the QC report.</li>
+          <li><strong>Testing Client redesigned</strong>: the same drifting aurora backdrop as the splash and landing screens, far more generous spacing, larger glass panels, and regrouped controls so nothing is buried mid-build.</li>
           <li><strong>Fixed: auto-detected specs never reached the admin ticket</strong>: The cloud sync had two copies of its data mapping and they had drifted — the live-update path silently dropped the detected hardware, so every refresh wiped it and the panel showed "--". Both paths now share one mapping. Detected specs stay on the ticket.</li>
           <li><strong>Fixed: the wrong Windows product key was being reported</strong>: The probe read whichever registry blob it found first instead of the one that matches Windows' own activation record — so it could print a key that never activated this PC. It now picks the key verified against that record. If Windows genuinely doesn't hold your key (installed via "I don't have a product key"), the app says so, shows the real last 5 characters, and lets you record the key you typed — verified against those 5 — so every customer's key is tracked correctly. No placeholder is ever shown as real.</li>
           <li><strong>Full hardware inventory with serial numbers</strong>: Auto-detect now captures brand, model, part number and <em>serial</em> for the motherboard, CPU, every RAM module (per slot), GPU, every drive, system chassis, BIOS and network adapters. Shown in full on the ticket and printed on the QC report, so a build can be proven part-by-part.</li>
@@ -2150,7 +2219,7 @@
         </ul>
       </div>
       <div class="modal-footer" style="border-top: 1px solid var(--glass-border); padding-top: 15px; display: flex; justify-content: flex-end; margin-top: 20px;">
-        <button id="btn-close-changelog" class="primary-pink-btn" style="padding: 10px 24px; font-weight: 700; font-size: 0.95rem;">Launch NeoQC v1.6.0</button>
+        <button id="btn-close-changelog" class="primary-pink-btn" style="padding: 10px 24px; font-weight: 700; font-size: 0.95rem;">Launch NeoQC v1.7.0</button>
       </div>
     </div>
   </div>

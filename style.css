@@ -4367,3 +4367,189 @@ body.dark-mode .sv-chip.unknown { color: #fcd34d; }
   padding: 2px 10px; font-size: 0.66rem; font-weight: 800; letter-spacing: 0.04em;
 }
 .cust-badge.hidden { display: none; }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   TESTING CLIENT — REDESIGN (v1.7.0)
+   Aurora backdrop to match splash/landing, plus a far airier layout: the
+   console was dense enough that a technician had to hunt for a control
+   mid-build.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+#client-screen { position: relative; }
+#client-screen::before {
+  content: '';
+  position: fixed;
+  inset: -25%;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(620px 520px at 20% 24%, rgba(231, 1, 78, 0.10), transparent 60%),
+    radial-gradient(580px 500px at 80% 66%, rgba(59, 130, 246, 0.09), transparent 60%),
+    radial-gradient(520px 440px at 64% 16%, rgba(139, 92, 246, 0.07), transparent 60%),
+    radial-gradient(560px 480px at 28% 84%, rgba(6, 182, 212, 0.06), transparent 60%);
+  filter: blur(10px);
+  animation: aurora-drift 22s ease-in-out infinite;
+  will-change: transform;
+}
+body.dark-mode #client-screen::before {
+  background:
+    radial-gradient(620px 520px at 20% 24%, rgba(231, 1, 78, 0.19), transparent 60%),
+    radial-gradient(580px 500px at 80% 66%, rgba(59, 130, 246, 0.15), transparent 60%),
+    radial-gradient(520px 440px at 64% 16%, rgba(139, 92, 246, 0.14), transparent 60%),
+    radial-gradient(560px 480px at 28% 84%, rgba(6, 182, 212, 0.11), transparent 60%);
+}
+/* Content sits above the drifting layer. */
+#client-screen > * { position: relative; z-index: 1; }
+
+/* ── Breathing room ───────────────────────────────────────────────────── */
+#client-screen .client-grid-row {
+  grid-template-columns: 1fr 1.35fr;
+  gap: 34px;
+  margin-top: 34px;
+  align-items: start;
+}
+#client-screen .client-panel {
+  padding: 30px 28px;
+  border-radius: 18px;
+  backdrop-filter: blur(14px) saturate(125%);
+  -webkit-backdrop-filter: blur(14px) saturate(125%);
+  box-shadow: 0 10px 34px -18px rgba(0,0,0,0.45);
+}
+body.dark-mode #client-screen .client-panel {
+  background: linear-gradient(180deg, rgba(255,255,255,0.055) 0%, rgba(255,255,255,0.022) 26%, rgba(255,255,255,0.02) 100%);
+  border-color: rgba(255,255,255,0.09);
+}
+#client-screen .client-panel h3 {
+  font-size: 1.16rem;
+  margin-bottom: 20px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--glass-border);
+  letter-spacing: 0.01em;
+}
+#client-screen .client-panel > * + * { margin-top: 16px; }
+#client-screen .port-rgb-checker-section { margin-top: 26px; }
+#client-screen .sv-row { padding: 11px 14px; }
+#client-screen .full-width { margin-top: 18px; }
+#client-screen .dr-card { padding: 16px 18px; border-radius: 14px; }
+#client-screen .dr-card + .dr-card { margin-top: 14px; }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   CASE PORT CERTIFICATION
+   ══════════════════════════════════════════════════════════════════════════ */
+.portcert-card {
+  margin-top: 18px;
+  border: 1px solid var(--glass-border);
+  border-radius: 16px;
+  padding: 22px;
+  background: linear-gradient(180deg, rgba(231,1,78,0.055), rgba(127,127,160,0.03) 45%);
+}
+.portcert-head {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  gap: 16px; margin-bottom: 14px;
+}
+.portcert-title { font-size: 1rem; font-weight: 800; color: var(--text-dark); }
+.portcert-sub { font-size: 0.76rem; color: var(--text-muted); margin-top: 4px; max-width: 46ch; line-height: 1.45; }
+.portcert-summary {
+  flex-shrink: 0; font-family: 'JetBrains Mono', monospace; font-size: 0.76rem; font-weight: 800;
+  padding: 5px 12px; border-radius: 999px;
+  background: rgba(245,158,11,0.14); color: #d97706; border: 1px solid rgba(245,158,11,0.35);
+}
+.portcert-summary.all-good { background: rgba(16,185,129,0.14); color: #10b981; border-color: rgba(16,185,129,0.4); }
+body.dark-mode .portcert-summary { color: #fcd34d; }
+body.dark-mode .portcert-summary.all-good { color: #34d399; }
+
+.portcert-explain {
+  font-size: 0.75rem; line-height: 1.6; color: var(--text-muted);
+  background: rgba(127,127,160,0.06);
+  border-left: 3px solid var(--primary-pink);
+  border-radius: 0 8px 8px 0;
+  padding: 12px 14px; margin-bottom: 20px;
+}
+.portcert-explain strong { color: var(--text-dark); }
+
+.portcert-group { margin-bottom: 22px; }
+.portcert-group:last-child { margin-bottom: 0; }
+.portcert-group-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
+.portcert-group-title {
+  font-size: 0.72rem; font-weight: 800; text-transform: uppercase;
+  letter-spacing: 0.09em; color: var(--text-dark);
+}
+.portcert-group-tag {
+  font-size: 0.62rem; font-weight: 700; padding: 2px 9px; border-radius: 999px;
+  text-transform: uppercase; letter-spacing: 0.05em;
+}
+.portcert-group-tag.tag-case { background: rgba(231,1,78,0.14); color: var(--primary-pink); border: 1px solid rgba(231,1,78,0.35); }
+.portcert-group-tag.tag-mobo { background: rgba(127,127,160,0.14); color: var(--text-muted); border: 1px solid var(--glass-border); }
+.portcert-mobo-note { font-size: 0.72rem; color: var(--text-muted); margin-bottom: 10px; line-height: 1.5; }
+
+.portcert-list { display: flex; flex-direction: column; gap: 10px; }
+.portcert-empty { font-size: 0.74rem; color: var(--text-muted); padding: 14px; text-align: center; border: 1px dashed var(--glass-border); border-radius: 10px; }
+
+.portcert-row, .portcert-mobo-row {
+  display: flex; align-items: center; gap: 13px;
+  padding: 13px 15px; border-radius: 12px;
+  border: 1px solid var(--glass-border);
+  background: rgba(127,127,160,0.045);
+  border-left-width: 3px;
+}
+.portcert-row.untested { border-left-color: var(--glass-border); }
+.portcert-row.pass { border-left-color: #10b981; background: rgba(16,185,129,0.06); }
+.portcert-row.fail { border-left-color: #ef4444; background: rgba(239,68,68,0.07); }
+.portcert-icon { font-size: 1.15rem; flex-shrink: 0; }
+.portcert-info { flex: 1; min-width: 0; }
+.portcert-label { font-size: 0.85rem; font-weight: 700; color: var(--text-dark); }
+.portcert-detail { font-size: 0.71rem; color: var(--text-muted); margin-top: 3px; line-height: 1.45; word-break: break-word; }
+.portcert-chip {
+  flex-shrink: 0; font-size: 0.62rem; font-weight: 800; letter-spacing: 0.05em;
+  padding: 3px 10px; border-radius: 999px; white-space: nowrap;
+}
+.portcert-chip.untested { background: rgba(127,127,160,0.14); color: var(--text-muted); }
+.portcert-chip.pass { background: rgba(16,185,129,0.16); color: #10b981; }
+.portcert-chip.fail { background: rgba(239,68,68,0.16); color: #ef4444; }
+.portcert-test-btn {
+  flex-shrink: 0; background: var(--primary-pink); color: #fff; border: none;
+  border-radius: 999px; padding: 6px 16px; font-size: 0.74rem; font-weight: 700; cursor: pointer;
+  transition: background .2s, transform .1s;
+}
+.portcert-test-btn:hover { background: var(--primary-pink-hover); }
+.portcert-test-btn:active { transform: translateY(1px); }
+.portcert-del {
+  flex-shrink: 0; background: none; border: none; color: var(--text-muted);
+  cursor: pointer; font-size: 0.85rem; padding: 2px 4px; opacity: 0.55;
+}
+.portcert-del:hover { opacity: 1; color: #ef4444; }
+
+.portcert-add { display: flex; gap: 10px; margin-top: 14px; flex-wrap: wrap; align-items: center; }
+.portcert-input {
+  flex: 1 1 190px; min-width: 0;
+  border: 1px solid var(--glass-border); border-radius: 8px;
+  background: var(--glass-bg); color: var(--text-dark);
+  padding: 8px 12px; font-size: 0.8rem; font-family: inherit; outline: none;
+}
+.portcert-input:focus { border-color: var(--primary-pink); box-shadow: 0 0 0 3px rgba(231,1,78,0.12); }
+
+.portcert-runner {
+  margin-top: 20px; padding: 18px;
+  border: 1px solid rgba(231,1,78,0.35); border-radius: 14px;
+  background: rgba(231,1,78,0.07);
+}
+.portcert-runner.hidden { display: none; }
+.portcert-runner-step { font-size: 0.84rem; line-height: 1.6; color: var(--text-dark); }
+.portcert-runner-step code {
+  font-family: 'JetBrains Mono', monospace; font-size: 0.76rem;
+  background: rgba(127,127,160,0.16); padding: 1px 6px; border-radius: 4px;
+}
+.portcert-runner-bar { height: 6px; border-radius: 999px; background: rgba(127,127,160,0.2); overflow: hidden; margin: 14px 0; }
+.portcert-runner-fill {
+  height: 100%; width: 0%; border-radius: 999px;
+  background: linear-gradient(90deg, var(--primary-pink), #ff5aa0);
+  transition: width .45s cubic-bezier(0.16,1,0.3,1);
+}
+.portcert-runner-actions { display: flex; gap: 10px; justify-content: flex-end; }
+
+@media (max-width: 1100px) {
+  #client-screen .client-grid-row { grid-template-columns: 1fr; gap: 24px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  #client-screen::before { animation: none; }
+}
