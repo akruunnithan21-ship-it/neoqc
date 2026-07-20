@@ -803,15 +803,21 @@ function runDiskSpdPhase({ exe, testFile, blockSize, queueDepth, durationSec, is
     //   -o<n>     outstanding I/O per thread (queue depth)
     //   -t1       one thread — CDM uses one thread per column
     //   -d<sec>   duration in seconds
-    //   -Sh       bypass software cache + hardware write cache
-    //             (this is the critical flag — without it we'd repeat the
-    //              measureDiskSpeed() bug of measuring RAM)
+    //   -Su       bypass the OS/software cache (FILE_FLAG_NO_BUFFERING) —
+    //             the drive is really measured, not RAM. NOTE: deliberately
+    //             NOT -Sh: -Sh additionally forces write-through, which
+    //             defeats the SSD's own DRAM cache and reports write speeds
+    //             far below what CrystalDiskMark (whose methodology we mirror,
+    //             software-cache-bypass only) shows for the same drive.
+    //   -W2       2 s warm-up before measurement starts (CDM also settles)
+    //   -Z1M      random-content write source buffer — DiskSpd writes zeros
+    //             by default, which compressible-controller SSDs flatter
     //   -w<pct>   percentage of writes (0 = pure read, 100 = pure write)
     //   -r        random (omit for sequential)
     //   -Rtext    text results format (matches the row we regex above)
     const args = [
       '-c1G', `-b${blockSize}`, `-o${queueDepth}`, '-t1',
-      `-d${durationSec}`, '-Sh', `-w${isWrite ? 100 : 0}`, '-Rtext'
+      `-d${durationSec}`, '-W2', '-Su', '-Z1M', `-w${isWrite ? 100 : 0}`, '-Rtext'
     ];
     if (random) args.push('-r');
     args.push(testFile);
@@ -850,12 +856,18 @@ async function runDriveBenchmark(vol, exe) {
   }
 
   try {
-    // Four phases (CDM's default Standard columns): SEQ1M Q8T1 read/write +
-    // RND4K Q32T1 read/write. 10 s per phase = ~40 s per drive.
-    const seqRead   = await runDiskSpdPhase({ exe, testFile, blockSize: '1M', queueDepth: 8,  durationSec: 10, isWrite: false, random: false });
+    // Four phases (CDM's default Standard columns): SEQ1M Q8T1 + RND4K Q32T1.
+    // WRITES RUN FIRST on purpose: -c1G creates the test file, but a
+    // freshly-created file has no valid data on disk — NTFS reads of
+    // never-written regions don't reliably reach the physical drive, so a
+    // read-first order measures the filesystem, not the SSD (CDM fills its
+    // test file before reading for the same reason). The 10 s sequential
+    // write pass rewrites the whole 1 GiB file several times over, so the
+    // read phases that follow hit real on-disk data.
     const seqWrite  = await runDiskSpdPhase({ exe, testFile, blockSize: '1M', queueDepth: 8,  durationSec: 10, isWrite: true,  random: false });
-    const rnd4kRead = await runDiskSpdPhase({ exe, testFile, blockSize: '4K', queueDepth: 32, durationSec: 10, isWrite: false, random: true });
+    const seqRead   = await runDiskSpdPhase({ exe, testFile, blockSize: '1M', queueDepth: 8,  durationSec: 10, isWrite: false, random: false });
     const rnd4kWrite= await runDiskSpdPhase({ exe, testFile, blockSize: '4K', queueDepth: 32, durationSec: 10, isWrite: true,  random: true });
+    const rnd4kRead = await runDiskSpdPhase({ exe, testFile, blockSize: '4K', queueDepth: 32, durationSec: 10, isWrite: false, random: true });
 
     if (!seqRead || !seqWrite || !rnd4kRead || !rnd4kWrite) {
       return {
@@ -1453,32 +1465,40 @@ ipcMain.handle('sys:run-diagnostics', async (event, config) => {
       if (cinebenchDone && furmarkDone && prime95Done) {
         event.sender.send('sys:diag-log', "Wrapping up diagnostic tests and saving results...");
 
-        // Stop monitor and dialog dismisser
-        try { monitorProc.kill(); } catch(e) {}
-        try { dismisserProc && dismisserProc.kill(); } catch(e) {}
-        
+        // v1.4.9 — keep the sensor monitor ALIVE until the SSD benchmark and
+        // RAM stress finish too. It used to be killed here, before these two
+        // awaits, so the tail of the run (up to several minutes of DiskSpd +
+        // RAM work) was missing from the temperature log — the report's
+        // "start of test till end" curve stopped early.
         const diskResult = await diskSpeedsPromise;
         const ramResult = await ramPromise;
 
+        // NOW everything is done — stop monitoring.
+        try { monitorProc.kill(); } catch(e) {}
+        try { dismisserProc && dismisserProc.kill(); } catch(e) {}
+
+        // v1.4.9 — no samples means NO DATA (null), never a fabricated
+        // 35/85/68. Placeholder temps on a QC certificate are worse than an
+        // honest blank (same rule as the v1.4.5 mock-data purge).
         const validCpuTemps = cpuTemps.filter(t => typeof t === 'number' && !isNaN(t));
-        const cpuMin = validCpuTemps.length > 0 ? Math.min(...validCpuTemps) : 35;
-        const cpuMax = validCpuTemps.length > 0 ? Math.max(...validCpuTemps) : 85;
-        const cpuAvg = validCpuTemps.length > 0 ? Math.round(validCpuTemps.reduce((a, b) => a + b, 0) / validCpuTemps.length) : 68;
+        const cpuMin = validCpuTemps.length > 0 ? Math.round(Math.min(...validCpuTemps)) : null;
+        const cpuMax = validCpuTemps.length > 0 ? Math.round(Math.max(...validCpuTemps)) : null;
+        const cpuAvg = validCpuTemps.length > 0 ? Math.round(validCpuTemps.reduce((a, b) => a + b, 0) / validCpuTemps.length) : null;
 
         const validGpuTemps = gpuTemps.filter(t => typeof t === 'number' && !isNaN(t));
-        const gpuMin = validGpuTemps.length > 0 ? Math.min(...validGpuTemps) : 40;
-        const gpuMax = validGpuTemps.length > 0 ? Math.max(...validGpuTemps) : 78;
-        const gpuAvg = validGpuTemps.length > 0 ? Math.round(validGpuTemps.reduce((a, b) => a + b, 0) / validGpuTemps.length) : 70;
+        const gpuMin = validGpuTemps.length > 0 ? Math.round(Math.min(...validGpuTemps)) : null;
+        const gpuMax = validGpuTemps.length > 0 ? Math.round(Math.max(...validGpuTemps)) : null;
+        const gpuAvg = validGpuTemps.length > 0 ? Math.round(validGpuTemps.reduce((a, b) => a + b, 0) / validGpuTemps.length) : null;
 
         resolve({
           success: true,
-          cpuTempMin: Math.round(cpuMin),
-          cpuTempMax: Math.round(cpuMax),
-          cpuTempAvg: Math.round(cpuAvg),
+          cpuTempMin: cpuMin,
+          cpuTempMax: cpuMax,
+          cpuTempAvg: cpuAvg,
           cpuTempLog: validCpuTemps.map(t => Math.round(t)),
-          gpuTempMin: Math.round(gpuMin),
-          gpuTempMax: Math.round(gpuMax),
-          gpuTempAvg: Math.round(gpuAvg),
+          gpuTempMin: gpuMin,
+          gpuTempMax: gpuMax,
+          gpuTempAvg: gpuAvg,
           gpuTempLog: validGpuTemps.map(t => Math.round(t)),
           cinebenchScore,
           furmarkScore,

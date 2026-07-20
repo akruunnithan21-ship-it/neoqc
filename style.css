@@ -547,6 +547,10 @@
     flex-direction: column;
     position: relative;
     overflow: hidden;
+    /* The landing screen is always dark — buttons don't inherit body color
+       (UA default is black), so the text must be explicitly light or the
+       titles render black-on-dark and disappear. */
+    color: #F1F5FB;
   }
   
   /* Grid pattern effect inside button */
@@ -611,11 +615,12 @@
     font-weight: 700;
     margin-bottom: 6px;
     transition: color 0.3s ease;
+    color: #F1F5FB;   /* always-dark landing — never inherit theme black */
   }
-  
+
   .mode-text {
     font-size: 0.85rem;
-    color: var(--text-muted);
+    color: rgba(226, 232, 244, 0.72);   /* light muted; --text-muted goes dark in light theme */
     line-height: 1.35;
     position: relative;
     z-index: 2;
@@ -4235,3 +4240,54 @@ body.dark-mode .autocomplete-list::-webkit-scrollbar-thumb:hover {
   text-transform: uppercase;
 }
 body.dark-mode .card-query-banner { color: #fcd34d; }
+
+/* ══════════════════════════════════════════════════════
+   SPEC VERIFICATION ROWS (v1.4.9) — client panel redesign
+   One row per component: target vs detected + verdict chip.
+   ══════════════════════════════════════════════════════ */
+.sv-list {
+  display: flex; flex-direction: column;
+  border: 1px solid var(--glass-border); border-radius: 10px;
+  background: rgba(255,255,255,0.02); overflow: hidden;
+}
+.sv-row {
+  display: grid; grid-template-columns: 64px 1fr auto;
+  gap: 10px; align-items: center;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--glass-border);
+}
+.sv-row:last-child { border-bottom: none; }
+.sv-cat {
+  font-size: 0.68rem; font-weight: 800; text-transform: uppercase;
+  letter-spacing: 0.06em; color: var(--text-muted);
+}
+.sv-vals { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.sv-val  { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+.sv-tag {
+  flex-shrink: 0; font-size: 0.6rem; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.05em; width: 58px;
+}
+.sv-tag-target   { color: var(--primary-pink); }
+.sv-tag-detected { color: #10b981; }
+.sv-text {
+  font-family: 'JetBrains Mono', monospace; font-size: 0.72rem;
+  color: var(--text-dark); word-break: break-word; line-height: 1.35;
+}
+.sv-checkline label {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 0.7rem; color: var(--text-muted); cursor: pointer; margin: 0;
+}
+.sv-status { justify-self: end; }
+.sv-chip {
+  display: inline-block; padding: 2px 9px; border-radius: 999px;
+  font-size: 0.62rem; font-weight: 800; letter-spacing: 0.04em;
+  text-transform: uppercase; white-space: nowrap;
+  background: rgba(127,127,160,0.12); color: var(--text-muted);
+  border: 1px solid var(--glass-border);
+}
+.sv-chip.match    { background: rgba(16,185,129,0.14); color: #10b981; border-color: rgba(16,185,129,0.35); }
+.sv-chip.size     { background: rgba(20,184,166,0.14); color: #14b8a6; border-color: rgba(20,184,166,0.35); }
+.sv-chip.physical { background: rgba(16,185,129,0.14); color: #10b981; border-color: rgba(16,185,129,0.35); }
+.sv-chip.mismatch { background: rgba(239,68,68,0.14);  color: #ef4444; border-color: rgba(239,68,68,0.35); }
+.sv-chip.unknown  { background: rgba(245,158,11,0.12); color: #d97706; border-color: rgba(245,158,11,0.35); }
+body.dark-mode .sv-chip.unknown { color: #fcd34d; }

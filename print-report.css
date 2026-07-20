@@ -16,8 +16,16 @@
 */
 
 @media print {
-  /* Hide the app, show only the report */
-  body * {
+  /* The paper is ALWAYS white — the app's dark mode must never reach the
+     PDF. body itself is not covered by the `body *` rule below, so without
+     this, dark-mode's body background painted onto every printed page. */
+  html, body {
+    background: #fff !important;
+  }
+  /* Hide the app, show only the report. The :not() guards keep the report's
+     own backgrounds (white pages, pink accents, tinted tables) intact —
+     the old plain `body *` rule stripped those too. */
+  body *:not(#print-report-container):not(#print-report-container *) {
     visibility: hidden;
     background: transparent !important;
   }
@@ -54,6 +62,7 @@
 #print-report-container {
   color: #000;
   background: #fff;
+  color-scheme: light;
   font-size: 9.5pt;
   line-height: 1.4;
   font-family: 'Hanken Grotesk', 'Outfit', sans-serif;

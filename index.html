@@ -280,34 +280,73 @@
           <div class="client-panel">
             <h3>1. Specification Verification</h3>
             
-            <div class="specs-comparison-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
-              <!-- Target Specs -->
-              <div class="spec-column target-specs" style="background: rgba(255,255,255,0.02); border: 1px solid var(--glass-border); padding: 10px; border-radius: 8px;">
-                <h4 style="font-size: 0.7rem; color: var(--primary-pink); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 8px; margin-top: 0;">📋 Target Specs</h4>
-                <div class="specs-readout" style="display: flex; flex-direction: column; gap: 6px;">
-                  <div class="spec-item"><span class="spec-label">Mobo:</span> <span id="c-target-mobo" class="spec-val font-mono" style="font-size: 0.72rem; color: var(--text-dark); word-break: break-all;">--</span></div>
-                  <div class="spec-item"><span class="spec-label">CPU:</span> <span id="c-target-cpu" class="spec-val font-mono" style="font-size: 0.72rem; color: var(--text-dark); word-break: break-all;">--</span></div>
-                  <div class="spec-item"><span class="spec-label">GPU:</span> <span id="c-target-gpu" class="spec-val font-mono" style="font-size: 0.72rem; color: var(--text-dark); word-break: break-all;">--</span></div>
-                  <div class="spec-item"><span class="spec-label">RAM:</span> <span id="c-target-ram" class="spec-val font-mono" style="font-size: 0.72rem; color: var(--text-dark); word-break: break-all;">--</span></div>
-                  <div class="spec-item"><span class="spec-label">SSD:</span> <span id="c-target-storage" class="spec-val font-mono" style="font-size: 0.72rem; color: var(--text-dark); word-break: break-all;">--</span></div>
-                  <div class="spec-item"><span class="spec-label">Cooler:</span> <span id="c-target-cooler" class="spec-val font-mono" style="font-size: 0.72rem; color: var(--text-dark); word-break: break-all;">--</span></div>
-                  <div class="spec-item"><span class="spec-label">PSU:</span> <span id="c-target-psu" class="spec-val font-mono" style="font-size: 0.72rem; color: var(--text-dark); word-break: break-all;">--</span></div>
-                  <div class="spec-item"><span class="spec-label">Case:</span> <span id="c-target-case" class="spec-val font-mono" style="font-size: 0.72rem; color: var(--text-dark); word-break: break-all;">--</span></div>
+            <!-- v1.4.9 — unified per-component verification rows (target vs detected
+                 side by side, per-row verdict chip). All legacy element IDs kept:
+                 c-target-*, c-spec-*, c-verify-* are populated by existing code. -->
+            <div class="sv-list">
+              <div class="sv-row" data-cat="mobo">
+                <div class="sv-cat">Mobo</div>
+                <div class="sv-vals">
+                  <div class="sv-val"><span class="sv-tag sv-tag-target">Target</span><span id="c-target-mobo" class="sv-text">--</span></div>
+                  <div class="sv-val"><span class="sv-tag sv-tag-detected">Detected</span><span id="c-spec-mobo" class="sv-text">Not detected</span></div>
                 </div>
+                <div class="sv-status"><span id="sv-status-mobo" class="sv-chip pending">·</span></div>
               </div>
-              <!-- Detected Specs -->
-              <div class="spec-column detected-specs" style="background: rgba(255,255,255,0.02); border: 1px solid var(--glass-border); padding: 10px; border-radius: 8px;">
-                <h4 style="font-size: 0.7rem; color: #10b981; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 8px; margin-top: 0;">🔍 Detected Specs</h4>
-                <div class="specs-readout" style="display: flex; flex-direction: column; gap: 6px;">
-                  <div class="spec-item"><span class="spec-label">Mobo:</span> <span id="c-spec-mobo" class="spec-val font-mono" style="font-size: 0.72rem; color: var(--text-dark); word-break: break-all;">Not detected</span></div>
-                  <div class="spec-item"><span class="spec-label">CPU:</span> <span id="c-spec-cpu" class="spec-val font-mono" style="font-size: 0.72rem; color: var(--text-dark); word-break: break-all;">Not detected</span></div>
-                  <div class="spec-item"><span class="spec-label">GPU:</span> <span id="c-spec-gpu" class="spec-val font-mono" style="font-size: 0.72rem; color: var(--text-dark); word-break: break-all;">Not detected</span></div>
-                  <div class="spec-item"><span class="spec-label">RAM:</span> <span id="c-spec-ram" class="spec-val font-mono" style="font-size: 0.72rem; color: var(--text-dark); word-break: break-all;">Not detected</span></div>
-                  <div class="spec-item"><span class="spec-label">SSD:</span> <span id="c-spec-storage" class="spec-val font-mono" style="font-size: 0.72rem; color: var(--text-dark); word-break: break-all;">Not detected</span></div>
-                  <div class="spec-item" style="display: flex; align-items: center; justify-content: space-between;"><span class="spec-label">Cooler:</span> <label style="font-size:0.68rem; display:flex; align-items:center; gap:2px; cursor:pointer; color: var(--text-dark);"><input type="checkbox" id="c-verify-cooler"> Verified</label></div>
-                  <div class="spec-item" style="display: flex; align-items: center; justify-content: space-between;"><span class="spec-label">PSU:</span> <label style="font-size:0.68rem; display:flex; align-items:center; gap:2px; cursor:pointer; color: var(--text-dark);"><input type="checkbox" id="c-verify-psu"> Verified</label></div>
-                  <div class="spec-item" style="display: flex; align-items: center; justify-content: space-between;"><span class="spec-label">Case:</span> <label style="font-size:0.68rem; display:flex; align-items:center; gap:2px; cursor:pointer; color: var(--text-dark);"><input type="checkbox" id="c-verify-case"> Verified</label></div>
+              <div class="sv-row" data-cat="cpu">
+                <div class="sv-cat">CPU</div>
+                <div class="sv-vals">
+                  <div class="sv-val"><span class="sv-tag sv-tag-target">Target</span><span id="c-target-cpu" class="sv-text">--</span></div>
+                  <div class="sv-val"><span class="sv-tag sv-tag-detected">Detected</span><span id="c-spec-cpu" class="sv-text">Not detected</span></div>
                 </div>
+                <div class="sv-status"><span id="sv-status-cpu" class="sv-chip pending">·</span></div>
+              </div>
+              <div class="sv-row" data-cat="gpu">
+                <div class="sv-cat">GPU</div>
+                <div class="sv-vals">
+                  <div class="sv-val"><span class="sv-tag sv-tag-target">Target</span><span id="c-target-gpu" class="sv-text">--</span></div>
+                  <div class="sv-val"><span class="sv-tag sv-tag-detected">Detected</span><span id="c-spec-gpu" class="sv-text">Not detected</span></div>
+                </div>
+                <div class="sv-status"><span id="sv-status-gpu" class="sv-chip pending">·</span></div>
+              </div>
+              <div class="sv-row" data-cat="ram">
+                <div class="sv-cat">RAM</div>
+                <div class="sv-vals">
+                  <div class="sv-val"><span class="sv-tag sv-tag-target">Target</span><span id="c-target-ram" class="sv-text">--</span></div>
+                  <div class="sv-val"><span class="sv-tag sv-tag-detected">Detected</span><span id="c-spec-ram" class="sv-text">Not detected</span></div>
+                </div>
+                <div class="sv-status"><span id="sv-status-ram" class="sv-chip pending">·</span></div>
+              </div>
+              <div class="sv-row" data-cat="storage">
+                <div class="sv-cat">SSD</div>
+                <div class="sv-vals">
+                  <div class="sv-val"><span class="sv-tag sv-tag-target">Target</span><span id="c-target-storage" class="sv-text">--</span></div>
+                  <div class="sv-val"><span class="sv-tag sv-tag-detected">Detected</span><span id="c-spec-storage" class="sv-text">Not detected</span></div>
+                </div>
+                <div class="sv-status"><span id="sv-status-storage" class="sv-chip pending">·</span></div>
+              </div>
+              <div class="sv-row sv-physical" data-cat="cooler">
+                <div class="sv-cat">Cooler</div>
+                <div class="sv-vals">
+                  <div class="sv-val"><span class="sv-tag sv-tag-target">Target</span><span id="c-target-cooler" class="sv-text">--</span></div>
+                  <div class="sv-val sv-checkline"><label><input type="checkbox" id="c-verify-cooler"> Physically verified by technician</label></div>
+                </div>
+                <div class="sv-status"><span id="sv-status-cooler" class="sv-chip pending">·</span></div>
+              </div>
+              <div class="sv-row sv-physical" data-cat="psu">
+                <div class="sv-cat">PSU</div>
+                <div class="sv-vals">
+                  <div class="sv-val"><span class="sv-tag sv-tag-target">Target</span><span id="c-target-psu" class="sv-text">--</span></div>
+                  <div class="sv-val sv-checkline"><label><input type="checkbox" id="c-verify-psu"> Physically verified by technician</label></div>
+                </div>
+                <div class="sv-status"><span id="sv-status-psu" class="sv-chip pending">·</span></div>
+              </div>
+              <div class="sv-row sv-physical" data-cat="case">
+                <div class="sv-cat">Case</div>
+                <div class="sv-vals">
+                  <div class="sv-val"><span class="sv-tag sv-tag-target">Target</span><span id="c-target-case" class="sv-text">--</span></div>
+                  <div class="sv-val sv-checkline"><label><input type="checkbox" id="c-verify-case"> Physically verified by technician</label></div>
+                </div>
+                <div class="sv-status"><span id="sv-status-case" class="sv-chip pending">·</span></div>
               </div>
             </div>
             
@@ -2044,18 +2083,22 @@
     <div class="glass-slab modal-card" style="max-width: 650px; width: 100%; padding: 30px; border-radius: 20px;">
       <div class="modal-header" style="border-bottom: 1px solid var(--glass-border); padding-bottom: 15px; margin-bottom: 20px;">
         <h2 style="font-family: 'Syncopate', sans-serif; font-size: 1.3rem; color: var(--primary-pink); letter-spacing: 0.05em; margin: 0;">NEO QC UPDATED</h2>
-        <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; font-weight: 700; background: rgba(231, 1, 78, 0.1); color: var(--primary-pink); padding: 4px 8px; border-radius: 4px;">v1.4.8</span>
+        <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; font-weight: 700; background: rgba(231, 1, 78, 0.1); color: var(--primary-pink); padding: 4px 8px; border-radius: 4px;">v1.4.9</span>
       </div>
       <div class="modal-body" style="font-size: 0.92rem; line-height: 1.6; color: var(--text-dark); max-height: 420px; overflow-y: auto; padding-right: 5px;">
-        <p style="margin-top: 0;">An update has been installed. Here are the key improvements in NeoQC <strong>v1.4.8</strong>:</p>
+        <p style="margin-top: 0;">An update has been installed. Here are the key improvements in NeoQC <strong>v1.4.9</strong>:</p>
         <ul style="padding-left: 20px; display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px;">
-          <li><strong>New: Sales ↔ Technician queries</strong>: Sales staff can raise a question against any build from the dashboard Staff View. It appears right inside the ticket, and the concerning technician replies from there — colour-coded Q&amp;A, an "awaiting reply" badge on the ticket card, and a resolve toggle when it's sorted.</li>
-          <li><strong>Beautified customer Track-Order page</strong>: A softer, more organic look — a living aurora backdrop, layered glass, a colour-coded animated progress tracker, and gradient accents.</li>
-          <li><strong>Fixed: Staff View "Enter" button</strong>: The PIN button no longer sticks out past its card on narrower screens — it now stays neatly aligned at every width.</li>
+          <li><strong>Accurate SSD benchmarking</strong>: The DiskSpd benchmark now mirrors CrystalDiskMark's exact methodology — the old run forced hardware write-through (reporting write speeds far below reality) and read from an unwritten test file. Writes now run first, with warm-up and non-compressible data. Expect CDM-comparable numbers on the report.</li>
+          <li><strong>CPU temperature covers the whole test</strong>: Sensor sampling now runs from the very start of diagnostics until the SSD benchmark and RAM stress finish (it used to stop early). No samples = honest blank, never a made-up number.</li>
+          <li><strong>Smarter spec verification</strong>: When hardware can't report brand/model (RAM often only reports size), the check now falls back to capacity matching for RAM/SSD (with DDR-generation guard) and model-number matching for GPU/motherboard. CPU stays strict. The panel is redesigned into clean per-component rows with verdict chips, and ticked physical checks (cooler/PSU/case) count as verified.</li>
+          <li><strong>Detected specs stay on the ticket</strong>: Auto-detected hardware no longer vanishes after Update Ticket — results merge per-field (a failed CPU probe no longer throws away the GPU/RAM/storage readings) and sync across machines.</li>
+          <li><strong>Fixed: PDF reports printed dark</strong>: Saving or printing the QC report while the app is in dark mode produced dark pages. The report now always prints on white, with its pink accents intact.</li>
+          <li><strong>Fixed: unreadable landing buttons</strong>: "Staff System" / "Testing Client" titles were black-on-dark in light theme.</li>
+          <li><strong>Sales queries polish</strong>: The awaiting-reply notice on ticket cards is now a proper banner strip, and queries show who in sales asked.</li>
         </ul>
       </div>
       <div class="modal-footer" style="border-top: 1px solid var(--glass-border); padding-top: 15px; display: flex; justify-content: flex-end; margin-top: 20px;">
-        <button id="btn-close-changelog" class="primary-pink-btn" style="padding: 10px 24px; font-weight: 700; font-size: 0.95rem;">Launch NeoQC v1.4.8</button>
+        <button id="btn-close-changelog" class="primary-pink-btn" style="padding: 10px 24px; font-weight: 700; font-size: 0.95rem;">Launch NeoQC v1.4.9</button>
       </div>
     </div>
   </div>

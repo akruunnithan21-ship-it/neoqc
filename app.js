@@ -895,6 +895,10 @@ let appState = {
 
 let currentMode = "selector"; // "selector", "staff", "client"
 let editingTicketId = null;
+// Raw result of the LAST in-modal 🔍 Auto-Detect run (admin side). The save
+// path merges this per-field with the ticket's stored detectedSpecs — the
+// display divs are display-only now, never the source of truth.
+let adminDetectedSpecs = null;
 
 // ==========================================================================
 // INITIALIZATION
@@ -1506,6 +1510,7 @@ function isI514thGen(cpuStr) {
 
 function openTicketModal(ticketId = null) {
   editingTicketId = ticketId;
+  adminDetectedSpecs = null;   // fresh modal — stale detect runs must not leak between tickets
   hideConflictBanner();
   const modal = document.getElementById('ticket-modal');
   const form = document.getElementById('ticket-form');
@@ -2716,20 +2721,42 @@ async function handleTicketFormSubmit(e) {
   updatedTicket.damagedComponents = damagedComponentsList.slice();
   updatedTicket.specs.__damaged = damagedComponentsList.slice();
 
-  if (detectedCpuVal !== '--' && detectedCpuVal !== 'Not detected') {
-    updatedTicket.detectedSpecs = {
-      cpu: detectedCpuVal,
-      igpu: (detectedIgpuVal === '--' || detectedIgpuVal === 'None') ? 'None' : detectedIgpuVal,
-      gpu: (detectedGpuVal === '--' || detectedGpuVal === 'Not detected') ? '' : detectedGpuVal,
-      ram: detectedRamVal,
-      storage: detectedStorageVal,
-      mobo: existingTicket && existingTicket.detectedSpecs ? (existingTicket.detectedSpecs.mobo || '') : '',
-      coolerVerified: existingTicket && existingTicket.detectedSpecs ? !!existingTicket.detectedSpecs.coolerVerified : false,
-      psuVerified: existingTicket && existingTicket.detectedSpecs ? !!existingTicket.detectedSpecs.psuVerified : false,
-      caseVerified: existingTicket && existingTicket.detectedSpecs ? !!existingTicket.detectedSpecs.caseVerified : false
+  // v1.4.9 — detected specs are merged PER FIELD, never gated on CPU alone.
+  // The old logic threw away the entire panel when the CPU probe failed
+  // ("Failed to detect") even if GPU/RAM/storage detected fine — that's why
+  // detected specs vanished after Update Ticket. Placeholder strings are
+  // never saved as hardware, a fresh real reading wins, and an old reading
+  // is kept when the new probe failed.
+  const realDetVal = v => {
+    const s = (v == null ? '' : String(v)).trim();
+    return (s && s !== '--' && s !== 'Not detected' && s !== 'Failed to detect' && s !== 'None') ? s : '';
+  };
+  {
+    const prev = (existingTicket && existingTicket.detectedSpecs) || {};
+    const fresh = adminDetectedSpecs || {};
+    const pick = (a, b) => realDetVal(a) || realDetVal(b) || '';
+    const merged = {
+      cpu:     pick(fresh.cpu, prev.cpu || detectedCpuVal),
+      igpu:    pick(fresh.igpu, prev.igpu || detectedIgpuVal) || 'None',
+      gpu:     pick(fresh.dgpu || fresh.gpu, prev.gpu || detectedGpuVal),
+      ram:     pick(fresh.ram, prev.ram || detectedRamVal),
+      storage: pick(fresh.storage, prev.storage || detectedStorageVal),
+      mobo:    pick(fresh.motherboard, prev.mobo),
+      coolerVerified: !!prev.coolerVerified,
+      psuVerified: !!prev.psuVerified,
+      caseVerified: !!prev.caseVerified
     };
-  } else if (existingTicket && existingTicket.detectedSpecs) {
-    updatedTicket.detectedSpecs = existingTicket.detectedSpecs;
+    const hasAnything = merged.cpu || merged.gpu || merged.ram || merged.storage || merged.mobo || (merged.igpu && merged.igpu !== 'None');
+    if (hasAnything) {
+      updatedTicket.detectedSpecs = merged;
+      // Mirror into specs.__detected so the JSONB specs column carries it
+      // cross-machine even if this ticket reaches Supabase through a path
+      // other than syncTicketToCloud (same pattern as __prices/__damaged).
+      updatedTicket.specs.__detected = merged;
+    } else if (existingTicket && existingTicket.detectedSpecs) {
+      updatedTicket.detectedSpecs = existingTicket.detectedSpecs;
+      updatedTicket.specs.__detected = existingTicket.detectedSpecs;
+    }
   }
 
   // Sync checkbox with activation state
@@ -2845,6 +2872,12 @@ async function setupClientMode() {
   });
 
   // Trigger system specs detection
+  // Physical-verification ticks re-evaluate the match rows live (v1.4.9)
+  ['c-verify-cooler', 'c-verify-psu', 'c-verify-case'].forEach(id => {
+    const box = document.getElementById(id);
+    if (box) box.addEventListener('change', () => { checkSpecsMatch(); checkClientFormReady(); });
+  });
+
   document.getElementById('btn-client-detect-hw').addEventListener('click', async () => {
     const btn = document.getElementById('btn-client-detect-hw');
     const oldText = btn.textContent;
@@ -3736,8 +3769,9 @@ function setupEventListeners() {
 
     try {
       const detected = await ipcRenderer.invoke('sys:detect-hw');
-      
-      // Update modal spec elements
+      adminDetectedSpecs = detected;   // v1.4.9 — source of truth for the save path
+
+      // Update modal spec elements (display only)
       document.getElementById('modal-spec-cpu').textContent = detected.cpu || "Failed to detect";
       document.getElementById('modal-spec-igpu').textContent = detected.igpu || "None";
       document.getElementById('modal-spec-gpu').textContent = detected.dgpu || "None";
@@ -5164,8 +5198,12 @@ async function executeDiagnosticsWorkflow(isModal) {
   }
 
   appendConsoleLine(boxId, `[SYS] All stress tests completed successfully.`);
-  appendConsoleLine(boxId, `[SYS] CPU avg ${res.cpuTempAvg}°C (min ${res.cpuTempMin}°C / max ${res.cpuTempMax}°C) over ${(res.cpuTempLog || []).length} samples.`);
-  appendConsoleLine(boxId, `[SYS] GPU avg ${res.gpuTempAvg}°C (min ${res.gpuTempMin}°C / max ${res.gpuTempMax}°C) over ${(res.gpuTempLog || []).length} samples.`);
+  appendConsoleLine(boxId, res.cpuTempAvg != null
+    ? `[SYS] CPU avg ${res.cpuTempAvg}°C (min ${res.cpuTempMin}°C / max ${res.cpuTempMax}°C) over ${(res.cpuTempLog || []).length} samples — full run, start to finish.`
+    : `[SYS] CPU temperature: no sensor samples captured (check [SENSORS] inventory above).`);
+  appendConsoleLine(boxId, res.gpuTempAvg != null
+    ? `[SYS] GPU avg ${res.gpuTempAvg}°C (min ${res.gpuTempMin}°C / max ${res.gpuTempMax}°C) over ${(res.gpuTempLog || []).length} samples.`
+    : `[SYS] GPU temperature: no sensor samples captured (iGPU-only build or sensor not exposed).`);
   appendConsoleLine(boxId, `[SYS] Cinebench R23: ${res.cinebenchScore} pts | FurMark: ${res.furmarkScore} pts.`);
   appendConsoleLine(boxId, `[SYS] SSD — Read: ${res.ssdRead} MB/s, Write: ${res.ssdWrite} MB/s.`);
   appendConsoleLine(boxId, `[SYS] RAM stress test: ${res.ramPassed ? "PASSED ✓" : "FAILED ✗"}${res.ramAllocatedMB != null ? ` (${res.ramAllocatedMB} MB, ${res.ramFaults || 0} faults)` : ''}.`);
@@ -5559,7 +5597,9 @@ function checkSpecsMatch() {
   const ticketId = document.getElementById('client-ticket-select').value;
   if (!ticketId) return;
   const ticket = appState.tickets.find(t => t.id === ticketId);
-  if (!ticket || !detectedSpecs) return;
+  if (!ticket) return;
+  // NOTE: no early return on !detectedSpecs — the per-row chips render
+  // meaningful pre-detection states ("awaiting detect", physical ticks).
 
   // v1.4.4 fix — cross-check via token-set scoring instead of naive substring.
   // Retail names ("ASUS PRIME B650M-A WIFI DDR5 mATX Motherboard") and WMIC
@@ -5595,44 +5635,112 @@ function checkSpecsMatch() {
     return Math.max(sAB, sBA) >= 0.55;
   }
 
-  const targetMobo = ticket.specs && ticket.specs.mobo || '';
-  const targetCpu = ticket.specs && ticket.specs.cpu || '';
-  const targetGpu = ticket.specs && ticket.specs.gpu || '';
-  const targetRam = ticket.specs && ticket.specs.ram || '';
-  const targetStorage = ticket.specs && ticket.specs.storage || '';
+  // ── v1.4.9 category-aware fallbacks ────────────────────────────────
+  // Detection tools often can't see brand/model (RAM SPD hidden, generic
+  // NVMe strings, …). When the NAME doesn't match, fall back to what the
+  // hardware can honestly tell us: capacity for RAM/SSD (+ DDR-gen guard),
+  // shared model numbers for GPU/mobo. CPU strings are always complete →
+  // CPU stays name-match only.
 
-  const detMobo = detectedSpecs.motherboard || '';
-  const detCpu = detectedSpecs.cpu || '';
-  const detGpu = detectedSpecs.dgpu || detectedSpecs.gpu || '';
-  const detRam = detectedSpecs.ram || '';
-  const detStorage = detectedSpecs.storage || '';
+  function capacityGB(s) {
+    if (!s) return null;
+    var str = String(s).toLowerCase();
+    var m = str.match(/(\d+)\s*x\s*(\d+(?:\.\d+)?)\s*gb/);        // "2 x 16GB"
+    if (m) return parseInt(m[1], 10) * parseFloat(m[2]);
+    var best = null, re = /(\d+(?:\.\d+)?)\s*(tb|gb)/g, mm;
+    while ((mm = re.exec(str))) {
+      var v = parseFloat(mm[1]) * (mm[2] === 'tb' ? 1000 : 1);
+      if (best === null || v > best) best = v;                     // biggest figure = the capacity
+    }
+    return best;
+  }
+  function capacityMatches(target, detected) {
+    var t = capacityGB(target), d = capacityGB(detected);
+    if (t == null || d == null) return false;
+    // Real drives/RAM report short of the label (GiB vs GB, reserved space):
+    // 2TB → 1863 GB, 32GB → 31.8 GB. Accept detected in [0.82, 1.15] × target.
+    var r = d / t;
+    return r >= 0.82 && r <= 1.15;
+  }
+  function ddrGenConflict(target, detected) {
+    var t = /ddr\s*(\d)/i.exec(target || ''), d = /ddr\s*(\d)/i.exec(detected || '');
+    return !!(t && d && t[1] !== d[1]);
+  }
+  function modelNumsMatch(target, detected) {
+    if (!target || !detected) return false;
+    // Digit-led (4070, 7800x3d) AND letter-led (b650m, x870e, z790) model
+    // tokens — motherboard chipsets/models usually start with one letter.
+    var re = /\b[a-z]?\d{3,5}[a-z0-9]*\b/g;
+    var t = String(target).toLowerCase().match(re) || [];
+    var d = new Set(String(detected).toLowerCase().match(re) || []);
+    for (var i = 0; i < t.length; i++) if (d.has(t[i])) return true;
+    return false;
+  }
 
-  const moboMatch = tokenMatch(targetMobo, detMobo);
-  const cpuMatch = tokenMatch(targetCpu, detCpu);
-  const gpuMatch = tokenMatch(targetGpu, detGpu);
-  const ramMatch = tokenMatch(targetRam, detRam);
-  const storageMatch = tokenMatch(targetStorage, detStorage);
+  var specs = ticket.specs || {};
+  var det = detectedSpecs || {};
+  var detectionRan = !!detectedSpecs;
 
-  var mismatches = [];
-  if (!moboMatch) mismatches.push('motherboard');
-  if (!cpuMatch) mismatches.push('CPU');
-  if (!gpuMatch) mismatches.push('GPU');
-  if (!ramMatch) mismatches.push('RAM');
-  if (!storageMatch) mismatches.push('storage');
+  var autoCats = [
+    { cat: 'mobo',    label: 'motherboard', target: specs.mobo,    detected: det.motherboard,          fallback: 'model' },
+    { cat: 'cpu',     label: 'CPU',         target: specs.cpu,     detected: det.cpu,                  fallback: null },
+    { cat: 'gpu',     label: 'GPU',         target: specs.gpu,     detected: det.dgpu || det.gpu,      fallback: 'model' },
+    { cat: 'ram',     label: 'RAM',         target: specs.ram,     detected: det.ram,                  fallback: 'capacity', genGuard: true },
+    { cat: 'storage', label: 'storage',     target: specs.storage, detected: det.storage,              fallback: 'capacity' }
+  ];
+
+  function setChip(cat, cls, text) {
+    var el = document.getElementById('sv-status-' + cat);
+    if (el) { el.className = 'sv-chip ' + cls; el.textContent = text; }
+  }
+
+  var mismatches = [], awaiting = [], notDetected = [];
+
+  autoCats.forEach(function (c) {
+    var target = (c.target || '').trim();
+    var detected = (c.detected || '').trim();
+    if (!target)            { setChip(c.cat, '', '—'); return; }                        // nothing to verify
+    if (!detectionRan)      { setChip(c.cat, 'pending', 'awaiting detect'); awaiting.push(c.label); return; }
+    if (!detected)          { setChip(c.cat, 'unknown', 'not detected');  notDetected.push(c.label); return; }
+    if (tokenMatch(target, detected)) { setChip(c.cat, 'match', '✓ match'); return; }
+    if (c.genGuard && ddrGenConflict(target, detected)) { setChip(c.cat, 'mismatch', '✗ DDR gen'); mismatches.push(c.label + ' (DDR generation)'); return; }
+    if (c.fallback === 'capacity' && capacityMatches(target, detected)) { setChip(c.cat, 'size', '✓ size ' + Math.round(capacityGB(target)) + ' GB'); return; }
+    if (c.fallback === 'model' && modelNumsMatch(target, detected))     { setChip(c.cat, 'size', '✓ model'); return; }
+    setChip(c.cat, 'mismatch', '✗ mismatch');
+    mismatches.push(c.label);
+  });
+
+  // Physical components — the technician eyeballs these; a ticked box IS the
+  // verification and counts as a pass.
+  var physicalPending = [];
+  [['cooler', 'c-verify-cooler'], ['psu', 'c-verify-psu'], ['case', 'c-verify-case']].forEach(function (p) {
+    var box = document.getElementById(p[1]);
+    if (box && box.checked) setChip(p[0], 'physical', '✓ verified');
+    else { setChip(p[0], 'pending', 'tick when checked'); physicalPending.push(p[0]); }
+  });
 
   const matchStatusEl = document.getElementById('specs-match-status');
   if (matchStatusEl) {
     matchStatusEl.classList.remove('hidden');
-    if (!mismatches.length) {
-      matchStatusEl.textContent = '✅ Specs Verification: MATCH SUCCESS';
-      matchStatusEl.style.background = 'rgba(16, 185, 129, 0.15)';
-      matchStatusEl.style.color = '#10b981';
-      matchStatusEl.style.borderColor = 'rgba(16, 185, 129, 0.3)';
-    } else {
-      matchStatusEl.textContent = '⚠️ Specs Verification: MISMATCH DETECTED — ' + mismatches.join(', ');
+    if (mismatches.length) {
+      matchStatusEl.textContent = '⚠️ Specs Verification: MISMATCH — ' + mismatches.join(', ');
       matchStatusEl.style.background = 'rgba(239, 68, 68, 0.15)';
       matchStatusEl.style.color = '#ef4444';
       matchStatusEl.style.borderColor = 'rgba(239, 68, 68, 0.3)';
+    } else if (!detectionRan || physicalPending.length) {
+      var todo = [];
+      if (!detectionRan) todo.push('run Auto-Detect');
+      if (physicalPending.length) todo.push('tick ' + physicalPending.join('/'));
+      matchStatusEl.textContent = '⏳ Verification in progress — ' + todo.join(' · ');
+      matchStatusEl.style.background = 'rgba(245, 158, 11, 0.12)';
+      matchStatusEl.style.color = '#d97706';
+      matchStatusEl.style.borderColor = 'rgba(245, 158, 11, 0.3)';
+    } else {
+      var note = notDetected.length ? ' (' + notDetected.join(', ') + ' not exposed by hardware — verified by size/technician)' : '';
+      matchStatusEl.textContent = '✅ Specs Verification: MATCH SUCCESS' + note;
+      matchStatusEl.style.background = 'rgba(16, 185, 129, 0.15)';
+      matchStatusEl.style.color = '#10b981';
+      matchStatusEl.style.borderColor = 'rgba(16, 185, 129, 0.3)';
     }
   }
 }
