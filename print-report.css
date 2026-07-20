@@ -46,14 +46,28 @@
     size: A4;
     margin: 9mm 10mm;
   }
+  /* v1.5.1 — FLOW, don't force.
+     Each .print-page used to `page-break-after: always`, so a section that
+     didn't fill its sheet left the rest of the page blank and pushed the next
+     section onto a fresh page. Now content flows continuously: a page breaks
+     only when it is genuinely full, and each section starts right where the
+     previous one ended. Sections still refuse to split across a boundary, so
+     nothing is cut in half. */
   .print-page {
-    page-break-after: always;
-  }
-  .print-page:last-child {
     page-break-after: auto;
   }
-  .print-section, .print-verdict-banner, .print-footer, .print-score-strip {
+  .print-section, .print-verdict-banner, .print-footer, .print-score-strip,
+  .print-page-subheader, .inv-print-table, .print-drivebench-card {
     page-break-inside: avoid;
+  }
+  /* Keep a heading glued to the content it introduces. */
+  .print-page-subheader {
+    page-break-after: avoid;
+  }
+  /* Widow/orphan control so a stray line never lands alone on a page. */
+  #print-report-container p, #print-report-container td, #print-report-container li {
+    orphans: 3;
+    widows: 3;
   }
 }
 
@@ -615,3 +629,62 @@
   margin-top: 3px;
 }
 #print-report-container .hidden { display: none !important; }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   v1.5.1 — CONTINUOUS FLOW POLISH
+   The report is no longer four fixed sheets with blank tails; sections run
+   one after another. These rules keep that flow looking deliberate rather
+   than merely tightened up.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* Sections breathe evenly instead of being padded out to fill a sheet. */
+#print-report-container .print-page + .print-page {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid #d8d8d8;
+}
+#print-report-container .print-section {
+  margin-bottom: 12px;
+}
+#print-report-container .print-section:last-child { margin-bottom: 0; }
+
+/* Section heads read as a clear start-of-section marker. */
+#print-report-container .print-page-subheader {
+  margin-top: 0;
+}
+
+/* Full hardware inventory table on the report — serials, part numbers. */
+#print-report-container .inv-print-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 8pt;
+  margin-top: 4px;
+}
+#print-report-container .inv-print-table th {
+  text-align: left;
+  font-size: 7pt;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  border-bottom: 1.5px solid #000;
+  padding: 3px 5px;
+}
+#print-report-container .inv-print-table td {
+  padding: 3px 5px;
+  border-bottom: 0.5px solid #ccc;
+  vertical-align: top;
+}
+#print-report-container .inv-print-table .inv-p-ser {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 7.5pt;
+  word-break: break-all;
+}
+#print-report-container .inv-p-tag {
+  display: inline-block;
+  border: 0.75px solid #E7014E;
+  color: #E7014E;
+  border-radius: 3px;
+  padding: 0 4px;
+  font-size: 6.5pt;
+  font-weight: bold;
+  letter-spacing: 0.04em;
+}

@@ -439,6 +439,53 @@
       }
     }
 
+    // ── Full hardware inventory (v1.5.1): brand / model / part no. / SERIAL ──
+    // Proves exactly which physical hardware shipped. Customer-supplied parts
+    // are tagged so the certificate distinguishes them from parts we sold.
+    var inv = ticket.detectedSpecs && ticket.detectedSpecs.inventory;
+    if (inv && $('print-inventory-body')) {
+      show('print-inventory-section');
+      var cs = ticket.customerSupplied || (ticket.specs && ticket.specs.__customerSupplied) || [];
+      var tag = function (cat) {
+        return cs.indexOf(cat) !== -1 ? ' <span class="inv-p-tag">CUSTOMER PART</span>' : '';
+      };
+      var join = function (arr) { return arr.filter(Boolean).join(' · '); };
+      var irows = [];
+      var imb = inv.motherboard || {};
+      if (imb.model || imb.manufacturer) {
+        irows.push(['Motherboard', join([imb.manufacturer, imb.model, imb.version]) + tag('motherboard'), imb.serial]);
+      }
+      (inv.cpus || []).forEach(function (c) {
+        irows.push(['CPU', join([c.name, c.socket, c.cores ? c.cores + 'C/' + c.threads + 'T' : '']) + tag('cpu'), c.processorId]);
+      });
+      (inv.gpus || []).forEach(function (g) {
+        irows.push(['GPU', join([g.name, g.vramGB ? g.vramGB + ' GB' : '', g.driverVersion ? 'driver ' + g.driverVersion : '']) + tag('gpu'), null]);
+      });
+      (inv.ramModules || []).forEach(function (m) {
+        irows.push(['RAM · ' + (m.slot || 'DIMM'),
+          join([m.manufacturer, m.partNumber, m.capacityGB ? m.capacityGB + ' GB' : '', m.ddrGen, m.configuredMHz ? m.configuredMHz + ' MHz' : '']) + tag('ram'),
+          m.serial]);
+      });
+      (inv.disks || []).forEach(function (dk) {
+        irows.push(['Storage', join([dk.model, dk.sizeGB ? dk.sizeGB + ' GB' : '', dk.busType, dk.firmware ? 'fw ' + dk.firmware : '']) + tag('storage'), dk.serial]);
+      });
+      var isys = inv.system || {};
+      if (isys.serial) irows.push(['System', join([isys.manufacturer, isys.model]), isys.serial]);
+      var ibios = inv.bios || {};
+      if (ibios.version) irows.push(['BIOS', join([ibios.vendor, ibios.version, ibios.releaseDate]), null]);
+
+      $('print-inventory-body').innerHTML = irows.map(function (r) {
+        return '<tr><td><strong>' + esc(r[0]) + '</strong></td><td>' + r[1] +
+               '</td><td class="inv-p-ser">' + esc(r[2] || '—') + '</td></tr>';
+      }).join('');
+      var noteEl = $('print-inventory-note');
+      if (noteEl) {
+        noteEl.textContent = 'Captured directly from this machine' +
+          (inv.capturedAt ? ' on ' + new Date(inv.capturedAt).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '') +
+          '. Serial numbers are read from the hardware itself; "—" means the component does not expose one to the operating system.';
+      }
+    }
+
     // ── Component passport ──
     var cp = d.componentPassport;
     if (cp && $('print-passport-body')) {

@@ -4293,3 +4293,77 @@ body.dark-mode .card-query-banner { color: #fcd34d; }
 .sv-chip.mismatch { background: rgba(239,68,68,0.14);  color: #ef4444; border-color: rgba(239,68,68,0.35); }
 .sv-chip.unknown  { background: rgba(245,158,11,0.12); color: #d97706; border-color: rgba(245,158,11,0.35); }
 body.dark-mode .sv-chip.unknown { color: #fcd34d; }
+
+/* ══════════════════════════════════════════════════════
+   HARDWARE INVENTORY TABLE (v1.5.1) — admin ticket
+   ══════════════════════════════════════════════════════ */
+.inv-table {
+  width: 100%; border-collapse: collapse;
+  border: 1px solid var(--glass-border); border-radius: 10px; overflow: hidden;
+  background: rgba(127,127,160,0.04);
+}
+.inv-table thead th {
+  text-align: left; font-size: 0.66rem; font-weight: 800; text-transform: uppercase;
+  letter-spacing: 0.06em; color: var(--text-muted);
+  padding: 8px 12px; border-bottom: 1px solid var(--glass-border);
+  background: rgba(127,127,160,0.07);
+}
+.inv-table td { padding: 8px 12px; border-bottom: 1px solid var(--glass-border); vertical-align: top; }
+.inv-table tbody tr:last-child td { border-bottom: none; }
+.inv-lbl { font-size: 0.72rem; font-weight: 700; color: var(--primary-pink); white-space: nowrap; }
+.inv-val { font-size: 0.78rem; color: var(--text-dark); word-break: break-word; }
+.inv-ser {
+  font-family: 'JetBrains Mono', monospace; font-size: 0.72rem;
+  color: var(--text-muted); word-break: break-all; max-width: 220px;
+}
+.inv-foot { margin-top: 6px; font-size: 0.68rem; color: var(--text-muted); }
+
+/* ══════════════════════════════════════════════════════
+   STRESS-TEST PROGRESS (v1.5.1)
+   ══════════════════════════════════════════════════════ */
+.stress-wrap {
+  border: 1px solid var(--glass-border); border-radius: 10px;
+  padding: 12px 14px; background: rgba(239,68,68,0.04);
+}
+.stress-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.stress-title { font-size: 0.78rem; font-weight: 800; color: var(--text-dark); letter-spacing: 0.02em; }
+.stress-pct { font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; font-weight: 800; color: #f59e0b; }
+.stress-pct.complete { color: #10b981; }
+.stress-bar-bg { height: 10px; border-radius: 999px; background: rgba(127,127,160,0.18); overflow: hidden; }
+.stress-bar-fill {
+  height: 100%; border-radius: 999px;
+  background: linear-gradient(90deg, #f59e0b, #ef4444);
+  transition: width 0.4s cubic-bezier(0.16,1,0.3,1);
+}
+.stress-bar-fill.complete { background: linear-gradient(90deg, #10b981, #22c55e); }
+.stress-meta { font-size: 0.72rem; color: var(--text-muted); margin-top: 7px; }
+.stress-btn {
+  margin-top: 10px; width: 100%;
+  background: linear-gradient(135deg, #ef4444, #b91c1c); color: #fff;
+  border: none; border-radius: 8px; padding: 9px 14px;
+  font-size: 0.82rem; font-weight: 800; cursor: pointer;
+  transition: opacity 0.2s, transform 0.1s;
+}
+.stress-btn:hover:not(:disabled) { opacity: 0.9; }
+.stress-btn:active:not(:disabled) { transform: translateY(1px); }
+.stress-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+/* Customer-supplied parts grid (v1.5.1) */
+.cust-grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px 14px; margin-top: 4px;
+}
+.cust-grid label {
+  display: flex; align-items: center; gap: 7px; margin: 0;
+  font-size: 0.8rem; color: var(--text-dark); cursor: pointer;
+  padding: 6px 10px; border: 1px solid var(--glass-border); border-radius: 8px;
+  background: rgba(127,127,160,0.04); transition: border-color .2s, background .2s;
+}
+.cust-grid label:hover { border-color: #14b8a6; }
+.cust-grid input:checked + span, .cust-grid label:has(input:checked) { border-color: #14b8a6; background: rgba(20,184,166,0.10); }
+.cust-badge {
+  background: rgba(20,184,166,0.16); color: #14b8a6;
+  border: 1px solid rgba(20,184,166,0.4); border-radius: 999px;
+  padding: 2px 10px; font-size: 0.66rem; font-weight: 800; letter-spacing: 0.04em;
+}
+.cust-badge.hidden { display: none; }

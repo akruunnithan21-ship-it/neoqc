@@ -787,6 +787,27 @@
           </div>
 
           <!-- COMPONENT CONDITION / DAMAGE REPORT -->
+          <!-- v1.5.1 — customer-supplied / transferred parts. Not purchased on
+               the invoice, so they're excluded from build cost and never fail
+               spec verification as a "mismatch". -->
+          <div class="form-section margin-top">
+            <div class="section-header">
+              <h3>♻️ Customer-Supplied Parts</h3>
+              <span id="cust-supplied-badge" class="cust-badge hidden">♻ REUSED PARTS</span>
+            </div>
+            <p class="panel-info-text">Tick any component the customer brought or transferred from their old PC. These are excluded from the build cost and are not treated as spec mismatches during verification.</p>
+            <div id="cust-supplied-grid" class="cust-grid">
+              <label><input type="checkbox" data-cs="cpu"> CPU</label>
+              <label><input type="checkbox" data-cs="gpu"> GPU</label>
+              <label><input type="checkbox" data-cs="ram"> RAM</label>
+              <label><input type="checkbox" data-cs="storage"> Storage / SSD</label>
+              <label><input type="checkbox" data-cs="psu"> PSU</label>
+              <label><input type="checkbox" data-cs="motherboard"> Motherboard</label>
+              <label><input type="checkbox" data-cs="cooler"> Cooler</label>
+              <label><input type="checkbox" data-cs="case"> Case</label>
+            </div>
+          </div>
+
           <div class="form-section margin-top">
             <div class="section-header">
               <h3>🛠️ Component Condition Report</h3>
@@ -955,8 +976,26 @@
                 </select>
               </div>
             </div>
+            <!-- v1.5.1 — stress-test progress. Never reaches 100% on run count
+                 alone; only the technician's sign-off completes it. -->
+            <div id="modal-stress-progress-wrap" class="margin-top stress-wrap">
+              <div class="stress-head">
+                <span class="stress-title">🔥 Stress Testing Progress</span>
+                <span id="modal-stress-pct" class="stress-pct">0%</span>
+              </div>
+              <div class="stress-bar-bg"><div id="modal-stress-bar" class="stress-bar-fill" style="width:0%"></div></div>
+              <div id="modal-stress-meta" class="stress-meta">No stress runs recorded yet.</div>
+              <button type="button" id="btn-tortured-enough" class="stress-btn">😈 I have tortured this PC enough</button>
+            </div>
+
             <div id="modal-prime95-panel"></div>
             <div id="modal-passport-grid" class="margin-top"></div>
+
+            <!-- v1.5.1 — full per-part inventory: brand / model / part no. / serial -->
+            <div id="modal-inventory-section" class="margin-top" style="display:none;">
+              <h4 style="color: var(--primary-pink); font-size: 0.82rem; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 10px;">🔎 Hardware Inventory &amp; Serial Numbers</h4>
+              <div id="modal-inventory-body"></div>
+            </div>
 
             <!-- Price-to-Performance (reads precomputed ticket_ppi; Compute shells to ppi_sync.py) -->
             <div style="display:flex; align-items:center; justify-content:space-between; margin-top:14px; margin-bottom:8px; flex-wrap:wrap; gap:8px;">
@@ -1942,6 +1981,18 @@
     </div>
 
     <!-- ── DRIVE BENCHMARK (per-SSD DiskSpd numbers, v1.4.6+) ── -->
+    <!-- v1.5.1 — full hardware inventory with serial numbers -->
+    <div id="print-inventory-section" class="print-section hidden">
+      <h3>Hardware Inventory &amp; Serial Numbers</h3>
+      <table class="inv-print-table">
+        <thead>
+          <tr><th style="width:18%;">Component</th><th style="width:52%;">Brand / model / part number</th><th style="width:30%;">Serial</th></tr>
+        </thead>
+        <tbody id="print-inventory-body"></tbody>
+      </table>
+      <p id="print-inventory-note" style="font-size:7pt;color:#666;margin-top:4px;"></p>
+    </div>
+
     <div id="print-drivebench-section" class="print-section hidden">
       <h3>Drive Benchmark — CrystalDiskMark-comparable Methodology (Microsoft DiskSpd)</h3>
       <table class="print-event-table" style="width:100%;">
@@ -2083,21 +2134,23 @@
     <div class="glass-slab modal-card" style="max-width: 650px; width: 100%; padding: 30px; border-radius: 20px;">
       <div class="modal-header" style="border-bottom: 1px solid var(--glass-border); padding-bottom: 15px; margin-bottom: 20px;">
         <h2 style="font-family: 'Syncopate', sans-serif; font-size: 1.3rem; color: var(--primary-pink); letter-spacing: 0.05em; margin: 0;">NEO QC UPDATED</h2>
-        <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; font-weight: 700; background: rgba(231, 1, 78, 0.1); color: var(--primary-pink); padding: 4px 8px; border-radius: 4px;">v1.5.0</span>
+        <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; font-weight: 700; background: rgba(231, 1, 78, 0.1); color: var(--primary-pink); padding: 4px 8px; border-radius: 4px;">v1.6.0</span>
       </div>
       <div class="modal-body" style="font-size: 0.92rem; line-height: 1.6; color: var(--text-dark); max-height: 420px; overflow-y: auto; padding-right: 5px;">
-        <p style="margin-top: 0;">An update has been installed. Here are the key improvements in NeoQC <strong>v1.5.0</strong>:</p>
+        <p style="margin-top: 0;">An update has been installed. Here are the key improvements in NeoQC <strong>v1.6.0</strong>:</p>
         <ul style="padding-left: 20px; display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px;">
-          <li><strong>Your invoice is now the source of truth</strong>: Invoice import no longer cross-checks component names against the catalogue. Every Target Spec is filled with the exact, full description from your invoice — brand, model and specs intact (e.g. "MSI B850M Gaming Pro WIFI6E M-ATX Motherboard", not a look-alike from the catalogue). Prices are your invoice's per-unit rates.</li>
-          <li><strong>The catalogue now grows from your invoices</strong>: Every imported component is added to the catalogue automatically, with your invoice price. If the part is already there, the existing entry is updated in place instead of creating a duplicate — so the catalogue gets richer and cleaner with every build, and your prices always win.</li>
-          <li><strong>Fixed: wrapped invoice lines split across fields</strong>: A description that wrapped onto two lines in the PDF (e.g. a motherboard name) was being torn in half — half landing in the wrong field (the board showing up under SSD). Rows are now reconstructed before matching, so nothing is truncated or mis-filed.</li>
-          <li><strong>Hardware verification passes on partial detection</strong>: Detection tools often can't read brand/model (RAM reports only size). Verification now matches on what the hardware can honestly report — capacity for RAM/SSD (kit sizes like 16×2 = 32 GB handled), model numbers for GPU/motherboard — so a correct build verifies clean while a genuine shortfall still fails. Ticked physical checks (cooler / PSU / case) count as verified.</li>
-          <li><strong>Fixed: previous invoice leaking into a new ticket</strong>: Creating a new ticket fully clears the last ticket's invoice banner and matched prices.</li>
-          <li><strong>Fixed: landing button text</strong>: "Staff System" / "Testing Client" now readable in both light and dark themes.</li>
+          <li><strong>Fixed: auto-detected specs never reached the admin ticket</strong>: The cloud sync had two copies of its data mapping and they had drifted — the live-update path silently dropped the detected hardware, so every refresh wiped it and the panel showed "--". Both paths now share one mapping. Detected specs stay on the ticket.</li>
+          <li><strong>Fixed: the wrong Windows product key was being reported</strong>: The probe read whichever registry blob it found first instead of the one that matches Windows' own activation record — so it could print a key that never activated this PC. It now picks the key verified against that record. If Windows genuinely doesn't hold your key (installed via "I don't have a product key"), the app says so, shows the real last 5 characters, and lets you record the key you typed — verified against those 5 — so every customer's key is tracked correctly. No placeholder is ever shown as real.</li>
+          <li><strong>Full hardware inventory with serial numbers</strong>: Auto-detect now captures brand, model, part number and <em>serial</em> for the motherboard, CPU, every RAM module (per slot), GPU, every drive, system chassis, BIOS and network adapters. Shown in full on the ticket and printed on the QC report, so a build can be proven part-by-part.</li>
+          <li><strong>Stress-testing progress bar</strong>: Tickets now show how much torture the machine has taken. It rises with every run but <em>never</em> reaches 100% on its own — only your "I have tortured this PC enough" sign-off completes it.</li>
+          <li><strong>Customer-supplied parts</strong>: Tick any component the customer brought or transferred from an old PC. Those are excluded from the build cost and never counted as a spec mismatch, and they're marked as customer parts on the QC report.</li>
+          <li><strong>More accurate SSD write speed</strong>: The benchmark now mirrors CrystalDiskMark exactly — short passes, best result of three. The old single long run let the drive's fast write cache fill mid-test, dragging the average down and under-reporting write speed.</li>
+          <li><strong>Verification override (Ctrl + Alt + G)</strong>: Force-pass the spec checks when you know a flagged part is correct. Every override is recorded and printed on the report — an audited sign-off, not a silent bypass.</li>
+          <li><strong>QC report flows continuously</strong>: Sections no longer force a new page each time, so there are no half-empty sheets — each section starts right where the last one ended, and nothing is split down the middle.</li>
         </ul>
       </div>
       <div class="modal-footer" style="border-top: 1px solid var(--glass-border); padding-top: 15px; display: flex; justify-content: flex-end; margin-top: 20px;">
-        <button id="btn-close-changelog" class="primary-pink-btn" style="padding: 10px 24px; font-weight: 700; font-size: 0.95rem;">Launch NeoQC v1.5.0</button>
+        <button id="btn-close-changelog" class="primary-pink-btn" style="padding: 10px 24px; font-weight: 700; font-size: 0.95rem;">Launch NeoQC v1.6.0</button>
       </div>
     </div>
   </div>

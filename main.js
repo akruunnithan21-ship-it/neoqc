@@ -836,6 +836,23 @@ function runDiskSpdPhase({ exe, testFile, blockSize, queueDepth, durationSec, is
   });
 }
 
+// v1.5.1 — run one phase N times and keep the BEST result.
+//
+// This is what CrystalDiskMark actually does: several short passes, report the
+// best. Our old single 10 s pass reported the AVERAGE of one long run, which
+// systematically under-reports write speed on consumer SSDs: once the SLC
+// write cache fills mid-run, the drive drops to native TLC/QLC speed and drags
+// the average down. Short passes stay inside the SLC window (as CDM's do), and
+// best-of-N removes one-off dips from background I/O.
+async function runDiskSpdPhaseBest(opts, passes) {
+  let best = null;
+  for (let i = 0; i < (passes || 3); i++) {
+    const r = await runDiskSpdPhase(opts);
+    if (r && (!best || r.mibPerSec > best.mibPerSec)) best = r;
+  }
+  return best;
+}
+
 // Full 4-phase Standard-profile bench for one drive. Never fabricates data —
 // returns { verdict: 'RUN FAILED', error } on any failure.
 async function runDriveBenchmark(vol, exe) {
@@ -863,10 +880,11 @@ async function runDriveBenchmark(vol, exe) {
     // test file before reading for the same reason). The 10 s sequential
     // write pass rewrites the whole 1 GiB file several times over, so the
     // read phases that follow hit real on-disk data.
-    const seqWrite  = await runDiskSpdPhase({ exe, testFile, blockSize: '1M', queueDepth: 8,  durationSec: 10, isWrite: true,  random: false });
-    const seqRead   = await runDiskSpdPhase({ exe, testFile, blockSize: '1M', queueDepth: 8,  durationSec: 10, isWrite: false, random: false });
-    const rnd4kWrite= await runDiskSpdPhase({ exe, testFile, blockSize: '4K', queueDepth: 32, durationSec: 10, isWrite: true,  random: true });
-    const rnd4kRead = await runDiskSpdPhase({ exe, testFile, blockSize: '4K', queueDepth: 32, durationSec: 10, isWrite: false, random: true });
+    // CDM Standard profile: 5 s passes, best of 3 (see runDiskSpdPhaseBest).
+    const seqWrite  = await runDiskSpdPhaseBest({ exe, testFile, blockSize: '1M', queueDepth: 8,  durationSec: 5, isWrite: true,  random: false }, 3);
+    const seqRead   = await runDiskSpdPhaseBest({ exe, testFile, blockSize: '1M', queueDepth: 8,  durationSec: 5, isWrite: false, random: false }, 3);
+    const rnd4kWrite= await runDiskSpdPhaseBest({ exe, testFile, blockSize: '4K', queueDepth: 32, durationSec: 5, isWrite: true,  random: true }, 3);
+    const rnd4kRead = await runDiskSpdPhaseBest({ exe, testFile, blockSize: '4K', queueDepth: 32, durationSec: 5, isWrite: false, random: true }, 3);
 
     if (!seqRead || !seqWrite || !rnd4kRead || !rnd4kWrite) {
       return {
@@ -1119,7 +1137,7 @@ ipcMain.handle('sys:run-diagnostics', async (event, config) => {
       for (let i = 0; i < volumes.length; i++) {
         const vol = volumes[i];
         event.sender.send('sys:diag-log',
-          `[SSD] Benchmarking ${vol.model} on ${vol.drive} (${i + 1} of ${volumes.length}) — SEQ1M + RND4K, ~40 s…`);
+          `[SSD] Benchmarking ${vol.model} on ${vol.drive} (${i + 1} of ${volumes.length}) — SEQ1M + RND4K, best-of-3 passes, ~70 s…`);
         const row = await runDriveBenchmark(vol, dsExe);
         if (row.verdict === 'RUN FAILED') {
           event.sender.send('sys:diag-log', `[SSD] ${vol.drive} failed: ${row.error}`);
@@ -1577,6 +1595,69 @@ ipcMain.handle('sys:check-port-hardware', async (event, portType) => {
 // guided before/after snapshot flow). Reports USB host controllers + their
 // generations, connected USB devices, GPU video outputs by connection type
 // (HDMI/DP/DVI), and audio controllers + endpoints. One PowerShell call → JSON.
+// v1.5.1 — FULL hardware inventory: brand / model / part number / SERIAL for
+// every component. Backed by hw_inventory.ps1 (WMI/CIM).
+//
+// Deliberately not HWiNFO: it is licensed for personal use only and needs a
+// paid licence for commercial use, so it can't ship inside a shop tool. If a
+// licensed HWiNFO64 IS present we enrich from its report export below.
+ipcMain.handle('sys:hw-inventory', async () => {
+  const diagnosticsPath = app.isPackaged
+    ? path.join(process.resourcesPath, 'app.asar.unpacked', 'assets', 'diagnostics')
+    : path.join(__dirname, 'assets', 'diagnostics');
+  const script = path.join(diagnosticsPath, 'hw_inventory.ps1');
+
+  const base = await new Promise((resolve) => {
+    if (!fs.existsSync(script)) { resolve({ ok: false, error: 'hw_inventory.ps1 missing' }); return; }
+    const ps = spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', script], { windowsHide: true });
+    let out = '', errOut = '';
+    ps.stdout.on('data', d => { out += d.toString(); });
+    ps.stderr.on('data', d => { errOut += d.toString(); });
+    ps.on('close', () => {
+      try { resolve({ ok: true, data: JSON.parse(out.trim()) }); }
+      catch (e) { resolve({ ok: false, error: (errOut || 'could not parse inventory output').slice(-800) }); }
+    });
+    ps.on('error', e => resolve({ ok: false, error: e.message }));
+    setTimeout(() => { try { ps.kill(); } catch (_) {} resolve({ ok: false, error: 'inventory timed out (40s)' }); }, 40000);
+  });
+
+  if (base.ok) {
+    try {
+      const extra = await hwinfoEnrich();
+      if (extra) { base.data.hwinfo = extra; base.data.source = 'wmi-cim + hwinfo'; }
+    } catch (_) {}
+  }
+  return base;
+});
+
+// Optional enrichment from a LOCALLY-INSTALLED, user-licensed HWiNFO64.
+// We never bundle it. If the shop owns a licence and has it installed, we ask
+// it for a full report (-r) and attach the raw sections. Absent → null.
+function hwinfoEnrich() {
+  return new Promise((resolve) => {
+    const candidates = [
+      'C:\\Program Files\\HWiNFO64\\HWiNFO64.EXE',
+      'C:\\Program Files (x86)\\HWiNFO32\\HWiNFO32.EXE'
+    ];
+    const exe = candidates.find(p => { try { return fs.existsSync(p); } catch (_) { return false; } });
+    if (!exe) { resolve(null); return; }
+    const outFile = path.join(app.getPath('userData'), 'hwinfo_report.csv');
+    try { fs.rmSync(outFile, { force: true }); } catch (_) {}
+    const ps = spawn(exe, ['-r' + outFile, '-nogui', '-silent'], { windowsHide: true });
+    const finish = () => {
+      try {
+        if (fs.existsSync(outFile)) {
+          const raw = fs.readFileSync(outFile, 'utf8');
+          resolve({ available: true, reportPath: outFile, excerpt: raw.slice(0, 20000) });
+        } else resolve({ available: true, reportPath: null, excerpt: null, note: 'HWiNFO found but produced no report' });
+      } catch (e) { resolve(null); }
+    };
+    ps.on('close', finish);
+    ps.on('error', () => resolve(null));
+    setTimeout(() => { try { ps.kill(); } catch (_) {} finish(); }, 30000);
+  });
+}
+
 ipcMain.handle('sys:enumerate-ports', async () => {
   const diagnosticsPath = app.isPackaged
     ? path.join(process.resourcesPath, 'app.asar.unpacked', 'assets', 'diagnostics')

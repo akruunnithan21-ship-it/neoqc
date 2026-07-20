@@ -1775,9 +1775,15 @@ function openTicketModal(ticketId = null) {
       renderSavedDiagnosticsPanels(ticket);
       loadAndRenderPpi(ticket.id);
       loadTicketQueries(ticket.id);
+      renderInventoryPanel(ticket);
+      renderStressProgress(ticket);
+      renderCustomerSupplied(ticket.customerSupplied);
     }
   } else {
     hideTicketQueriesSection();
+    renderInventoryPanel(null);
+    renderStressProgress(null);
+    renderCustomerSupplied([]);
     title.textContent = "Create Service Ticket";
     document.getElementById('form-ticket-id').value = '';
     document.getElementById('form-created-at').value = '';
@@ -2819,6 +2825,8 @@ async function handleTicketFormSubmit(e) {
     };
     const hasAnything = merged.cpu || merged.gpu || merged.ram || merged.storage || merged.mobo || (merged.igpu && merged.igpu !== 'None');
     if (hasAnything) {
+      updatedTicket.customerSupplied = readCustomerSuppliedFromForm();
+      updatedTicket.specs.__customerSupplied = updatedTicket.customerSupplied;
       updatedTicket.detectedSpecs = merged;
       // Mirror into specs.__detected so the JSONB specs column carries it
       // cross-machine even if this ticket reaches Supabase through a path
@@ -3050,6 +3058,19 @@ async function setupClientMode() {
 
     try {
       detectedSpecs = await ipcRenderer.invoke('sys:detect-hw');
+
+      // v1.5.1 — full inventory (brand / model / part no. / SERIAL per part).
+      // Attached to detectedSpecs so it rides the existing sync path
+      // (specs.__detected) straight to the admin ticket and the QC report.
+      try {
+        btn.textContent = '🔍 Reading full hardware inventory…';
+        const inv = await ipcRenderer.invoke('sys:hw-inventory');
+        if (inv && inv.ok && inv.data) {
+          detectedSpecs.inventory = inv.data;
+        } else if (inv && inv.error) {
+          console.warn('hw inventory unavailable:', inv.error);
+        }
+      } catch (e) { console.warn('hw inventory failed:', e && e.message); }
       
       document.getElementById('c-spec-mobo').textContent = detectedSpecs.motherboard || "Failed to detect";
       document.getElementById('c-spec-cpu').textContent = detectedSpecs.cpu || "Failed to detect";
@@ -3148,6 +3169,10 @@ async function setupClientMode() {
       t.detectedSpecs.ram = detectedSpecs.ram;
       t.detectedSpecs.storage = detectedSpecs.storage;
       t.detectedSpecs.motherboard = detectedSpecs.motherboard || '';
+      // Full per-part inventory (serials / part numbers / brands). Kept on the
+      // ticket so the admin panel and QC report can prove exactly which
+      // physical hardware shipped.
+      if (detectedSpecs.inventory) t.detectedSpecs.inventory = detectedSpecs.inventory;
     }
 
     // Populate physical checks verified status
@@ -4575,6 +4600,14 @@ async function syncTicketToCloud(ticket) {
     // client auto-detected. Without this, detectedSpecs never left the client.
     const specsPayload = Object.assign({}, ticket.specs || {});
     if (ticket.detectedSpecs) specsPayload.__detected = ticket.detectedSpecs;
+    if (ticket.customerSupplied) specsPayload.__customerSupplied = ticket.customerSupplied;
+
+    // Stress-test progress has no dedicated columns; diagnostics is JSONB and
+    // already syncs, so carry it there (same pattern as specs.__detected).
+    const diagPayload = Object.assign({}, ticket.diagnostics || {});
+    if (ticket.stressRuns != null) diagPayload.__stressRuns = ticket.stressRuns;
+    if (ticket.stressSignedOff != null) diagPayload.__stressSignedOff = ticket.stressSignedOff;
+    if (ticket.stressSignedOffAt) diagPayload.__stressSignedOffAt = ticket.stressSignedOffAt;
 
     const { error } = await supabaseClient
       .from('tickets')
@@ -4590,7 +4623,7 @@ async function syncTicketToCloud(ticket) {
         missing_components: ticket.missingComponents,
         build_checks: ticket.buildChecks,
         qc_checks: ticket.qcChecks,
-        diagnostics: ticket.diagnostics,
+        diagnostics: diagPayload,
         serials: ticket.serials,
         specs: specsPayload,
         status: ticket.status,
@@ -4636,7 +4669,11 @@ async function deleteTicketFromCloud(ticketId) {
 // matter what the testing client detected. Never inline this mapping again.
 function mapDbRowToTicket(dbRow) {
   const specs = dbRow.specs || {};
+  const diag = dbRow.diagnostics || {};
   return {
+    stressRuns: diag.__stressRuns || 0,
+    stressSignedOff: !!diag.__stressSignedOff,
+    stressSignedOffAt: diag.__stressSignedOffAt || null,
     id: dbRow.id,
     createdAt: dbRow.created_at,
     updatedAt: dbRow.updated_at || dbRow.created_at,
@@ -4653,6 +4690,7 @@ function mapDbRowToTicket(dbRow) {
     specs: dbRow.specs,
     specPrices: specs.__prices || null,
     detectedSpecs: dbRow.detectedSpecs || specs.__detected || null,
+    customerSupplied: specs.__customerSupplied || [],
     damagedComponents: dbRow.damagedComponents || specs.__damaged || null,
     status: dbRow.status,
     completedAt: dbRow.completed_at
@@ -5296,6 +5334,10 @@ async function executeDiagnosticsWorkflow(isModal) {
     return;
   }
 
+  // A completed run counts toward stress-test progress (never to 100% —
+  // only the technician's sign-off does that).
+  if (editingTicketId) recordStressRun(editingTicketId);
+
   // Populate actual inputs
   document.getElementById(prefix + 'cpu-temp-min').value = res.cpuTempMin || '';
   document.getElementById(prefix + 'cpu-temp-max').value = res.cpuTempMax || '';
@@ -5855,6 +5897,11 @@ function checkSpecsMatch() {
   autoCats.forEach(function (c) {
     var target = (c.target || '').trim();
     var detected = (c.detected || '').trim();
+    // Manual technician override (Ctrl+Alt+G) — force-passes this component.
+    if (specOverrides.has(c.cat)) { setChip(c.cat, 'physical', '✓ overridden'); return; }
+    // Customer-supplied / transferred part: not bought on this invoice, so a
+    // difference from the target spec is expected, not a fault.
+    if (isCustomerSupplied(c.cat)) { setChip(c.cat, 'size', '♻ customer part'); return; }
     if (!target)            { setChip(c.cat, '', '—'); return; }                        // nothing to verify
     if (!detectionRan)      { setChip(c.cat, 'pending', 'awaiting detect'); awaiting.push(c.label); return; }
     if (!detected)          { setChip(c.cat, 'unknown', 'not detected');  notDetected.push(c.label); return; }
@@ -6055,3 +6102,214 @@ async function loadTicketQueryCounts() {
     // table missing / offline — leave badges off
   }
 }
+
+// ═══════════════════════════════════════════════════════════
+//  HARDWARE INVENTORY (v1.5.1) — admin ticket panel
+//  Renders the full per-part inventory captured by hw_inventory.ps1:
+//  brand, model, part number and SERIAL for every component, so a ticket
+//  proves exactly which physical hardware left the shop.
+// ═══════════════════════════════════════════════════════════
+function renderInventoryPanel(ticket) {
+  const sec = document.getElementById('modal-inventory-section');
+  const body = document.getElementById('modal-inventory-body');
+  if (!sec || !body) return;
+  const inv = ticket && ticket.detectedSpecs && ticket.detectedSpecs.inventory;
+  if (!inv) { sec.style.display = 'none'; body.innerHTML = ''; return; }
+  sec.style.display = '';
+
+  const esc = (s) => escapeHtmlLite(s == null || s === '' ? '—' : String(s));
+  const row = (label, value, serial) =>
+    `<tr><td class="inv-lbl">${esc(label)}</td><td class="inv-val">${esc(value)}</td><td class="inv-ser">${esc(serial)}</td></tr>`;
+
+  let rows = '';
+  const mb = inv.motherboard || {};
+  if (mb.model || mb.manufacturer) {
+    rows += row('Motherboard', [mb.manufacturer, mb.model, mb.version].filter(Boolean).join(' '), mb.serial);
+  }
+  (inv.cpus || []).forEach(c => {
+    rows += row('CPU', [c.name, c.socket ? '(' + c.socket + ')' : '', c.cores ? c.cores + 'C/' + c.threads + 'T' : ''].filter(Boolean).join(' '), c.processorId);
+  });
+  (inv.gpus || []).forEach(g => {
+    rows += row('GPU', [g.name, g.vramGB ? g.vramGB + ' GB' : '', g.driverVersion ? 'drv ' + g.driverVersion : ''].filter(Boolean).join(' · '), g.pnpDeviceId ? String(g.pnpDeviceId).split(String.fromCharCode(92)).pop() : null);
+  });
+  (inv.ramModules || []).forEach(m => {
+    rows += row('RAM · ' + (m.slot || 'DIMM'),
+      [m.manufacturer, m.partNumber, m.capacityGB ? m.capacityGB + ' GB' : '', m.ddrGen, m.configuredMHz ? m.configuredMHz + ' MHz' : ''].filter(Boolean).join(' · '),
+      m.serial);
+  });
+  (inv.disks || []).forEach(d => {
+    rows += row('Storage', [d.model, d.sizeGB ? d.sizeGB + ' GB' : '', d.busType, d.firmware ? 'fw ' + d.firmware : ''].filter(Boolean).join(' · '), d.serial);
+  });
+  const sys = inv.system || {};
+  if (sys.serial) rows += row('System / chassis', [sys.manufacturer, sys.model].filter(Boolean).join(' '), sys.serial);
+  const bios = inv.bios || {};
+  if (bios.version) rows += row('BIOS', [bios.vendor, bios.version, bios.releaseDate].filter(Boolean).join(' · '), null);
+  (inv.nics || []).forEach(n => { rows += row('Network', n.name, n.macAddress); });
+
+  const when = inv.capturedAt ? new Date(inv.capturedAt).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '';
+  body.innerHTML =
+    `<table class="inv-table"><thead><tr><th>Component</th><th>Brand / model / part</th><th>Serial</th></tr></thead><tbody>${rows}</tbody></table>` +
+    `<div class="inv-foot">Captured ${escapeHtmlLite(when)} · source: ${escapeHtmlLite(inv.source || 'wmi-cim')}` +
+    (inv.hwinfo && inv.hwinfo.available ? ' · enriched by locally-installed HWiNFO' : '') + '</div>';
+}
+
+// ═══════════════════════════════════════════════════════════
+//  STRESS-TEST PROGRESS (v1.5.1)
+//  The bar reflects how much torture the machine has taken, but it can NEVER
+//  reach 100% from run count alone — a rig is only "done" when the technician
+//  says so. Each completed diagnostics run adds progress with diminishing
+//  returns and hard-caps at 90%; the sign-off button is the only path to 100%.
+// ═══════════════════════════════════════════════════════════
+const STRESS_CAP_BEFORE_SIGNOFF = 90;
+
+function stressProgressPercent(ticket) {
+  if (!ticket) return 0;
+  if (ticket.stressSignedOff) return 100;
+  const runs = ticket.stressRuns || 0;
+  if (runs <= 0) return 0;
+  // 45 / 68 / 79 / 85 / 88 … asymptotic, never hits the cap by accident.
+  const pct = STRESS_CAP_BEFORE_SIGNOFF * (1 - Math.pow(0.5, runs));
+  return Math.min(STRESS_CAP_BEFORE_SIGNOFF, Math.round(pct));
+}
+
+function renderStressProgress(ticket) {
+  const wrap = document.getElementById('modal-stress-progress-wrap');
+  const bar = document.getElementById('modal-stress-bar');
+  const pctEl = document.getElementById('modal-stress-pct');
+  const meta = document.getElementById('modal-stress-meta');
+  const btn = document.getElementById('btn-tortured-enough');
+  if (!wrap || !bar || !pctEl || !meta || !btn) return;
+
+  const pct = stressProgressPercent(ticket);
+  const runs = (ticket && ticket.stressRuns) || 0;
+  const done = !!(ticket && ticket.stressSignedOff);
+
+  bar.style.width = pct + '%';
+  bar.classList.toggle('complete', done);
+  pctEl.textContent = pct + '%';
+  pctEl.classList.toggle('complete', done);
+
+  if (done) {
+    meta.textContent = `Signed off by the technician after ${runs} stress run${runs === 1 ? '' : 's'}` +
+      (ticket.stressSignedOffAt ? ' · ' + new Date(ticket.stressSignedOffAt).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '');
+    btn.textContent = '✓ Tortured enough — signed off';
+    btn.disabled = true;
+  } else {
+    meta.textContent = runs === 0
+      ? 'No stress runs recorded yet. Run the diagnostics as many times as you like.'
+      : `${runs} stress run${runs === 1 ? '' : 's'} completed. Keep going, or sign off to complete this stage.`;
+    btn.textContent = '😈 I have tortured this PC enough';
+    btn.disabled = runs === 0;
+  }
+}
+
+// Called whenever a diagnostics/stress run finishes for the open ticket.
+function recordStressRun(ticketId) {
+  const t = appState.tickets.find(x => x.id === ticketId);
+  if (!t) return;
+  t.stressRuns = (t.stressRuns || 0) + 1;
+  t.updatedAt = new Date().toISOString();
+  saveDatabase();
+  syncTicketToCloud(t);
+  if (editingTicketId === ticketId) renderStressProgress(t);
+  renderDashboard();
+}
+
+// Sign-off button — the ONLY way stress testing reaches 100%.
+document.addEventListener('DOMContentLoaded', () => {
+  const btn = document.getElementById('btn-tortured-enough');
+  if (!btn) return;
+  btn.addEventListener('click', () => {
+    if (!editingTicketId) return;
+    const t = appState.tickets.find(x => x.id === editingTicketId);
+    if (!t) return;
+    if (!(t.stressRuns > 0)) { alert('Run the stress test at least once before signing off.'); return; }
+    if (!confirm(`Sign off stress testing for ${t.customerName}?\n\n${t.stressRuns} run(s) completed. This marks stress testing 100% complete.`)) return;
+    t.stressSignedOff = true;
+    t.stressSignedOffAt = new Date().toISOString();
+    t.updatedAt = new Date().toISOString();
+    saveDatabase();
+    syncTicketToCloud(t);
+    renderStressProgress(t);
+    renderDashboard();
+  });
+});
+
+// ═══════════════════════════════════════════════════════════
+//  CUSTOMER-SUPPLIED PARTS (v1.5.1)
+//  Components the customer brought / transferred from an old PC. They are not
+//  on the invoice, so they must not be priced into the build and must never be
+//  reported as a spec "mismatch" during verification.
+// ═══════════════════════════════════════════════════════════
+const customerSuppliedSet = new Set();
+
+function readCustomerSuppliedFromForm() {
+  customerSuppliedSet.clear();
+  document.querySelectorAll('#cust-supplied-grid input[data-cs]').forEach(cb => {
+    if (cb.checked) customerSuppliedSet.add(cb.dataset.cs);
+  });
+  const badge = document.getElementById('cust-supplied-badge');
+  if (badge) badge.classList.toggle('hidden', customerSuppliedSet.size === 0);
+  return Array.from(customerSuppliedSet);
+}
+
+function renderCustomerSupplied(list) {
+  customerSuppliedSet.clear();
+  (Array.isArray(list) ? list : []).forEach(c => customerSuppliedSet.add(c));
+  document.querySelectorAll('#cust-supplied-grid input[data-cs]').forEach(cb => {
+    cb.checked = customerSuppliedSet.has(cb.dataset.cs);
+  });
+  const badge = document.getElementById('cust-supplied-badge');
+  if (badge) badge.classList.toggle('hidden', customerSuppliedSet.size === 0);
+}
+
+function isCustomerSupplied(category) {
+  // 'mobo' is the spec-field name; 'motherboard' is the canonical category.
+  if (category === 'mobo') category = 'motherboard';
+  return customerSuppliedSet.has(category);
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  const grid = document.getElementById('cust-supplied-grid');
+  if (!grid) return;
+  grid.addEventListener('change', () => {
+    readCustomerSuppliedFromForm();
+    if (typeof checkSpecsMatch === 'function') { try { checkSpecsMatch(); } catch (_) {} }
+  });
+});
+
+// ═══════════════════════════════════════════════════════════
+//  SPEC VERIFICATION OVERRIDE — secret keybind Ctrl+Alt+G (v1.5.1)
+//  Now that the full HWiNFO-grade inventory gives real brand/model/serial
+//  data, verification is strict. When the technician KNOWS a flagged part is
+//  correct (odd vendor string, OEM rebadge, etc.) this force-passes it.
+//  Every override is recorded on the ticket and printed on the QC report —
+//  it is an audited manual sign-off, not a silent bypass.
+// ═══════════════════════════════════════════════════════════
+const specOverrides = new Set();
+
+function applySpecOverrideAll() {
+  ['mobo', 'cpu', 'gpu', 'ram', 'storage'].forEach(c => specOverrides.add(c));
+  if (typeof checkSpecsMatch === 'function') { try { checkSpecsMatch(); } catch (_) {} }
+  const el = document.getElementById('specs-match-status');
+  if (el) {
+    el.classList.remove('hidden');
+    el.textContent = '🔓 Verification manually overridden by technician (Ctrl+Alt+G) — recorded on the QC report.';
+    el.style.background = 'rgba(124,92,255,0.15)';
+    el.style.color = '#7c5cff';
+    el.style.borderColor = 'rgba(124,92,255,0.4)';
+  }
+}
+
+document.addEventListener('keydown', (e) => {
+  if (e.ctrlKey && e.altKey && (e.key === 'g' || e.key === 'G')) {
+    e.preventDefault();
+    if (specOverrides.size) {
+      specOverrides.clear();
+      if (typeof checkSpecsMatch === 'function') { try { checkSpecsMatch(); } catch (_) {} }
+    } else {
+      if (!confirm('Override spec verification for this build?\n\nAll component checks will be force-passed and the override will be recorded on the QC report.')) return;
+      applySpecOverrideAll();
+    }
+  }
+});
