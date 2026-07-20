@@ -547,10 +547,12 @@
     flex-direction: column;
     position: relative;
     overflow: hidden;
-    /* The landing screen is always dark — buttons don't inherit body color
-       (UA default is black), so the text must be explicitly light or the
-       titles render black-on-dark and disappear. */
-    color: #F1F5FB;
+    /* <button> doesn't inherit the page text color (UA default is black), so
+       set it explicitly to the theme's primary text token — which flips with
+       light/dark. Without this the titles were black-on-dark in dark mode;
+       hardcoding light then broke light mode. var(--text-dark) is correct in
+       both (dark ink on light theme, light ink on dark theme). */
+    color: var(--text-dark);
   }
   
   /* Grid pattern effect inside button */
@@ -615,12 +617,12 @@
     font-weight: 700;
     margin-bottom: 6px;
     transition: color 0.3s ease;
-    color: #F1F5FB;   /* always-dark landing — never inherit theme black */
+    color: var(--text-dark);   /* theme-aware: flips with light/dark */
   }
 
   .mode-text {
     font-size: 0.85rem;
-    color: rgba(226, 232, 244, 0.72);   /* light muted; --text-muted goes dark in light theme */
+    color: var(--text-muted);   /* theme-aware muted (flips light/dark) */
     line-height: 1.35;
     position: relative;
     z-index: 2;
