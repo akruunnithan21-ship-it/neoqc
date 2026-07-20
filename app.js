@@ -724,6 +724,64 @@ function applyInvoiceBuild(build) {
   return summary;
 }
 
+// v1.4.11 — grow the catalog FROM the invoice. Each imported component is
+// upserted into component_prices; the invoice price + name win. We dedupe
+// against what's already there (strong same-brand match) so re-importing or
+// building the same rig twice updates the existing row instead of piling up
+// duplicates. Fully background — never blocks the ticket.
+async function upsertInvoiceComponentsToCatalog(build) {
+  if (!supabaseClient || !build || !build.results) return;
+  const now = new Date().toISOString();
+  const slug = s => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 70);
+  const brandConflict = (window.NeoQcInvoiceImport && window.NeoQcInvoiceImport.brandConflict) || (() => false);
+
+  for (const category of Object.keys(build.results)) {
+    const e = build.results[category];
+    const name = e.displayName;
+    if (!name || name.length < 3) continue;
+    try {
+      // Dedupe: already in the catalog? (same category, strong match, same brand)
+      let existing = null;
+      if (catalogMatcher && typeof catalogMatcher.suggest === 'function') {
+        const hits = catalogMatcher.suggest(name, category, 3) || [];
+        existing = hits.find(h => h.confidence >= 0.8 && !brandConflict(name, h.matchedName)) || null;
+      }
+      let sku;
+      if (existing && existing.sku) {
+        // Update the existing row IN PLACE — invoice price wins, no duplicate.
+        sku = existing.sku;
+        if (e.priceInr != null) {
+          await supabaseClient.from('component_prices')
+            .update({ price_inr: e.priceInr, updated_at: now, source: 'invoice' })
+            .eq('sku', sku);
+          const mem = catalogMatcher._entries && catalogMatcher._entries.find(x => x.sku === sku);
+          if (mem) mem.price_inr = e.priceInr;
+        }
+      } else {
+        // New component — insert it so the catalog grows from real invoices.
+        sku = 'INV-' + slug(name);
+        await supabaseClient.from('component_prices').upsert({
+          sku, name, category, price_inr: e.priceInr,
+          source: 'invoice', source_method: 'invoice-import',
+          fetched_at: now, updated_at: now, needs_review: false
+        }, { onConflict: 'sku' });
+        if (catalogMatcher && catalogMatcher.addEntry) {
+          catalogMatcher.addEntry({ sku, name, category, price_inr: e.priceInr });
+        }
+      }
+      // Attach the resolved SKU + invoice price to this ticket's spec match so
+      // the report / PPI price the exact part the customer was invoiced for.
+      const fieldId = CATEGORY_TO_SPEC_FIELD[category];
+      if (fieldId && specFieldMatches[fieldId]) {
+        specFieldMatches[fieldId].sku = sku;
+        if (specFieldMatches[fieldId].priceInr == null) specFieldMatches[fieldId].priceInr = e.priceInr;
+      }
+    } catch (err) {
+      console.warn('invoice→catalog upsert failed for', category, err && err.message);
+    }
+  }
+}
+
 // ==========================================================================
 // PPI ENGINE — Use-Case Tuning (Settings). Lets staff edit the Price-
 // Performance Index knobs (per-use-case component weights, min-recommended
@@ -3880,40 +3938,32 @@ function setupEventListeners() {
 
         const summary = applyInvoiceBuild(build);
         renderConfigSynergy(); // surface any socket/RAM mismatch from the imported build
+        // Grow the catalog from this invoice (background — invoice price wins,
+        // dedupes against existing rows). Resolves each field's SKU too.
+        upsertInvoiceComponentsToCatalog(build).catch(err => console.warn('invoice catalog sync failed:', err && err.message));
 
-        // Build a readable summary of what got filled, its price, and what needs a look.
+        // Build a readable summary of what got filled and its invoice price.
         const rupee = (n) => (n != null ? '₹' + Math.round(n).toLocaleString('en-IN') : '—');
         let priceTotal = 0;
         const line = (icon, item) => {
           const e = item.entry;
           if (e.priceInr != null) priceTotal += e.priceInr;
-          const priceStr = e.priceInr != null
-            ? ` — <strong>${rupee(e.priceInr)}</strong>${e.priceSource === 'catalog' ? ' <span style="opacity:0.6;">(catalog est.)</span>' : ''}`
-            : '';
-          const conf = e.confidence ? ` <span style="opacity:0.6;">(${Math.round(e.confidence * 100)}% match)</span>` : '';
-          // When the catalog's closest hit was a different brand, say so — the
-          // invoice text (kept as the spec) is right; the catalog just guessed wrong.
-          const brandNote = e.brandConflict && e.catalogName
-            ? ` <span style="opacity:0.75;">— catalog's closest was a different brand (“${escapeHtmlLite(e.catalogName)}”), kept your invoice text</span>`
-            : '';
-          return `<div style="margin-top:4px;">${icon} <strong>${catLabel[item.category] || item.category}:</strong> ${escapeHtmlLite(e.displayName || e.matchedName)}${priceStr}${conf}${brandNote}</div>`;
+          const priceStr = e.priceInr != null ? ` — <strong>${rupee(e.priceInr)}</strong>` : '';
+          return `<div style="margin-top:4px;">${icon} <strong>${catLabel[item.category] || item.category}:</strong> ${escapeHtmlLite(e.displayName || e.matchedName)}${priceStr}</div>`;
         };
         let html = `<strong>✓ Auto-filled ${summary.filled.length + summary.review.length + summary.manual.length} field(s) from the invoice.</strong>`;
         summary.filled.forEach(it => { html += line('✅', it); });
-        if (summary.review.length) {
-          html += `<div style="margin-top:8px;"><strong>Please verify these lower-confidence matches:</strong></div>`;
-          summary.review.forEach(it => { html += line('🟡', it); });
-        }
-        if (summary.manual.length) {
-          html += `<div style="margin-top:8px;"><strong>Not found in catalog — filled as typed on the invoice:</strong></div>`;
-          summary.manual.forEach(it => { html += line('✏️', it); });
+        const needsLook = summary.review.concat(summary.manual);
+        if (needsLook.length) {
+          html += `<div style="margin-top:8px;"><strong>Double-check the category on these (unusual wording):</strong></div>`;
+          needsLook.forEach(it => { html += line('🟡', it); });
         }
         html += `<div style="margin-top:8px; padding-top:6px; border-top:1px dashed currentColor;"><strong>Components subtotal (from invoice): ${rupee(priceTotal)}</strong></div>`;
         if (summary.skipped.length) {
           html += `<div style="margin-top:8px; opacity:0.75;">Skipped (marked awaiting): ${summary.skipped.map(c => catLabel[c] || c).join(', ')}</div>`;
         }
-        html += `<div style="margin-top:8px; opacity:0.7; font-size:0.72rem;">Prices are the per-unit rate read off the invoice. Review every field before saving — invoice wording is matched to the catalog automatically, but always confirm it's the right part.</div>`;
-        const kind = (summary.review.length || summary.manual.length) ? 'warn' : 'ok';
+        html += `<div style="margin-top:8px; opacity:0.7; font-size:0.72rem;">Names and per-unit prices are taken straight from your invoice and added to the catalogue. Review each field before saving.</div>`;
+        const kind = needsLook.length ? 'warn' : 'ok';
         setInvoiceStatus(html, kind);
       } catch (err) {
         console.error('Invoice import failed:', err);
@@ -5663,8 +5713,17 @@ function checkSpecsMatch() {
   function capacityGB(s) {
     if (!s) return null;
     var str = String(s).toLowerCase();
-    var m = str.match(/(\d+)\s*x\s*(\d+(?:\.\d+)?)\s*gb/);        // "2 x 16GB"
-    if (m) return parseInt(m[1], 10) * parseFloat(m[2]);
+    // Kit notation → total capacity. "2 x 16GB", "16GB x 2", or a bare "16x2"
+    // (module count is the small side). This makes a 2x16 = 32 GB kit compare
+    // correctly against a detected ~31.8 GB.
+    var m = str.match(/(\d+)\s*x\s*(\d+(?:\.\d+)?)\s*gb/) || str.match(/(\d+(?:\.\d+)?)\s*gb\s*x\s*(\d+)/);
+    if (m) return parseFloat(m[1]) * parseFloat(m[2]);
+    var k = str.match(/(\d+)\s*x\s*(\d+)/);
+    if (k) {
+      var a = parseInt(k[1], 10), b = parseInt(k[2], 10);
+      var lo = Math.min(a, b), hi = Math.max(a, b);
+      if (lo >= 1 && lo <= 8 && hi >= 4) return lo * hi;           // plausible RAM kit
+    }
     var best = null, re = /(\d+(?:\.\d+)?)\s*(tb|gb)/g, mm;
     while ((mm = re.exec(str))) {
       var v = parseFloat(mm[1]) * (mm[2] === 'tb' ? 1000 : 1);

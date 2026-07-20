@@ -2083,18 +2083,21 @@
     <div class="glass-slab modal-card" style="max-width: 650px; width: 100%; padding: 30px; border-radius: 20px;">
       <div class="modal-header" style="border-bottom: 1px solid var(--glass-border); padding-bottom: 15px; margin-bottom: 20px;">
         <h2 style="font-family: 'Syncopate', sans-serif; font-size: 1.3rem; color: var(--primary-pink); letter-spacing: 0.05em; margin: 0;">NEO QC UPDATED</h2>
-        <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; font-weight: 700; background: rgba(231, 1, 78, 0.1); color: var(--primary-pink); padding: 4px 8px; border-radius: 4px;">v1.4.10</span>
+        <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; font-weight: 700; background: rgba(231, 1, 78, 0.1); color: var(--primary-pink); padding: 4px 8px; border-radius: 4px;">v1.5.0</span>
       </div>
       <div class="modal-body" style="font-size: 0.92rem; line-height: 1.6; color: var(--text-dark); max-height: 420px; overflow-y: auto; padding-right: 5px;">
-        <p style="margin-top: 0;">An update has been installed. Here are the key improvements in NeoQC <strong>v1.4.10</strong>:</p>
+        <p style="margin-top: 0;">An update has been installed. Here are the key improvements in NeoQC <strong>v1.5.0</strong>:</p>
         <ul style="padding-left: 20px; display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px;">
-          <li><strong>Invoice import no longer substitutes the wrong part</strong>: The auto-fill now keeps the exact component from your invoice as the spec name — the catalogue is used only for pricing. If the closest catalogue match is a different brand (e.g. an MSI board vs a Gigabyte look-alike), it's flagged for review and the wrong SKU is dropped, never silently swapped in. Invoice line text is also cleaned of HSN codes, warranty and quantity columns.</li>
-          <li><strong>Fixed: previous invoice leaking into a new ticket</strong>: Creating a new ticket now fully clears the last ticket's invoice auto-fill banner and matched prices — no more stale specs showing up in the Target Specs area.</li>
-          <li><strong>Fixed: landing button text in light theme</strong>: "Staff System" / "Testing Client" text now follows the theme (readable in both light and dark) instead of being hardcoded.</li>
+          <li><strong>Your invoice is now the source of truth</strong>: Invoice import no longer cross-checks component names against the catalogue. Every Target Spec is filled with the exact, full description from your invoice — brand, model and specs intact (e.g. "MSI B850M Gaming Pro WIFI6E M-ATX Motherboard", not a look-alike from the catalogue). Prices are your invoice's per-unit rates.</li>
+          <li><strong>The catalogue now grows from your invoices</strong>: Every imported component is added to the catalogue automatically, with your invoice price. If the part is already there, the existing entry is updated in place instead of creating a duplicate — so the catalogue gets richer and cleaner with every build, and your prices always win.</li>
+          <li><strong>Fixed: wrapped invoice lines split across fields</strong>: A description that wrapped onto two lines in the PDF (e.g. a motherboard name) was being torn in half — half landing in the wrong field (the board showing up under SSD). Rows are now reconstructed before matching, so nothing is truncated or mis-filed.</li>
+          <li><strong>Hardware verification passes on partial detection</strong>: Detection tools often can't read brand/model (RAM reports only size). Verification now matches on what the hardware can honestly report — capacity for RAM/SSD (kit sizes like 16×2 = 32 GB handled), model numbers for GPU/motherboard — so a correct build verifies clean while a genuine shortfall still fails. Ticked physical checks (cooler / PSU / case) count as verified.</li>
+          <li><strong>Fixed: previous invoice leaking into a new ticket</strong>: Creating a new ticket fully clears the last ticket's invoice banner and matched prices.</li>
+          <li><strong>Fixed: landing button text</strong>: "Staff System" / "Testing Client" now readable in both light and dark themes.</li>
         </ul>
       </div>
       <div class="modal-footer" style="border-top: 1px solid var(--glass-border); padding-top: 15px; display: flex; justify-content: flex-end; margin-top: 20px;">
-        <button id="btn-close-changelog" class="primary-pink-btn" style="padding: 10px 24px; font-weight: 700; font-size: 0.95rem;">Launch NeoQC v1.4.10</button>
+        <button id="btn-close-changelog" class="primary-pink-btn" style="padding: 10px 24px; font-weight: 700; font-size: 0.95rem;">Launch NeoQC v1.5.0</button>
       </div>
     </div>
   </div>

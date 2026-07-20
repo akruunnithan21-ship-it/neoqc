@@ -28,7 +28,7 @@
     storage: [/\bssd\b/i, /\bnvme\b/i, /\bhdd\b/i, /\bm\.?2\b/i, /\bhard\s*(disk|drive)\b/i, /\bsata\s*ssd\b/i, /\b\d+\s*(gb|tb)\b.*\b(ssd|nvme|hdd|drive)\b/i, /\b(970|980|990)\s*(evo|pro)?\b/i, /\bsn\d{3}\b/i, /\bwd\s*(blue|black|green)\b/i],
     psu: [/\bpsu\b/i, /\bpower\s*supply\b/i, /\bsmps\b/i, /\b\d{3,4}\s*w(att)?\b/i, /\b80\s*\+?\s*plus\b/i, /\b(gold|bronze|platinum|titanium)\b/i, /\bmodular\b/i, /\brm\d{3,4}\b/i, /\bcv\d{3}\b/i, /\bmwe\b/i],
     case: [/\bcabinet\b/i, /\bchassis\b/i, /\btower\b/i, /\batx\s*case\b/i, /\bmid[\s-]*tower\b/i, /\blian\s*li\b/i, /\bnzxt\b/i, /\bmeshify\b/i, /\blancool\b/i, /\bcase\b/i],
-    cooler: [/\bcooler\b/i, /\baio\b/i, /\bliquid\s*(cooler|freezer)\b/i, /\bair\s*cooler\b/i, /\bhyper\s*212\b/i, /\bak\d{3}\b/i, /\bnh[\s-]*[du]\d{2}\b/i, /\bpeerless\b/i, /\bkraken\b/i, /\bml\d{3}\b/i, /\b(240|280|360)\s*mm\b/i]
+    cooler: [/\bcooler\b/i, /\baio\b/i, /\bliquid\s*(cooler|freezer)\b/i, /\bair\s*cooler\b/i, /\bhyper\s*212\b/i, /\bak\d{3}\b/i, /\bnh[\s-]*[du]\d{2}\b/i, /\bpeerless\b/i, /\bkraken\b/i, /\bml\d{3}\b/i, /\b(240|280|360|420)\s*mm\b/i, /\b(le|lt|ls|as)\d{3}\b/i, /\bassassin\b/i, /\bgammaxx\b/i, /\bfrost\s*flow\b/i, /\bcastle\b/i, /\bgalahad\b/i]
   };
 
   var ALL_CATEGORIES = ['cpu', 'gpu', 'motherboard', 'ram', 'storage', 'psu', 'case', 'cooler'];
@@ -159,125 +159,118 @@
     return hits;
   }
 
-  // Best catalog match for one line within one category.
-  function bestCatalogMatch(matcher, line, category) {
-    if (!matcher || typeof matcher.suggest !== 'function') return null;
-    var res = matcher.suggest(line, category, 1);
-    return (res && res.length) ? res[0] : null;
+  // (Removed in v1.5.0: bestCatalogMatch. Invoice lines are no longer scored
+  // against the catalog — the invoice IS the source of truth for what the part
+  // is. The catalog is grown FROM invoices instead; see
+  // upsertInvoiceComponentsToCatalog() in app.js.)
+
+  // A line that begins a new invoice row: a leading serial index ("1 ", "2)")
+  // or a price on the line. A digit glued to a unit ("16GB", "2TB") is NOT a
+  // serial. Used to know where one item ends and the next begins.
+  function startsNewRow(line, hasPrice) {
+    if (hasPrice) return true;
+    return /^\s*\d{1,3}[\s\).\-]/.test(line) && !/^\s*\d{1,3}\s*(gb|tb|mhz|ghz|w|mm)\b/i.test(line);
+  }
+
+  // Reconstruct full item rows from possibly-wrapped PDF lines. A description
+  // that wraps ("MSI B850M Gaming Pro" / "WIFI6E M-ATX Motherboard") arrives as
+  // two physical lines — the continuation has no price and no serial index, so
+  // we fold it back into its row. THIS is what stops a wrapped board name from
+  // being split and mis-filed under Storage.
+  function reconstructRows(text) {
+    var lines = normalizeLines(text).filter(isCandidate);
+    var rows = [];
+    var leading = [];   // continuation lines seen before the first real row
+    lines.forEach(function (orig) {
+      var pr = extractPrices(orig);
+      var hasPrice = pr.rate != null;
+      if (startsNewRow(orig, hasPrice)) {
+        rows.push({ parts: [orig], rate: pr.rate, total: pr.total });
+      } else if (rows.length) {
+        // continuation of the current row
+        var row = rows[rows.length - 1];
+        row.parts.push(orig);
+        if (row.rate == null && hasPrice) { row.rate = pr.rate; row.total = pr.total; }
+      } else {
+        leading.push(orig);
+      }
+    });
+    if (leading.length && rows.length) rows[0].parts = leading.concat(rows[0].parts);
+    // Materialize each row: cleaned display text + de-dup identical text.
+    var seen = {}; var out = [];
+    rows.forEach(function (row) {
+      var joined = row.parts.join(' ');
+      var text2 = cleanInvoiceName(joined);
+      if (text2.length < 3) return;
+      var k = text2.toLowerCase();
+      if (seen[k]) return; seen[k] = 1;
+      out.push({ text: text2, orig: joined, rate: row.rate, total: row.total });
+    });
+    return out;
   }
 
   /*
-    buildFromInvoice(text, catalogMatcher, opts) →
-    {
-      results: { <category>: {
-        rawLine, matchedName, displayName, sku, priceInr, confidence, status
-      } },   // status: 'matched' | 'review' | 'manual'
-      filledCount, reviewCount, candidateLines
-    }
-    status:
-      matched — catalog confidence >= SUGGEST_THRESHOLD (safe auto-fill)
-      review  — filled from a weaker catalog hit; tech should eyeball it
-      manual  — no catalog hit; filled with the cleaned raw invoice line
+    buildFromInvoice(text, catalogMatcher, opts) → INVOICE-FIRST (v1.4.11)
+
+    The invoice is the source of truth. We do NOT rewrite component names from
+    the catalog — the spec name is the customer's actual invoice line, in full
+    (brand + model + specs). The catalog is only grown FROM invoices later
+    (app.js upserts each result into component_prices, invoice price wins).
+
+    Category assignment is keyword-only (no catalog scoring), which removed the
+    class of bug where a wrapped/partial line scored against an unrelated SKU
+    and landed in the wrong field.
+
+    results[category] = { rawLine, matchedName, displayName, priceInr,
+      invoicePriceInr, invoiceLineTotal, priceSource:'invoice', confidence,
+      status:'matched'|'review', category }
+      status: 'matched' when a category keyword clearly fits, else 'review'.
   */
   function buildFromInvoice(text, catalogMatcher, opts) {
     opts = opts || {};
-    var SUGGEST = (window.NeoQcMatcher && window.NeoQcMatcher.SUGGEST_THRESHOLD) || 0.55;
-    var REVIEW_FLOOR = opts.reviewFloor != null ? opts.reviewFloor : 0.30;
     var cleanName = (window.NeoQcMatcher && window.NeoQcMatcher.cleanName) || function (s) { return s; };
 
-    // Keep the original line (for price extraction) alongside the stripped line
-    // (for name matching). De-dup on the stripped text, preserve order.
-    var seen = {}; var candidates = [];
-    normalizeLines(text).filter(isCandidate).forEach(function (orig) {
-      var stripped = stripRowNoise(orig);
-      if (stripped.length < 5) return;
-      var k = stripped.toLowerCase();
-      if (seen[k]) return;
-      seen[k] = 1;
-      var pr = extractPrices(orig);
-      candidates.push({ text: stripped, orig: orig, rate: pr.rate, total: pr.total });
-    });
+    var rows = reconstructRows(text);
 
-    // Score every (candidate, category) pair.
-    var tuples = []; // {category, cand, entry, catConf, kw, score}
-    candidates.forEach(function (cand) {
+    // Score every (row, category) pair on KEYWORD evidence only.
+    var tuples = [];
+    rows.forEach(function (row) {
       ALL_CATEGORIES.forEach(function (category) {
-        var entry = bestCatalogMatch(catalogMatcher, cand.text, category);
-        var catConf = entry ? entry.confidence : 0;
-        var kw = keywordScore(cand.text, category);
-        if (catConf <= 0 && kw <= 0) return;
-        // Combined ranking score: catalog confidence dominates; keyword adds a
-        // small nudge so a strong keyword line still ranks when the catalog is
-        // thin/offline.
-        var s = catConf + Math.min(kw, 3) * 0.05;
-        tuples.push({ category: category, cand: cand, entry: entry, catConf: catConf, kw: kw, score: s });
+        var kw = keywordScore(row.text, category);
+        if (kw <= 0) return;
+        tuples.push({ category: category, row: row, kw: kw });
       });
     });
+    // Strongest keyword evidence first; ties keep invoice order (stable-ish).
+    tuples.sort(function (a, b) { return b.kw - a.kw; });
 
-    tuples.sort(function (a, b) { return b.score - a.score; });
-
-    // Greedy assignment: each category filled once, each invoice line used once.
     var results = {};
-    var usedLines = {};
+    var usedRows = [];
     tuples.forEach(function (t) {
-      if (results[t.category]) return;              // category already filled
-      var lineKey = t.cand.text.toLowerCase();
-      if (usedLines[lineKey]) return;               // line already used elsewhere
-      // Require SOME evidence: a catalog hit above the review floor, or a
-      // keyword hint for this category (offline / not-in-catalog case).
-      var hasCatalog = t.entry && t.catConf >= REVIEW_FLOOR;
-      var hasKeyword = t.kw > 0;
-      if (!hasCatalog && !hasKeyword) return;
-
-      // The component NAME is always what's on the invoice — that's the part
-      // actually being built. The catalog match only supplies a price + SKU,
-      // and only when it's trustworthy (high confidence AND same brand). A
-      // brand conflict downgrades to 'review' and drops the wrong SKU, so we
-      // never silently substitute e.g. an MSI board with a Gigabyte one.
-      var catalogName = t.entry ? t.entry.matchedName : null;
-      var conflict = t.entry && brandConflict(t.cand.text, catalogName);
-      var status, sku, catalogPrice, confidence;
-
-      if (t.entry && t.catConf >= SUGGEST && !conflict) {
-        status = 'matched';
-        sku = t.entry.sku; catalogPrice = t.entry.priceInr; confidence = t.catConf;
-      } else if (t.entry && t.catConf >= REVIEW_FLOOR && !conflict) {
-        status = 'review';
-        sku = t.entry.sku; catalogPrice = t.entry.priceInr; confidence = t.catConf;
-      } else if (t.entry && conflict && t.catConf >= REVIEW_FLOOR) {
-        // Catalog found a look-alike of a different brand — keep the invoice
-        // text as the spec, use the invoice price, but do NOT attach the
-        // mismatched catalog SKU. Flag for the tech to eyeball.
-        status = 'review';
-        sku = null; catalogPrice = null; confidence = t.catConf;
-      } else {
-        // keyword-only / no usable catalog hit: honest manual entry.
-        status = 'manual';
-        sku = null; catalogPrice = null; confidence = t.catConf || 0;
-      }
-
-      // The invoice price is what the customer actually paid — prefer it over the
-      // catalog's reference price for this specific build. Fall back to catalog.
-      var invoicePrice = t.cand.rate != null ? t.cand.rate : null;
-      var priceInr = invoicePrice != null ? invoicePrice : catalogPrice;
-
-      var invoiceName = cleanName(cleanInvoiceName(t.cand.text));
+      if (results[t.category]) return;                 // category already filled
+      if (usedRows.indexOf(t.row) !== -1) return;      // row already used
+      var invoicePrice = t.row.rate != null ? t.row.rate : null;
+      var invoiceName = cleanName(t.row.text);
+      // 'matched' when the keyword fit is decisive (>=2 hints or a strong single
+      // hint); otherwise 'review' so the tech eyeballs the categorization.
+      var status = t.kw >= 2 ? 'matched' : 'review';
       results[t.category] = {
-        rawLine: t.cand.text,
-        matchedName: invoiceName,               // spec name = the invoice line
-        displayName: invoiceName,               // shown + saved to the ticket
-        catalogName: catalogName ? cleanName(catalogName) : null, // reference only
-        brandConflict: !!conflict,
-        sku: sku,
-        priceInr: priceInr,
+        rawLine: t.row.text,
+        matchedName: invoiceName,
+        displayName: invoiceName,
+        catalogName: null,
+        brandConflict: false,
+        sku: null,                                     // set by the catalog upsert in app.js
+        priceInr: invoicePrice,
         invoicePriceInr: invoicePrice,
-        invoiceLineTotal: t.cand.total,
-        catalogPriceInr: catalogPrice,
-        priceSource: invoicePrice != null ? 'invoice' : (catalogPrice != null ? 'catalog' : 'none'),
-        confidence: confidence,
-        status: status
+        invoiceLineTotal: t.row.total,
+        catalogPriceInr: null,
+        priceSource: invoicePrice != null ? 'invoice' : 'none',
+        confidence: Math.min(1, 0.6 + t.kw * 0.12),
+        status: status,
+        category: t.category
       };
-      usedLines[lineKey] = 1;
+      usedRows.push(t.row);
     });
 
     var filledCount = 0, reviewCount = 0;
@@ -286,15 +279,19 @@
       if (results[c].status !== 'matched') reviewCount++;
     });
 
-    return { results: results, filledCount: filledCount, reviewCount: reviewCount, candidateLines: candidates };
+    return { results: results, filledCount: filledCount, reviewCount: reviewCount, candidateLines: rows };
   }
 
   var api = {
     buildFromInvoice: buildFromInvoice,
     normalizeLines: normalizeLines,
+    reconstructRows: reconstructRows,
+    brandConflict: brandConflict,
+    brandOf: brandOf,
     // exposed for unit tests / debugging
     _isCandidate: isCandidate,
     _stripRowNoise: stripRowNoise,
+    _cleanInvoiceName: cleanInvoiceName,
     _keywordScore: keywordScore,
     ALL_CATEGORIES: ALL_CATEGORIES
   };
