@@ -631,14 +631,13 @@ ipcMain.handle('sys:check-win', () => {
             const parsed = JSON.parse(keyStdout.trim());
             if (parsed && parsed.productKey) {
               productKey = parsed.productKey;
-              keyDetail = {
-                source: parsed.source,
-                installedKey: parsed.installedKey,
-                oemKey: parsed.oemKey,
-                oemDiffersFromInstalled: parsed.oemDiffersFromInstalled,
-                partialKey: parsed.partialKey,
-                licenseDescription: parsed.licenseDescription
-              };
+              // v1.5.1 — forward the WHOLE probe result. The previous
+              // hand-picked whitelist silently dropped keyRecoverable,
+              // isDigitalLicensePlaceholder and decodedLast5MatchesPartial,
+              // so the renderer could never tell a verified key from a shared
+              // generic one and just printed whatever it was handed. Any new
+              // field the probe learns is now available to the UI for free.
+              keyDetail = parsed;
             }
           } catch (e) {
             // Fallback: try to salvage a bare key from stdout

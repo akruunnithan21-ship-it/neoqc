@@ -2931,6 +2931,99 @@ function setupSerialVerification() {
 // ==========================================================================
 let detectedSpecs = null;
 let detectedWinKey = '';
+// Key the technician typed during Windows setup, verified against this PC's
+// real activation record. Used when Windows itself no longer holds the key.
+let winKeyEnteredByTech = '';
+
+// v1.5.1 — Windows product key panel.
+//
+// Ground truth: SoftwareLicensingProduct.PartialProductKey (the last 5 chars)
+// is ALWAYS this machine's real activating key. The full key is only present
+// on disk when a DigitalProductId blob decodes to something whose last-5
+// matches that. When a tech installs via "I don't have a product key", Windows
+// stores a shared GENERIC key instead — the same on every PC — and typing a
+// real key later does not always rewrite it. In that case the full key is
+// simply not on the machine, so we ask the technician to record it and verify
+// their entry against the last-5. That gives a real, auditable key→customer
+// record instead of printing a placeholder.
+function renderWinKeyPanel(kd, productKey) {
+  const container = document.getElementById('client-win-key-container');
+  const valEl = document.getElementById('client-win-key');
+  if (!container || !valEl) return;
+  container.classList.remove('hidden');
+
+  const partial = kd.partialKey || '';
+  let note = document.getElementById('client-win-key-note');
+  if (!note && container.parentNode) {
+    note = document.createElement('div');
+    note.id = 'client-win-key-note';
+    container.parentNode.appendChild(note);
+  }
+
+  if (kd.keyRecoverable && productKey) {
+    valEl.textContent = productKey;
+    valEl.style.color = '';
+    if (note) {
+      note.style.cssText = 'margin-top:6px;padding:8px;background:rgba(16,185,129,0.12);border:1px solid rgba(16,185,129,0.4);border-radius:6px;font-size:0.72rem;color:#10b981;';
+      note.textContent = '✓ Verified against this PC\'s activation record (ends ' + partial + '). This is the key that activated this installation.';
+    }
+    const entry = document.getElementById('winkey-entry-wrap');
+    if (entry) entry.remove();
+    return;
+  }
+
+  // Not recoverable — never present the decoded/generic key as the real one.
+  valEl.textContent = partial ? ('•••••-•••••-•••••-•••••-' + partial) : 'Not recoverable';
+  valEl.style.color = '#d97706';
+  if (note) {
+    note.style.cssText = 'margin-top:6px;padding:8px;background:rgba(245,158,11,0.12);border:1px solid rgba(245,158,11,0.4);border-radius:6px;font-size:0.72rem;color:#b45309;';
+    note.textContent = 'Windows does not store the full key on this PC (installed with "I don\'t have a product key", so the registry holds a shared generic key). Only the last 5 characters are real: ' +
+      (partial || 'unknown') + '. Type the key you used below — it will be checked against those last 5 and saved to the ticket.';
+  }
+
+  // Technician key entry + live verification against the real last-5.
+  let wrap = document.getElementById('winkey-entry-wrap');
+  if (!wrap && container.parentNode) {
+    wrap = document.createElement('div');
+    wrap.id = 'winkey-entry-wrap';
+    wrap.style.cssText = 'margin-top:8px;display:flex;flex-direction:column;gap:6px;';
+    wrap.innerHTML =
+      '<label style="font-size:0.72rem;font-weight:700;color:var(--text-muted);">KEY USED TO ACTIVATE (record for this customer)</label>' +
+      '<div style="display:flex;gap:8px;flex-wrap:wrap;">' +
+      '<input id="winkey-entry" placeholder="XXXXX-XXXXX-XXXXX-XXXXX-XXXXX" maxlength="29" autocomplete="off" ' +
+      'style="flex:1 1 260px;min-width:0;font-family:\'JetBrains Mono\',monospace;text-transform:uppercase;letter-spacing:0.08em;padding:8px 10px;border-radius:6px;border:1px solid var(--glass-border);background:var(--glass-bg);color:var(--text-dark);outline:none;">' +
+      '</div><div id="winkey-entry-status" style="font-size:0.72rem;min-height:14px;"></div>';
+    container.parentNode.appendChild(wrap);
+
+    const input = wrap.querySelector('#winkey-entry');
+    const status = wrap.querySelector('#winkey-entry-status');
+    input.value = winKeyEnteredByTech || '';
+    input.addEventListener('input', () => {
+      let v = input.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 25);
+      input.value = (v.match(/.{1,5}/g) || []).join('-');
+      const clean = v;
+      const realLast5 = (partial || '').toUpperCase();
+      if (clean.length < 25) {
+        status.textContent = clean.length ? 'Keep typing… (' + clean.length + '/25)' : '';
+        status.style.color = 'var(--text-muted)';
+        winKeyEnteredByTech = ''; detectedWinKey = '';
+      } else if (!realLast5) {
+        status.textContent = 'Saved (no activation record available to verify against).';
+        status.style.color = '#d97706';
+        winKeyEnteredByTech = input.value; detectedWinKey = input.value;
+      } else if (clean.slice(-5) === realLast5) {
+        status.textContent = '✓ Verified — matches this PC\'s activation record (' + realLast5 + ').';
+        status.style.color = '#10b981';
+        winKeyEnteredByTech = input.value; detectedWinKey = input.value;
+      } else {
+        status.textContent = '✗ Does not match this PC — Windows says the key ends in ' + realLast5 + '. Check you typed the right one.';
+        status.style.color = '#ef4444';
+        winKeyEnteredByTech = ''; detectedWinKey = '';
+      }
+      if (typeof checkClientFormReady === 'function') checkClientFormReady();
+    });
+  }
+}
 let detectedWinStatus = '';
 let parsedTemps = null;
 let parsedCinebench = null;
@@ -3003,31 +3096,17 @@ async function setupClientMode() {
       detectedWinStatus = "Not Activated";
     }
     
-    if (result.productKey) {
+    // v1.5.1 — a key is only shown AS the customer's key when the probe
+    // verified it against Windows' own activation record (last-5 ==
+    // SoftwareLicensingProduct.PartialProductKey). Otherwise we say so and let
+    // the technician record the key they actually typed, verified against that
+    // same last-5. No generic/unverified key is ever presented as real.
+    const kd = result.keyDetail || {};
+    renderWinKeyPanel(kd, result.productKey);
+    if (kd.keyRecoverable && result.productKey) {
       detectedWinKey = result.productKey;
-      if (winKeyVal) winKeyVal.textContent = result.productKey;
-      if (winKeyContainer) winKeyContainer.classList.remove('hidden');
-      // v1.4.5 — surface the "this is a Microsoft placeholder key" note when
-      // the probe detects Digital License activation, so the tech doesn't
-      // print a shared generic key on the QC report thinking it's the real
-      // retail key. Also lets them know where to actually find it.
-      if (result.keyDetail && result.keyDetail.isDigitalLicensePlaceholder) {
-        var note = document.getElementById('client-win-key-note');
-        if (!note && winKeyContainer && winKeyContainer.parentNode) {
-          note = document.createElement('div');
-          note.id = 'client-win-key-note';
-          note.style.cssText = 'margin-top:6px;padding:8px;background:rgba(255,193,7,0.12);border:1px solid rgba(255,193,7,0.4);border-radius:6px;font-size:0.72rem;color:#b8860b;';
-          winKeyContainer.parentNode.appendChild(note);
-        }
-        if (note) {
-          note.textContent = '⚠ Digital License placeholder — this is a shared Microsoft key. The real retail/OEM key you entered isn\'t stored on this machine (activation is tied to your Microsoft Account server-side). Get it from account.microsoft.com › Devices, or your install notes.';
-        }
-      } else {
-        var existingNote = document.getElementById('client-win-key-note');
-        if (existingNote) existingNote.remove();
-      }
     } else {
-      detectedWinKey = '';
+      detectedWinKey = winKeyEnteredByTech || '';
     }
 
     checkClientFormReady();
@@ -4546,43 +4625,57 @@ async function deleteTicketFromCloud(ticketId) {
 }
 
 // Fetch all tickets from Supabase to sync local store
+// SINGLE source of truth for Supabase row → ticket mapping.
+//
+// v1.5.1 — this exists because syncFromCloud() and the realtime listener each
+// had their OWN copy of this mapping, and they drifted: the realtime copy was
+// missing detectedSpecs / specPrices / damagedComponents. Since the realtime
+// handler does `appState.tickets[index] = ticket`, every realtime update
+// WIPED the client's auto-detected hardware off the ticket — which is why the
+// admin's "System Hardware Specs (Verification)" panel kept showing "--" no
+// matter what the testing client detected. Never inline this mapping again.
+function mapDbRowToTicket(dbRow) {
+  const specs = dbRow.specs || {};
+  return {
+    id: dbRow.id,
+    createdAt: dbRow.created_at,
+    updatedAt: dbRow.updated_at || dbRow.created_at,
+    type: dbRow.type,
+    customerName: dbRow.customer_name,
+    deadline: dbRow.deadline,
+    technician: dbRow.technician,
+    missingComponentsToggle: dbRow.missing_components_toggle,
+    missingComponents: dbRow.missing_components,
+    buildChecks: dbRow.build_checks,
+    qcChecks: dbRow.qc_checks,
+    diagnostics: dbRow.diagnostics,
+    serials: dbRow.serials,
+    specs: dbRow.specs,
+    specPrices: specs.__prices || null,
+    detectedSpecs: dbRow.detectedSpecs || specs.__detected || null,
+    damagedComponents: dbRow.damagedComponents || specs.__damaged || null,
+    status: dbRow.status,
+    completedAt: dbRow.completed_at
+  };
+}
+
 async function syncFromCloud() {
   if (!supabaseClient) return;
   try {
     const { data, error } = await supabaseClient
       .from('tickets')
       .select('*');
-    
+
     if (error) {
       console.error("Failed to fetch cloud tickets:", error.message);
       return;
     }
-    
+
     if (data) {
       const cloudIds = new Set(data.map(dbRow => dbRow.id));
-      
+
       data.forEach(dbRow => {
-        const ticket = {
-          id: dbRow.id,
-          createdAt: dbRow.created_at,
-          updatedAt: dbRow.updated_at || dbRow.created_at,
-          type: dbRow.type,
-          customerName: dbRow.customer_name,
-          deadline: dbRow.deadline,
-          technician: dbRow.technician,
-          missingComponentsToggle: dbRow.missing_components_toggle,
-          missingComponents: dbRow.missing_components,
-          buildChecks: dbRow.build_checks,
-          qcChecks: dbRow.qc_checks,
-          diagnostics: dbRow.diagnostics,
-          serials: dbRow.serials,
-          specs: dbRow.specs,
-          specPrices: (dbRow.specs && dbRow.specs.__prices) || null,
-          detectedSpecs: dbRow.detectedSpecs || (dbRow.specs && dbRow.specs.__detected) || null,
-          damagedComponents: dbRow.damagedComponents || (dbRow.specs && dbRow.specs.__damaged) || null,
-          status: dbRow.status,
-          completedAt: dbRow.completed_at
-        };
+        const ticket = mapDbRowToTicket(dbRow);
 
         const index = appState.tickets.findIndex(t => t.id === ticket.id);
         if (index === -1) {
@@ -4638,24 +4731,10 @@ function setupRealtimeListener() {
 
         const dbRow = payload.new;
         if (dbRow) {
-          const ticket = {
-            id: dbRow.id,
-            createdAt: dbRow.created_at,
-            updatedAt: dbRow.updated_at || dbRow.created_at,
-            type: dbRow.type,
-            customerName: dbRow.customer_name,
-            deadline: dbRow.deadline,
-            technician: dbRow.technician,
-            missingComponentsToggle: dbRow.missing_components_toggle,
-            missingComponents: dbRow.missing_components,
-            buildChecks: dbRow.build_checks,
-            qcChecks: dbRow.qc_checks,
-            diagnostics: dbRow.diagnostics,
-            serials: dbRow.serials,
-            specs: dbRow.specs,
-            status: dbRow.status,
-            completedAt: dbRow.completed_at
-          };
+          // Use the SHARED mapper — an inline copy here is what silently
+          // dropped detectedSpecs/specPrices/damagedComponents on every
+          // realtime update (see mapDbRowToTicket).
+          const ticket = mapDbRowToTicket(dbRow);
 
           const index = appState.tickets.findIndex(t => t.id === ticket.id);
           if (index === -1) {

@@ -109,8 +109,39 @@ try {
     }
 } catch {}
 
-# Preferred order: DPID4 > DPID > OEM.
-$installedKey = if ($key_dpid4) { $key_dpid4 } elseif ($key_dpid) { $key_dpid } else { $null }
+# v1.5.1 — SELECT BY VALIDATION, not by blind source preference.
+#
+# The old order (DPID4 > DPID > OEM) reported whichever blob existed first.
+# Measured on a real Retail machine: DigitalProductId4 decoded to
+# JVF76-...-TCGTV while the authoritative PartialProductKey was 8FG6T, and
+# DigitalProductId decoded to XN99X-...-8FG6T (correct). So the app printed a
+# WRONG key while the right one sat in the other blob.
+#
+# Correct rule: whichever candidate's last-5 matches SoftwareLicensingProduct's
+# PartialProductKey IS this machine's activating key. Only fall back to raw
+# preference when there's no partial to validate against.
+$keyCandidates = @()
+if ($key_dpid4) { $keyCandidates += ,@('digital-product-id-4', $key_dpid4) }
+if ($key_dpid)  { $keyCandidates += ,@('digital-product-id',   $key_dpid) }
+if ($oemKey)    { $keyCandidates += ,@('bios-oa3x',            $oemKey) }
+
+$installedKey = $null
+$installedKeySource = $null
+if ($partialKey) {
+    foreach ($cand in $keyCandidates) {
+        $ck = $cand[1]
+        if ($ck -and $ck.Length -ge 5 -and $ck.Substring($ck.Length - 5) -eq $partialKey) {
+            $installedKey = $ck; $installedKeySource = $cand[0]; break
+        }
+    }
+}
+if (-not $installedKey) {
+    # Nothing validated — keep the old preference so we still report SOMETHING,
+    # but keyRecoverable below will be false so the UI never presents it as
+    # the customer's key.
+    $installedKey = if ($key_dpid4) { $key_dpid4 } elseif ($key_dpid) { $key_dpid } else { $null }
+    $installedKeySource = if ($key_dpid4) { 'digital-product-id-4' } elseif ($key_dpid) { 'digital-product-id' } else { $null }
+}
 
 # If we have a partial from SLP and the decoded key's last-5 doesn't match,
 # the decoded key is stale — trust the partial and use the decode for the
@@ -129,7 +160,7 @@ $reportedKey = $null
 if ($installedKey) {
     $isPlaceholder = $genericKeys -contains $installedKey
     $reportedKey = $installedKey
-    $whichSource = if ($key_dpid4) { 'digital-product-id-4' } else { 'digital-product-id' }
+    $whichSource = $installedKeySource
     if ($isPlaceholder) {
         # Don't LIE — surface the placeholder AND the note that the real key
         # isn't on the machine.
@@ -142,8 +173,28 @@ if ($installedKey) {
 
 $oemDiffers = ($oemKey -and $installedKey -and ($oemKey -ne $installedKey))
 
+# v1.5.1 — THE decisive flag for the UI.
+#
+# A key is only "recoverable" (i.e. genuinely THIS machine's activating key)
+# when all three hold:
+#   1. we decoded something,
+#   2. it is not one of Microsoft's shared generic install keys, and
+#   3. its last-5 matches SoftwareLicensingProduct.PartialProductKey — the
+#      authoritative, per-machine record of what actually activated Windows.
+#
+# When a tech installs with "I don't have a product key", Windows writes a
+# GENERIC edition key into DigitalProductId. Activating later by typing a real
+# key does NOT always rewrite that blob, so the decode keeps returning the same
+# generic key on every machine. That is precisely the "same key everywhere"
+# symptom. In that case the full key is NOT on the PC — Microsoft keeps only a
+# hash + digital licence — and the only ground truth locally is the last-5.
+# The UI must then ask the technician to record the key they typed, and verify
+# it against that last-5 rather than printing a shared placeholder.
+$keyRecoverable = [bool]($installedKey -and (-not $isPlaceholder) -and ($matchesPartial -eq $true))
+
 $result = [ordered]@{
     productKey = $reportedKey
+    keyRecoverable = $keyRecoverable
     source = $whichSource
     installedKey = $installedKey
     installedKeyDpid = $key_dpid
