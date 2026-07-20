@@ -33,6 +33,47 @@
 
   var ALL_CATEGORIES = ['cpu', 'gpu', 'motherboard', 'ram', 'storage', 'psu', 'case', 'cooler'];
 
+  // Brand guard — the catalog scorer matches on shared tokens (B850, Gaming,
+  // WiFi6E, AM5, ATX…), so an "MSI B850M Gaming Pro" invoice line can score
+  // 70%+ against a "Gigabyte B850 Gaming X" catalog row. That's a DIFFERENT
+  // product. If both the invoice line and the catalog match name a recognized
+  // brand and the brands disagree, we refuse to treat it as a confident match:
+  // the invoice text becomes the spec name and the wrong catalog SKU is dropped.
+  // ONLY manufacturer / board-partner brands — deliberately NOT chip vendors
+  // (nvidia, geforce, radeon, amd, intel). A card is legitimately "Zotac
+  // GeForce RTX 5080", so comparing chip vendors would false-flag a Zotac
+  // invoice vs a bare-"GeForce" catalog hit. Multi-word aliases come first so
+  // "cooler master" matches before a stray "master".
+  var BRAND_ALIASES = [
+    ['western digital', 'wd'], ['cooler master', 'coolermaster'], ['lian li', 'lianli'],
+    ['g.skill', 'gskill'], ['g skill', 'gskill'], ['team group', 'teamgroup'],
+    ['be quiet', 'bequiet'], ['silicon power', 'siliconpower'], ['sea gate', 'seagate'],
+    ['msi', 'msi'], ['gigabyte', 'gigabyte'], ['asrock', 'asrock'], ['asus', 'asus'],
+    ['zotac', 'zotac'], ['deepcool', 'deepcool'], ['corsair', 'corsair'], ['kingston', 'kingston'],
+    ['samsung', 'samsung'], ['crucial', 'crucial'], ['seagate', 'seagate'],
+    ['coolermaster', 'coolermaster'], ['nzxt', 'nzxt'], ['lianli', 'lianli'], ['evga', 'evga'],
+    ['palit', 'palit'], ['galax', 'galax'], ['sapphire', 'sapphire'], ['powercolor', 'powercolor'],
+    ['xfx', 'xfx'], ['pny', 'pny'], ['inno3d', 'inno3d'], ['gainward', 'gainward'],
+    ['gskill', 'gskill'], ['adata', 'adata'], ['teamgroup', 'teamgroup'], ['tforce', 'teamgroup'],
+    ['thermaltake', 'thermaltake'], ['bequiet', 'bequiet'], ['fractal', 'fractal'], ['antec', 'antec'],
+    ['colorful', 'colorful'], ['biostar', 'biostar'], ['sandisk', 'sandisk'], ['kioxia', 'kioxia'],
+    ['micron', 'micron'], ['patriot', 'patriot'], ['transcend', 'transcend'], ['wd', 'wd']
+  ];
+  function brandOf(str) {
+    if (!str) return null;
+    var s = ' ' + String(str).toLowerCase().replace(/[^a-z0-9. ]/g, ' ').replace(/\s+/g, ' ') + ' ';
+    for (var i = 0; i < BRAND_ALIASES.length; i++) {
+      var token = BRAND_ALIASES[i][0];
+      if (s.indexOf(' ' + token + ' ') !== -1) return BRAND_ALIASES[i][1];
+    }
+    return null;
+  }
+  // true only when BOTH names carry a recognized brand AND they differ.
+  function brandConflict(a, b) {
+    var ba = brandOf(a), bb = brandOf(b);
+    return !!(ba && bb && ba !== bb);
+  }
+
   // Lines we never treat as a component: totals, taxes, addresses, headers.
   var NOISE_LINE = /(sub\s*total|grand\s*total|\btotal\b|\bgst\b|\bcgst\b|\bsgst\b|\bigst\b|\btax\b|invoice\s*(no|date|number)|\bhsn\b|\bqty\b|quantity|\bamount\b|\bdiscount\b|\bround\s*off\b|bill\s*to|ship\s*to|\bgstin\b|\bpan\b|terms\s*&|thank\s*you|authori[sz]ed|signature|\bemail\b|\bphone\b|\bmobile\b|www\.|@|payment|balance\s*due)/i;
 
@@ -75,6 +116,24 @@
     l = l.replace(/\b(?:rs|inr)\b\.?/ig, ' ');
     l = l.replace(/\b\d{1,3}(,\d{2,3})+(\.\d{1,2})?\b/g, ' '); // 1,23,456.00 amounts
     l = l.replace(/\s{2,}/g, ' ').trim();
+    return l;
+  }
+
+  // Clean the invoice line into a presentable SPEC NAME: strip the tabular
+  // metadata that rides along when a PDF glues columns onto the description
+  // (HSN codes, warranty, quantity, tax %). Preserves real spec tokens like
+  // "16GB", "6000MHz", "2TB", "GDDR7" (those carry letters, HSN codes don't).
+  function cleanInvoiceName(line) {
+    var l = stripRowNoise(line);
+    // Leading row index ("2 MSI …") — but never a spec unit ("16 GB …").
+    l = l.replace(/^\s*\d{1,2}\s+(?!(?:gb|tb|mhz|ghz|w|watt|mm)\b)(?=[A-Za-z])/i, '');
+    l = l.replace(/\bhsn\s*\/?\s*sac\b/ig, ' ');
+    l = l.replace(/\(?\b\d{1,3}\s*%\)?/g, ' ');                 // tax "(18%)" / "18 %"
+    l = l.replace(/\b\d{1,2}\s*(yrs?|years?|months?|mo)\b/ig, ' '); // warranty "3yr"
+    l = l.replace(/\b\d{1,3}\s*(pcs?|nos?|units?|qty)\b/ig, ' ');   // qty "1 PCS"
+    l = l.replace(/\b\d{6,9}\b/g, ' ');                          // bare HSN/SAC codes
+    l = l.replace(/\s*[|/\\]\s*/g, ' ');                         // leftover column pipes
+    l = l.replace(/\s{2,}/g, ' ').replace(/^[\s\-–,]+|[\s\-–,]+$/g, '').trim();
     return l;
   }
 
@@ -170,19 +229,31 @@
       var hasKeyword = t.kw > 0;
       if (!hasCatalog && !hasKeyword) return;
 
-      var status, matchedName, sku, catalogPrice, confidence;
-      if (t.entry && t.catConf >= SUGGEST) {
+      // The component NAME is always what's on the invoice — that's the part
+      // actually being built. The catalog match only supplies a price + SKU,
+      // and only when it's trustworthy (high confidence AND same brand). A
+      // brand conflict downgrades to 'review' and drops the wrong SKU, so we
+      // never silently substitute e.g. an MSI board with a Gigabyte one.
+      var catalogName = t.entry ? t.entry.matchedName : null;
+      var conflict = t.entry && brandConflict(t.cand.text, catalogName);
+      var status, sku, catalogPrice, confidence;
+
+      if (t.entry && t.catConf >= SUGGEST && !conflict) {
         status = 'matched';
-        matchedName = t.entry.matchedName; sku = t.entry.sku;
-        catalogPrice = t.entry.priceInr; confidence = t.catConf;
-      } else if (t.entry && t.catConf >= REVIEW_FLOOR) {
+        sku = t.entry.sku; catalogPrice = t.entry.priceInr; confidence = t.catConf;
+      } else if (t.entry && t.catConf >= REVIEW_FLOOR && !conflict) {
         status = 'review';
-        matchedName = t.entry.matchedName; sku = t.entry.sku;
-        catalogPrice = t.entry.priceInr; confidence = t.catConf;
+        sku = t.entry.sku; catalogPrice = t.entry.priceInr; confidence = t.catConf;
+      } else if (t.entry && conflict && t.catConf >= REVIEW_FLOOR) {
+        // Catalog found a look-alike of a different brand — keep the invoice
+        // text as the spec, use the invoice price, but do NOT attach the
+        // mismatched catalog SKU. Flag for the tech to eyeball.
+        status = 'review';
+        sku = null; catalogPrice = null; confidence = t.catConf;
       } else {
-        // keyword-only: fill the cleaned raw invoice line as manual entry.
+        // keyword-only / no usable catalog hit: honest manual entry.
         status = 'manual';
-        matchedName = t.cand.text; sku = null; catalogPrice = null; confidence = t.catConf || 0;
+        sku = null; catalogPrice = null; confidence = t.catConf || 0;
       }
 
       // The invoice price is what the customer actually paid — prefer it over the
@@ -190,10 +261,13 @@
       var invoicePrice = t.cand.rate != null ? t.cand.rate : null;
       var priceInr = invoicePrice != null ? invoicePrice : catalogPrice;
 
+      var invoiceName = cleanName(cleanInvoiceName(t.cand.text));
       results[t.category] = {
         rawLine: t.cand.text,
-        matchedName: matchedName,
-        displayName: cleanName(matchedName),
+        matchedName: invoiceName,               // spec name = the invoice line
+        displayName: invoiceName,               // shown + saved to the ticket
+        catalogName: catalogName ? cleanName(catalogName) : null, // reference only
+        brandConflict: !!conflict,
         sku: sku,
         priceInr: priceInr,
         invoicePriceInr: invoicePrice,

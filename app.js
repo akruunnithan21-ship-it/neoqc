@@ -671,9 +671,12 @@ function fillTargetSpecFromInvoice(category, entry) {
       confidence: entry.confidence, fromInvoice: true
     };
   } else {
-    // No catalog hit — honest manual entry, no fabricated sku/price.
+    // No catalog SKU (keyword-only, or a dropped wrong-brand match) — keep the
+    // invoice price if we have one so the build cost still reflects the invoice,
+    // but never fabricate a SKU.
     specFieldMatches[fieldId] = {
-      sku: null, priceInr: null, category: category, manualEntry: true, fromInvoice: true
+      sku: null, priceInr: (entry.priceInr != null ? entry.priceInr : null),
+      category: category, manualEntry: true, fromInvoice: true
     };
   }
   return 'filled';
@@ -1515,6 +1518,16 @@ function openTicketModal(ticketId = null) {
   const modal = document.getElementById('ticket-modal');
   const form = document.getElementById('ticket-form');
   form.reset();
+
+  // v1.4.10 — clear session-scoped invoice/autocomplete state so a previous
+  // ticket's invoice import (its auto-fill banner + matched SKUs/prices) never
+  // bleeds into another ticket. specFieldMatches is a const object, so wipe its
+  // keys in place rather than reassigning.
+  Object.keys(specFieldMatches).forEach(k => delete specFieldMatches[k]);
+  const invoiceStatusEl = document.getElementById('invoice-import-status');
+  if (invoiceStatusEl) { invoiceStatusEl.classList.add('hidden'); invoiceStatusEl.innerHTML = ''; }
+  const coolerModelReset = document.getElementById('form-spec-cooler-model');
+  if (coolerModelReset) coolerModelReset.value = '';
 
   // Reset collapsible activity log to closed by default
   const eventLogSection = document.querySelector('.event-log-section');
@@ -3878,7 +3891,12 @@ function setupEventListeners() {
             ? ` — <strong>${rupee(e.priceInr)}</strong>${e.priceSource === 'catalog' ? ' <span style="opacity:0.6;">(catalog est.)</span>' : ''}`
             : '';
           const conf = e.confidence ? ` <span style="opacity:0.6;">(${Math.round(e.confidence * 100)}% match)</span>` : '';
-          return `<div style="margin-top:4px;">${icon} <strong>${catLabel[item.category] || item.category}:</strong> ${e.displayName || e.matchedName}${priceStr}${conf}</div>`;
+          // When the catalog's closest hit was a different brand, say so — the
+          // invoice text (kept as the spec) is right; the catalog just guessed wrong.
+          const brandNote = e.brandConflict && e.catalogName
+            ? ` <span style="opacity:0.75;">— catalog's closest was a different brand (“${escapeHtmlLite(e.catalogName)}”), kept your invoice text</span>`
+            : '';
+          return `<div style="margin-top:4px;">${icon} <strong>${catLabel[item.category] || item.category}:</strong> ${escapeHtmlLite(e.displayName || e.matchedName)}${priceStr}${conf}${brandNote}</div>`;
         };
         let html = `<strong>✓ Auto-filled ${summary.filled.length + summary.review.length + summary.manual.length} field(s) from the invoice.</strong>`;
         summary.filled.forEach(it => { html += line('✅', it); });

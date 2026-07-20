@@ -2083,22 +2083,18 @@
     <div class="glass-slab modal-card" style="max-width: 650px; width: 100%; padding: 30px; border-radius: 20px;">
       <div class="modal-header" style="border-bottom: 1px solid var(--glass-border); padding-bottom: 15px; margin-bottom: 20px;">
         <h2 style="font-family: 'Syncopate', sans-serif; font-size: 1.3rem; color: var(--primary-pink); letter-spacing: 0.05em; margin: 0;">NEO QC UPDATED</h2>
-        <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; font-weight: 700; background: rgba(231, 1, 78, 0.1); color: var(--primary-pink); padding: 4px 8px; border-radius: 4px;">v1.4.9</span>
+        <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; font-weight: 700; background: rgba(231, 1, 78, 0.1); color: var(--primary-pink); padding: 4px 8px; border-radius: 4px;">v1.4.10</span>
       </div>
       <div class="modal-body" style="font-size: 0.92rem; line-height: 1.6; color: var(--text-dark); max-height: 420px; overflow-y: auto; padding-right: 5px;">
-        <p style="margin-top: 0;">An update has been installed. Here are the key improvements in NeoQC <strong>v1.4.9</strong>:</p>
+        <p style="margin-top: 0;">An update has been installed. Here are the key improvements in NeoQC <strong>v1.4.10</strong>:</p>
         <ul style="padding-left: 20px; display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px;">
-          <li><strong>Accurate SSD benchmarking</strong>: The DiskSpd benchmark now mirrors CrystalDiskMark's exact methodology — the old run forced hardware write-through (reporting write speeds far below reality) and read from an unwritten test file. Writes now run first, with warm-up and non-compressible data. Expect CDM-comparable numbers on the report.</li>
-          <li><strong>CPU temperature covers the whole test</strong>: Sensor sampling now runs from the very start of diagnostics until the SSD benchmark and RAM stress finish (it used to stop early). No samples = honest blank, never a made-up number.</li>
-          <li><strong>Smarter spec verification</strong>: When hardware can't report brand/model (RAM often only reports size), the check now falls back to capacity matching for RAM/SSD (with DDR-generation guard) and model-number matching for GPU/motherboard. CPU stays strict. The panel is redesigned into clean per-component rows with verdict chips, and ticked physical checks (cooler/PSU/case) count as verified.</li>
-          <li><strong>Detected specs stay on the ticket</strong>: Auto-detected hardware no longer vanishes after Update Ticket — results merge per-field (a failed CPU probe no longer throws away the GPU/RAM/storage readings) and sync across machines.</li>
-          <li><strong>Fixed: PDF reports printed dark</strong>: Saving or printing the QC report while the app is in dark mode produced dark pages. The report now always prints on white, with its pink accents intact.</li>
-          <li><strong>Fixed: unreadable landing buttons</strong>: "Staff System" / "Testing Client" titles were black-on-dark in light theme.</li>
-          <li><strong>Sales queries polish</strong>: The awaiting-reply notice on ticket cards is now a proper banner strip, and queries show who in sales asked.</li>
+          <li><strong>Invoice import no longer substitutes the wrong part</strong>: The auto-fill now keeps the exact component from your invoice as the spec name — the catalogue is used only for pricing. If the closest catalogue match is a different brand (e.g. an MSI board vs a Gigabyte look-alike), it's flagged for review and the wrong SKU is dropped, never silently swapped in. Invoice line text is also cleaned of HSN codes, warranty and quantity columns.</li>
+          <li><strong>Fixed: previous invoice leaking into a new ticket</strong>: Creating a new ticket now fully clears the last ticket's invoice auto-fill banner and matched prices — no more stale specs showing up in the Target Specs area.</li>
+          <li><strong>Fixed: landing button text in light theme</strong>: "Staff System" / "Testing Client" text now follows the theme (readable in both light and dark) instead of being hardcoded.</li>
         </ul>
       </div>
       <div class="modal-footer" style="border-top: 1px solid var(--glass-border); padding-top: 15px; display: flex; justify-content: flex-end; margin-top: 20px;">
-        <button id="btn-close-changelog" class="primary-pink-btn" style="padding: 10px 24px; font-weight: 700; font-size: 0.95rem;">Launch NeoQC v1.4.9</button>
+        <button id="btn-close-changelog" class="primary-pink-btn" style="padding: 10px 24px; font-weight: 700; font-size: 0.95rem;">Launch NeoQC v1.4.10</button>
       </div>
     </div>
   </div>
