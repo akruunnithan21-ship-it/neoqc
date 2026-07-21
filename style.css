@@ -4402,11 +4402,23 @@ body.dark-mode #client-screen::before {
 #client-screen > * { position: relative; z-index: 1; }
 
 /* ── Breathing room ───────────────────────────────────────────────────── */
+/* v1.8.0 — USE the screen. The generic .client-card caps at 1180px, which on
+   a modern display wastes half the width and stacks everything into a long
+   scroll. The client card now breathes to 1720px and the two columns rebalance
+   at large sizes so panels get genuinely wider, not just taller. */
+#client-screen .client-card { max-width: 1720px; }
 #client-screen .client-grid-row {
   grid-template-columns: 1fr 1.35fr;
   gap: 34px;
   margin-top: 34px;
   align-items: start;
+}
+@media (min-width: 1500px) {
+  #client-screen .client-card { padding: 38px 44px; }
+  #client-screen .client-grid-row { grid-template-columns: 1fr 1.5fr; gap: 44px; }
+  /* Wide displays: the spec-verification rows get roomier two-line layout and
+     the readouts sit in two columns instead of one long stack. */
+  #client-screen .specs-readout { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 18px; }
 }
 #client-screen .client-panel {
   padding: 30px 28px;

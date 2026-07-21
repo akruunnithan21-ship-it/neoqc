@@ -145,14 +145,20 @@
     var shortId = ticket.id.slice(-6).toUpperCase();
     setText('print-ticket-id', shortId);
     setAllByClass('print-ticket-id-echo', shortId);
-    setText('print-build-type', ticket.buildType || ticket.jobType || 'PC Assembly');
+    // Job type comes from the ticket's Type field (set at creation). The old
+    // code read ticket.buildType/jobType — fields that never existed — so the
+    // report always printed "--".
+    var jobTypeLabel = ticket.type === 'build' ? 'New PC Build'
+      : ticket.type === 'repair' ? 'Service / Repair'
+      : (ticket.type || 'PC Assembly');
+    setText('print-build-type', jobTypeLabel);
     setText('print-date', new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }));
     setText('print-tech', ticket.technician || '--');
     setText('print-shop-contact', settings.shopContact || '');
 
     // ── Customer & Job ──
     setText('print-customer-name', ticket.customerName || '--');
-    setText('print-job-type', ticket.buildType || ticket.jobType || '--');
+    setText('print-job-type', jobTypeLabel);
     setText('print-status', ticket.status || '--');
     setText('print-created-at', fmtDate(ticket.createdAt));
     setText('print-deadline', fmtDate(ticket.deadline));
@@ -205,7 +211,18 @@
     // ── Thresholds (shop QC policy, from settings) ──
     var cpuThresh = settings.cpuMaxTemp || 85;
     var gpuThresh = settings.gpuMaxTemp || 80;
-    var cbThresh = settings.minCinebench || 10000;
+    // v1.8.0 — Cinebench thresholds are MODE-AWARE. A single-core run scores
+    // ~2,300 on a top CPU; judging it against the multi-core minimum branded
+    // healthy machines "QC FAILED" (the 9700X @ 2280 pts case). Single-core
+    // runs get their own floor and an explicit label.
+    var cbMode = d.cinebenchMode === 'single' ? 'single' : 'multi';
+    // Legacy tickets stored no mode. A score under 4,000 on a shop build is
+    // single-core territory (any modern multi run lands 5-figure) — infer it
+    // so old reports stop reading as failures.
+    if (!d.cinebenchMode && d.cinebench != null && d.cinebench < 4000) cbMode = 'single';
+    var cbThresh = cbMode === 'single'
+      ? (settings.minCinebenchSingle || 1500)
+      : (settings.minCinebench || 10000);
     var fmThresh = settings.minFurmark || 5000;
     var readThresh = settings.minSsdRead || 3000;
     var writeThresh = settings.minSsdWrite || 2500;
@@ -230,11 +247,27 @@
     setText('print-gpu-max', gpuMax !== null ? gpuMax + ' °C' : '--');
     setText('print-cpu-thresh', '≤ ' + cpuThresh + ' °C');
     setText('print-gpu-thresh', '≤ ' + gpuThresh + ' °C');
-    if ($('print-cpu-result')) $('print-cpu-result').innerHTML = cpuPass !== null ? badge(cpuPass) : '--';
-    if ($('print-gpu-result')) $('print-gpu-result').innerHTML = gpuPass !== null ? badge(gpuPass) : '--';
+    // v1.8.0 — a test with no data is NOT MEASURED, never an implicit fail.
+    var nmChip = '<span class="print-nm-chip">NOT MEASURED</span>';
+    if ($('print-cpu-result')) $('print-cpu-result').innerHTML = cpuPass !== null ? badge(cpuPass) : nmChip;
+    if ($('print-gpu-result')) $('print-gpu-result').innerHTML = gpuPass !== null ? badge(gpuPass) : nmChip;
+
+    // Clock telemetry rows (informational)
+    if (d.cpuClockMax != null && $('print-cpu-clock-row')) {
+      $('print-cpu-clock-row').classList.remove('hidden');
+      setText('print-cpu-clock-min', d.cpuClockMin + ' MHz');
+      setText('print-cpu-clock-avg', d.cpuClockAvg + ' MHz');
+      setText('print-cpu-clock-max', d.cpuClockMax + ' MHz');
+    }
+    if (d.gpuClockMax != null && $('print-gpu-clock-row')) {
+      $('print-gpu-clock-row').classList.remove('hidden');
+      setText('print-gpu-clock-min', d.gpuClockMin + ' MHz');
+      setText('print-gpu-clock-avg', d.gpuClockAvg + ' MHz');
+      setText('print-gpu-clock-max', d.gpuClockMax + ' MHz');
+    }
 
     setText('print-ram-detail', d.ramDetail || (d.ramStress !== undefined ? String(d.ramStress) : '--'));
-    if ($('print-ram-result')) $('print-ram-result').innerHTML = d.ramStress !== undefined ? badge(ramPass) : '--';
+    if ($('print-ram-result')) $('print-ram-result').innerHTML = d.ramStress !== undefined ? badge(ramPass) : nmChip;
 
     // ── Sparklines (temp + load) ──
     // Temp lines answer "did it stay under the QC ceiling?"; load lines answer
@@ -279,7 +312,7 @@
     var readPass = ssdR !== null ? ssdR >= readThresh : null;
     var writePass = ssdW !== null ? ssdW >= writeThresh : null;
 
-    setText('print-score-cb', cb !== null ? cb.toLocaleString() + ' pts' : '--');
+    setText('print-score-cb', cb !== null ? cb.toLocaleString() + ' pts (' + (cbMode === 'single' ? 'Single-Core' : 'Multi-Core') + ')' : '--');
     setText('print-score-fm', fm !== null ? fm.toLocaleString() + ' pts' : '--');
     setText('print-score-read', ssdR !== null ? ssdR.toLocaleString() + ' MB/s' : '--');
     setText('print-score-write', ssdW !== null ? ssdW.toLocaleString() + ' MB/s' : '--');
@@ -287,10 +320,10 @@
     setText('print-thresh-fm', '≥ ' + fmThresh.toLocaleString() + ' pts');
     setText('print-thresh-read', '≥ ' + readThresh.toLocaleString() + ' MB/s');
     setText('print-thresh-write', '≥ ' + writeThresh.toLocaleString() + ' MB/s');
-    if ($('print-result-cb')) $('print-result-cb').innerHTML = cbPass !== null ? badge(cbPass) : '--';
-    if ($('print-result-fm')) $('print-result-fm').innerHTML = fmPass !== null ? badge(fmPass) : '--';
-    if ($('print-result-read')) $('print-result-read').innerHTML = readPass !== null ? badge(readPass) : '--';
-    if ($('print-result-write')) $('print-result-write').innerHTML = writePass !== null ? badge(writePass) : '--';
+    if ($('print-result-cb')) $('print-result-cb').innerHTML = cbPass !== null ? badge(cbPass) : nmChip;
+    if ($('print-result-fm')) $('print-result-fm').innerHTML = fmPass !== null ? badge(fmPass) : nmChip;
+    if ($('print-result-read')) $('print-result-read').innerHTML = readPass !== null ? badge(readPass) : nmChip;
+    if ($('print-result-write')) $('print-result-write').innerHTML = writePass !== null ? badge(writePass) : nmChip;
 
     // ── Ghosted measured-vs-threshold bars ──
     var barsEl = $('print-bench-bars');

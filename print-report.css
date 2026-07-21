@@ -688,3 +688,21 @@
   font-weight: bold;
   letter-spacing: 0.04em;
 }
+
+/* v1.8.0 — "no data" is neutral, never an implicit fail */
+#print-report-container .print-nm-chip {
+  display: inline-block;
+  border: 1px dashed #999;
+  color: #777;
+  border-radius: 3px;
+  padding: 1px 6px;
+  font-size: 6.5pt;
+  font-weight: bold;
+  letter-spacing: 0.06em;
+}
+
+/* v1.8.0 — polish: zebra striping on metric tables, tightened score strip */
+#print-report-container .print-metric-table tbody tr:nth-child(even) td {
+  background: #fafafa;
+}
+#print-report-container .print-score-tile .pst-value { letter-spacing: -0.01em; }

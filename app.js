@@ -3422,11 +3422,49 @@ function populatePrintFields(ticket) {
   }
 }
 
-function triggerPrintReport(ticketId, shouldPrint = true) {
+// v1.8.0 — the ticket as the REPORT sees it: God-Mode overrides (admin,
+// Ctrl+Alt+W) merged over diagnostics. Overrides live on the ticket
+// (diagnostics.__reportOverrides via sync) for the shop's own audit trail.
+function reportEffectiveTicket(ticket) {
+  const ov = ticket.reportOverrides;
+  if (!ov || !Object.keys(ov).length) return ticket;
+  const eff = JSON.parse(JSON.stringify(ticket));
+  eff.diagnostics = Object.assign({}, eff.diagnostics || {}, ov);
+  return eff;
+}
+
+// v1.8.0 — the customer should always see the value story. If PPI was never
+// computed for this ticket, compute it now (JS engine, in-process) so the
+// report's value section is populated instead of a placeholder.
+async function ensurePpiForReport(ticket) {
+  if (ppiCacheByTicket[ticket.id]) return;
+  if (!(window.NeoQcPpiSync && window.NeoQcPpi && catalogMatcher && ticket.specs)) return;
+  try {
+    const useCase = (document.getElementById('modal-ppi-usecase') || {}).value || 'gaming-1440p';
+    const ticketPrices = Object.assign({}, ticket.specPrices || (ticket.specs && ticket.specs.__prices) || {});
+    const jsRes = await window.NeoQcPpiSync.computePpi({
+      ticketSpecs: ticket.specs,
+      catalogMatcher: catalogMatcher,
+      useCase: useCase,
+      ticketPrices: ticketPrices,
+      fetchUrl: function (url) { return ipcRenderer.invoke('catalog:fetch-url', { url: url }); },
+      supabaseClient: supabaseClient
+    });
+    if (jsRes && jsRes.success) {
+      ppiCacheByTicket[ticket.id] = jsRes.payload;
+      if (supabaseClient) {
+        window.NeoQcPpiSync.upsertTicketPpi(supabaseClient, ticket.id, jsRes.payload).catch(() => {});
+      }
+    }
+  } catch (e) { console.warn('report-time PPI compute skipped:', e && e.message); }
+}
+
+async function triggerPrintReport(ticketId, shouldPrint = true) {
   const ticket = appState.tickets.find(t => t.id === ticketId);
   if (!ticket) return;
 
-  if (!populatePrintFields(ticket)) return; // never print an unpopulated skeleton
+  await ensurePpiForReport(ticket);
+  if (!populatePrintFields(reportEffectiveTicket(ticket))) return; // never print an unpopulated skeleton
 
   // Execute print in main Electron window
   if (shouldPrint) {
@@ -3438,7 +3476,8 @@ async function triggerSavePdf(ticketId) {
   const ticket = appState.tickets.find(t => t.id === ticketId);
   if (!ticket) return;
 
-  if (!populatePrintFields(ticket)) return; // never save an unpopulated skeleton
+  await ensurePpiForReport(ticket);
+  if (!populatePrintFields(reportEffectiveTicket(ticket))) return; // never save an unpopulated skeleton
 
   // Save PDF filename
   const cleanName = ticket.customerName.replace(/[^a-z0-9]/gi, '_').toLowerCase();
@@ -4618,6 +4657,8 @@ async function syncTicketToCloud(ticket) {
     if (ticket.stressRuns != null) diagPayload.__stressRuns = ticket.stressRuns;
     if (ticket.stressSignedOff != null) diagPayload.__stressSignedOff = ticket.stressSignedOff;
     if (ticket.stressSignedOffAt) diagPayload.__stressSignedOffAt = ticket.stressSignedOffAt;
+    if (ticket.reportOverrides) diagPayload.__reportOverrides = ticket.reportOverrides;
+    else delete diagPayload.__reportOverrides;
 
     const { error } = await supabaseClient
       .from('tickets')
@@ -4684,6 +4725,7 @@ function mapDbRowToTicket(dbRow) {
     stressRuns: diag.__stressRuns || 0,
     stressSignedOff: !!diag.__stressSignedOff,
     stressSignedOffAt: diag.__stressSignedOffAt || null,
+    reportOverrides: diag.__reportOverrides || null,
     id: dbRow.id,
     createdAt: dbRow.created_at,
     updatedAt: dbRow.updated_at || dbRow.created_at,
@@ -5461,9 +5503,20 @@ async function executeDiagnosticsWorkflow(isModal) {
       ticket.diagnostics.gpuTempAvg = res.gpuTempAvg || null;
       ticket.diagnostics.gpuTempLog = res.gpuTempLog || null;
       ticket.diagnostics.cinebench = res.cinebenchScore || null;
+      ticket.diagnostics.cinebenchMode = res.cinebenchMode || 'multi';
       ticket.diagnostics.furmark = res.furmarkScore || null;
       ticket.diagnostics.ssdRead = res.ssdRead || null;
       ticket.diagnostics.ssdWrite = res.ssdWrite || null;
+      // v1.8.0 — clock telemetry + temp source
+      ticket.diagnostics.cpuClockMin = res.cpuClockMin || null;
+      ticket.diagnostics.cpuClockAvg = res.cpuClockAvg || null;
+      ticket.diagnostics.cpuClockMax = res.cpuClockMax || null;
+      ticket.diagnostics.cpuClockLog = res.cpuClockLog || null;
+      ticket.diagnostics.gpuClockMin = res.gpuClockMin || null;
+      ticket.diagnostics.gpuClockAvg = res.gpuClockAvg || null;
+      ticket.diagnostics.gpuClockMax = res.gpuClockMax || null;
+      ticket.diagnostics.gpuClockLog = res.gpuClockLog || null;
+      ticket.diagnostics.cpuTempSource = res.cpuTempSource || null;
       if (ssdHealth && !ssdHealth.error) ticket.diagnostics.ssdHealth = ssdHealth;
 
       // RAM verdict + detail come from the quick sustained stress test that
@@ -6581,4 +6634,96 @@ document.addEventListener('DOMContentLoaded', () => {
     const r = document.getElementById('portcert-runner');
     if (r) r.classList.add('hidden');
   });
+});
+
+// ═══════════════════════════════════════════════════════════
+//  GOD MODE (v1.8.0) — admin-only report override, Ctrl+Alt+W
+//  Staff app only, with a ticket open. Fields left blank keep the measured
+//  value; filled fields replace it ON THE PRINTED REPORT for this ticket.
+//  Overrides persist on the ticket (diagnostics.__reportOverrides in cloud
+//  sync) so the shop retains an internal record of every change.
+// ═══════════════════════════════════════════════════════════
+const GODMODE_FIELDS = [
+  ['cinebench',    'Cinebench score (pts)',        'number'],
+  ['cinebenchMode','Cinebench mode',               'select', ['', 'multi', 'single']],
+  ['furmark',      'FurMark score (pts)',          'number'],
+  ['ssdRead',      'SSD seq. read (MB/s)',         'number'],
+  ['ssdWrite',     'SSD seq. write (MB/s)',        'number'],
+  ['cpuTempMin',   'CPU temp min (°C)',            'number'],
+  ['cpuTempAvg',   'CPU temp avg (°C)',            'number'],
+  ['cpuTempMax',   'CPU temp max (°C)',            'number'],
+  ['gpuTempMin',   'GPU temp min (°C)',            'number'],
+  ['gpuTempAvg',   'GPU temp avg (°C)',            'number'],
+  ['gpuTempMax',   'GPU temp max (°C)',            'number'],
+  ['cpuClockMax',  'CPU max clock (MHz)',          'number'],
+  ['gpuClockMax',  'GPU max clock (MHz)',          'number'],
+  ['ramStress',    'RAM stress result',            'select', ['', 'passed', 'failed']],
+  ['ramDetail',    'RAM detail line',              'text']
+];
+
+function openGodMode() {
+  if (currentMode !== 'staff' || !editingTicketId) return;
+  const ticket = appState.tickets.find(t => t.id === editingTicketId);
+  if (!ticket) return;
+  const grid = document.getElementById('godmode-grid');
+  const d = ticket.diagnostics || {};
+  const ov = ticket.reportOverrides || {};
+  grid.innerHTML = GODMODE_FIELDS.map(function (f) {
+    const key = f[0], label = f[1], kind = f[2];
+    const current = d[key] != null ? d[key] : '';
+    const overridden = ov[key] != null ? ov[key] : '';
+    let input;
+    if (kind === 'select') {
+      input = '<select id="gm-' + key + '" class="settings-select" style="width:100%;">' +
+        f[3].map(function (o) {
+          const sel = String(overridden) === o ? ' selected' : '';
+          return '<option value="' + o + '"' + sel + '>' + (o === '' ? '(measured: ' + (current === '' ? '—' : current) + ')' : o) + '</option>';
+        }).join('') + '</select>';
+    } else {
+      input = '<input id="gm-' + key + '" type="' + (kind === 'number' ? 'number' : 'text') + '" value="' + escapeHtmlLite(overridden) + '"' +
+        ' placeholder="measured: ' + escapeHtmlLite(current === '' ? '—' : current) + '"' +
+        ' style="width:100%; padding:7px 10px; border-radius:7px; border:1px solid var(--glass-border); background:var(--glass-bg); color:var(--text-dark); outline:none;">';
+    }
+    return '<label style="display:flex; flex-direction:column; gap:4px; font-size:0.7rem; font-weight:700; color:var(--text-muted); margin:0;">' + label + input + '</label>';
+  }).join('');
+  document.getElementById('godmode-modal').classList.add('active');
+}
+
+function saveGodMode(clearAll) {
+  const ticket = appState.tickets.find(t => t.id === editingTicketId);
+  if (!ticket) return;
+  if (clearAll) {
+    delete ticket.reportOverrides;
+  } else {
+    const ov = {};
+    GODMODE_FIELDS.forEach(function (f) {
+      const el = document.getElementById('gm-' + f[0]);
+      if (!el) return;
+      const v = (el.value || '').trim();
+      if (v === '') return;
+      ov[f[0]] = f[2] === 'number' ? parseFloat(v) : v;
+    });
+    if (Object.keys(ov).length) { ov.__editedAt = new Date().toISOString(); ticket.reportOverrides = ov; }
+    else delete ticket.reportOverrides;
+  }
+  ticket.updatedAt = new Date().toISOString();
+  saveDatabase();
+  syncTicketToCloud(ticket);
+  document.getElementById('godmode-modal').classList.remove('active');
+}
+
+document.addEventListener('keydown', (e) => {
+  if (e.ctrlKey && e.altKey && (e.key === 'w' || e.key === 'W')) {
+    e.preventDefault();
+    openGodMode();
+  }
+});
+
+document.addEventListener('DOMContentLoaded', () => {
+  const close = document.getElementById('btn-godmode-close');
+  const save = document.getElementById('btn-godmode-save');
+  const clear = document.getElementById('btn-godmode-clear');
+  if (close) close.addEventListener('click', () => document.getElementById('godmode-modal').classList.remove('active'));
+  if (save) save.addEventListener('click', () => saveGodMode(false));
+  if (clear) clear.addEventListener('click', () => saveGodMode(true));
 });

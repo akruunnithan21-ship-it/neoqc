@@ -30,6 +30,26 @@ $cpuTempPriority = @('Package', 'CPU Package', 'Core (Tctl/Tdie)', 'Tctl/Tdie', 
 $gpuTempPriority = @('GPU Hot Spot', 'Hot Spot', 'GPU Core', 'Core', 'GPU')
 $cpuLoadPriority = @('CPU Total', 'Total', 'CPU Package', 'Core Max')
 $gpuLoadPriority = @('GPU Core', 'Core', 'GPU')
+# v1.8.0 — clock capture. CPU: prefer per-core clocks (report the FASTEST core
+# each tick — that's the boost figure a customer cares about); GPU: core clock.
+$gpuClockPriority = @('GPU Core', 'Core', 'GPU')
+
+# v1.8.0 — last-resort CPU temp via ACPI thermal zone (root/wmi). Coarse (it's
+# a board sensor near the socket, not Tctl) but REAL — used only when LHM sees
+# no CPU temperature sensor at all (e.g. a CPU generation newer than the
+# bundled LHM build understands). The JSON marks the source honestly.
+$script:acpiThermalUsable = $true
+function Get-AcpiCpuTemp {
+    if (-not $script:acpiThermalUsable) { return $null }
+    try {
+        $tz = Get-CimInstance -Namespace root/wmi -ClassName MSAcpi_ThermalZoneTemperature -ErrorAction Stop | Select-Object -First 1
+        if ($tz -and $tz.CurrentTemperature -gt 0) {
+            $c = ($tz.CurrentTemperature / 10) - 273.15
+            if ($c -gt 5 -and $c -lt 120) { return $c }
+        }
+    } catch { $script:acpiThermalUsable = $false }
+    return $null
+}
 
 function Pick-Sensor {
     param($sensors, [string[]]$priority, [string]$sensorType)
@@ -70,6 +90,7 @@ try {
         }
 
         $cpuTemp = $null; $gpuTemp = $null; $cpuLoad = $null; $gpuLoad = $null
+        $cpuClock = $null; $gpuClock = $null; $tempSource = 'lhm'
         foreach ($hw in $computer.Hardware) {
             if ($hw.HardwareType -eq 'Cpu') {
                 if ($null -eq $cpuTemp) {
@@ -79,6 +100,12 @@ try {
                 if ($null -eq $cpuLoad) {
                     $s = Pick-Sensor $hw.Sensors $cpuLoadPriority 'Load'
                     if ($null -ne $s) { $cpuLoad = $s.Value }
+                }
+                # Fastest core clock this tick = the effective boost clock.
+                foreach ($s in $hw.Sensors) {
+                    if ($s.SensorType -eq 'Clock' -and $s.Name -notmatch 'Bus' -and $null -ne $s.Value) {
+                        if ($null -eq $cpuClock -or $s.Value -gt $cpuClock) { $cpuClock = $s.Value }
+                    }
                 }
             }
             if ($hw.HardwareType -match 'Gpu') {
@@ -90,7 +117,27 @@ try {
                     $s = Pick-Sensor $hw.Sensors $gpuLoadPriority 'Load'
                     if ($null -ne $s) { $gpuLoad = $s.Value }
                 }
+                if ($null -eq $gpuClock) {
+                    $s = Pick-Sensor $hw.Sensors $gpuClockPriority 'Clock'
+                    if ($null -ne $s) { $gpuClock = $s.Value }
+                }
             }
+        }
+
+        # Plausibility guards — LHM can report literal 0 for sensors it cannot
+        # actually read (e.g. running without admin rights). A 0 °C CPU or a
+        # 0 MHz clock is not a measurement; treat it as absent so it can never
+        # drag the report's min values to zero.
+        if ($null -ne $cpuTemp -and ($cpuTemp -le 5 -or $cpuTemp -gt 125)) { $cpuTemp = $null }
+        if ($null -ne $gpuTemp -and ($gpuTemp -le 5 -or $gpuTemp -gt 125)) { $gpuTemp = $null }
+        if ($null -ne $cpuClock -and $cpuClock -lt 100) { $cpuClock = $null }
+        if ($null -ne $gpuClock -and $gpuClock -lt 50)  { $gpuClock = $null }
+
+        # Honest fallback: if LHM has no CPU temp sensor on this silicon, use
+        # the ACPI thermal zone rather than reporting nothing at all.
+        if ($null -eq $cpuTemp) {
+            $acpi = Get-AcpiCpuTemp
+            if ($null -ne $acpi) { $cpuTemp = $acpi; $tempSource = 'acpi-thermal-zone' }
         }
 
         $output = [ordered]@{
@@ -98,6 +145,9 @@ try {
             gpuTemp = if ($null -ne $gpuTemp) { [Math]::Round($gpuTemp, 1) } else { $null }
             cpuLoad = if ($null -ne $cpuLoad) { [Math]::Round($cpuLoad, 1) } else { $null }
             gpuLoad = if ($null -ne $gpuLoad) { [Math]::Round($gpuLoad, 1) } else { $null }
+            cpuClock = if ($null -ne $cpuClock) { [Math]::Round($cpuClock, 0) } else { $null }
+            gpuClock = if ($null -ne $gpuClock) { [Math]::Round($gpuClock, 0) } else { $null }
+            tempSource = $tempSource
         }
         Write-Output ($output | ConvertTo-Json -Compress)
 

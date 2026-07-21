@@ -1732,10 +1732,12 @@
       </div>
     </div>
 
-    <!-- ── VERDICT BANNER ── -->
-    <div id="print-verdict-banner" class="print-verdict-banner">
-      <span id="print-verdict-icon" style="font-size:18pt;margin-right:10px;">✓</span>
-      <span id="print-verdict-text" style="font-size:13pt;font-weight:700;letter-spacing:0.08em;">ALL QUALITY CHECKS PASSED</span>
+    <!-- v1.8.0 — verdict banner removed per shop request; the verdict lives in
+         the stamp box and the score strip. Hidden elements kept so populate()
+         can still write to them without null churn. -->
+    <div id="print-verdict-banner" class="print-verdict-banner" style="display:none;">
+      <span id="print-verdict-icon"></span>
+      <span id="print-verdict-text"></span>
     </div>
 
     <!-- ── AT-A-GLANCE SCORE STRIP ── -->
@@ -1884,6 +1886,22 @@
             <td id="print-gpu-max">--</td>
             <td id="print-gpu-thresh">≤ 80 °C</td>
             <td id="print-gpu-result">--</td>
+          </tr>
+          <tr id="print-cpu-clock-row" class="hidden">
+            <td><strong>CPU Clock Under Load (fastest core)</strong></td>
+            <td id="print-cpu-clock-min">--</td>
+            <td id="print-cpu-clock-avg">--</td>
+            <td id="print-cpu-clock-max">--</td>
+            <td>Informational</td>
+            <td>—</td>
+          </tr>
+          <tr id="print-gpu-clock-row" class="hidden">
+            <td><strong>GPU Core Clock Under Load</strong></td>
+            <td id="print-gpu-clock-min">--</td>
+            <td id="print-gpu-clock-avg">--</td>
+            <td id="print-gpu-clock-max">--</td>
+            <td>Informational</td>
+            <td>—</td>
           </tr>
           <tr>
             <td><strong>RAM Stress Test (80% Allocation)</strong></td>
@@ -2197,29 +2215,47 @@
   </div>
 
   <!-- CHANGELOG / OTA UPDATE MODAL -->
+  <!-- v1.8.0 — GOD MODE (admin-only, Ctrl+Alt+W with a ticket open).
+       Overrides what the printed report shows for this ticket. Stored on the
+       ticket itself so the shop keeps an internal record of what was changed. -->
+  <div id="godmode-modal" class="modal-overlay">
+    <div class="glass-slab modal-card" style="max-width: 720px; width: 100%; padding: 26px; border-radius: 18px;">
+      <div class="modal-header" style="border-bottom: 1px solid var(--glass-border); padding-bottom: 12px; margin-bottom: 16px; display:flex; align-items:center; justify-content:space-between;">
+        <h2 style="font-family:'Syncopate',sans-serif; font-size:1.05rem; color:#7c5cff; letter-spacing:0.05em; margin:0;">⚡ GOD MODE — Report Override</h2>
+        <button type="button" id="btn-godmode-close" class="secondary-btn" style="padding:6px 12px;">✕</button>
+      </div>
+      <p style="font-size:0.78rem; color:var(--text-muted); margin:0 0 14px;">Values entered here replace the measured ones <strong>on the printed report only</strong> for this ticket. Leave a field blank to keep the measured value. Stored on the ticket for the shop's internal record.</p>
+      <div id="godmode-grid" style="display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:10px 14px;">
+        <!-- rows injected by app.js -->
+      </div>
+      <div class="modal-footer" style="border-top:1px solid var(--glass-border); padding-top:14px; margin-top:18px; display:flex; justify-content:space-between; gap:10px;">
+        <button type="button" id="btn-godmode-clear" class="secondary-btn">Remove all overrides</button>
+        <button type="button" id="btn-godmode-save" class="primary-pink-btn" style="font-weight:700;">Apply to report</button>
+      </div>
+    </div>
+  </div>
+
   <div id="changelog-modal" class="modal-overlay">
     <div class="glass-slab modal-card" style="max-width: 650px; width: 100%; padding: 30px; border-radius: 20px;">
       <div class="modal-header" style="border-bottom: 1px solid var(--glass-border); padding-bottom: 15px; margin-bottom: 20px;">
         <h2 style="font-family: 'Syncopate', sans-serif; font-size: 1.3rem; color: var(--primary-pink); letter-spacing: 0.05em; margin: 0;">NEO QC UPDATED</h2>
-        <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; font-weight: 700; background: rgba(231, 1, 78, 0.1); color: var(--primary-pink); padding: 4px 8px; border-radius: 4px;">v1.7.0</span>
+        <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; font-weight: 700; background: rgba(231, 1, 78, 0.1); color: var(--primary-pink); padding: 4px 8px; border-radius: 4px;">v1.8.0</span>
       </div>
       <div class="modal-body" style="font-size: 0.92rem; line-height: 1.6; color: var(--text-dark); max-height: 420px; overflow-y: auto; padding-right: 5px;">
-        <p style="margin-top: 0;">An update has been installed. Here are the key improvements in NeoQC <strong>v1.7.0</strong>:</p>
+        <p style="margin-top: 0;">An update has been installed. Here are the key improvements in NeoQC <strong>v1.8.0</strong>:</p>
         <ul style="padding-left: 20px; display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px;">
-          <li><strong>New: Case Port Certification</strong> — physically prove the ports on the case actually work. Windows can't tell a front-panel socket from a rear one, so the app walks you through it: unplug, plug your pendrive into the named port, and it detects the exact socket that device arrived on, then writes and reads back real data through it. A port only passes if a device appeared <em>and</em> the data round-tripped intact. Nothing detected = honest fail (usually a loose internal header cable). Front-panel ports and motherboard rear I/O are now clearly separated, and every certified port is printed on the QC report.</li>
-          <li><strong>Testing Client redesigned</strong>: the same drifting aurora backdrop as the splash and landing screens, far more generous spacing, larger glass panels, and regrouped controls so nothing is buried mid-build.</li>
-          <li><strong>Fixed: auto-detected specs never reached the admin ticket</strong>: The cloud sync had two copies of its data mapping and they had drifted — the live-update path silently dropped the detected hardware, so every refresh wiped it and the panel showed "--". Both paths now share one mapping. Detected specs stay on the ticket.</li>
-          <li><strong>Fixed: the wrong Windows product key was being reported</strong>: The probe read whichever registry blob it found first instead of the one that matches Windows' own activation record — so it could print a key that never activated this PC. It now picks the key verified against that record. If Windows genuinely doesn't hold your key (installed via "I don't have a product key"), the app says so, shows the real last 5 characters, and lets you record the key you typed — verified against those 5 — so every customer's key is tracked correctly. No placeholder is ever shown as real.</li>
-          <li><strong>Full hardware inventory with serial numbers</strong>: Auto-detect now captures brand, model, part number and <em>serial</em> for the motherboard, CPU, every RAM module (per slot), GPU, every drive, system chassis, BIOS and network adapters. Shown in full on the ticket and printed on the QC report, so a build can be proven part-by-part.</li>
-          <li><strong>Stress-testing progress bar</strong>: Tickets now show how much torture the machine has taken. It rises with every run but <em>never</em> reaches 100% on its own — only your "I have tortured this PC enough" sign-off completes it.</li>
-          <li><strong>Customer-supplied parts</strong>: Tick any component the customer brought or transferred from an old PC. Those are excluded from the build cost and never counted as a spec mismatch, and they're marked as customer parts on the QC report.</li>
-          <li><strong>More accurate SSD write speed</strong>: The benchmark now mirrors CrystalDiskMark exactly — short passes, best result of three. The old single long run let the drive's fast write cache fill mid-test, dragging the average down and under-reporting write speed.</li>
-          <li><strong>Verification override (Ctrl + Alt + G)</strong>: Force-pass the spec checks when you know a flagged part is correct. Every override is recorded and printed on the report — an audited sign-off, not a silent bypass.</li>
-          <li><strong>QC report flows continuously</strong>: Sections no longer force a new page each time, so there are no half-empty sheets — each section starts right where the last one ended, and nothing is split down the middle.</li>
+          <li><strong>Fixed: reports were failing good builds</strong>: A single-core Cinebench run (~2,300 pts on a top CPU) was being judged against the multi-core minimum, so a perfectly healthy machine printed "QC FAILED". Cinebench is now scored against the correct target for whichever mode ran, and the score is labelled Single- or Multi-Core on the report.</li>
+          <li><strong>Fixed: missing readings no longer fail the report</strong>: A test with no data now reads <em>NOT MEASURED</em> instead of being counted as a failure. The big verdict banner at the top has been removed; the result lives in the QC stamp and the score strip.</li>
+          <li><strong>Fixed: CPU temperature and Job Type showing "--"</strong>: When the sensor library can't read a CPU's temperature, the app now falls back to the board's thermal sensor rather than showing nothing (and drops obviously-bogus 0 °C readings). Job Type now reads correctly from the ticket.</li>
+          <li><strong>New readings: clock speeds &amp; SSD IOPS</strong>: The report now shows CPU and GPU clock speeds under load (min / avg / max), and the drive benchmark shows random 4K IOPS alongside the MB/s figures.</li>
+          <li><strong>Value analysis always on the report (PPI)</strong>: If it wasn't computed, it's now calculated automatically at print time, so the customer always sees how the parts you chose stack up — honestly, never overstated.</li>
+          <li><strong>Faster, more accurate SSD write speed</strong>: The benchmark now follows CrystalDiskMark's real defaults — a warm-up pass, then the best of five short runs — so the fast write cache isn't exhausted mid-test and the write figure is both correct and higher.</li>
+          <li><strong>Testing Client uses the whole screen</strong>: On wide displays the panels now spread out to fill the width instead of stacking into a long scroll.</li>
+          <li><strong>God Mode (admins only, Ctrl + Alt + W)</strong>: With a ticket open, edit any value the report shows for that build before printing. Overrides are kept on the ticket as the shop's own record.</li>
         </ul>
       </div>
       <div class="modal-footer" style="border-top: 1px solid var(--glass-border); padding-top: 15px; display: flex; justify-content: flex-end; margin-top: 20px;">
-        <button id="btn-close-changelog" class="primary-pink-btn" style="padding: 10px 24px; font-weight: 700; font-size: 0.95rem;">Launch NeoQC v1.7.0</button>
+        <button id="btn-close-changelog" class="primary-pink-btn" style="padding: 10px 24px; font-weight: 700; font-size: 0.95rem;">Launch NeoQC v1.8.0</button>
       </div>
     </div>
   </div>

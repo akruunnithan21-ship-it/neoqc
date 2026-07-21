@@ -880,11 +880,15 @@ async function runDriveBenchmark(vol, exe) {
     // test file before reading for the same reason). The 10 s sequential
     // write pass rewrites the whole 1 GiB file several times over, so the
     // read phases that follow hit real on-disk data.
-    // CDM Standard profile: 5 s passes, best of 3 (see runDiskSpdPhaseBest).
-    const seqWrite  = await runDiskSpdPhaseBest({ exe, testFile, blockSize: '1M', queueDepth: 8,  durationSec: 5, isWrite: true,  random: false }, 3);
-    const seqRead   = await runDiskSpdPhaseBest({ exe, testFile, blockSize: '1M', queueDepth: 8,  durationSec: 5, isWrite: false, random: false }, 3);
-    const rnd4kWrite= await runDiskSpdPhaseBest({ exe, testFile, blockSize: '4K', queueDepth: 32, durationSec: 5, isWrite: true,  random: true }, 3);
-    const rnd4kRead = await runDiskSpdPhaseBest({ exe, testFile, blockSize: '4K', queueDepth: 32, durationSec: 5, isWrite: false, random: true }, 3);
+    // v1.8.0 — CDM's actual defaults are FIVE runs per test, best kept. Also
+    // run one untimed prep pass first: it absorbs the file-allocation cost and
+    // fills the file with real data, so even the first measured write pass is
+    // clean and the read passes always hit on-disk data.
+    await runDiskSpdPhase({ exe, testFile, blockSize: '1M', queueDepth: 8, durationSec: 3, isWrite: true, random: false });
+    const seqWrite  = await runDiskSpdPhaseBest({ exe, testFile, blockSize: '1M', queueDepth: 8,  durationSec: 5, isWrite: true,  random: false }, 5);
+    const seqRead   = await runDiskSpdPhaseBest({ exe, testFile, blockSize: '1M', queueDepth: 8,  durationSec: 5, isWrite: false, random: false }, 5);
+    const rnd4kWrite= await runDiskSpdPhaseBest({ exe, testFile, blockSize: '4K', queueDepth: 32, durationSec: 5, isWrite: true,  random: true }, 5);
+    const rnd4kRead = await runDiskSpdPhaseBest({ exe, testFile, blockSize: '4K', queueDepth: 32, durationSec: 5, isWrite: false, random: true }, 5);
 
     if (!seqRead || !seqWrite || !rnd4kRead || !rnd4kWrite) {
       return {
@@ -1061,6 +1065,9 @@ ipcMain.handle('sys:run-diagnostics', async (event, config) => {
     let gpuTemps = [];
     let cpuLoads = [];
     let gpuLoads = [];
+    let cpuClocks = [];   // v1.8.0 — fastest-core clock per tick (MHz)
+    let gpuClocks = [];   // v1.8.0 — GPU core clock per tick (MHz)
+    let cpuTempSource = null; // 'lhm' | 'acpi-thermal-zone'
     let sensorInventory = null; // one-shot list of detected sensor names — invaluable if temp isn't reading
 
     // 1. Start LibreHardwareMonitor sensor polling
@@ -1111,6 +1118,15 @@ ipcMain.handle('sys:run-diagnostics', async (event, config) => {
               const val = parseFloat(parsed.gpuLoad);
               if (!isNaN(val)) gpuLoads.push(val);
             }
+            if (parsed.cpuClock != null) {
+              const val = parseFloat(parsed.cpuClock);
+              if (!isNaN(val) && val > 0) cpuClocks.push(val);
+            }
+            if (parsed.gpuClock != null) {
+              const val = parseFloat(parsed.gpuClock);
+              if (!isNaN(val) && val > 0) gpuClocks.push(val);
+            }
+            if (parsed.tempSource && parsed.cpuTemp != null) cpuTempSource = parsed.tempSource;
             event.sender.send('sys:sensor-update', parsed);
           } catch(e) {}
         }
@@ -1137,7 +1153,7 @@ ipcMain.handle('sys:run-diagnostics', async (event, config) => {
       for (let i = 0; i < volumes.length; i++) {
         const vol = volumes[i];
         event.sender.send('sys:diag-log',
-          `[SSD] Benchmarking ${vol.model} on ${vol.drive} (${i + 1} of ${volumes.length}) — SEQ1M + RND4K, best-of-3 passes, ~70 s…`);
+          `[SSD] Benchmarking ${vol.model} on ${vol.drive} (${i + 1} of ${volumes.length}) — SEQ1M + RND4K, CDM profile (best of 5), ~2 min…`);
         const row = await runDriveBenchmark(vol, dsExe);
         if (row.verdict === 'RUN FAILED') {
           event.sender.send('sys:diag-log', `[SSD] ${vol.drive} failed: ${row.error}`);
@@ -1541,6 +1557,19 @@ ipcMain.handle('sys:run-diagnostics', async (event, config) => {
           gpuLoadAvg: gpuLoads.length ? Math.round(gpuLoads.reduce((a,b)=>a+b,0)/gpuLoads.length) : null,
           gpuLoadMax: gpuLoads.length ? Math.round(Math.max(...gpuLoads)) : null,
           gpuLoadLog: gpuLoads.map(v => Math.round(v)),
+          // v1.8.0 — clock telemetry (MHz): fastest CPU core + GPU core per tick.
+          cpuClockMin: cpuClocks.length ? Math.round(Math.min(...cpuClocks)) : null,
+          cpuClockAvg: cpuClocks.length ? Math.round(cpuClocks.reduce((a,b)=>a+b,0)/cpuClocks.length) : null,
+          cpuClockMax: cpuClocks.length ? Math.round(Math.max(...cpuClocks)) : null,
+          cpuClockLog: cpuClocks.map(v => Math.round(v)),
+          gpuClockMin: gpuClocks.length ? Math.round(Math.min(...gpuClocks)) : null,
+          gpuClockAvg: gpuClocks.length ? Math.round(gpuClocks.reduce((a,b)=>a+b,0)/gpuClocks.length) : null,
+          gpuClockMax: gpuClocks.length ? Math.round(Math.max(...gpuClocks)) : null,
+          gpuClockLog: gpuClocks.map(v => Math.round(v)),
+          cpuTempSource: cpuTempSource,
+          // Which Cinebench mode ran — a single-core score looks catastrophic
+          // if displayed unlabelled next to multi-core expectations.
+          cinebenchMode: (config && config.useCase === 'gaming') ? 'single' : 'multi',
           sensorInventory
         });
       }
