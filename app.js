@@ -1760,6 +1760,7 @@ function openTicketModal(ticketId = null) {
         updateTempBar('modal-hud-cpu-temp-val', 'modal-hud-cpu-temp-bar', ticket.diagnostics.cpuTempMax);
         updateTempBar('modal-hud-gpu-temp-val', 'modal-hud-gpu-temp-bar', ticket.diagnostics.gpuTempMax);
       }
+      restoreHudFromDiagnostics('modal-', ticket.diagnostics);
       document.getElementById('serial-motherboard').value = ticket.serials.motherboard || '';
       document.getElementById('serial-ram').value = ticket.serials.ram || '';
       document.getElementById('serial-gpu').value = ticket.serials.gpu || '';
@@ -2130,6 +2131,7 @@ function handleClientTicketSelect() {
     updateTempBar('c-hud-cpu-temp-val', 'c-hud-cpu-temp-bar', ticket.diagnostics.cpuTempMax);
     updateTempBar('c-hud-gpu-temp-val', 'c-hud-gpu-temp-bar', ticket.diagnostics.gpuTempMax);
   }
+  restoreHudFromDiagnostics('c-', ticket.diagnostics);
 
   // Populate benchmarks
   document.getElementById('c-cinebench-score').value = ticket.diagnostics.cinebench || '';
@@ -5276,6 +5278,29 @@ ipcRenderer.on('sys:sensor-update', (event, data) => {
     updateTempBar('modal-hud-gpu-temp-val', 'modal-hud-gpu-temp-bar', data.gpuTemp);
   }
 });
+
+// v1.8.3 — the RAM and SSD HUD cards only ever showed LIVE progress, so after a
+// run finished (or the ticket was reopened) they fell back to "0% / Idle" even
+// though the test had passed and the result was saved. Rebuild them from the
+// stored diagnostics, the same way the temperature cards are restored.
+function restoreHudFromDiagnostics(prefix, diag) {
+  if (!diag) return;
+  const ramVal  = document.getElementById(prefix + 'hud-ram-val');
+  const ramBar  = document.getElementById(prefix + 'hud-ram-bar');
+  const ramDesc = document.getElementById(prefix + 'hud-ram-desc');
+  if (ramVal && diag.ramStress) {
+    const passed = String(diag.ramStress).toLowerCase() === 'passed';
+    ramVal.textContent = passed ? '100%' : 'FAIL';
+    if (ramBar) ramBar.style.width = '100%';
+    if (ramDesc) ramDesc.textContent = diag.ramDetail || (passed ? 'Completed — no errors.' : 'Errors detected.');
+  }
+  const ssdVal = document.getElementById(prefix + 'hud-ssd-val');
+  const ssdBar = document.getElementById(prefix + 'hud-ssd-bar');
+  if (ssdVal && (diag.ssdRead || diag.ssdWrite)) {
+    ssdVal.textContent = `${diag.ssdRead || '--'} / ${diag.ssdWrite || '--'} MB/s`;
+    if (ssdBar) ssdBar.style.width = '100%';
+  }
+}
 
 ipcRenderer.on('sys:ram-update', (event, data) => {
   const pct = data.percentDone || 0;

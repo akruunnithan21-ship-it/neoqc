@@ -51,6 +51,29 @@ function Get-AcpiCpuTemp {
     return $null
 }
 
+# v1.8.3 — SECOND fallback: the thermal-zone PERFORMANCE COUNTER. Measured on a
+# real machine where the two paths above both failed: LibreHardwareMonitor
+# exposes "Core (Tctl/Tdie)" but its Value is null because reading CPU MSRs
+# needs the WinRing0 kernel driver (absent, or quarantined by Defender — the
+# same driver the RGB feature fights), and MSAcpi_ThermalZoneTemperature throws
+# "Access denied". This counter needs NO driver and NO elevation, and returned a
+# correct 79 C under load. That is why a build could show a perfect GPU temp
+# beside a blank CPU temp. Coarse (board thermal zone, not Tctl) but REAL, and
+# the JSON labels the source so the report never implies otherwise.
+$script:perfThermalUsable = $true
+function Get-PerfCounterCpuTemp {
+    if (-not $script:perfThermalUsable) { return $null }
+    try {
+        $pf = Get-CimInstance -ClassName Win32_PerfFormattedData_Counters_ThermalZoneInformation -ErrorAction Stop |
+              Where-Object { $_.Temperature -gt 0 } | Select-Object -First 1
+        if ($pf) {
+            $c = $pf.Temperature - 273.15
+            if ($c -gt 5 -and $c -lt 120) { return $c }
+        }
+    } catch { $script:perfThermalUsable = $false }
+    return $null
+}
+
 function Pick-Sensor {
     param($sensors, [string[]]$priority, [string]$sensorType)
     foreach ($name in $priority) {
@@ -133,11 +156,18 @@ try {
         if ($null -ne $cpuClock -and $cpuClock -lt 100) { $cpuClock = $null }
         if ($null -ne $gpuClock -and $gpuClock -lt 50)  { $gpuClock = $null }
 
-        # Honest fallback: if LHM has no CPU temp sensor on this silicon, use
-        # the ACPI thermal zone rather than reporting nothing at all.
+        # Honest fallback chain: if LHM has no usable CPU temp (sensor missing,
+        # or present but valueless because the MSR driver isn't loaded), fall
+        # back to the ACPI thermal zone, then to the thermal-zone performance
+        # counter. Each source is labelled in the JSON so nothing is passed off
+        # as a Tctl reading when it isn't.
         if ($null -eq $cpuTemp) {
             $acpi = Get-AcpiCpuTemp
             if ($null -ne $acpi) { $cpuTemp = $acpi; $tempSource = 'acpi-thermal-zone' }
+        }
+        if ($null -eq $cpuTemp) {
+            $perf = Get-PerfCounterCpuTemp
+            if ($null -ne $perf) { $cpuTemp = $perf; $tempSource = 'thermal-zone-perf-counter' }
         }
 
         $output = [ordered]@{

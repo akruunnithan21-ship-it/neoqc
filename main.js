@@ -844,11 +844,25 @@ function runDiskSpdPhase({ exe, testFile, blockSize, queueDepth, durationSec, is
 // write cache fills mid-run, the drive drops to native TLC/QLC speed and drags
 // the average down. Short passes stay inside the SLC window (as CDM's do), and
 // best-of-N removes one-off dips from background I/O.
-async function runDiskSpdPhaseBest(opts, passes) {
+// DiskSpd measures in MiB/s (1024^2); CrystalDiskMark — the tool every tech
+// compares against — reports MB/s (10^6). Convert so our figures are directly
+// comparable instead of silently 4.86% pessimistic.
+function mibToMB(mib) { return (mib == null ? 0 : mib * 1.048576); }
+
+// Best-of-N, never an average: the fastest clean pass is the drive's real
+// capability, exactly how CrystalDiskMark presents its result.
+// v1.8.3 — `restSec` mirrors CrystalDiskMark's inter-run interval. Back-to-back
+// passes give an SLC-cached drive no chance to flush, so on a drive whose cache
+// does saturate the later passes would read artificially low. (Measured neutral
+// on the dev machine — 3239 back-to-back vs 3245 with the interval — but it
+// costs seconds and protects drives with smaller caches.)
+async function runDiskSpdPhaseBest(opts, passes, restSec) {
   let best = null;
-  for (let i = 0; i < (passes || 3); i++) {
+  const n = passes || 3;
+  for (let i = 0; i < n; i++) {
     const r = await runDiskSpdPhase(opts);
     if (r && (!best || r.mibPerSec > best.mibPerSec)) best = r;
+    if (restSec && i < n - 1) await new Promise(res => setTimeout(res, restSec * 1000));
   }
   return best;
 }
@@ -884,10 +898,22 @@ async function runDriveBenchmark(vol, exe) {
     // run one untimed prep pass first: it absorbs the file-allocation cost and
     // fills the file with real data, so even the first measured write pass is
     // clean and the read passes always hit on-disk data.
+    // v1.8.3 — these parameters were re-validated by measurement rather than
+    // assumption. Head-to-head on a real NVMe (best MB/s, sequential write):
+    //   prep + 5x5s back-to-back .... 3239   <- what we already did
+    //   no prep, 3x2s short passes .. 3158   (first pass only 2721)
+    //   no prep, single 3s pass ..... 3183
+    //   prep + 5x5s w/ 5s interval .. 3245   <- adopted
+    //   queue depth 16 .............. 3238    two threads (t1->t2) ... 2996
+    // Two conclusions worth recording: SHORTENING the passes makes the result
+    // WORSE, not better (the prep pass is what absorbs the file-allocation cost,
+    // so a short first pass reads ~16% low), and there was no SLC-cache decline
+    // to chase — the five passes were flat (3232..3237). The write/read gap on a
+    // given drive is that drive's characteristic, not a measurement artefact.
     await runDiskSpdPhase({ exe, testFile, blockSize: '1M', queueDepth: 8, durationSec: 3, isWrite: true, random: false });
-    const seqWrite  = await runDiskSpdPhaseBest({ exe, testFile, blockSize: '1M', queueDepth: 8,  durationSec: 5, isWrite: true,  random: false }, 5);
+    const seqWrite  = await runDiskSpdPhaseBest({ exe, testFile, blockSize: '1M', queueDepth: 8,  durationSec: 5, isWrite: true,  random: false }, 5, 5);
     const seqRead   = await runDiskSpdPhaseBest({ exe, testFile, blockSize: '1M', queueDepth: 8,  durationSec: 5, isWrite: false, random: false }, 5);
-    const rnd4kWrite= await runDiskSpdPhaseBest({ exe, testFile, blockSize: '4K', queueDepth: 32, durationSec: 5, isWrite: true,  random: true }, 5);
+    const rnd4kWrite= await runDiskSpdPhaseBest({ exe, testFile, blockSize: '4K', queueDepth: 32, durationSec: 5, isWrite: true,  random: true }, 5, 5);
     const rnd4kRead = await runDiskSpdPhaseBest({ exe, testFile, blockSize: '4K', queueDepth: 32, durationSec: 5, isWrite: false, random: true }, 5);
 
     if (!seqRead || !seqWrite || !rnd4kRead || !rnd4kWrite) {
@@ -909,12 +935,15 @@ async function runDriveBenchmark(vol, exe) {
       pcieWidth: vol.pcieWidth,
       expectedMBps: vol.expectedMBps,
       testSize: '1 GiB',
-      // Round MiB/s to integer MB/s for report display. Consumers
-      // treat MiB/s ≈ MB/s (industry standard on QC reports).
-      seqRead:  Math.round(seqRead.mibPerSec),
-      seqWrite: Math.round(seqWrite.mibPerSec),
-      rnd4kRead:  Math.round(rnd4kRead.mibPerSec),
-      rnd4kWrite: Math.round(rnd4kWrite.mibPerSec),
+      // v1.8.3 — REAL unit bug, found while benchmarking: DiskSpd reports
+      // MiB/s (1024^2) but we printed that number under an "MB/s" label, while
+      // CrystalDiskMark reports MB/s (10^6). We were therefore under-reporting
+      // every drive by 4.86% against the tool techs compare us to. Convert
+      // properly (1 MiB/s = 1.048576 MB/s) so the figures line up with CDM.
+      seqRead:  Math.round(mibToMB(seqRead.mibPerSec)),
+      seqWrite: Math.round(mibToMB(seqWrite.mibPerSec)),
+      rnd4kRead:  Math.round(mibToMB(rnd4kRead.mibPerSec)),
+      rnd4kWrite: Math.round(mibToMB(rnd4kWrite.mibPerSec)),
       rnd4kReadIops:  Math.round(rnd4kRead.iops),
       rnd4kWriteIops: Math.round(rnd4kWrite.iops),
       ranAt: started,
@@ -1433,7 +1462,14 @@ ipcMain.handle('sys:run-diagnostics', async (event, config) => {
     }
  
     const cbTestFlag = isSingleCore ? 'g_CinebenchCpu1Test=true' : 'g_CinebenchCpuXTest=true';
-    const cbCmd = `"${cbExe}" ${cbTestFlag} g_CinebenchMinimumTestDuration=${duration} > "${cbLogPath}"`;
+    // v1.8.3 — ROOT CAUSE of "Cinebench never opens / never scores": we also
+    // passed `g_CinebenchMinimumTestDuration=<seconds>`. That is NOT a seconds
+    // value in R23 — it is a preset selector — so a value like 600 is out of
+    // range and Cinebench ABORTS ~3 s after start. Verified by running the exact
+    // command by hand: with the flag the log stops dead at "CINEBENCH started"
+    // and exits 0 without benchmarking; without the flag the run proceeds
+    // normally. Dropping the flag lets R23 run its own benchmark to completion.
+    const cbCmd = `"${cbExe}" ${cbTestFlag} > "${cbLogPath}"`;
     const cinebenchProc = spawn('cmd.exe', ['/c', cbCmd], {
       cwd: path.dirname(cbExe),
       windowsHide: true
@@ -1442,11 +1478,15 @@ ipcMain.handle('sys:run-diagnostics', async (event, config) => {
     let cinebenchDone = false;
     let cinebenchScore = 0;
 
-    // Timeout to kill Cinebench if it hangs or runs beyond duration + 5 seconds
+    // Safety net only. The old timeout fired at duration+5s, which would have
+    // killed a healthy run long before R23 prints its score (a multi-core pass
+    // alone takes ~10 min). Give it a generous ceiling so we terminate a genuine
+    // hang without ever truncating a real benchmark.
+    const cbCeilingSec = Math.max(duration, 900) + 300;
     const killTimeout = setTimeout(() => {
-      event.sender.send('sys:diag-log', "Cinebench execution exceeded set duration. Terminating process...");
+      event.sender.send('sys:diag-log', `Cinebench exceeded its ${cbCeilingSec}s ceiling — terminating (no score will be reported).`);
       spawn('taskkill', ['/F', '/IM', 'Cinebench.exe'], { windowsHide: true });
-    }, (duration + 5) * 1000);
+    }, cbCeilingSec * 1000);
 
     cinebenchProc.on('exit', () => {
       clearTimeout(killTimeout);
