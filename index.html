@@ -1022,38 +1022,20 @@
             <div class="locked-overlay"></div>
             <h3><span class="dr-inline-icon" data-icon="thermometer"></span> System Thermal &amp; Benchmark Results</h3>
             
-            <!-- Automated Stress Test in Modal -->
-            <div class="diagnostics-auto-run-card" style="background: rgba(231, 1, 78, 0.03); border: 1px dashed rgba(231, 1, 78, 0.2); padding: 12px; border-radius: 8px; margin-bottom: 16px; display: flex; flex-direction: column; gap: 8px;">
-              <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
-                <label style="color: var(--primary-pink); font-weight: 700; margin-bottom: 0; display: inline-flex; align-items: center; gap: 6px;"><span class="dr-inline-icon" data-icon="torture"></span>Automated Benchmarks</label>
-                <div style="display: flex; align-items: center; gap: 8px;">
-                  <select id="modal-usecase-select" style="padding: 4px 8px; font-size: 0.8rem; border-radius: 4px; border: 1px solid var(--glass-border); background: var(--glass-bg); color: var(--text-dark); outline: none;">
-                    <option value="gaming">Gaming Use (Single-Core)</option>
-                    <option value="studio">Studio Use (Multi-Core)</option>
-                  </select>
-                  <select id="modal-duration-select" style="padding: 4px 8px; font-size: 0.8rem; border-radius: 4px; border: 1px solid var(--glass-border); background: var(--glass-bg); color: var(--text-dark); outline: none;">
-                    <option value="30">30s (Fast)</option>
-                    <option value="60">60s (Standard)</option>
-                    <option value="300">5m (Burn-in)</option>
-                    <option value="600" selected>10m (Recommended)</option>
-                  </select>
-                  <button type="button" id="btn-modal-run-diagnostics" class="primary-pink-btn" style="padding: 6px 12px; font-size: 0.8rem;">Run Stress Test & Auto-Fill</button>
-                </div>
-              </div>
-              <div id="modal-diagnostics-status" class="font-mono" style="font-size: 0.75rem; color: var(--text-muted); line-height: 1.4;">
-                Cinebench R23: [Idle] | FurMark: [Idle] | RAM: [Idle]
-              </div>
-              <div style="display: flex; align-items: center; gap: 8px; padding-top: 6px; border-top: 1px solid var(--glass-border); margin-top: 4px;">
-                <label style="display: flex; align-items: center; gap: 6px; font-size: 0.8rem; margin-bottom: 0; cursor: pointer;">
-                  <input type="checkbox" id="modal-prime95-enable">
-                  Include Prime95 torture test (CPU + RAM, Blend mode)
-                </label>
-                <select id="modal-prime95-duration-select" style="padding: 4px 8px; font-size: 0.8rem; border-radius: 4px; border: 1px solid var(--glass-border); background: var(--glass-bg); color: var(--text-dark); outline: none;">
-                  <option value="900">15 min (Minimum)</option>
-                  <option value="1200" selected>20 min (Recommended)</option>
-                  <option value="1800">30 min (Thorough)</option>
-                </select>
-              </div>
+            <!-- v1.8.2 — the admin side no longer RUNS benchmarks. Testing is
+                 done in the Testing Client; the admin shows the results that
+                 sync back. Hidden stubs keep legacy JS references null-safe. -->
+            <div class="diagnostics-readonly-note" style="background: rgba(59,130,246,0.06); border: 1px solid rgba(59,130,246,0.25); padding: 10px 14px; border-radius: 8px; margin-bottom: 16px; font-size: 0.8rem; color: var(--text-muted);">
+              <strong style="color: var(--text-dark);">🧪 Benchmarks run in the Testing Client.</strong>
+              Results, temperatures and stress-test progress below update automatically as the technician tests this build.
+              <span id="modal-diagnostics-status" style="display:none;"></span>
+            </div>
+            <div style="display:none;">
+              <select id="modal-usecase-select"><option value="studio" selected>studio</option></select>
+              <select id="modal-duration-select"><option value="600" selected>600</option></select>
+              <input type="checkbox" id="modal-prime95-enable">
+              <select id="modal-prime95-duration-select"><option value="1800" selected>1800</option></select>
+              <button type="button" id="btn-modal-run-diagnostics">run</button>
             </div>
             <!-- v1.8.1 — stress progress is now READ-ONLY on the admin side;
                  the technician runs tests + signs off in the Testing Client.
@@ -2279,23 +2261,20 @@
     <div class="glass-slab modal-card" style="max-width: 650px; width: 100%; padding: 30px; border-radius: 20px;">
       <div class="modal-header" style="border-bottom: 1px solid var(--glass-border); padding-bottom: 15px; margin-bottom: 20px;">
         <h2 style="font-family: 'Syncopate', sans-serif; font-size: 1.3rem; color: var(--primary-pink); letter-spacing: 0.05em; margin: 0;">NEO QC UPDATED</h2>
-        <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; font-weight: 700; background: rgba(231, 1, 78, 0.1); color: var(--primary-pink); padding: 4px 8px; border-radius: 4px;">v1.8.1</span>
+        <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; font-weight: 700; background: rgba(231, 1, 78, 0.1); color: var(--primary-pink); padding: 4px 8px; border-radius: 4px;">v1.8.2</span>
       </div>
       <div class="modal-body" style="font-size: 0.92rem; line-height: 1.6; color: var(--text-dark); max-height: 420px; overflow-y: auto; padding-right: 5px;">
-        <p style="margin-top: 0;">An update has been installed. Here are the key improvements in NeoQC <strong>v1.8.1</strong>:</p>
+        <p style="margin-top: 0;">An update has been installed. Here are the key improvements in NeoQC <strong>v1.8.2</strong>:</p>
         <ul style="padding-left: 20px; display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px;">
-          <li><strong>New: Throttle &amp; Stability test modes</strong> — replacing the old gaming/studio choice. <em>Stability</em> (the default) is the ultimate torture test with Prime95 always bundled, 30 minutes by default (20–60 min). <em>Throttle</em> is a 15-minute thermal check without Prime95. A secret Ctrl+Alt+T unlocks a 15-minute quick-Stability option. Both run the real multi-core benchmark.</li>
-          <li><strong>Smarter spec verification</strong>: The checker now knows brand aliases — "MSI" matches "Micro-Star International", "ASUS" matches "ASUSTeK", and a board chipset (B850) matches its full model (B850M) — so a correctly-built PC no longer reads as a mismatch.</li>
-          <li><strong>Honest benchmark scores</strong>: Cinebench and FurMark now report the real measured result or <em>NOT MEASURED</em> — never a fabricated estimate.</li>
-          <li><strong>Catalogue editor in Settings</strong>: Search, edit, add or remove components and prices in your catalogue directly from the app.</li>
-          <li><strong>Sign-off moved to the Testing Client</strong>: The "I have tortured this PC enough" button now lives where the testing happens; the admin ticket shows progress read-only.</li>
-          <li><strong>Case Port Certification &amp; RGB moved to the right</strong>, and ports can be added or removed for any case layout.</li>
-          <li><strong>God Mode now opens reliably</strong> (Ctrl+Alt+W with a ticket open) — the keybind is fixed and tells you if no ticket is open.</li>
-          <li><strong>A more beautiful report</strong>: softer header graphics, refined score tiles, section markers, a subtle monogram, and a warm thank-you note for the customer.</li>
+          <li><strong>Fixed: temperatures &amp; stress progress now show on the admin side</strong>: When the Testing Client finishes a build, its CPU/GPU temperatures (min / max / avg) and stress-test progress now appear on the admin ticket <em>and</em> on the dashboard build card — no more blank "--°C".</li>
+          <li><strong>Admin side no longer runs benchmarks</strong>: The old Gaming/Studio run controls are gone from the ticket. All testing happens in the Testing Client and the results sync back automatically.</li>
+          <li><strong>Fixed: customer-supplied parts now save</strong>: Ticking a customer-brought component now persists correctly even without running hardware detection.</li>
+          <li><strong>Testing Client columns balanced</strong>: Benchmark &amp; Thermal on the left, Case Port Certification &amp; RGB on the right — both sides now carry a similar amount instead of one long column.</li>
+          <li><strong>Tighter report</strong>: Removed the last of the empty gaps so the certificate reads as one clean, continuous document.</li>
         </ul>
       </div>
       <div class="modal-footer" style="border-top: 1px solid var(--glass-border); padding-top: 15px; display: flex; justify-content: flex-end; margin-top: 20px;">
-        <button id="btn-close-changelog" class="primary-pink-btn" style="padding: 10px 24px; font-weight: 700; font-size: 0.95rem;">Launch NeoQC v1.8.1</button>
+        <button id="btn-close-changelog" class="primary-pink-btn" style="padding: 10px 24px; font-weight: 700; font-size: 0.95rem;">Launch NeoQC v1.8.2</button>
       </div>
     </div>
   </div>

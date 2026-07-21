@@ -782,3 +782,17 @@
   border: 1px solid #f2d9e3; font-size: 8.5pt; color: #7a2540;
   display: flex; align-items: center; gap: 8px;
 }
+
+/* v1.8.2 — guarantee hidden sections reserve ZERO space in the report (the
+   global .hidden might be overridden inside the print container), and tighten
+   the top so removing the verdict banner leaves no gap. */
+#print-report-container .print-section.hidden,
+#print-report-container .print-sparklines.hidden,
+#print-report-container [style*="display:none"],
+#print-report-container [style*="display: none"] { display: none !important; }
+
+#print-report-container .print-score-strip { margin-top: 6px; }
+#print-report-container .print-divider { margin: 8px 0 10px; }
+#print-report-container .print-section:empty { display: none; }
+/* remove the trailing gap under the last visible section before the footer */
+#print-report-container .print-footer { margin-top: 10px; }

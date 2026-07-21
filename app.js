@@ -1391,6 +1391,10 @@ function renderDashboard() {
       // Calculate percentages
       const buildPct = calculateBuildPercentage(t);
       const qcPct = calculateQcPercentage(t);
+      // v1.8.2 — stress-test progress on the card (same curve as the panels):
+      // asymptotic on run count, only the client sign-off reaches 100%.
+      const stressRuns = t.stressRuns || 0;
+      const stressPct = t.stressSignedOff ? 100 : (stressRuns <= 0 ? 0 : Math.min(90, Math.round(90 * (1 - Math.pow(0.5, stressRuns)))));
       const isAwaitingParts = t.missingComponentsToggle;
       
       const isUrgent = checkIsUrgent(t.deadline);
@@ -1436,6 +1440,16 @@ function renderDashboard() {
           </div>
           <div class="progress-bar-bg">
             <div class="progress-bar-fill qc" style="width: ${qcPct}%"></div>
+          </div>
+        </div>
+
+        <div class="card-progress-section">
+          <div class="card-progress-label">
+            <span>Stress ${t.stressSignedOff ? '✓' : ''}</span>
+            <span style="font-family:'JetBrains Mono',monospace;font-weight:800;">${stressPct}%</span>
+          </div>
+          <div class="progress-bar-bg">
+            <div class="progress-bar-fill stress" style="width: ${stressPct}%; background: ${t.stressSignedOff ? 'linear-gradient(90deg,#10b981,#22c55e)' : 'linear-gradient(90deg,#f59e0b,#ef4444)'};"></div>
           </div>
         </div>
 
@@ -1739,6 +1753,13 @@ function openTicketModal(ticketId = null) {
       document.getElementById('form-furmark-score').value = ticket.diagnostics.furmark || '';
       document.getElementById('form-ssd-read').value = ticket.diagnostics.ssdRead || '';
       document.getElementById('form-ssd-write').value = ticket.diagnostics.ssdWrite || '';
+      // v1.8.2 — populate the HUD temperature cards from saved diagnostics so
+      // the admin sees the peak temps the Testing Client recorded (previously
+      // only the min/max/avg inputs loaded; the big HUD value stayed "--°C").
+      if (typeof updateTempBar === 'function') {
+        updateTempBar('modal-hud-cpu-temp-val', 'modal-hud-cpu-temp-bar', ticket.diagnostics.cpuTempMax);
+        updateTempBar('modal-hud-gpu-temp-val', 'modal-hud-gpu-temp-bar', ticket.diagnostics.gpuTempMax);
+      }
       document.getElementById('serial-motherboard').value = ticket.serials.motherboard || '';
       document.getElementById('serial-ram').value = ticket.serials.ram || '';
       document.getElementById('serial-gpu').value = ticket.serials.gpu || '';
@@ -1777,7 +1798,7 @@ function openTicketModal(ticketId = null) {
       loadTicketQueries(ticket.id);
       renderInventoryPanel(ticket);
       renderStressProgress(ticket);
-      renderCustomerSupplied(ticket.customerSupplied);
+      renderCustomerSupplied(ticket.customerSupplied || (ticket.specs && ticket.specs.__customerSupplied) || []);
     }
   } else {
     hideTicketQueriesSection();
@@ -2104,6 +2125,11 @@ function handleClientTicketSelect() {
   document.getElementById('c-gpu-temp-min').value = ticket.diagnostics.gpuTempMin || '';
   document.getElementById('c-gpu-temp-max').value = ticket.diagnostics.gpuTempMax || '';
   document.getElementById('c-gpu-temp-avg').value = ticket.diagnostics.gpuTempAvg || '';
+  // v1.8.2 — restore the client HUD temp cards from saved diagnostics too.
+  if (typeof updateTempBar === 'function') {
+    updateTempBar('c-hud-cpu-temp-val', 'c-hud-cpu-temp-bar', ticket.diagnostics.cpuTempMax);
+    updateTempBar('c-hud-gpu-temp-val', 'c-hud-gpu-temp-bar', ticket.diagnostics.gpuTempMax);
+  }
 
   // Populate benchmarks
   document.getElementById('c-cinebench-score').value = ticket.diagnostics.cinebench || '';
@@ -2839,8 +2865,6 @@ async function handleTicketFormSubmit(e) {
     };
     const hasAnything = merged.cpu || merged.gpu || merged.ram || merged.storage || merged.mobo || (merged.igpu && merged.igpu !== 'None');
     if (hasAnything) {
-      updatedTicket.customerSupplied = readCustomerSuppliedFromForm();
-      updatedTicket.specs.__customerSupplied = updatedTicket.customerSupplied;
       updatedTicket.detectedSpecs = merged;
       // Mirror into specs.__detected so the JSONB specs column carries it
       // cross-machine even if this ticket reaches Supabase through a path
@@ -2851,6 +2875,13 @@ async function handleTicketFormSubmit(e) {
       updatedTicket.specs.__detected = existingTicket.detectedSpecs;
     }
   }
+
+  // v1.8.2 — customer-supplied parts must ALWAYS persist, independent of
+  // whether hardware detection ran (the previous code only saved them inside
+  // the has-detected-specs branch, so ticking a part on a fresh ticket was
+  // silently dropped on save).
+  updatedTicket.customerSupplied = readCustomerSuppliedFromForm();
+  updatedTicket.specs.__customerSupplied = updatedTicket.customerSupplied;
 
   // Sync checkbox with activation state
   if (updatedTicket.qcChecks.softWindows && updatedTicket.specs.windowsActivationState !== 'Activated') {
@@ -6914,17 +6945,24 @@ document.addEventListener('keydown', (e) => {
   }
 });
 
-// v1.8.1 — relocate Case Port Certification + RGB into the RIGHT client column
-// (per request), below Benchmark & Thermal. Done in JS to avoid a risky HTML
-// block move; the section keeps all its IDs and handlers.
+// v1.8.2 — REBALANCE the Testing Client columns so left and right hold a
+// similar amount. Done in JS (keeps all IDs/handlers). Result:
+//   LEFT  = Spec Verification + Benchmark & Thermal
+//   RIGHT = Case Port Certification + RGB Sync
+// Previously the right column carried bench + port + rgb and ran far longer.
 document.addEventListener('DOMContentLoaded', () => {
-  const section = document.querySelector('#client-screen .port-rgb-checker-section')
-    || document.querySelector('.port-rgb-checker-section');
+  const grid = document.querySelector('#client-screen .client-grid-row');
   const right = document.getElementById('client-panel-right');
-  if (section && right && section.parentNode !== right) {
-    right.appendChild(section);
-    section.style.marginTop = '28px';
-  }
+  if (!grid || !right) return;
+  const left = grid.querySelector('.client-panel');            // first panel = left
+  const portrgb = document.querySelector('#client-screen .port-rgb-checker-section')
+    || document.querySelector('.port-rgb-checker-section');
+  if (!left || !right || left === right || !portrgb) return;
+  // Move the Benchmark & Thermal content (all of the right panel) into the left.
+  while (right.firstChild) left.appendChild(right.firstChild);
+  // Move Case Port Certification + RGB into the now-empty right panel.
+  right.appendChild(portrgb);
+  portrgb.style.marginTop = '0';
 });
 
 // ═══════════════════════════════════════════════════════════
