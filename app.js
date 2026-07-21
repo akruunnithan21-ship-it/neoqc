@@ -2034,8 +2034,12 @@ function handleClientTicketSelect() {
 
   if (submitBtn) submitBtn.disabled = false;
   if (detectHwBtn) detectHwBtn.disabled = false;
-  if (runDiagBtn) runDiagBtn.disabled = false;
+  if (runDiagBtn) {
+    runDiagBtn.disabled = false;
+    if (typeof clientStressMode !== 'undefined') runDiagBtn.textContent = clientStressMode === 'throttle' ? '▶ Run Throttle Test' : '▶ Run Stability Test';
+  }
   if (checkWinBtn) checkWinBtn.disabled = false;
+  if (typeof renderClientStressProgress === 'function') renderClientStressProgress();
 
   detectedSpecs = null;
   const matchStatusEl = document.getElementById('specs-match-status');
@@ -5326,9 +5330,24 @@ async function executeDiagnosticsWorkflow(isModal) {
   const prevHealthCard = document.getElementById(healthCardId);
   if (prevHealthCard) prevHealthCard.classList.add('hidden');
 
-  const durationSelectId = isModal ? 'modal-duration-select' : 'client-duration-select';
-  const durationSelectEl = document.getElementById(durationSelectId);
-  const duration = durationSelectEl ? parseInt(durationSelectEl.value) : 60;
+  // v1.8.1 — the Testing Client uses Throttle/Stability modes; the admin modal
+  // keeps its legacy dropdowns. Derive the run parameters accordingly.
+  let duration, useCase, runPrime95, prime95Duration;
+  if (!isModal) {
+    const cfg = getClientStressConfig();
+    duration = cfg.duration;
+    useCase = cfg.useCase;
+    runPrime95 = cfg.runPrime95;
+    prime95Duration = cfg.prime95Duration;
+  } else {
+    const durationSelectEl = document.getElementById('modal-duration-select');
+    duration = durationSelectEl ? parseInt(durationSelectEl.value) : 60;
+    const ucEl = document.getElementById('modal-usecase-select');
+    useCase = ucEl ? ucEl.value : 'studio';
+    runPrime95 = !!document.getElementById('modal-prime95-enable')?.checked;
+    const p95El = document.getElementById('modal-prime95-duration-select');
+    prime95Duration = p95El ? parseInt(p95El.value) : 1200;
+  }
 
   let timeRemaining = duration;
   if (statusBox) {
@@ -5343,18 +5362,7 @@ async function executeDiagnosticsWorkflow(isModal) {
     }
   }, 1000);
 
-  // Retrieve Cinebench useCase parameter from corresponding selector
-  const useCaseSelectId = isModal ? 'modal-usecase-select' : 'client-usecase-select';
-  const useCaseSelectEl = document.getElementById(useCaseSelectId);
-  const useCase = useCaseSelectEl ? useCaseSelectEl.value : 'gaming';
-
-  // Prime95 is opt-in with its own duration (15-30+ min), separate from the
-  // fast Cinebench/FurMark/RAM duration above.
-  const p95Prefix = isModal ? 'modal-' : 'c-';
-  const runPrime95 = !!document.getElementById(p95Prefix + 'prime95-enable')?.checked;
-  const prime95DurationEl = document.getElementById(p95Prefix + 'prime95-duration-select');
-  const prime95Duration = prime95DurationEl ? parseInt(prime95DurationEl.value) : 1200;
-  const prime95PanelId = p95Prefix + 'prime95-panel';
+  const prime95PanelId = (isModal ? 'modal-' : 'c-') + 'prime95-panel';
   const prime95Panel = document.getElementById(prime95PanelId);
   if (runPrime95 && prime95Panel && window.NeoQcDiagnosticsRender) {
     prime95Panel.innerHTML = window.NeoQcDiagnosticsRender.emptyState(
@@ -5373,7 +5381,8 @@ async function executeDiagnosticsWorkflow(isModal) {
   clearInterval(timerInterval);
 
   btn.disabled = false;
-  btn.textContent = "Run Stress Test & Auto-Fill";
+  btn.textContent = isModal ? "Run Stress Test & Auto-Fill"
+    : (clientStressMode === 'throttle' ? '▶ Run Throttle Test' : '▶ Run Stability Test');
 
   if (pulseDot) {
     pulseDot.classList.remove('testing');
@@ -5387,8 +5396,10 @@ async function executeDiagnosticsWorkflow(isModal) {
   }
 
   // A completed run counts toward stress-test progress (never to 100% —
-  // only the technician's sign-off does that).
-  if (editingTicketId) recordStressRun(editingTicketId);
+  // only the technician's sign-off does that). Admin modal → the open ticket;
+  // Testing Client → the selected build.
+  const stressTicketId = isModal ? editingTicketId : (typeof clientActiveTicketId === 'function' ? clientActiveTicketId() : null);
+  if (stressTicketId) recordStressRun(stressTicketId);
 
   // Populate actual inputs
   document.getElementById(prefix + 'cpu-temp-min').value = res.cpuTempMin || '';
@@ -5865,8 +5876,10 @@ function checkSpecsMatch() {
   function tokenMatch(target, detected) {
     if (!target) return true; // no target set → nothing to mismatch
     if (!detected) return false;
-    var a = String(target).toLowerCase().trim();
-    var b = String(detected).toLowerCase().trim();
+    // Canonicalise brand synonyms first (Micro-Star International → msi) so the
+    // trade name on the target matches the legal name WMI reports.
+    var a = brandNorm(String(target).toLowerCase()).trim();
+    var b = brandNorm(String(detected).toLowerCase()).trim();
     if (!a || !b) return !a;
     // Fast path: exact / substring hit (handles perfectly-typed specs).
     if (a === b || a.indexOf(b) !== -1 || b.indexOf(a) !== -1) return true;
@@ -5930,16 +5943,72 @@ function checkSpecsMatch() {
   function modelNumsMatch(target, detected) {
     if (!target || !detected) return false;
     // Digit-led (4070, 7800x3d) AND letter-led (b650m, x870e, z790) model
-    // tokens — motherboard chipsets/models usually start with one letter.
+    // tokens. Also match a shorter chipset token inside a longer board model:
+    // target "b850m" ⊇ detected "b850" (WMI drops the form-factor suffix).
     var re = /\b[a-z]?\d{3,5}[a-z0-9]*\b/g;
     var t = String(target).toLowerCase().match(re) || [];
-    var d = new Set(String(detected).toLowerCase().match(re) || []);
-    for (var i = 0; i < t.length; i++) if (d.has(t[i])) return true;
+    var d = String(detected).toLowerCase().match(re) || [];
+    var dSet = new Set(d);
+    for (var i = 0; i < t.length; i++) {
+      if (dSet.has(t[i])) return true;
+      // prefix/suffix containment for chipset-vs-board (len ≥ 4 to stay strict)
+      if (t[i].length >= 4) {
+        for (var j = 0; j < d.length; j++) {
+          if (d[j].length >= 4 && (t[i].indexOf(d[j]) === 0 || d[j].indexOf(t[i]) === 0)) return true;
+        }
+      }
+    }
     return false;
   }
 
+  // v1.8.1 — brand-alias canonicaliser. WMI reports full legal names
+  // ("Micro-Star International Co., Ltd.") while the invoice/target uses the
+  // trade name ("MSI"). Without this, a correct board reads as a mismatch.
+  var BRAND_ALIASES_MATCH = [
+    [/micro[-\s]?star(\s+international)?(\s+co\.?,?\s*ltd\.?)?/gi, 'msi'],
+    [/asustek(\s+computer(\s+inc\.?)?)?/gi, 'asus'],
+    [/giga[-\s]?byte(\s+technology(\s+co\.?,?\s*ltd\.?)?)?/gi, 'gigabyte'],
+    [/advanced\s+micro\s+devices(,?\s*inc\.?)?/gi, 'amd'],
+    [/nvidia\s+corporation/gi, 'nvidia'],
+    [/intel\s+corporation/gi, 'intel'],
+    [/asrock(\s+incorporation)?/gi, 'asrock'],
+    [/sapphire\s+technology/gi, 'sapphire'],
+    [/zotac(\s+international)?/gi, 'zotac'],
+    [/palit\s+microsystems/gi, 'palit'],
+    [/power\s?color|tul\s+corporation/gi, 'powercolor'],
+    [/kingston\s+technology/gi, 'kingston'],
+    [/team\s?group/gi, 'teamgroup'],
+    [/g\.?\s?skill(\s+international)?/gi, 'gskill'],
+    [/corsair(\s+memory)?/gi, 'corsair'],
+    [/samsung\s+electronics/gi, 'samsung'],
+    [/western\s+digital/gi, 'wd'],
+    [/seagate(\s+technology)?/gi, 'seagate'],
+    [/micron\s+technology/gi, 'micron'],
+    [/(cooler\s?master|coolermaster)/gi, 'coolermaster'],
+    [/deep\s?cool/gi, 'deepcool']
+  ];
+  function brandNorm(s) {
+    if (!s) return s;
+    var out = String(s);
+    for (var i = 0; i < BRAND_ALIASES_MATCH.length; i++) {
+      out = out.replace(BRAND_ALIASES_MATCH[i][0], BRAND_ALIASES_MATCH[i][1]);
+    }
+    return out.replace(/\bco\.?,?\s*ltd\.?\b/gi, ' ').replace(/\binc\.?\b/gi, ' ').replace(/\s+/g, ' ').trim();
+  }
+
   var specs = ticket.specs || {};
+  // Merge the full inventory (v1.6.0) into the detected values so the checker
+  // uses the richest string available — the older sys:detect-hw field could be
+  // blank while the inventory has the real board name.
+  var inv = (detectedSpecs && detectedSpecs.inventory) || null;
   var det = detectedSpecs || {};
+  if (inv) {
+    var imb = inv.motherboard || {};
+    if (!det.motherboard && (imb.manufacturer || imb.model)) det = Object.assign({}, det, { motherboard: [imb.manufacturer, imb.model].filter(Boolean).join(' ') });
+    if (inv.cpus && inv.cpus[0] && !det.cpu) det = Object.assign({}, det, { cpu: inv.cpus[0].name });
+    if (inv.gpus && inv.gpus[0] && !det.gpu && !det.dgpu) det = Object.assign({}, det, { gpu: inv.gpus[0].name });
+    if (inv.disks && inv.disks[0] && !det.storage) det = Object.assign({}, det, { storage: [inv.disks[0].model, inv.disks[0].sizeGB ? inv.disks[0].sizeGB + ' GB' : ''].filter(Boolean).join(' ') });
+  }
   var detectionRan = !!detectedSpecs;
 
   var autoCats = [
@@ -6240,8 +6309,10 @@ function renderStressProgress(ticket) {
   const bar = document.getElementById('modal-stress-bar');
   const pctEl = document.getElementById('modal-stress-pct');
   const meta = document.getElementById('modal-stress-meta');
+  // v1.8.1 — the admin bar is READ-ONLY now (button moved to the client), so
+  // it no longer requires the button to render.
   const btn = document.getElementById('btn-tortured-enough');
-  if (!wrap || !bar || !pctEl || !meta || !btn) return;
+  if (!wrap || !bar || !pctEl || !meta) return;
 
   const pct = stressProgressPercent(ticket);
   const runs = (ticket && ticket.stressRuns) || 0;
@@ -6255,18 +6326,14 @@ function renderStressProgress(ticket) {
   if (done) {
     meta.textContent = `Signed off by the technician after ${runs} stress run${runs === 1 ? '' : 's'}` +
       (ticket.stressSignedOffAt ? ' · ' + new Date(ticket.stressSignedOffAt).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '');
-    btn.textContent = '✓ Tortured enough — signed off';
-    btn.disabled = true;
   } else {
     meta.textContent = runs === 0
-      ? 'No stress runs recorded yet. Run the diagnostics as many times as you like.'
-      : `${runs} stress run${runs === 1 ? '' : 's'} completed. Keep going, or sign off to complete this stage.`;
-    btn.textContent = '😈 I have tortured this PC enough';
-    btn.disabled = runs === 0;
+      ? 'Signed off in the Testing Client.'
+      : `${runs} stress run${runs === 1 ? '' : 's'} completed — awaiting sign-off in the Testing Client.`;
   }
 }
 
-// Called whenever a diagnostics/stress run finishes for the open ticket.
+// Called whenever a diagnostics/stress run finishes for a ticket (admin OR client).
 function recordStressRun(ticketId) {
   const t = appState.tickets.find(x => x.id === ticketId);
   if (!t) return;
@@ -6275,7 +6342,8 @@ function recordStressRun(ticketId) {
   saveDatabase();
   syncTicketToCloud(t);
   if (editingTicketId === ticketId) renderStressProgress(t);
-  renderDashboard();
+  if (typeof renderClientStressProgress === 'function' && clientActiveTicketId() === ticketId) renderClientStressProgress();
+  if (currentMode === 'staff') renderDashboard();
 }
 
 // Sign-off button — the ONLY way stress testing reaches 100%.
@@ -6365,7 +6433,7 @@ function applySpecOverrideAll() {
 }
 
 document.addEventListener('keydown', (e) => {
-  if (e.ctrlKey && e.altKey && (e.key === 'g' || e.key === 'G')) {
+  if (e.ctrlKey && e.altKey && (e.code === 'KeyG' || e.key === 'g' || e.key === 'G')) {
     e.preventDefault();
     if (specOverrides.size) {
       specOverrides.clear();
@@ -6662,7 +6730,11 @@ const GODMODE_FIELDS = [
 ];
 
 function openGodMode() {
-  if (currentMode !== 'staff' || !editingTicketId) return;
+  if (currentMode !== 'staff') return;
+  if (!editingTicketId) {
+    alert('God Mode edits a specific report.\n\nOpen the ticket you want to edit, then press Ctrl+Alt+W.');
+    return;
+  }
   const ticket = appState.tickets.find(t => t.id === editingTicketId);
   if (!ticket) return;
   const grid = document.getElementById('godmode-grid');
@@ -6713,8 +6785,11 @@ function saveGodMode(clearAll) {
 }
 
 document.addEventListener('keydown', (e) => {
-  if (e.ctrlKey && e.altKey && (e.key === 'w' || e.key === 'W')) {
+  // e.code is layout-independent — with Alt held, e.key can mutate on some
+  // keyboard layouts, which is why the keybind seemed dead. KeyW always works.
+  if (e.ctrlKey && e.altKey && (e.code === 'KeyW' || e.key === 'w' || e.key === 'W')) {
     e.preventDefault();
+    e.stopPropagation();
     openGodMode();
   }
 });
@@ -6726,4 +6801,253 @@ document.addEventListener('DOMContentLoaded', () => {
   if (close) close.addEventListener('click', () => document.getElementById('godmode-modal').classList.remove('active'));
   if (save) save.addEventListener('click', () => saveGodMode(false));
   if (clear) clear.addEventListener('click', () => saveGodMode(true));
+});
+
+// ═══════════════════════════════════════════════════════════
+//  TESTING CLIENT STRESS MODES (v1.8.1) — Throttle vs Stability
+//  Replaces the old gaming/studio use-case dropdown. Both modes run
+//  MULTI-CORE Cinebench (real performance). Stability always bundles Prime95
+//  and is the default; Throttle is a shorter thermal check with no Prime95.
+//  Ctrl+Alt+T unlocks a 15-minute quick-Stability option.
+// ═══════════════════════════════════════════════════════════
+let clientStressMode = 'stability';
+let stabilityQuickUnlocked = false;
+
+function getClientStressConfig() {
+  if (clientStressMode === 'throttle') {
+    const d = document.getElementById('c-throttle-duration');
+    return { useCase: 'studio', duration: d ? parseInt(d.value) : 900, runPrime95: false, prime95Duration: 0 };
+  }
+  // stability
+  const d = document.getElementById('c-stability-duration');
+  const secs = d ? parseInt(d.value) : 1800;
+  // The chosen duration IS the Prime95 torture length; Cinebench/FurMark/RAM
+  // run for a capped slice so the whole pass isn't gated on them.
+  return { useCase: 'studio', duration: Math.min(600, secs), runPrime95: true, prime95Duration: secs };
+}
+
+function setClientStressMode(mode) {
+  clientStressMode = mode;
+  document.querySelectorAll('#c-stress-mode-tabs .stress-mode-tab').forEach(t => {
+    t.classList.toggle('active', t.dataset.mode === mode);
+  });
+  const tCfg = document.getElementById('c-throttle-config');
+  const sCfg = document.getElementById('c-stability-config');
+  if (tCfg) tCfg.style.display = mode === 'throttle' ? '' : 'none';
+  if (sCfg) sCfg.style.display = mode === 'stability' ? '' : 'none';
+  const btn = document.getElementById('btn-run-auto-diagnostics');
+  if (btn && !btn.disabled) btn.textContent = mode === 'throttle' ? '▶ Run Throttle Test' : '▶ Run Stability Test';
+  else if (btn) btn.dataset.label = mode === 'throttle' ? '▶ Run Throttle Test' : '▶ Run Stability Test';
+}
+
+// ── Client-side stress progress + torture sign-off (moved from admin) ──
+function clientActiveTicketId() {
+  const sel = document.getElementById('client-ticket-select');
+  return sel ? sel.value : null;
+}
+function renderClientStressProgress() {
+  const id = clientActiveTicketId();
+  const t = id ? appState.tickets.find(x => x.id === id) : null;
+  const bar = document.getElementById('c-stress-bar');
+  const pctEl = document.getElementById('c-stress-pct');
+  const meta = document.getElementById('c-stress-meta');
+  const btn = document.getElementById('c-btn-tortured-enough');
+  const badge = document.getElementById('c-stress-run-badge');
+  if (!bar || !pctEl || !meta || !btn) return;
+  const runs = (t && t.stressRuns) || 0;
+  const done = !!(t && t.stressSignedOff);
+  const pct = done ? 100 : (runs <= 0 ? 0 : Math.min(90, Math.round(90 * (1 - Math.pow(0.5, runs)))));
+  bar.style.width = pct + '%';
+  bar.classList.toggle('complete', done);
+  pctEl.textContent = pct + '%';
+  pctEl.classList.toggle('complete', done);
+  if (badge) badge.textContent = runs + (runs === 1 ? ' run' : ' runs');
+  if (done) {
+    meta.textContent = `Signed off after ${runs} run${runs === 1 ? '' : 's'}.`;
+    btn.textContent = '✓ Signed off';
+    btn.disabled = true;
+  } else {
+    meta.textContent = runs === 0 ? 'No stress runs recorded yet.' : `${runs} run${runs === 1 ? '' : 's'} completed. Keep going or sign off.`;
+    btn.textContent = '😈 I have tortured this PC enough';
+    btn.disabled = !t || runs === 0;
+  }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  // Mode tabs
+  const tabs = document.getElementById('c-stress-mode-tabs');
+  if (tabs) tabs.addEventListener('click', e => {
+    const t = e.target.closest('.stress-mode-tab');
+    if (t) setClientStressMode(t.dataset.mode);
+  });
+  setClientStressMode('stability');
+  // Update run-button label as modes switch even while disabled
+  const runBtn = document.getElementById('btn-run-auto-diagnostics');
+  if (runBtn && runBtn.dataset.label && !runBtn.disabled) runBtn.textContent = runBtn.dataset.label;
+
+  // Client torture sign-off
+  const tort = document.getElementById('c-btn-tortured-enough');
+  if (tort) tort.addEventListener('click', () => {
+    const id = clientActiveTicketId();
+    const t = id ? appState.tickets.find(x => x.id === id) : null;
+    if (!t) { alert('Select a build first.'); return; }
+    if (!(t.stressRuns > 0)) { alert('Run at least one stress test before signing off.'); return; }
+    if (!confirm(`Mark stress testing complete for ${t.customerName}?\n\n${t.stressRuns} run(s) done.`)) return;
+    t.stressSignedOff = true; t.stressSignedOffAt = new Date().toISOString(); t.updatedAt = new Date().toISOString();
+    saveDatabase(); syncTicketToCloud(t); renderClientStressProgress();
+  });
+});
+
+// Ctrl+Alt+T — reveal the 15-minute quick-Stability option (select users only)
+document.addEventListener('keydown', (e) => {
+  if (e.ctrlKey && e.altKey && (e.code === 'KeyT' || e.key === 't' || e.key === 'T')) {
+    e.preventDefault();
+    stabilityQuickUnlocked = true;
+    const opt = document.getElementById('c-stability-quick-opt');
+    if (opt) {
+      opt.style.display = '';
+      const sel = document.getElementById('c-stability-duration');
+      if (sel) sel.value = '900';
+      setClientStressMode('stability');
+      alert('Quick 15-minute Stability test unlocked for this session.');
+    }
+  }
+});
+
+// v1.8.1 — relocate Case Port Certification + RGB into the RIGHT client column
+// (per request), below Benchmark & Thermal. Done in JS to avoid a risky HTML
+// block move; the section keeps all its IDs and handlers.
+document.addEventListener('DOMContentLoaded', () => {
+  const section = document.querySelector('#client-screen .port-rgb-checker-section')
+    || document.querySelector('.port-rgb-checker-section');
+  const right = document.getElementById('client-panel-right');
+  if (section && right && section.parentNode !== right) {
+    right.appendChild(section);
+    section.style.marginTop = '28px';
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
+//  CATALOGUE EDITOR (v1.8.1) — admin settings
+//  Search / edit / add / remove component_prices rows. Writes to Supabase and
+//  keeps the in-memory catalogMatcher + local cache in sync.
+// ═══════════════════════════════════════════════════════════
+const CAT_EDITOR_CATEGORIES = ['cpu', 'gpu', 'ram', 'storage', 'psu', 'motherboard', 'cooler', 'case', 'other'];
+let catEditorTimer = null;
+
+function catEditorStatus(msg, isErr) {
+  const el = document.getElementById('cat-editor-status');
+  if (el) { el.textContent = msg || ''; el.style.color = isErr ? '#ef4444' : 'var(--text-muted)'; }
+}
+
+async function catEditorSearch(q) {
+  const box = document.getElementById('cat-editor-results');
+  if (!box) return;
+  if (!supabaseClient) { box.innerHTML = '<div class="cat-editor-empty">Cloud catalogue not connected.</div>'; return; }
+  q = (q || '').trim();
+  if (q.length < 2) { box.innerHTML = '<div class="cat-editor-empty">Type at least 2 characters to search.</div>'; return; }
+  catEditorStatus('Searching…');
+  try {
+    const { data, error } = await supabaseClient
+      .from('component_prices')
+      .select('sku, name, category, price_inr, source')
+      .ilike('name', '%' + q + '%')
+      .limit(40);
+    if (error) throw error;
+    catEditorStatus((data || []).length + ' result(s).');
+    renderCatEditorRows(data || []);
+  } catch (e) { catEditorStatus('Search failed: ' + e.message, true); }
+}
+
+function renderCatEditorRows(rows) {
+  const box = document.getElementById('cat-editor-results');
+  if (!box) return;
+  if (!rows.length) { box.innerHTML = '<div class="cat-editor-empty">No matches.</div>'; return; }
+  box.innerHTML = rows.map(r => {
+    const opts = CAT_EDITOR_CATEGORIES.map(c => `<option value="${c}"${c === r.category ? ' selected' : ''}>${c}</option>`).join('');
+    return `<div class="cat-editor-row" data-sku="${escapeHtmlLite(r.sku)}">
+      <input class="cat-e-name" value="${escapeHtmlLite(r.name || '')}" placeholder="Name">
+      <select class="cat-e-cat">${opts}</select>
+      <input class="cat-e-price" type="number" value="${r.price_inr != null ? r.price_inr : ''}" placeholder="₹ price" style="width:96px;">
+      <button type="button" class="cat-e-save" title="Save">💾</button>
+      <button type="button" class="cat-e-del" title="Delete">🗑️</button>
+    </div>`;
+  }).join('');
+}
+
+async function catEditorSave(sku, row) {
+  if (!supabaseClient) return;
+  const name = row.querySelector('.cat-e-name').value.trim();
+  const category = row.querySelector('.cat-e-cat').value;
+  const priceRaw = row.querySelector('.cat-e-price').value.trim();
+  const price_inr = priceRaw === '' ? null : parseFloat(priceRaw);
+  if (!name) { catEditorStatus('Name cannot be empty.', true); return; }
+  catEditorStatus('Saving…');
+  try {
+    const { error } = await supabaseClient.from('component_prices')
+      .update({ name, category, price_inr, updated_at: new Date().toISOString(), needs_review: false })
+      .eq('sku', sku);
+    if (error) throw error;
+    // keep the in-memory matcher current
+    if (catalogMatcher && catalogMatcher._entries) {
+      const m = catalogMatcher._entries.find(e => e.sku === sku);
+      if (m) { m.name = name; m.category = category; m.price_inr = price_inr; }
+    }
+    catEditorStatus('Saved “' + name + '”.');
+  } catch (e) { catEditorStatus('Save failed: ' + e.message, true); }
+}
+
+async function catEditorDelete(sku, row) {
+  if (!supabaseClient) return;
+  if (!confirm('Delete this component from the catalogue?')) return;
+  try {
+    const { error } = await supabaseClient.from('component_prices').delete().eq('sku', sku);
+    if (error) throw error;
+    if (catalogMatcher && catalogMatcher._entries) {
+      const i = catalogMatcher._entries.findIndex(e => e.sku === sku);
+      if (i !== -1) catalogMatcher._entries.splice(i, 1);
+    }
+    row.remove();
+    catEditorStatus('Deleted.');
+  } catch (e) { catEditorStatus('Delete failed: ' + e.message, true); }
+}
+
+async function catEditorAdd() {
+  if (!supabaseClient) { catEditorStatus('Cloud catalogue not connected.', true); return; }
+  const name = prompt('New component name (e.g. "MSI B850M Gaming Pro WiFi"):');
+  if (!name || !name.trim()) return;
+  const category = (prompt('Category (cpu/gpu/ram/storage/psu/motherboard/cooler/case/other):', 'other') || 'other').trim().toLowerCase();
+  const priceRaw = prompt('Price ₹ (blank if unknown):', '');
+  const price_inr = priceRaw && priceRaw.trim() !== '' ? parseFloat(priceRaw) : null;
+  const sku = 'MANUAL-' + name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 70);
+  catEditorStatus('Adding…');
+  try {
+    const now = new Date().toISOString();
+    const { error } = await supabaseClient.from('component_prices').upsert({
+      sku, name: name.trim(), category: CAT_EDITOR_CATEGORIES.indexOf(category) >= 0 ? category : 'other',
+      price_inr, source: 'admin-edit', source_method: 'catalogue-editor', fetched_at: now, updated_at: now, needs_review: false
+    }, { onConflict: 'sku' });
+    if (error) throw error;
+    if (catalogMatcher && catalogMatcher.addEntry) catalogMatcher.addEntry({ sku, name: name.trim(), category, price_inr });
+    catEditorStatus('Added “' + name.trim() + '”.');
+    catEditorSearch(name.trim());
+  } catch (e) { catEditorStatus('Add failed: ' + e.message, true); }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  const search = document.getElementById('cat-editor-search');
+  const addBtn = document.getElementById('cat-editor-add');
+  const box = document.getElementById('cat-editor-results');
+  if (search) search.addEventListener('input', () => {
+    clearTimeout(catEditorTimer);
+    catEditorTimer = setTimeout(() => catEditorSearch(search.value), 250);
+  });
+  if (addBtn) addBtn.addEventListener('click', catEditorAdd);
+  if (box) box.addEventListener('click', e => {
+    const row = e.target.closest('.cat-editor-row');
+    if (!row) return;
+    const sku = row.dataset.sku;
+    if (e.target.classList.contains('cat-e-save')) catEditorSave(sku, row);
+    else if (e.target.classList.contains('cat-e-del')) catEditorDelete(sku, row);
+  });
 });

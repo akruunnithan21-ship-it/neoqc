@@ -4565,3 +4565,64 @@ body.dark-mode .portcert-summary.all-good { color: #34d399; }
 @media (prefers-reduced-motion: reduce) {
   #client-screen::before { animation: none; }
 }
+
+/* ══════════════════════════════════════════════════════
+   TESTING CLIENT — Throttle / Stability stress modes (v1.8.1)
+   ══════════════════════════════════════════════════════ */
+.stress-mode-card {
+  border: 1px solid var(--glass-border);
+  border-radius: 16px;
+  padding: 20px 22px;
+  margin: 10px 0 16px;
+  background:
+    radial-gradient(120% 100% at 100% 0%, rgba(239,68,68,0.06), transparent 60%),
+    rgba(127,127,160,0.04);
+}
+.stress-mode-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+.stress-mode-title { font-size: 0.98rem; font-weight: 800; color: var(--text-dark); display: inline-flex; align-items: center; gap: 8px; }
+.stress-mode-badge { font-size: 0.68rem; font-weight: 800; color: var(--text-muted); background: rgba(127,127,160,0.12); border: 1px solid var(--glass-border); border-radius: 999px; padding: 3px 11px; }
+
+.stress-mode-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 14px; }
+.stress-mode-tab {
+  display: flex; flex-direction: column; gap: 3px; text-align: left;
+  padding: 12px 14px; border-radius: 12px; cursor: pointer;
+  border: 1.5px solid var(--glass-border); background: var(--glass-bg);
+  transition: border-color .18s, background .18s, transform .1s;
+}
+.stress-mode-tab:hover { transform: translateY(-1px); }
+.stress-mode-tab .smt-name { font-size: 0.92rem; font-weight: 800; color: var(--text-dark); }
+.stress-mode-tab .smt-desc { font-size: 0.68rem; color: var(--text-muted); }
+.stress-mode-tab.active { border-color: #ef4444; background: rgba(239,68,68,0.08); box-shadow: 0 6px 18px -10px rgba(239,68,68,0.5); }
+.stress-mode-tab.active .smt-name { color: #ef4444; }
+
+.stress-mode-config { margin-bottom: 14px; }
+.smc-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.smc-label { font-size: 0.72rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); margin: 0; }
+.smc-select {
+  padding: 8px 12px; border-radius: 8px; border: 1px solid var(--glass-border);
+  background: var(--glass-bg); color: var(--text-dark); outline: none; font-size: 0.85rem; font-weight: 600;
+}
+.smc-select:focus { border-color: #ef4444; }
+.smc-note { font-size: 0.68rem; color: var(--text-muted); flex-basis: 100%; }
+
+.stress-run-btn {
+  width: 100%; border: none; border-radius: 12px; padding: 13px 16px;
+  font-size: 0.98rem; font-weight: 800; cursor: pointer; color: #fff;
+  background: linear-gradient(135deg, #ef4444, #b91c1c);
+  box-shadow: 0 10px 26px -12px rgba(239,68,68,0.7);
+  transition: opacity .2s, transform .1s;
+}
+.stress-run-btn:hover:not(:disabled) { opacity: 0.94; transform: translateY(-1px); }
+.stress-run-btn:disabled { opacity: 0.45; cursor: not-allowed; box-shadow: none; }
+.stress-mode-status { font-size: 0.75rem; color: var(--text-muted); line-height: 1.5; margin-top: 12px; }
+
+/* Catalogue editor (v1.8.1) */
+.cat-editor-results { display: flex; flex-direction: column; gap: 6px; max-height: 280px; overflow-y: auto; }
+.cat-editor-empty { font-size: 0.78rem; color: var(--text-muted); padding: 10px; text-align: center; }
+.cat-editor-row { display: flex; gap: 6px; align-items: center; }
+.cat-editor-row .cat-e-name { flex: 1; min-width: 0; padding: 6px 9px; border-radius: 7px; border: 1px solid var(--glass-border); background: var(--glass-bg); color: var(--text-dark); font-size: 0.8rem; outline: none; }
+.cat-editor-row .cat-e-cat { padding: 6px 8px; border-radius: 7px; border: 1px solid var(--glass-border); background: var(--glass-bg); color: var(--text-dark); font-size: 0.75rem; }
+.cat-editor-row .cat-e-price { padding: 6px 8px; border-radius: 7px; border: 1px solid var(--glass-border); background: var(--glass-bg); color: var(--text-dark); font-size: 0.8rem; }
+.cat-editor-row .cat-e-save, .cat-editor-row .cat-e-del { border: 1px solid var(--glass-border); background: var(--glass-bg); border-radius: 7px; padding: 5px 8px; cursor: pointer; font-size: 0.85rem; }
+.cat-editor-row .cat-e-save:hover { border-color: var(--status-completed); }
+.cat-editor-row .cat-e-del:hover { border-color: var(--status-urgent); }

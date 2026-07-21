@@ -477,40 +477,62 @@
           </div>
 
           <!-- Diagnostic Log File Parsers -->
-          <div class="client-panel">
+          <div class="client-panel" id="client-panel-right">
             <h3>2. Benchmark & Thermal Logging</h3>
             
-            <!-- Automated Stress Test in Client Portal -->
-            <div class="diagnostics-auto-run-card" style="background: rgba(231, 1, 78, 0.03); border: 1px dashed rgba(231, 1, 78, 0.2); padding: 12px; border-radius: 8px; margin-bottom: 16px; display: flex; flex-direction: column; gap: 8px; margin-top: 10px;">
-              <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
-                <label style="color: var(--primary-pink); font-weight: 700; margin-bottom: 0; display: inline-flex; align-items: center; gap: 6px;"><span class="dr-inline-icon" data-icon="torture"></span>Automated Benchmarks</label>
-                <div style="display: flex; align-items: center; gap: 8px;">
-                  <select id="client-usecase-select" style="padding: 4px 8px; font-size: 0.8rem; border-radius: 4px; border: 1px solid var(--glass-border); background: var(--glass-bg); color: var(--text-dark); outline: none;">
-                    <option value="gaming">Gaming Use (Single-Core)</option>
-                    <option value="studio">Studio Use (Multi-Core)</option>
+            <!-- v1.8.1 — Testing Client stress/benchmark modes (Throttle / Stability) -->
+            <div class="stress-mode-card">
+              <div class="stress-mode-head">
+                <span class="stress-mode-title"><span class="dr-inline-icon" data-icon="torture"></span> Stress &amp; Benchmark</span>
+                <span id="c-stress-run-badge" class="stress-mode-badge">0 runs</span>
+              </div>
+
+              <div class="stress-mode-tabs" id="c-stress-mode-tabs">
+                <button type="button" class="stress-mode-tab" data-mode="throttle">
+                  <span class="smt-name">🌡️ Throttle</span>
+                  <span class="smt-desc">Thermal check · 15 min · CPU·GPU·SSD·RAM</span>
+                </button>
+                <button type="button" class="stress-mode-tab active" data-mode="stability">
+                  <span class="smt-name">🛡️ Stability</span>
+                  <span class="smt-desc">Ultimate torture · Prime95 · 30 min</span>
+                </button>
+              </div>
+
+              <div class="stress-mode-config">
+                <div class="smc-row" id="c-throttle-config" style="display:none;">
+                  <label class="smc-label">Duration</label>
+                  <select id="c-throttle-duration" class="smc-select">
+                    <option value="600">10 minutes</option>
+                    <option value="900" selected>15 minutes</option>
                   </select>
-                  <select id="client-duration-select" style="padding: 4px 8px; font-size: 0.8rem; border-radius: 4px; border: 1px solid var(--glass-border); background: var(--glass-bg); color: var(--text-dark); outline: none;">
-                    <option value="30">30s (Fast)</option>
-                    <option value="60">60s (Standard)</option>
-                    <option value="300">5m (Burn-in)</option>
-                    <option value="600" selected>10m (Recommended)</option>
+                </div>
+                <div class="smc-row" id="c-stability-config">
+                  <label class="smc-label">Duration</label>
+                  <select id="c-stability-duration" class="smc-select">
+                    <option value="900" id="c-stability-quick-opt" style="display:none;">15 minutes (quick)</option>
+                    <option value="1200">20 minutes (minimum)</option>
+                    <option value="1800" selected>30 minutes (default)</option>
+                    <option value="3600">60 minutes (maximum)</option>
                   </select>
-                  <button type="button" id="btn-run-auto-diagnostics" class="primary-pink-btn" style="padding: 6px 12px; font-size: 0.8rem;" disabled>Run Stress Test & Auto-Fill</button>
+                  <span class="smc-note">Prime95 Blend (CPU + RAM) is always included in Stability mode.</span>
                 </div>
               </div>
-              <div id="c-diagnostics-status" class="font-mono" style="font-size: 0.75rem; color: var(--text-muted); line-height: 1.4;">
-                Cinebench R23: [Idle] | FurMark: [Idle] | RAM: [Idle]
+
+              <button type="button" id="btn-run-auto-diagnostics" class="stress-run-btn" disabled>▶ Run Stability Test</button>
+
+              <div id="c-diagnostics-status" class="font-mono stress-mode-status">
+                CPU: [Idle] · GPU: [Idle] · RAM: [Idle] · SSD: [Idle]
               </div>
-              <div style="display: flex; align-items: center; gap: 8px; padding-top: 6px; border-top: 1px solid var(--glass-border); margin-top: 4px;">
-                <label style="display: flex; align-items: center; gap: 6px; font-size: 0.8rem; margin-bottom: 0; cursor: pointer;">
-                  <input type="checkbox" id="c-prime95-enable">
-                  Include Prime95 torture test (CPU + RAM, Blend mode)
-                </label>
-                <select id="c-prime95-duration-select" style="padding: 4px 8px; font-size: 0.8rem; border-radius: 4px; border: 1px solid var(--glass-border); background: var(--glass-bg); color: var(--text-dark); outline: none;">
-                  <option value="900">15 min (Minimum)</option>
-                  <option value="1200" selected>20 min (Recommended)</option>
-                  <option value="1800">30 min (Thorough)</option>
-                </select>
+
+              <!-- torture sign-off lives HERE now (client side), not on the admin ticket -->
+              <div id="c-stress-progress-wrap" class="stress-wrap" style="margin-top:14px;">
+                <div class="stress-head">
+                  <span class="stress-title">🔥 Stress Testing Progress</span>
+                  <span id="c-stress-pct" class="stress-pct">0%</span>
+                </div>
+                <div class="stress-bar-bg"><div id="c-stress-bar" class="stress-bar-fill" style="width:0%"></div></div>
+                <div id="c-stress-meta" class="stress-meta">No stress runs recorded yet.</div>
+                <button type="button" id="c-btn-tortured-enough" class="stress-btn">😈 I have tortured this PC enough</button>
               </div>
             </div>
             <div id="c-prime95-panel"></div>
@@ -1033,16 +1055,16 @@
                 </select>
               </div>
             </div>
-            <!-- v1.5.1 — stress-test progress. Never reaches 100% on run count
-                 alone; only the technician's sign-off completes it. -->
+            <!-- v1.8.1 — stress progress is now READ-ONLY on the admin side;
+                 the technician runs tests + signs off in the Testing Client.
+                 The "tortured enough" button was moved there. -->
             <div id="modal-stress-progress-wrap" class="margin-top stress-wrap">
               <div class="stress-head">
                 <span class="stress-title">🔥 Stress Testing Progress</span>
                 <span id="modal-stress-pct" class="stress-pct">0%</span>
               </div>
               <div class="stress-bar-bg"><div id="modal-stress-bar" class="stress-bar-fill" style="width:0%"></div></div>
-              <div id="modal-stress-meta" class="stress-meta">No stress runs recorded yet.</div>
-              <button type="button" id="btn-tortured-enough" class="stress-btn">😈 I have tortured this PC enough</button>
+              <div id="modal-stress-meta" class="stress-meta">Signed off in the Testing Client.</div>
             </div>
 
             <div id="modal-prime95-panel"></div>
@@ -1350,6 +1372,18 @@
 
           <!-- ══ TAB: GENERAL ══ -->
           <div id="tab-general" class="settings-tab-content">
+
+            <!-- v1.8.1 — Catalogue editor: edit / add / remove components + prices -->
+            <div class="settings-section">
+              <div class="settings-section-title">🗂️ Component Catalogue</div>
+              <p style="font-size:0.75rem;color:var(--text-muted);margin:0 0 10px;">Search the catalogue, edit a component's name / category / price, add a new part, or remove one. Changes save to the cloud catalogue instantly.</p>
+              <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
+                <input type="text" id="cat-editor-search" class="settings-input" placeholder="Search components…" style="flex:1;min-width:180px;">
+                <button type="button" id="cat-editor-add" class="secondary-btn" style="padding:8px 14px;white-space:nowrap;">+ Add new</button>
+              </div>
+              <div id="cat-editor-results" class="cat-editor-results"></div>
+              <div id="cat-editor-status" style="font-size:0.72rem;color:var(--text-muted);margin-top:8px;min-height:14px;"></div>
+            </div>
 
             <div class="settings-section">
               <div class="settings-section-title">Shop Identity</div>
@@ -2191,6 +2225,12 @@
       </div>
     </div>
 
+    <!-- v1.8.1 — a warm closing note for the customer -->
+    <div class="print-thanks">
+      <span style="font-size:11pt;">🎌</span>
+      <span>Thank you for choosing <strong>Neo Tokyo Kochi</strong>. Every component above was hand-assembled, stress-tested and verified by our team so your machine runs its best from day one. Keep this certificate for your warranty records.</span>
+    </div>
+
     <!-- ── FOOTER ── -->
     <div class="print-footer">
       <div class="signature-line">
@@ -2239,23 +2279,23 @@
     <div class="glass-slab modal-card" style="max-width: 650px; width: 100%; padding: 30px; border-radius: 20px;">
       <div class="modal-header" style="border-bottom: 1px solid var(--glass-border); padding-bottom: 15px; margin-bottom: 20px;">
         <h2 style="font-family: 'Syncopate', sans-serif; font-size: 1.3rem; color: var(--primary-pink); letter-spacing: 0.05em; margin: 0;">NEO QC UPDATED</h2>
-        <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; font-weight: 700; background: rgba(231, 1, 78, 0.1); color: var(--primary-pink); padding: 4px 8px; border-radius: 4px;">v1.8.0</span>
+        <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; font-weight: 700; background: rgba(231, 1, 78, 0.1); color: var(--primary-pink); padding: 4px 8px; border-radius: 4px;">v1.8.1</span>
       </div>
       <div class="modal-body" style="font-size: 0.92rem; line-height: 1.6; color: var(--text-dark); max-height: 420px; overflow-y: auto; padding-right: 5px;">
-        <p style="margin-top: 0;">An update has been installed. Here are the key improvements in NeoQC <strong>v1.8.0</strong>:</p>
+        <p style="margin-top: 0;">An update has been installed. Here are the key improvements in NeoQC <strong>v1.8.1</strong>:</p>
         <ul style="padding-left: 20px; display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px;">
-          <li><strong>Fixed: reports were failing good builds</strong>: A single-core Cinebench run (~2,300 pts on a top CPU) was being judged against the multi-core minimum, so a perfectly healthy machine printed "QC FAILED". Cinebench is now scored against the correct target for whichever mode ran, and the score is labelled Single- or Multi-Core on the report.</li>
-          <li><strong>Fixed: missing readings no longer fail the report</strong>: A test with no data now reads <em>NOT MEASURED</em> instead of being counted as a failure. The big verdict banner at the top has been removed; the result lives in the QC stamp and the score strip.</li>
-          <li><strong>Fixed: CPU temperature and Job Type showing "--"</strong>: When the sensor library can't read a CPU's temperature, the app now falls back to the board's thermal sensor rather than showing nothing (and drops obviously-bogus 0 °C readings). Job Type now reads correctly from the ticket.</li>
-          <li><strong>New readings: clock speeds &amp; SSD IOPS</strong>: The report now shows CPU and GPU clock speeds under load (min / avg / max), and the drive benchmark shows random 4K IOPS alongside the MB/s figures.</li>
-          <li><strong>Value analysis always on the report (PPI)</strong>: If it wasn't computed, it's now calculated automatically at print time, so the customer always sees how the parts you chose stack up — honestly, never overstated.</li>
-          <li><strong>Faster, more accurate SSD write speed</strong>: The benchmark now follows CrystalDiskMark's real defaults — a warm-up pass, then the best of five short runs — so the fast write cache isn't exhausted mid-test and the write figure is both correct and higher.</li>
-          <li><strong>Testing Client uses the whole screen</strong>: On wide displays the panels now spread out to fill the width instead of stacking into a long scroll.</li>
-          <li><strong>God Mode (admins only, Ctrl + Alt + W)</strong>: With a ticket open, edit any value the report shows for that build before printing. Overrides are kept on the ticket as the shop's own record.</li>
+          <li><strong>New: Throttle &amp; Stability test modes</strong> — replacing the old gaming/studio choice. <em>Stability</em> (the default) is the ultimate torture test with Prime95 always bundled, 30 minutes by default (20–60 min). <em>Throttle</em> is a 15-minute thermal check without Prime95. A secret Ctrl+Alt+T unlocks a 15-minute quick-Stability option. Both run the real multi-core benchmark.</li>
+          <li><strong>Smarter spec verification</strong>: The checker now knows brand aliases — "MSI" matches "Micro-Star International", "ASUS" matches "ASUSTeK", and a board chipset (B850) matches its full model (B850M) — so a correctly-built PC no longer reads as a mismatch.</li>
+          <li><strong>Honest benchmark scores</strong>: Cinebench and FurMark now report the real measured result or <em>NOT MEASURED</em> — never a fabricated estimate.</li>
+          <li><strong>Catalogue editor in Settings</strong>: Search, edit, add or remove components and prices in your catalogue directly from the app.</li>
+          <li><strong>Sign-off moved to the Testing Client</strong>: The "I have tortured this PC enough" button now lives where the testing happens; the admin ticket shows progress read-only.</li>
+          <li><strong>Case Port Certification &amp; RGB moved to the right</strong>, and ports can be added or removed for any case layout.</li>
+          <li><strong>God Mode now opens reliably</strong> (Ctrl+Alt+W with a ticket open) — the keybind is fixed and tells you if no ticket is open.</li>
+          <li><strong>A more beautiful report</strong>: softer header graphics, refined score tiles, section markers, a subtle monogram, and a warm thank-you note for the customer.</li>
         </ul>
       </div>
       <div class="modal-footer" style="border-top: 1px solid var(--glass-border); padding-top: 15px; display: flex; justify-content: flex-end; margin-top: 20px;">
-        <button id="btn-close-changelog" class="primary-pink-btn" style="padding: 10px 24px; font-weight: 700; font-size: 0.95rem;">Launch NeoQC v1.8.0</button>
+        <button id="btn-close-changelog" class="primary-pink-btn" style="padding: 10px 24px; font-weight: 700; font-size: 0.95rem;">Launch NeoQC v1.8.1</button>
       </div>
     </div>
   </div>

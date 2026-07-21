@@ -1416,10 +1416,10 @@ ipcMain.handle('sys:run-diagnostics', async (event, config) => {
         const m = furmarkStdout.match(/score[:\s=]+(\d+)/i);
         if (m) furmarkScore = parseInt(m[1]);
       }
-      // Estimation fallback: GPU score scales roughly with avg FPS at 1280x720 × 100
-      if (furmarkScore === 0) furmarkScore = Math.round(7500 + Math.random() * 3000);
+      // v1.8.1 — no fabricated GPU score either. Unparsed = NOT MEASURED.
+      if (furmarkScore === 0) furmarkScore = null;
 
-      event.sender.send('sys:diag-log', `FurMark GPU test completed. Score: ${furmarkScore} pts`);
+      event.sender.send('sys:diag-log', `FurMark GPU test ${furmarkScore != null ? 'completed. Score: ' + furmarkScore + ' pts' : 'produced no parseable score — NOT MEASURED.'}`);
       furmarkDone = true;
       checkAllDone();
     });
@@ -1480,18 +1480,18 @@ ipcMain.handle('sys:run-diagnostics', async (event, config) => {
           `Cinebench raw output (${outputStr.length} bytes): "${outputStr.replace(/\s+/g, ' ').trim().slice(0, 160)}"`);
       }
       
-      // Fallback: If score is 0, generate an estimated score based on CPU specs
+      // v1.8.1 — NO fabricated fallback. The old code invented a score from
+      // core count when the real run produced nothing ("i want true to its
+      // performance, not some fake numbers"). If Cinebench didn't yield a
+      // parseable score, we report NOTHING — the report shows NOT MEASURED —
+      // rather than a made-up figure that misrepresents the CPU.
       if (cinebenchScore === 0) {
-        exec('powershell -Command "(Get-CimInstance Win32_Processor).Name"', (cpuErr, cpuStdout) => {
-          const cpuName = (!cpuErr && cpuStdout) ? cpuStdout.trim() : '';
-          cinebenchScore = estimateCinebenchScore(cpuName, isSingleCore);
-          event.sender.send('sys:diag-log', `Cinebench score estimated: ${cinebenchScore} pts (CPU: ${cpuName || 'Unknown'})`);
-          checkAllDone();
-        });
+        cinebenchScore = null;
+        event.sender.send('sys:diag-log', `Cinebench produced no parseable score — reporting NOT MEASURED (no estimate fabricated).`);
       } else {
-        event.sender.send('sys:diag-log', `Cinebench score parsed: ${cinebenchScore} pts`);
-        checkAllDone();
+        event.sender.send('sys:diag-log', `Cinebench score parsed: ${cinebenchScore} pts (${isSingleCore ? 'single' : 'multi'}-core)`);
       }
+      checkAllDone();
     });
 
     async function checkAllDone() {
