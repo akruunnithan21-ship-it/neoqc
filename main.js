@@ -1235,6 +1235,10 @@ ipcMain.handle('sys:run-diagnostics', async (event, config) => {
         });
       } catch (e) {
         event.sender.send('sys:diag-log', `[RAM Error] worker failed to start: ${e.message}`);
+        // v1.8.4 — surface the failure ON the card. Previously a worker that
+        // never started left the RAM card silently at "Idle / 0%" with no
+        // explanation (looked exactly like the test hadn't run).
+        event.sender.send('sys:ram-update', { failed: true, message: `RAM test could not start: ${e.message}` });
         ramResolve({ success: false, error: e.message });
         return;
       }
@@ -1260,6 +1264,7 @@ ipcMain.handle('sys:run-diagnostics', async (event, config) => {
         } else if (msg.type === 'error') {
           clearTimeout(ramTimeout);
           event.sender.send('sys:diag-log', `[RAM Error] ${msg.error}`);
+          event.sender.send('sys:ram-update', { failed: true, message: `RAM test error: ${msg.error}` });
           ramResolve({ success: false, error: msg.error });
         } else if (msg.type === 'done') {
           clearTimeout(ramTimeout);
@@ -1282,6 +1287,7 @@ ipcMain.handle('sys:run-diagnostics', async (event, config) => {
       worker.on('error', (err) => {
         clearTimeout(ramTimeout);
         event.sender.send('sys:diag-log', `[RAM Error] ${err.message}`);
+        event.sender.send('sys:ram-update', { failed: true, message: `RAM test error: ${err.message}` });
         ramResolve({ success: false, error: err.message });
       });
 

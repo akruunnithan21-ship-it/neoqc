@@ -5303,6 +5303,17 @@ function restoreHudFromDiagnostics(prefix, diag) {
 }
 
 ipcRenderer.on('sys:ram-update', (event, data) => {
+  // v1.8.4 — a worker that failed to start/run now says so on the card instead
+  // of sitting silently at "Idle / 0%".
+  if (data && data.failed) {
+    ['c-', 'modal-'].forEach(pfx => {
+      const v = document.getElementById(pfx + 'hud-ram-val');
+      const d = document.getElementById(pfx + 'hud-ram-desc');
+      if (v) v.textContent = 'ERROR';
+      if (d) d.textContent = data.message || 'RAM test failed to run.';
+    });
+    return;
+  }
   const pct = data.percentDone || 0;
   const mb = data.allocatedMB || 0;
   const faults = data.faults || 0;
