@@ -3,12 +3,83 @@
 **Project:** Neo QC — Electron QC/build-tracking app for Neo Tokyo Kochi service dept
 **Repo:** `C:\Users\Aladeen\Desktop\Aladeen\neoqc-main`
 **Python:** `C:\Users\Aladeen\AppData\Local\Python\pythoncore-3.14-64\python.exe`
-**Supabase:** `https://ggsxkhenzdhaachubrsc.supabase.co` (anon key hardcoded in `main.js`, `app.js`, `dashboard/app.js`, and every Python script that touches Supabase)
+**Supabase:** `https://ggsxkhenzdhaachubrsc.supabase.co` (anon key hardcoded in `main.js`, `app.js`, `dashboard/app.js`, and every Python script that touches Supabase). **Security note (2026-07-22 review): the anon key ships inside the asar; the entire data-access security model therefore rests on Supabase Row Level Security being enabled and correctly scoped. Confirm RLS policies on `tickets` + `component_prices` — see the code review below.**
 **GitHub:** `akruunnithan21-ship-it/neoqc` — releases are the OTA update mechanism (electron-updater)
-**Shipped version:** **v1.4.4** (2026-07-15) — pushed by user after a
-comprehensive field-bug batch (see "v1.4.4 SHIPPED" below). v1.4.3 stayed
-current for ~3 days before this cut.
-**Last session date:** 2026-07-15
+**Shipped version:** **v1.8.4** (2026-07-22, OTA live + verified). Supersedes v1.8.3 (which shipped a UI-wide mojibake regression — see below). Per-version detail for v1.5.0 → v1.8.4 lives in the auto-memory file `project_neoqc_progress.md`; git log has the commit-level record.
+**Last session date:** 2026-07-22
+
+---
+
+## ⭐ CURRENT STATE (2026-07-22) — READ THIS FIRST
+
+Shipped **v1.8.4**, OTA live and verified (feed=1.8.4 Latest, installer HTTP 200, packaged `index.html` extracted from `app.asar` confirmed clean). Below: (A) a concise catch-up of v1.5.0 → v1.8.4, then (B) the full whole-app code review the user requested on 2026-07-22.
+
+### A. Version catch-up v1.5.0 → v1.8.4 (concise — full detail in memory file `project_neoqc_progress.md` + git log)
+
+- **v1.5.0** — invoice-first import (verbatim names, grows catalog, dedupe); full-detail target specs + digital match passes.
+- **v1.8.0** (commit 9a94f85) — mode-aware Cinebench (no more false FAIL), CPU/GPU clocks + SSD IOPS captured into report, PPI auto-computes on report, God Mode report editor (Ctrl+Alt+W), wider client layout.
+- **v1.8.1** (787d543) — Throttle/Stability test modes replace gaming/studio (client); spec-checker brand aliases (MSI = Micro-Star International, ASUS = ASUSTeK, chipset⊇full-model); honest scores (real Cinebench/FurMark or NOT MEASURED, no fabrication); catalogue editor in Settings; report beauty pass.
+- **v1.8.2** (2ac0346, folded forward — never released standalone) — temps + stress progress sync to the admin ticket AND dashboard card; admin side no longer RUNS benchmarks (run controls removed, hidden stubs keep legacy JS null-safe); **customer-supplied parts now persist** (were only saved inside the has-detected-specs branch); Testing Client columns rebalanced (LEFT = Spec + Bench/Thermal, RIGHT = Port Cert + RGB); report gaps removed.
+- **v1.8.3** (2470ab0) — the four "run the real tool, don't guess" fixes:
+  1. **Cinebench never scored** = we passed `g_CinebenchMinimumTestDuration=<seconds>`; R23 only accepts preset values there, so an out-of-range value ABORTS ~3 s after launch (log stops at "CINEBENCH started", exit 0, no error). Client Throttle passed 900 → silent abort. Flag dropped; verified a full 679 s run → `CB 4748.92`, parser extracts 4748.
+  2. **CPU temp blank while GPU fine** = LHM lists `Core (Tctl/Tdie)` but its Value is null without the WinRing0 driver, and the ACPI fallback throws "Access denied". Added a 3rd source: `Win32_PerfFormattedData_Counters_ThermalZoneInformation` (no driver, no elevation; verified live null → 79.9 °C, `tempSource:'thermal-zone-perf-counter'`).
+  3. **RAM/SSD cards reset to Idle** after a passing run (rendered live progress only) → `restoreHudFromDiagnostics()` rebuilds them from saved diagnostics.
+  4. **SSD under-reported 4.86%** = DiskSpd reports MiB/s but we labelled it MB/s while CDM uses MB/s (10⁶) → `mibToMB()` (×1.048576). Also **measured** the SSD methodology (shorter intervals are WORSE — prep pass absorbs file-allocation cost; no SLC decline to chase); kept best-of-5 + added CDM's inter-run interval.
+  - **v1.8.3 shipped a REGRESSION** (see below) and was superseded within a day.
+- **v1.8.4** (a43a8b6 + 1285efa) — **fixed the mojibake regression** + hardening:
+  - **ROOT CAUSE of the gibberish UI:** the v1.8.3 version bump used PowerShell `(Get-Content index.html -Raw) | Set-Content -Encoding utf8`. On a BOM-less file `Get-Content -Raw` decodes as the ANSI codepage, reading each emoji's UTF-8 bytes as separate Latin-1 chars, and `Set-Content` re-encoded that as UTF-8 — **double-encoding the whole file**. index.html shipped with 371 mojibake sequences and 0 real emoji → entire UI rendered as `â˜°`, `ðŸš€`, etc. **ONLY index.html was hit** (byte-scanned every asset; package.json survived = pure ASCII).
+  - **Fix:** restored index.html byte-for-byte from the last-clean commit (2ac0346), re-applied version+changelog via the Edit tool. Verified by extracting index.html back out of the shipped `app.asar` → 0xC3=0, 46 real emoji.
+  - **GUARD (so it can't recur):** `build-helper.js` now runs a preflight that aborts the build if any text asset shows the double-encode fingerprint (0xC3>20 && 0xF0===0). Verified it aborts on the broken file and passes clean.
+  - **RAM failure now visible:** the RAM worker's failure paths only wrote to the diag log, leaving the card silently at "Idle/0%". All three paths now emit `sys:ram-update {failed,message}` → card shows "ERROR" + reason.
+  - **RULE: never bump versions with PowerShell `Set-Content`. Use the Edit tool or node `fs.writeFileSync(..., 'utf8')` (no BOM).** `Set-Content -Encoding utf8` in PS 5.1 writes a BOM (which separately broke electron-builder on package.json); the raw round-trip double-encodes emoji.
+
+**Still needs field confirmation (can't verify from a dev box):** whether RAM stress actually RUNS live on a shop PC (worker path + handlers are correct; if still 0% and not "ERROR" in 1.8.4, need the Diagnostics Console log); the full client flow detect→Stability→sign-off→print; RGB colour control on real hardware. **SSD honesty check:** if CrystalDiskMark on a customer drive shows meaningfully more than our write number, the drive-is-the-ceiling assumption is wrong and needs re-investigation.
+
+---
+
+### B. FULL CODE REVIEW (2026-07-22) — flaws, improvements, QoL
+
+Scope note: this reviewed the **architecture-critical paths** (Electron security, Supabase sync, local persistence, diagnostics flow) plus targeted codebase-wide scans — NOT all ~18k lines line-by-line. Severities #1/#3/#4 are threat-model calls that depend on the actual Supabase RLS config, which isn't visible from the client repo.
+
+#### 🔴 High severity
+
+1. **Stored XSS → remote code execution.** Renderer runs `nodeIntegration: true` + `contextIsolation: false` (main.js:129-130), and user fields are interpolated raw into `innerHTML` — e.g. `<h3 class="card-cust-name">${t.customerName}</h3>` (app.js:1418, again :1490). `escapeHtmlLite()` exists but is used in only a couple of spots (damage notes). A customer name like `<img src=x onerror=...>` typed on the sales machine syncs to every admin/technician PC and executes with full Node privileges on render. *Fix:* escape all interpolated user fields (reuse `escapeHtmlLite` or switch to `textContent`); ideally migrate to `contextIsolation: true` + preload bridge.
+
+2. **Local DB writes are not atomic — a crash can erase every ticket.** `db:write` does `fs.writeFileSync(dbPath, JSON.stringify(...))` directly (main.js:365). Power loss / crash mid-write truncates the file; next `db:read` throws and returns `null` (main.js:357) with no `.bak` → total local ticket loss. *Fix:* write to `dbPath.tmp` then `fs.rename()` (atomic) + keep one rotating `.bak`. ~10 lines. **Cheapest high-value fix.**
+
+3. **Cross-machine sync is last-write-wins with no concurrency guard.** `syncTicketToCloud` does a full-row `upsert` of the whole ticket (app.js:4700). The 15 s poll is skipped whenever ANY modal is open (app.js:4660), so an admin with a ticket open for minutes edits stale data and, on save, overwrites whatever the client wrote meanwhile. The conflict banner only fires if a realtime event lands *while* the modal is open — it does not prevent the clobber. (The v1.5.1 `mapDbRowToTicket` comment shows this class of bug has bitten before.) *Fix:* guard the update with `WHERE updated_at = <loaded_value>` optimistic concurrency; reject/merge on mismatch.
+
+#### 🟠 Medium
+
+4. **Security rests entirely on Supabase RLS.** Anon key is in the shipped bundle (app.js:1072 etc.) — normal for an anon key IF RLS is locked down. If policies are permissive, anyone who extracts the key can read/write all tickets + customer data, and (with #1) inject an XSS payload into any row. **ACTION: confirm RLS is enabled and scoped on `tickets` and `component_prices`.**
+
+5. **29 empty `catch {}` in main.js (9 in app.js).** Some are legitimate best-effort cleanup, but at this volume real failures get swallowed — exactly how the RAM-card and temp bugs stayed invisible. Audit each for at least a `log.error`.
+
+6. **Corrupt DB = silent blank slate.** Tied to #2: `db:read` returning `null` on parse error shows an empty app with no warning, inviting a technician to "start over" on top of recoverable data.
+
+#### 🟡 Low / quality-of-life
+
+- **35 `alert()` + 11 `confirm()`** — blocking native dialogs that freeze the frameless window and look dated. A non-blocking toast / inline-confirm system would be a broad polish win.
+- **Dashboard search isn't debounced** — `search-input` calls `renderDashboard` on every keystroke (app.js:4570), re-rendering all cards each time; the catalogue editor IS debounced (250 ms, app.js:7117). Inconsistent — add the same debounce. Safe, self-contained.
+- **Accessibility essentially absent** (index.html: aria-* ×1, role ×0, alt ×0). Low priority for an internal tool; a few labels + focus states would help.
+- **`app.js` is a 7,127-line monolith** (main.js 2,379, style.css 4,628). High blast-radius per change — partly how the encoding regression slipped in. Splitting by concern (sync / diagnostics / render / catalog) would pay off.
+- **Stray `console.log`** in production paths (9 app.js, 4 main.js) — minor noise.
+- **Version string maintained by hand in 3+ places** (package.json + two index.html spots + changelog) — the exact fragility that caused the mojibake. A tiny build step could stamp it from package.json.
+
+#### ✅ What's genuinely good (balance)
+- Renderer **crash-recovery with loop-breaking** (main.js:150) — thoughtful, battle-tested.
+- **"Honest scores" philosophy** (real measurement or NOT MEASURED, never fabricated) — correct and rare discipline for a QC tool.
+- **Offline-capable local catalog cache** mirroring Supabase — solid.
+- New **build-time encoding guard** (this session) closes a real hole.
+- Single **`mapDbRowToTicket` source of truth** (app.js:4758, "never inline this again") — right lesson learned from the v1.5.1 drift bug.
+
+#### Recommended priority order
+1. Atomic db write + `.bak` (#2) — cheapest, prevents catastrophic loss.
+2. Escape interpolated fields (#1) + confirm RLS (#4) — closes the RCE path.
+3. Optimistic-concurrency on sync (#3).
+4. QoL sweep (alerts→toasts, search debounce).
+
+**None of the above is implemented yet** — this is the review only. When acting: ship in small, independently-verifiable steps, not one big release. #2 and the search debounce are the safe self-contained starting points; #1 (escaping) touches many render sites and needs a dashboard re-test after.
 
 ---
 
