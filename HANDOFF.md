@@ -10,7 +10,47 @@
 
 ---
 
-## ⭐ SESSION 2026-07-25 — Phase-1 hardening + Phase-2 plan (UNRELEASED, in working tree)
+## ⭐ v1.8.5 (2026-08-03) — detection fixes + Phase-1 hardening (source pushed, commit 2b72fd0)
+
+Three pre-Phase-2 fixes the user asked for, bundled with the 2026-07-25 Phase-1 hardening
+below (both were in the working tree; shipped together as 1.8.5). Source is on `origin/main`;
+OTA was cut after the user chose "build + publish now" (updates are opt-in — `autoDownload`
+is false). **Not hardware-validated from the dev box** — the RAM fix needs a 64 GB machine
+and the invoice fix needs real problem invoices; smoke-test on a shop PC.
+
+1. **RAM sometimes detected as only 32 GB** (`main.js` `sys:detect-hw`). `Win32_PhysicalMemory.
+   Capacity` intermittently returns null for a module → the SMBIOS sum halves. Fixed:
+   `Math.round(max(smbiosSumBytes, os.totalmem()) / 1GB)`. `os.totalmem()` alone under-reports
+   (hardware-reserved memory — this dev laptop's 24 GB reads 23.34), and a complete SMBIOS sum
+   is exact and always ≥ the OS figure, so `max()` is correct whether a module drops out or not.
+2. **Invoice reader mis-filing parts** (`invoice-import.js`). Root cause: greedy `(row,
+   category)` tuple assignment dumped a row displaced from its true category into whatever
+   weaker category was still open on a stray model-token hit. Rewrote as weighted argmax-per-row:
+   `STRONG_HINTS` (explicit nouns, ×3) + `CATEGORY_HINTS` (×1); each row takes its OWN best open
+   category, a fallback only if that fallback itself has a strong noun (score ≥ 3), else the row
+   is skipped/`review` rather than mis-filed. Guarded the `window.NeoQcMatcher` reference so it's
+   Node-testable. 14/14 unit tests (board-with-DDR5 → motherboard, PSU without the word "PSU",
+   wrapped-board fold, ambiguous line not over-filling).
+3. **Full per-component detail on the report** (`hw_inventory.ps1`, `print-render.js`, `app.js`).
+   The native WMI/CIM inventory already captures make/model/part-number/serial/speed for every
+   component — this is the licence-clean answer (HWiNFO's free build is personal-use-only and
+   can't ship in a shop tool; `hwinfoEnrich()` still enriches from a licensed local copy if
+   present). Enriched the report + admin panel: RAM **rated-vs-configured speed** (surfaces
+   XMP/EXPO left off), drive media/health, network adapters, OS build. Fixed two `ps1` cosmetic
+   bugs (a link-down NIC reporting a sentinel speed of 8796093022208 → null; iGPU `vramGB` 0 →
+   null). Added an inventory mock to `report-harness.html` for A4 verification.
+   - **A4 note:** with a full inventory, report page 3 exceeds one A4 sheet, but the report is
+     deliberately "flow, don't force" (`.print-section` + `.inv-print-table` are
+     `page-break-inside: avoid`), so in real print the inventory moves as a unit to the next
+     page — the harness fixed-sheet overflow is a preview artifact, not a clip. A future polish
+     is to give the inventory its own page.
+
+Double-checked: `node -c` on all 15 JS modules, 30 IPC handlers all unique, invoice test 14/14,
+mojibake guard clean, `hw_inventory.ps1` run on real hardware, report harness renders every page.
+
+---
+
+## ⭐ SESSION 2026-07-25 — Phase-1 hardening + Phase-2 plan (shipped in v1.8.5)
 
 Acted on the 2026-07-22 code review (§B below) + a request to make the window controls
 glassy and to plan Phase 2. **All work is in the working tree, NOT yet built/shipped.** No
