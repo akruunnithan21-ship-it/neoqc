@@ -507,17 +507,30 @@
         irows.push(['GPU', join([g.name, g.vramGB ? g.vramGB + ' GB' : '', g.driverVersion ? 'driver ' + g.driverVersion : '']) + tag('gpu'), null]);
       });
       (inv.ramModules || []).forEach(function (m) {
+        // Show configured speed, and the rated speed when they differ — a stick
+        // running below its rated MHz (XMP/EXPO not enabled) is a real QC finding.
+        var spd = '';
+        if (m.configuredMHz && m.speedMHz && m.speedMHz !== m.configuredMHz) {
+          spd = m.configuredMHz + ' MHz (rated ' + m.speedMHz + ')';
+        } else if (m.configuredMHz || m.speedMHz) {
+          spd = (m.configuredMHz || m.speedMHz) + ' MHz';
+        }
         irows.push(['RAM · ' + (m.slot || 'DIMM'),
-          join([m.manufacturer, m.partNumber, m.capacityGB ? m.capacityGB + ' GB' : '', m.ddrGen, m.configuredMHz ? m.configuredMHz + ' MHz' : '']) + tag('ram'),
+          join([m.manufacturer, m.partNumber, m.capacityGB ? m.capacityGB + ' GB' : '', m.ddrGen, spd]) + tag('ram'),
           m.serial]);
       });
       (inv.disks || []).forEach(function (dk) {
-        irows.push(['Storage', join([dk.model, dk.sizeGB ? dk.sizeGB + ' GB' : '', dk.busType, dk.firmware ? 'fw ' + dk.firmware : '']) + tag('storage'), dk.serial]);
+        irows.push(['Storage', join([dk.model, dk.sizeGB ? dk.sizeGB + ' GB' : '', dk.busType || dk.interfaceType, dk.mediaType, dk.healthStatus, dk.firmware ? 'fw ' + dk.firmware : '']) + tag('storage'), dk.serial]);
+      });
+      (inv.nics || []).forEach(function (n) {
+        irows.push(['Network', join([n.name, n.speedMbps ? n.speedMbps + ' Mbps' : '']), n.macAddress]);
       });
       var isys = inv.system || {};
       if (isys.serial) irows.push(['System', join([isys.manufacturer, isys.model]), isys.serial]);
       var ibios = inv.bios || {};
       if (ibios.version) irows.push(['BIOS', join([ibios.vendor, ibios.version, ibios.releaseDate]), null]);
+      var ios = inv.os || {};
+      if (ios.caption) irows.push(['Operating system', join([ios.caption, ios.buildNumber ? 'build ' + ios.buildNumber : '', ios.architecture]), ios.serial]);
 
       $('print-inventory-body').innerHTML = irows.map(function (r) {
         return '<tr><td><strong>' + esc(r[0]) + '</strong></td><td>' + r[1] +

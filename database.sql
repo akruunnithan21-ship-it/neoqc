@@ -50,6 +50,42 @@ CREATE POLICY "Allow anonymous delete access"
 alter publication supabase_realtime add table public.tickets;
 
 -- ==========================================================================
+-- ⚠ SECURITY DEBT — READ BEFORE THE NEXT RELEASE (2026-07 code review, item #4)
+-- --------------------------------------------------------------------------
+-- The policies above are RLS-ENABLED but FULLY PERMISSIVE (USING (true)).
+-- The Supabase anon key is hard-coded in main.js/app.js and therefore ships
+-- inside every installer published to GitHub Releases. That means anyone who
+-- downloads a NeoQC installer can extract the key and READ, EDIT, or DELETE
+-- every ticket and all customer names/phone data in the live database.
+--
+-- For an internal, LAN-only shop tool this was an accepted trade-off, but the
+-- public installer distribution makes it a real exposure. Recommended path
+-- (planned as Phase-2 hardening — do NOT paste blindly, each step changes the
+-- shipped app's access and must be tested):
+--
+--   1. Remove anonymous DELETE entirely (deletes are the most destructive and
+--      rarely needed cross-machine). Gate the in-app "Delete ticket" button
+--      behind a Postgres RPC that runs with a checked secret, or accept that
+--      deletes must be done from the Supabase dashboard.
+--        -- DROP POLICY "Allow anonymous delete access" ON public.tickets;
+--
+--   2. Move reads/writes to the `authenticated` role and give each shop PC a
+--      real Supabase Auth login (email or a shared service account). Then:
+--        -- DROP POLICY "Allow anonymous read access"   ON public.tickets;
+--        -- DROP POLICY "Allow anonymous insert access" ON public.tickets;
+--        -- DROP POLICY "Allow anonymous update access" ON public.tickets;
+--        -- CREATE POLICY "auth read"   ON public.tickets FOR SELECT TO authenticated USING (true);
+--        -- CREATE POLICY "auth insert" ON public.tickets FOR INSERT TO authenticated WITH CHECK (true);
+--        -- CREATE POLICY "auth update" ON public.tickets FOR UPDATE TO authenticated USING (true) WITH CHECK (true);
+--
+--   3. Rotate the anon key AFTER auth is in place (the current one is burned —
+--      it is in the git history and every shipped build).
+--
+-- Until then: keep the Supabase project's network/allowed-origins as tight as
+-- the plan allows, and treat the anon key as public. See HANDOFF.md.
+-- ==========================================================================
+
+-- ==========================================================================
 -- PRICE INDEX  (Layer 1)
 -- component_prices  — current price per SKU (upsert target)
 -- price_history     — append-only log; populated by the loader on every change

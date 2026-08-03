@@ -130,7 +130,7 @@ foreach ($g in (Get-CimInstance Win32_VideoController)) {
     $gpus += [ordered]@{
         name           = S $g.Name
         manufacturer   = S $g.AdapterCompatibility
-        vramGB         = $vram
+        vramGB         = if ($vram) { $vram } else { $null }   # 0 = integrated/shared → null, not "0 GB"
         driverVersion  = S $g.DriverVersion
         driverDate     = if ($g.DriverDate) { $g.DriverDate.ToString('yyyy-MM-dd') } else { $null }
         videoProcessor = S $g.VideoProcessor
@@ -169,7 +169,9 @@ foreach ($n in (Get-CimInstance Win32_NetworkAdapter -Filter "PhysicalAdapter=Tr
         manufacturer = S $n.Manufacturer
         macAddress   = S $n.MACAddress
         adapterType  = S $n.AdapterType
-        speedMbps    = if ($n.Speed) { [math]::Round($n.Speed / 1MB, 0) } else { $null }
+        # Win32_NetworkAdapter.Speed is a link-down sentinel on some NICs
+        # (e.g. 8796093022208). Only trust a plausible value (<= 100 Gbps).
+        speedMbps    = if ($n.Speed -and $n.Speed -gt 0) { $mbps = [math]::Round($n.Speed / 1MB, 0); if ($mbps -gt 0 -and $mbps -le 100000) { $mbps } else { $null } } else { $null }
     }
 }
 

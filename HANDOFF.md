@@ -10,6 +10,70 @@
 
 ---
 
+## ⭐ SESSION 2026-07-25 — Phase-1 hardening + Phase-2 plan (UNRELEASED, in working tree)
+
+Acted on the 2026-07-22 code review (§B below) + a request to make the window controls
+glassy and to plan Phase 2. **All work is in the working tree, NOT yet built/shipped.** No
+version bump yet — when ready, bump `package.json` (the changelog badge/button now auto-stamp
+from it — see below) and follow the release checklist. Nothing here touches `shared/` so no
+`node sync-shared.js` is needed. `node -c app.js / main.js / build-helper.js` all pass.
+
+**What changed this session (all verified in the browser preview where visual):**
+
+1. **Glass window controls** (index.html + style.css `.titlebar-btn`). Replaced the text
+   glyphs (—/⬜/×) with crisp inline SVGs and restyled the three buttons as frosted glass
+   "pills": gradient fill, glossy top sheen (`::before`), inner-highlight shadow, backdrop
+   blur, hover lift, and colour-tinted glass hover states — amber (minimize), emerald
+   (maximize), brand-pink→red glow (close). Theme-aware (`body.dark-mode` overrides).
+   Verified light + dark + all three hover states via the browser pane.
+2. **Non-blocking toast + confirm system** (new `showToast()` / `showConfirm()` in app.js;
+   CSS in style.css). Replaced **all 46** native dialogs — 35 `alert()` → `showToast(msg,type)`
+   and 11 `confirm()` → `await showConfirm(...)`. **Safety note:** `showConfirm` returns a
+   Promise; every one of the 11 sites was made `async` + `await`ed (an un-awaited call is
+   truthy and would auto-confirm destructive actions — verified none remain via grep). Toasts
+   set text via `textContent` (no injection). Verified render in dark mode.
+3. **Atomic local DB writes + recovery** (review #2 high + #6 medium, main.js `db:write`/
+   `db:read`). `db:write` now writes `db.json.tmp` then `fs.renameSync` over the real file
+   (atomic; a crash can only leave a stray `.tmp`), and keeps a rotating `.bak`. `db:read`
+   recovers from `.bak` on corruption, preserves the corrupt file as `.corrupt-<ts>`, and
+   records a `dbHealth` status exposed via a new `db:health` IPC. `loadDatabase()` reads it
+   and shows a warning/sticky-error toast — a corrupt/lost DB is no longer a silent blank slate.
+4. **Silent-save-failure fixed at the root** (review #5, app.js `saveDatabase()`). It ignored
+   the `{success:false}` that `db:write` returns; now it checks and toasts on failure so a
+   local write error can't quietly lose data. Also added `log.warn/debug` to the three
+   diagnostics-parse catches (sensor line / FurMark CSV / Cinebench log) where a swallowed
+   error hides a missing measurement — the exact class of the old RAM/temp bugs. The many
+   `.kill()`/`unlink` best-effort catches were left silent on purpose (correct as-is).
+5. **Stored-XSS render sites escaped** (review #1 high). `escapeHtmlLite()` now wraps
+   `customerName`/`technician`/specs on the dashboard card and the completed-builds table, and
+   the awaiting-parts note on the card. (The dashboard/`customer.html` static site was NOT
+   swept this session — separate deploy, lower risk, note for later.)
+6. **Dashboard search debounced** (review QoL, 150 ms) — matched the catalogue editor.
+7. **Version auto-stamped** (review QoL). Added `data-app-version` / `data-app-version-label`
+   markers to the changelog badge, sentence, and launch button; `stampAppVersion()` fills them
+   from `package.json` at load. **The version number no longer needs hand-editing in HTML** —
+   only the changelog bullet prose is manual per release. (Done at runtime, NOT by rewriting
+   HTML at build time — deliberately, to avoid the v1.8.3 mojibake class of accident.)
+8. **RLS hardening documented** (review #4). `database.sql` gained a prominent SECURITY DEBT
+   block: RLS is enabled but fully permissive and the anon key ships in every public
+   installer → anyone can read/delete customer data. Concrete tightening steps (drop anon
+   DELETE, move to `authenticated` role, rotate the key) are stubbed as commented SQL. Live
+   policies were NOT changed (can't test from here + would affect the shipped app).
+9. **`PHASE2_PLAN.md`** (new, repo root) + a shareable artifact. The "next level" idea:
+   **Neo QC → Neo OS**, a component-lifecycle loop tying the four requested areas into one
+   system — **Call Centre/CRM**, **Inventory/Rack stock**, **Service desk**, **Procurement** —
+   around the existing `component_prices` spine. Phased 2.0→2.5, foundations first.
+
+**Intentionally deferred to the Phase-2 foundation (documented, not forgotten):**
+- Review #3 (optimistic-concurrency sync — full-row last-write-wins can clobber concurrent
+  edits). Architectural; belongs with multi-role auth.
+- Full auth + RLS lockdown + anon-key rotation (review #4). The top security debt.
+- The `app.js` 7,100-line module split (review QoL). Too high blast-radius to do blind right
+  before a field test; scheduled as Phase-2 step 2.0.
+- Full accessibility pass (only new UI + window controls got aria labels this session).
+
+---
+
 ## ⭐ CURRENT STATE (2026-07-22) — READ THIS FIRST
 
 Shipped **v1.8.4**, OTA live and verified (feed=1.8.4 Latest, installer HTTP 200, packaged `index.html` extracted from `app.asar` confirmed clean). Below: (A) a concise catch-up of v1.5.0 → v1.8.4, then (B) the full whole-app code review the user requested on 2026-07-22.

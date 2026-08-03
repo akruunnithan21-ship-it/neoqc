@@ -51,6 +51,30 @@ const MOCK_TICKET = {
     cooler: 'Deepcool AK620', psu: 'Deepcool PM850D 850W Gold', case: 'Corsair 4000D Airflow'
   },
   serials: { gpu: 'GPU-8842-XK', ram: 'RAM-1029-BB', ssd: 'SSD-5521-NV', mobo: 'MB-7761-MS', cabinet: 'CAB-3301-CR' },
+  // Full per-component inventory (v1.8.5) — brand / model / part no. / serial /
+  // speed for every part, as captured natively by hw_inventory.ps1 (WMI/CIM).
+  // One RAM stick is deliberately running below its rated speed to exercise the
+  // "rated" annotation, and one NIC has an unknown speed (rendered as null).
+  detectedSpecs: {
+    inventory: {
+      capturedAt: '2026-07-11T15:20:00Z', source: 'wmi-cim',
+      system: { manufacturer: 'Neo Tokyo Custom', model: 'NT-Build', serial: 'NTK-2026-0711-01' },
+      bios: { vendor: 'American Megatrends', version: '7E26v18', releaseDate: '2025-11-02' },
+      motherboard: { manufacturer: 'MSI', model: 'PRO B650M-A WIFI', version: '1.0', serial: 'MB-7761-MS' },
+      cpus: [{ name: 'AMD Ryzen 7 7800X3D', socket: 'AM5', cores: 8, threads: 16, processorId: 'A50F00-8CT' }],
+      gpus: [{ name: 'NVIDIA GeForce RTX 4070 Ti SUPER', vramGB: 16, driverVersion: '552.44', driverDate: '2026-04-18', pnpDeviceId: 'PCI\\VEN_10DE&DEV_2705' }],
+      ramModules: [
+        { manufacturer: 'Corsair', partNumber: 'CMK32GX5M2B6000C36', capacityGB: 16, speedMHz: 6000, configuredMHz: 6000, ddrGen: 'DDR5', slot: 'DIMM A2', serial: 'RAM-1029-BB' },
+        { manufacturer: 'Corsair', partNumber: 'CMK32GX5M2B6000C36', capacityGB: 16, speedMHz: 6000, configuredMHz: 4800, ddrGen: 'DDR5', slot: 'DIMM B2', serial: 'RAM-1030-BB' }
+      ],
+      disks: [{ model: 'Samsung SSD 990 Pro 2TB', sizeGB: 2000, busType: 'NVMe', mediaType: 'SSD', healthStatus: 'Healthy', firmware: '4B2QJXD7', serial: 'SSD-5521-NV' }],
+      nics: [
+        { name: 'Realtek 2.5GbE Family Controller', macAddress: 'D4:93:90:5B:45:C9', speedMbps: 2500 },
+        { name: 'Intel Wi-Fi 6E AX211', macAddress: '58:02:05:7E:8F:C4', speedMbps: null }
+      ],
+      os: { caption: 'Microsoft Windows 11 Pro', version: '10.0.26100', buildNumber: '26100', architecture: '64-bit', serial: '00330-80000-00000-AA111' }
+    }
+  },
   buildChecks: { cooler: true, cables: true, posted: true },
   qcChecks: {
     physCabinet: true, physMobo: true, physRam: true, softWindows: true,

@@ -177,6 +177,100 @@ function escapeHtmlLite(s) {
   });
 }
 
+// ---- Toast notifications -----------------------------------------------------
+// Non-blocking replacement for native alert(). alert() freezes the frameless
+// window (its own close/min buttons are HTML the renderer draws, so a blocking
+// dialog locks the whole chrome) and looks dated. showToast() slides a glass
+// card into the top-right stack and auto-dismisses. Message is set via
+// textContent, so user-supplied text can never inject HTML. duration=0 = sticky.
+// Returns a dismiss() function so callers can close a sticky toast early.
+function showToast(message, type = 'info', duration = 5000) {
+  let stack = document.getElementById('neo-toast-stack');
+  if (!stack) {
+    stack = document.createElement('div');
+    stack.id = 'neo-toast-stack';
+    document.body.appendChild(stack);
+  }
+  const toast = document.createElement('div');
+  toast.className = 'neo-toast neo-toast-' + type;
+  const icons = { info: 'ℹ️', success: '✅', warning: '⚠️', error: '⛔' };
+  const icon = document.createElement('span');
+  icon.className = 'neo-toast-icon';
+  icon.textContent = icons[type] || icons.info;
+  const msg = document.createElement('span');
+  msg.className = 'neo-toast-msg';
+  msg.textContent = String(message);
+  const closeBtn = document.createElement('button');
+  closeBtn.className = 'neo-toast-close';
+  closeBtn.setAttribute('aria-label', 'Dismiss notification');
+  closeBtn.innerHTML = '&times;';
+  toast.append(icon, msg, closeBtn);
+
+  let dismissed = false;
+  const dismiss = () => {
+    if (dismissed) return;
+    dismissed = true;
+    toast.classList.remove('neo-toast-in');
+    toast.classList.add('neo-toast-out');
+    setTimeout(() => { if (toast.parentNode) toast.parentNode.removeChild(toast); }, 300);
+  };
+  closeBtn.addEventListener('click', dismiss);
+  stack.appendChild(toast);
+  requestAnimationFrame(() => toast.classList.add('neo-toast-in'));
+  if (duration > 0) setTimeout(dismiss, duration);
+  return dismiss;
+}
+
+// ---- Confirm modal ----------------------------------------------------------
+// Promise-based replacement for native confirm(). Resolves true on confirm,
+// false on cancel / Escape / backdrop click. ALWAYS `await` this — an un-awaited
+// call returns a Promise, which is truthy, so a missed await would silently
+// auto-confirm a destructive action. Message/labels set via textContent.
+function showConfirm(message, opts = {}) {
+  const { title = 'Please confirm', okText = 'Confirm', cancelText = 'Cancel', danger = false } = opts;
+  return new Promise((resolve) => {
+    const overlay = document.createElement('div');
+    overlay.className = 'neo-confirm-overlay';
+    const box = document.createElement('div');
+    box.className = 'neo-confirm-box';
+    box.setAttribute('role', 'dialog');
+    box.setAttribute('aria-modal', 'true');
+    const h = document.createElement('h3');
+    h.className = 'neo-confirm-title';
+    h.textContent = title;
+    const p = document.createElement('p');
+    p.className = 'neo-confirm-msg';
+    p.textContent = message;
+    const actions = document.createElement('div');
+    actions.className = 'neo-confirm-actions';
+    const cancelBtn = document.createElement('button');
+    cancelBtn.className = 'neo-confirm-cancel';
+    cancelBtn.textContent = cancelText;
+    const okBtn = document.createElement('button');
+    okBtn.className = 'neo-confirm-ok' + (danger ? ' danger' : '');
+    okBtn.textContent = okText;
+    actions.append(cancelBtn, okBtn);
+    box.append(h, p, actions);
+    overlay.appendChild(box);
+
+    const onKey = (e) => { if (e.key === 'Escape') close(false); };
+    const close = (val) => {
+      document.removeEventListener('keydown', onKey);
+      overlay.classList.remove('neo-confirm-in');
+      overlay.classList.add('neo-confirm-out');
+      setTimeout(() => { if (overlay.parentNode) overlay.parentNode.removeChild(overlay); }, 220);
+      resolve(val);
+    };
+    cancelBtn.addEventListener('click', () => close(false));
+    okBtn.addEventListener('click', () => close(true));
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(false); });
+    document.addEventListener('keydown', onKey);
+    document.body.appendChild(overlay);
+    requestAnimationFrame(() => overlay.classList.add('neo-confirm-in'));
+    okBtn.focus();
+  });
+}
+
 // Which target-build-spec input matches each awaiting category. "other" has
 // no spec field — those chips are informational only.
 const AWAITING_CATEGORY_TO_SPEC = {
@@ -886,10 +980,10 @@ function renderPpiConfigTable() {
     });
   });
   body.querySelectorAll('.ppi-remove-uc').forEach(btn => {
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', async () => {
       const uc = btn.getAttribute('data-uc');
-      if (Object.keys(cfg.useCases).length <= 1) { alert('At least one use case must remain.'); return; }
-      if (confirm(`Remove use case "${uc}"? PPI will no longer offer it.`)) {
+      if (Object.keys(cfg.useCases).length <= 1) { showToast('At least one use case must remain.', 'warning'); return; }
+      if (await showConfirm(`Remove use case "${uc}"? PPI will no longer offer it.`, { title: 'Remove use case', okText: 'Remove', danger: true })) {
         delete cfg.useCases[uc];
         renderPpiConfigTable();
       }
@@ -907,7 +1001,7 @@ function setupPpiTuningHandlers() {
     if (!name) return;
     if (!appState.settings.ppiConfig) initPpiTuning();
     const cfg = appState.settings.ppiConfig;
-    if (cfg.useCases[name]) { alert('That use case already exists.'); return; }
+    if (cfg.useCases[name]) { showToast('That use case already exists.', 'warning'); return; }
     cfg.useCases[name] = { cpu: 0.2, gpu: 0.4, ram: 0.1, storage: 0.1, other: 0.2, minCpu: 10000, minGpu: 8000, st: 0.4 };
     input.value = '';
     renderPpiConfigTable();
@@ -920,7 +1014,7 @@ function setupPpiTuningHandlers() {
     const br = parseFloat(document.getElementById('ppi-bottleneck-ratio').value);
     cfg.bottleneckRatio = isNaN(br) ? 1.6 : br;
     const bad = Object.keys(cfg.useCases).filter(uc => Math.abs(ppiRowSum(cfg.useCases[uc]) - 1) >= 0.01);
-    if (bad.length && !confirm(`These use cases don't sum to 1.00: ${bad.join(', ')}.\nSave anyway? (PPI normalises internally, but 1.00 keeps the weights meaningful.)`)) return;
+    if (bad.length && !(await showConfirm(`These use cases don't sum to 1.00: ${bad.join(', ')}.\nSave anyway? (PPI normalises internally, but 1.00 keeps the weights meaningful.)`, { title: 'Weights don’t sum to 1.00', okText: 'Save anyway' }))) return;
     applyPpiConfig(cfg);
     await saveDatabase();
     const status = document.getElementById('ppi-tuning-status');
@@ -930,7 +1024,7 @@ function setupPpiTuningHandlers() {
   const resetBtn = document.getElementById('btn-ppi-reset');
   if (resetBtn) resetBtn.addEventListener('click', async () => {
     if (!PPI_ENGINE_DEFAULTS) PPI_ENGINE_DEFAULTS = ppiConfigFromEngine();
-    if (!confirm('Reset all PPI tuning back to the built-in engine defaults?')) return;
+    if (!(await showConfirm('Reset all PPI tuning back to the built-in engine defaults?', { title: 'Reset PPI tuning', okText: 'Reset', danger: true }))) return;
     appState.settings.ppiConfig = JSON.parse(JSON.stringify(PPI_ENGINE_DEFAULTS));
     applyPpiConfig(appState.settings.ppiConfig);
     await saveDatabase();
@@ -1043,6 +1137,16 @@ async function loadDatabase() {
     appState = dbData;
   }
 
+  // Surface local-DB health so a corrupt/lost file is never a silent blank slate.
+  try {
+    const health = await ipcRenderer.invoke('db:health');
+    if (health && health.status === 'recovered') {
+      showToast(health.message, 'warning', 14000);
+    } else if (health && health.status === 'error') {
+      showToast(health.message, 'error', 0); // sticky until dismissed
+    }
+  } catch (e) { /* older main process without db:health — ignore */ }
+
   // Securely initialize missing properties to prevent runtime script crashes
   if (!appState.tickets) appState.tickets = [];
   if (!appState.technicians) appState.technicians = ["Adhil", "Amal", "Ananthakrishnan", "Athul"];
@@ -1146,6 +1250,7 @@ async function loadDatabase() {
 
   // Version check and Changelog Modal trigger
   const currentVersion = require('./package.json').version;
+  stampAppVersion(currentVersion); // keep the changelog badge/button in sync with package.json — no more hand-editing
   if (appState.lastRunVersion !== currentVersion) {
     setTimeout(() => {
       const changelogModal = document.getElementById('changelog-modal');
@@ -1156,9 +1261,39 @@ async function loadDatabase() {
   }
 }
 
-// Save DB back to local storage
+// Stamp the running version into any element marked with data-app-version /
+// data-app-version-label, from package.json. This is the single source of truth
+// for the changelog badge, the "improvements in NeoQC vX" sentence, and the
+// "Launch NeoQC vX" button — the three spots the code review flagged as
+// hand-maintained (and the exact fragility behind the v1.8.3 version-bump
+// mojibake). The changelog bullet text stays a manual, per-release edit.
+function stampAppVersion(version) {
+  let v = version;
+  if (!v) { try { v = require('./package.json').version; } catch (e) {} }
+  if (!v) return;
+  document.querySelectorAll('[data-app-version]').forEach(el => { el.textContent = 'v' + v; });
+  document.querySelectorAll('[data-app-version-label]').forEach(el => { el.textContent = 'Launch NeoQC v' + v; });
+}
+
+// Save DB back to local storage. db:write is atomic and returns
+// {success:false,error} on failure — surface that instead of silently
+// pretending the save worked (a swallowed write error is how data quietly
+// goes missing). Callers that wrap this in try/catch still work; it no
+// longer throws for a write failure, it toasts and returns the result.
 async function saveDatabase() {
-  await ipcRenderer.invoke('db:write', appState);
+  try {
+    const res = await ipcRenderer.invoke('db:write', appState);
+    if (res && res.success === false) {
+      console.error('Local save failed:', res.error);
+      showToast('Could not save to the local database: ' + (res.error || 'unknown error') +
+        '. Your latest change may not survive a restart.', 'error', 10000);
+    }
+    return res;
+  } catch (e) {
+    console.error('saveDatabase invoke failed:', e);
+    showToast('Could not save to the local database. Your latest change may not survive a restart.', 'error', 10000);
+    return { success: false, error: e && e.message };
+  }
 }
 
 // Switch between screens
@@ -1415,11 +1550,11 @@ function renderDashboard() {
         </div>
         ${damaged ? `<div class="card-damage-banner">⚠ DOA / Damaged Components (${damagedCount})</div>` : ''}
         ${ticketQueryCounts[t.id] ? `<div class="card-query-banner"><span>💬 ${ticketQueryCounts[t.id]} sales quer${ticketQueryCounts[t.id] > 1 ? 'ies' : 'y'} awaiting reply</span><span class="cqb-cta">Reply ›</span></div>` : ''}
-        <h3 class="card-cust-name">${t.customerName}</h3>
+        <h3 class="card-cust-name">${escapeHtmlLite(t.customerName)}</h3>
         <div style="margin-bottom:14px;">
           <span class="tech-chip">
             <span class="tech-chip-dot"></span>
-            ${t.technician || 'Unassigned'}
+            ${escapeHtmlLite(t.technician || 'Unassigned')}
           </span>
         </div>
         
@@ -1455,7 +1590,7 @@ function renderDashboard() {
 
         ${isAwaitingParts ? `
           <div class="card-missing-parts">
-            ⚠️ <strong>Awaiting:</strong> ${formatMissingComponentsHuman(t.missingComponents)}
+            ⚠️ <strong>Awaiting:</strong> ${escapeHtmlLite(formatMissingComponentsHuman(t.missingComponents))}
           </div>
         ` : ''}
 
@@ -1486,10 +1621,10 @@ function renderDashboard() {
     filteredCompleted.forEach(t => {
       const row = document.createElement('tr');
       row.innerHTML = `
-        <td class="font-mono">#${t.id.slice(-6)}</td>
-        <td><strong>${t.customerName}</strong></td>
-        <td>${t.technician}</td>
-        <td>${t.specs ? (window.NeoQcMatcher && window.NeoQcMatcher.cleanName ? window.NeoQcMatcher.cleanName(t.specs.cpu || 'System Build') : (t.specs.cpu || 'System Build')) : 'N/A'}</td>
+        <td class="font-mono">#${escapeHtmlLite(t.id.slice(-6))}</td>
+        <td><strong>${escapeHtmlLite(t.customerName)}</strong></td>
+        <td>${escapeHtmlLite(t.technician)}</td>
+        <td>${escapeHtmlLite(t.specs ? (window.NeoQcMatcher && window.NeoQcMatcher.cleanName ? window.NeoQcMatcher.cleanName(t.specs.cpu || 'System Build') : (t.specs.cpu || 'System Build')) : 'N/A')}</td>
         <td class="font-mono">${t.diagnostics ? (t.diagnostics.cinebench || 'Not Run') : 'N/A'} pts</td>
         <td>${t.completedAt ? new Date(t.completedAt).toLocaleDateString() : 'N/A'}</td>
         <td>
@@ -2459,7 +2594,7 @@ function setupOpenRgbController() {
   applyBtn.addEventListener('click', async () => {
     const ticketId = document.getElementById('client-ticket-select').value;
     if (!ticketId) {
-      alert("Please select a ticket first before applying RGB Sync!");
+      showToast("Please select a ticket first before applying RGB Sync.", 'warning');
       return;
     }
     const ticket = appState.tickets.find(t => t.id === ticketId);
@@ -2546,7 +2681,7 @@ function setupPortsChecker() {
   if (scanBtn) {
     scanBtn.addEventListener('click', async () => {
       const ticketId = document.getElementById('client-ticket-select').value;
-      if (!ticketId) { alert('Please select a ticket first before scanning ports!'); return; }
+      if (!ticketId) { showToast('Please select a ticket first before scanning ports.', 'warning'); return; }
       const resultsEl = document.getElementById('port-enum-results');
       scanBtn.disabled = true;
       setBadge('enum', 'unverified', 'Scanning…');
@@ -2581,7 +2716,7 @@ function setupPortsChecker() {
   if (rgbBtn) {
     rgbBtn.addEventListener('click', async () => {
       const ticketId = document.getElementById('client-ticket-select').value;
-      if (!ticketId) { alert("Please select a ticket first before detecting RGB devices!"); return; }
+      if (!ticketId) { showToast("Please select a ticket first before detecting RGB devices.", 'warning'); return; }
       rgbBtn.disabled = true;
       setBadge('rgb', 'unverified', 'Detecting…');
       const panel = document.getElementById('openrgb-control-panel');
@@ -2654,7 +2789,7 @@ async function handleTicketFormSubmit(e) {
   // later over the ticket's lifecycle (that's the whole awaiting-parts flow).
   const _custName = (document.getElementById('form-customer-name').value || '').trim();
   if (!_custName) {
-    alert('Please enter a customer name to create the ticket.');
+    showToast('Please enter a customer name to create the ticket.', 'warning');
     document.getElementById('form-customer-name').focus();
     return;
   }
@@ -2950,7 +3085,7 @@ async function handleTicketFormSubmit(e) {
   } catch (err) {
     // Never fail silently — surface the reason so a save problem is visible.
     console.error('Ticket save failed:', err);
-    alert('Could not save the ticket: ' + (err && err.message ? err.message : err));
+    showToast('Could not save the ticket: ' + (err && err.message ? err.message : err), 'error', 8000);
   }
 }
 
@@ -3135,7 +3270,7 @@ async function setupClientMode() {
       checkSpecsMatch();
     } catch (err) {
       console.error("Client specs detection error:", err);
-      alert("Specs detection failed: " + err.message);
+      showToast("Specs detection failed: " + err.message, 'error', 8000);
     } finally {
       btn.disabled = false;
       if (btn.textContent === "🔍 Detecting hardware...") {
@@ -3442,7 +3577,7 @@ function populatePrintFields(ticket) {
   // when NeoQcPrintRender was missing (the Electron UMD gotcha); an unusable
   // report must never reach paper/PDF quietly again.
   if (!window.NeoQcPrintRender) {
-    alert('Report renderer failed to load (print-render.js) — cannot generate the QC report. Please report this to the developer.');
+    showToast('Report renderer failed to load (print-render.js) — cannot generate the QC report. Please report this to the developer.', 'error', 10000);
     return false;
   }
   try {
@@ -3454,7 +3589,7 @@ function populatePrintFields(ticket) {
     return true;
   } catch (e) {
     console.error('Report populate failed:', e);
-    alert('Report generation failed: ' + e.message);
+    showToast('Report generation failed: ' + e.message, 'error', 8000);
     return false;
   }
 }
@@ -3522,9 +3657,9 @@ async function triggerSavePdf(ticketId) {
 
   const result = await ipcRenderer.invoke('sys:print-pdf', defaultFilename);
   if (result.success) {
-    alert(`PDF Report successfully saved to:\n${result.filePath}`);
+    showToast(`PDF report saved to:\n${result.filePath}`, 'success', 7000);
   } else if (result.error !== 'Cancelled') {
-    alert(`Failed to save PDF: ${result.error}`);
+    showToast(`Failed to save PDF: ${result.error}`, 'error', 8000);
   }
 }
 
@@ -3598,9 +3733,9 @@ function unlockAdminSettings() {
         el.removeAttribute('disabled');
       }
     });
-    alert("Admin Settings Unlocked.");
+    showToast("Admin settings unlocked.", 'success');
   } else {
-    alert("Incorrect passcode. Access Denied.");
+    showToast("Incorrect passcode. Access denied.", 'error');
   }
 }
 
@@ -3919,12 +4054,12 @@ function setupEventListeners() {
   }
 
   document.getElementById('btn-reseed-data').addEventListener('click', async () => {
-    if (confirm("This will overwrite your current tickets with mock demo data. Proceed?")) {
+    if (await showConfirm("This will overwrite your current tickets with mock demo data. Proceed?", { title: 'Reseed demo data', okText: 'Overwrite', danger: true })) {
       seedMockTickets();
       await saveDatabase();
       document.getElementById('settings-modal').classList.remove('active');
       renderDashboard();
-      alert("Mock database reseeded successfully!");
+      showToast("Mock database reseeded successfully.", 'success');
     }
   });
 
@@ -3960,9 +4095,9 @@ function setupEventListeners() {
       const pw = prompt("Enter administrator password to edit deadline:");
       if (pw === 'neoadmin') {
         document.getElementById('form-deadline').disabled = false;
-        alert("Deadline unlocked. You can now modify the target date.");
+        showToast("Deadline unlocked. You can now modify the target date.", 'success');
       } else {
-        alert("Incorrect password. Deadline locked.");
+        showToast("Incorrect password. Deadline locked.", 'error');
       }
     });
   }
@@ -4009,7 +4144,7 @@ function setupEventListeners() {
   });
   document.getElementById('btn-dismiss-conflict-banner').addEventListener('click', hideConflictBanner);
   document.getElementById('btn-delete-ticket').addEventListener('click', async () => {
-    if (editingTicketId && confirm("Are you sure you want to delete this ticket?")) {
+    if (editingTicketId && await showConfirm("Are you sure you want to delete this ticket?", { title: 'Delete ticket', okText: 'Delete', danger: true })) {
       const idToDelete = editingTicketId;
       appState.tickets = appState.tickets.filter(t => t.id !== idToDelete);
       await saveDatabase();
@@ -4042,7 +4177,7 @@ function setupEventListeners() {
       // Competitor auto-detect comparison and banner updates omitted
     } catch (err) {
       console.error("Hardware spec detection failed in modal:", err);
-      alert("Hardware specs detection failed: " + err.message);
+      showToast("Hardware specs detection failed: " + err.message, 'error', 8000);
     } finally {
       btn.textContent = oldText;
       btn.disabled = false;
@@ -4189,7 +4324,7 @@ function setupEventListeners() {
       const note = awaitingNoteInput.value.trim();
       // Prevent duplicate category chips — one awaiting entry per category.
       if (category !== 'other' && awaitingComponentsList.some(a => a.category === category)) {
-        alert(`${category.toUpperCase()} is already listed as awaiting. Remove the existing entry first if you want to change it.`);
+        showToast(`${category.toUpperCase()} is already listed as awaiting. Remove the existing entry first if you want to change it.`, 'warning');
         return;
       }
       awaitingComponentsList.push({ category, note: note || null });
@@ -4365,7 +4500,7 @@ function setupEventListeners() {
   if (ppiBtn) {
     ppiBtn.addEventListener('click', async () => {
       if (!editingTicketId) {
-        alert('Save the ticket first — PPI needs a stored ticket with specs.');
+        showToast('Save the ticket first — PPI needs a stored ticket with specs.', 'warning');
         return;
       }
       const useCaseSel = document.getElementById('modal-ppi-usecase');
@@ -4418,7 +4553,7 @@ function setupEventListeners() {
             } else if (jsRes && jsRes.error) {
               // Real error (e.g. no spec matched). Do NOT silently fall back
               // to Python — the user needs to see this so they can fix specs.
-              alert('PPI compute failed: ' + jsRes.error);
+              showToast('PPI compute failed: ' + jsRes.error, 'error', 8000);
               return;
             }
           } catch (e) {
@@ -4430,11 +4565,11 @@ function setupEventListeners() {
           if (res && res.success) {
             await loadAndRenderPpi(editingTicketId);
           } else {
-            alert('PPI compute failed: ' + ((res && res.error) || 'unknown error'));
+            showToast('PPI compute failed: ' + ((res && res.error) || 'unknown error'), 'error', 8000);
           }
         }
       } catch (e) {
-        alert('PPI compute failed: ' + e.message);
+        showToast('PPI compute failed: ' + e.message, 'error', 8000);
       } finally {
         ppiBtn.disabled = false;
         ppiBtn.textContent = 'Compute Price-Performance';
@@ -4477,7 +4612,7 @@ function setupEventListeners() {
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
     } catch (err) {
-      alert("Failed to export backup: " + err.message);
+      showToast("Failed to export backup: " + err.message, 'error', 8000);
     }
   });
 
@@ -4497,7 +4632,7 @@ function setupEventListeners() {
         try {
           const parsed = JSON.parse(event.target.result);
           if (parsed && typeof parsed === 'object') {
-            if (confirm("Are you sure you want to restore this backup? This will overwrite your current local database data.")) {
+            if (await showConfirm("Are you sure you want to restore this backup? This will overwrite your current local database data.", { title: 'Restore backup', okText: 'Restore', danger: true })) {
               // Ensure critical fields exist
               if (!parsed.tickets) parsed.tickets = [];
               if (!parsed.technicians) parsed.technicians = ["Adhil", "Amal", "Ananthakrishnan", "Athul"];
@@ -4507,14 +4642,14 @@ function setupEventListeners() {
               initPpiTuning(); // re-seed/apply PPI tuning from the restored settings
               await saveDatabase();
               renderDashboard();
-              alert("Database restored successfully!");
+              showToast("Database restored successfully.", 'success');
               openSettingsModal(); // Refresh modal
             }
           } else {
-            alert("Invalid backup file structure.");
+            showToast("Invalid backup file structure.", 'error');
           }
         } catch (err) {
-          alert("Error parsing backup JSON: " + err.message);
+          showToast("Error parsing backup JSON: " + err.message, 'error', 8000);
         }
       };
       reader.readAsText(file);
@@ -4526,7 +4661,7 @@ function setupEventListeners() {
   const btnWipe = document.getElementById('btn-settings-wipe');
   if (btnWipe) {
     btnWipe.addEventListener('click', async () => {
-      if (confirm("🚨 WARNING: This will delete ALL tickets, custom technicians, and settings. Are you absolutely sure?")) {
+      if (await showConfirm("This will delete ALL tickets, custom technicians, and settings. This cannot be undone. Are you absolutely sure?", { title: '🚨 Factory reset', okText: 'Delete everything', danger: true })) {
         appState = {
           tickets: [],
           technicians: ["Adhil", "Amal", "Ananthakrishnan", "Athul"],
@@ -4560,14 +4695,20 @@ function setupEventListeners() {
         initPpiTuning(); // seed default PPI tuning into the fresh settings
         await saveDatabase();
         renderDashboard();
-        alert("Database has been factory reset.");
+        showToast("Database has been factory reset.", 'success');
         openSettingsModal();
       }
     });
   }
 
-  // Filters and search fields triggers
-  document.getElementById('search-input').addEventListener('input', renderDashboard);
+  // Filters and search fields triggers. Search is debounced (150 ms) — it used
+  // to re-render every card on every keystroke, which got sluggish with a full
+  // dashboard (the catalogue editor was already debounced; this matches it).
+  let dashSearchTimer = null;
+  document.getElementById('search-input').addEventListener('input', () => {
+    clearTimeout(dashSearchTimer);
+    dashSearchTimer = setTimeout(renderDashboard, 150);
+  });
   document.getElementById('filter-status').addEventListener('change', renderDashboard);
   document.getElementById('filter-tech').addEventListener('change', renderDashboard);
 
@@ -4836,8 +4977,9 @@ function setupRealtimeListener() {
     supabaseClient
       .channel('public:tickets')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'tickets' }, async payload => {
-        console.log("Realtime event received:", payload);
-        
+        // Log the event type + id only — the full payload carries customer data.
+        console.log(`Realtime event: ${payload.eventType} ${(payload.new && payload.new.id) || (payload.old && payload.old.id) || ''}`);
+
         if (payload.eventType === 'DELETE') {
           const deletedId = payload.old.id;
           if (deletedId) {
@@ -6245,7 +6387,7 @@ async function submitTechAnswer(id) {
     loadTicketQueryCounts();
   } catch (err) {
     if (btn) { btn.disabled = false; btn.textContent = 'Send reply →'; }
-    alert('Could not send reply: ' + err.message);
+    showToast('Could not send reply: ' + err.message, 'error', 8000);
   }
 }
 
@@ -6257,7 +6399,7 @@ async function setQueryStatus(id, status) {
     if (editingTicketId) loadTicketQueries(editingTicketId);
     loadTicketQueryCounts();
   } catch (err) {
-    alert('Could not update query: ' + err.message);
+    showToast('Could not update query: ' + err.message, 'error', 8000);
   }
 }
 
@@ -6332,12 +6474,15 @@ function renderInventoryPanel(ticket) {
     rows += row('GPU', [g.name, g.vramGB ? g.vramGB + ' GB' : '', g.driverVersion ? 'drv ' + g.driverVersion : ''].filter(Boolean).join(' · '), g.pnpDeviceId ? String(g.pnpDeviceId).split(String.fromCharCode(92)).pop() : null);
   });
   (inv.ramModules || []).forEach(m => {
+    let spd = '';
+    if (m.configuredMHz && m.speedMHz && m.speedMHz !== m.configuredMHz) spd = m.configuredMHz + ' MHz (rated ' + m.speedMHz + ')';
+    else if (m.configuredMHz || m.speedMHz) spd = (m.configuredMHz || m.speedMHz) + ' MHz';
     rows += row('RAM · ' + (m.slot || 'DIMM'),
-      [m.manufacturer, m.partNumber, m.capacityGB ? m.capacityGB + ' GB' : '', m.ddrGen, m.configuredMHz ? m.configuredMHz + ' MHz' : ''].filter(Boolean).join(' · '),
+      [m.manufacturer, m.partNumber, m.capacityGB ? m.capacityGB + ' GB' : '', m.ddrGen, spd].filter(Boolean).join(' · '),
       m.serial);
   });
   (inv.disks || []).forEach(d => {
-    rows += row('Storage', [d.model, d.sizeGB ? d.sizeGB + ' GB' : '', d.busType, d.firmware ? 'fw ' + d.firmware : ''].filter(Boolean).join(' · '), d.serial);
+    rows += row('Storage', [d.model, d.sizeGB ? d.sizeGB + ' GB' : '', d.busType || d.interfaceType, d.mediaType, d.healthStatus, d.firmware ? 'fw ' + d.firmware : ''].filter(Boolean).join(' · '), d.serial);
   });
   const sys = inv.system || {};
   if (sys.serial) rows += row('System / chassis', [sys.manufacturer, sys.model].filter(Boolean).join(' '), sys.serial);
@@ -6417,12 +6562,12 @@ function recordStressRun(ticketId) {
 document.addEventListener('DOMContentLoaded', () => {
   const btn = document.getElementById('btn-tortured-enough');
   if (!btn) return;
-  btn.addEventListener('click', () => {
+  btn.addEventListener('click', async () => {
     if (!editingTicketId) return;
     const t = appState.tickets.find(x => x.id === editingTicketId);
     if (!t) return;
-    if (!(t.stressRuns > 0)) { alert('Run the stress test at least once before signing off.'); return; }
-    if (!confirm(`Sign off stress testing for ${t.customerName}?\n\n${t.stressRuns} run(s) completed. This marks stress testing 100% complete.`)) return;
+    if (!(t.stressRuns > 0)) { showToast('Run the stress test at least once before signing off.', 'warning'); return; }
+    if (!(await showConfirm(`Sign off stress testing for ${t.customerName}?\n\n${t.stressRuns} run(s) completed. This marks stress testing 100% complete.`, { title: 'Sign off stress testing', okText: 'Sign off' }))) return;
     t.stressSignedOff = true;
     t.stressSignedOffAt = new Date().toISOString();
     t.updatedAt = new Date().toISOString();
@@ -6499,14 +6644,14 @@ function applySpecOverrideAll() {
   }
 }
 
-document.addEventListener('keydown', (e) => {
+document.addEventListener('keydown', async (e) => {
   if (e.ctrlKey && e.altKey && (e.code === 'KeyG' || e.key === 'g' || e.key === 'G')) {
     e.preventDefault();
     if (specOverrides.size) {
       specOverrides.clear();
       if (typeof checkSpecsMatch === 'function') { try { checkSpecsMatch(); } catch (_) {} }
     } else {
-      if (!confirm('Override spec verification for this build?\n\nAll component checks will be force-passed and the override will be recorded on the QC report.')) return;
+      if (!(await showConfirm('Override spec verification for this build?\n\nAll component checks will be force-passed and the override will be recorded on the QC report.', { title: 'Override spec verification', okText: 'Override', danger: true }))) return;
       applySpecOverrideAll();
     }
   }
@@ -6799,7 +6944,7 @@ const GODMODE_FIELDS = [
 function openGodMode() {
   if (currentMode !== 'staff') return;
   if (!editingTicketId) {
-    alert('God Mode edits a specific report.\n\nOpen the ticket you want to edit, then press Ctrl+Alt+W.');
+    showToast('God Mode edits a specific report.\n\nOpen the ticket you want to edit, then press Ctrl+Alt+W.', 'info', 7000);
     return;
   }
   const ticket = appState.tickets.find(t => t.id === editingTicketId);
@@ -6954,12 +7099,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Client torture sign-off
   const tort = document.getElementById('c-btn-tortured-enough');
-  if (tort) tort.addEventListener('click', () => {
+  if (tort) tort.addEventListener('click', async () => {
     const id = clientActiveTicketId();
     const t = id ? appState.tickets.find(x => x.id === id) : null;
-    if (!t) { alert('Select a build first.'); return; }
-    if (!(t.stressRuns > 0)) { alert('Run at least one stress test before signing off.'); return; }
-    if (!confirm(`Mark stress testing complete for ${t.customerName}?\n\n${t.stressRuns} run(s) done.`)) return;
+    if (!t) { showToast('Select a build first.', 'warning'); return; }
+    if (!(t.stressRuns > 0)) { showToast('Run at least one stress test before signing off.', 'warning'); return; }
+    if (!(await showConfirm(`Mark stress testing complete for ${t.customerName}?\n\n${t.stressRuns} run(s) done.`, { title: 'Complete stress testing', okText: 'Mark complete' }))) return;
     t.stressSignedOff = true; t.stressSignedOffAt = new Date().toISOString(); t.updatedAt = new Date().toISOString();
     saveDatabase(); syncTicketToCloud(t); renderClientStressProgress();
   });
@@ -6976,7 +7121,7 @@ document.addEventListener('keydown', (e) => {
       const sel = document.getElementById('c-stability-duration');
       if (sel) sel.value = '900';
       setClientStressMode('stability');
-      alert('Quick 15-minute Stability test unlocked for this session.');
+      showToast('Quick 15-minute Stability test unlocked for this session.', 'success');
     }
   }
 });
@@ -7073,7 +7218,7 @@ async function catEditorSave(sku, row) {
 
 async function catEditorDelete(sku, row) {
   if (!supabaseClient) return;
-  if (!confirm('Delete this component from the catalogue?')) return;
+  if (!(await showConfirm('Delete this component from the catalogue?', { title: 'Delete component', okText: 'Delete', danger: true }))) return;
   try {
     const { error } = await supabaseClient.from('component_prices').delete().eq('sku', sku);
     if (error) throw error;

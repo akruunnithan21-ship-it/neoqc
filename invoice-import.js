@@ -31,6 +31,22 @@
     cooler: [/\bcooler\b/i, /\baio\b/i, /\bliquid\s*(cooler|freezer)\b/i, /\bair\s*cooler\b/i, /\bhyper\s*212\b/i, /\bak\d{3}\b/i, /\bnh[\s-]*[du]\d{2}\b/i, /\bpeerless\b/i, /\bkraken\b/i, /\bml\d{3}\b/i, /\b(240|280|360|420)\s*mm\b/i, /\b(le|lt|ls|as)\d{3}\b/i, /\bassassin\b/i, /\bgammaxx\b/i, /\bfrost\s*flow\b/i, /\bcastle\b/i, /\bgalahad\b/i]
   };
 
+  // STRONG hints = explicit category nouns that are near-certain on their own
+  // ("Motherboard", "Power Supply", "SSD"). Weighted 3× the broad model/brand
+  // patterns above so a decisive word always beats an incidental model-token
+  // overlap (e.g. a board line that mentions "DDR5" must still classify as a
+  // motherboard, not RAM). Kept deliberately tight — only unambiguous nouns.
+  var STRONG_HINTS = {
+    cpu: [/\bprocessor\b/i, /\bcpu\b/i, /\bthreadripper\b/i],
+    gpu: [/\bgraphics?\s*card\b/i, /\bvideo\s*card\b/i, /\bgpu\b/i],
+    motherboard: [/\bmotherboard\b/i, /\bmainboard\b/i, /\bmobo\b/i],
+    ram: [/\bmemory\b/i, /\bdimm\b/i, /\bram\b/i, /\bddr[45]\b/i],
+    storage: [/\bssd\b/i, /\bnvme\b/i, /\bhdd\b/i, /\bhard\s*(disk|drive)\b/i, /\bsolid[\s-]*state\b/i],
+    psu: [/\bpsu\b/i, /\bpower\s*supply\b/i, /\bsmps\b/i],
+    case: [/\bcabinet\b/i, /\bchassis\b/i, /\b(mid|full)[\s-]*tower\b/i, /\bpc\s*case\b/i, /\bcase\b/i],
+    cooler: [/\bcpu\s*cooler\b/i, /\bcooler\b/i, /\baio\b/i, /\bliquid\s*cool/i, /\bair\s*cool/i, /\bheat\s*sink\b/i]
+  };
+
   var ALL_CATEGORIES = ['cpu', 'gpu', 'motherboard', 'ram', 'storage', 'psu', 'case', 'cooler'];
 
   // Brand guard — the catalog scorer matches on shared tokens (B850, Gaming,
@@ -152,11 +168,26 @@
     return { rate: nums[0], total: nums[nums.length - 1] };
   }
 
+  // Weighted keyword score for one (line, category): explicit STRONG nouns
+  // count 3×, broad model/brand patterns 1×. A decisive noun (score >= 3)
+  // therefore outranks any pile-up of incidental model-token overlaps.
   function keywordScore(line, category) {
-    var pats = CATEGORY_HINTS[category] || [];
-    var hits = 0;
-    for (var i = 0; i < pats.length; i++) if (pats[i].test(line)) hits++;
-    return hits;
+    var strong = STRONG_HINTS[category] || [];
+    var model = CATEGORY_HINTS[category] || [];
+    var s = 0, i;
+    for (i = 0; i < strong.length; i++) if (strong[i].test(line)) s += 3;
+    for (i = 0; i < model.length; i++) if (model[i].test(line)) s += 1;
+    return s;
+  }
+
+  // Rank every category for a line by weighted score (descending), keeping only
+  // categories with any evidence.
+  function rankCategories(line) {
+    var scores = {};
+    ALL_CATEGORIES.forEach(function (c) { scores[c] = keywordScore(line, c); });
+    var ranked = ALL_CATEGORIES.filter(function (c) { return scores[c] > 0; })
+      .sort(function (a, b) { return scores[b] - scores[a]; });
+    return { scores: scores, ranked: ranked, topScore: ranked.length ? scores[ranked[0]] : 0 };
   }
 
   // (Removed in v1.5.0: bestCatalogMatch. Invoice lines are no longer scored
@@ -228,34 +259,45 @@
   */
   function buildFromInvoice(text, catalogMatcher, opts) {
     opts = opts || {};
-    var cleanName = (window.NeoQcMatcher && window.NeoQcMatcher.cleanName) || function (s) { return s; };
+    var cleanName = (typeof window !== 'undefined' && window.NeoQcMatcher && window.NeoQcMatcher.cleanName) || function (s) { return s; };
 
     var rows = reconstructRows(text);
 
-    // Score every (row, category) pair on KEYWORD evidence only.
-    var tuples = [];
-    rows.forEach(function (row) {
-      ALL_CATEGORIES.forEach(function (category) {
-        var kw = keywordScore(row.text, category);
-        if (kw <= 0) return;
-        tuples.push({ category: category, row: row, kw: kw });
-      });
+    // Rank each ROW's candidate categories by weighted keyword score. Assigning
+    // by row (argmax) — rather than by flat (row,category) tuples — is what
+    // fixes the "wrong part under the wrong component" bug: previously a row
+    // displaced from its true category (because a stronger row claimed it first)
+    // was dumped into whatever weaker category was still open on a stray
+    // model-token hit. Now a row only ever lands in its OWN best-fitting open
+    // category, or a fallback that ITSELF has decisive (strong-noun) evidence —
+    // otherwise it is left out rather than mis-filed.
+    var rowInfos = rows.map(function (row) {
+      var r = rankCategories(row.text);
+      return { row: row, scores: r.scores, ranked: r.ranked, topScore: r.topScore };
     });
-    // Strongest keyword evidence first; ties keep invoice order (stable-ish).
-    tuples.sort(function (a, b) { return b.kw - a.kw; });
+    // Most-confident rows claim their category first.
+    rowInfos.sort(function (a, b) { return b.topScore - a.topScore; });
 
     var results = {};
-    var usedRows = [];
-    tuples.forEach(function (t) {
-      if (results[t.category]) return;                 // category already filled
-      if (usedRows.indexOf(t.row) !== -1) return;      // row already used
-      var invoicePrice = t.row.rate != null ? t.row.rate : null;
-      var invoiceName = cleanName(t.row.text);
-      // 'matched' when the keyword fit is decisive (>=2 hints or a strong single
-      // hint); otherwise 'review' so the tech eyeballs the categorization.
-      var status = t.kw >= 2 ? 'matched' : 'review';
-      results[t.category] = {
-        rawLine: t.row.text,
+    rowInfos.forEach(function (info) {
+      var chosen = null, chosenScore = 0;
+      for (var i = 0; i < info.ranked.length; i++) {
+        var c = info.ranked[i];
+        if (results[c]) continue;                      // category already filled
+        // A non-top fallback is only acceptable with decisive evidence (an
+        // explicit category noun, score >= 3). Otherwise stop — do NOT dump the
+        // row into an unrelated open slot on a lone model-token overlap.
+        if (i > 0 && info.scores[c] < 3) break;
+        chosen = c; chosenScore = info.scores[c]; break;
+      }
+      if (!chosen) return;                             // safer to skip than mis-file
+      var invoicePrice = info.row.rate != null ? info.row.rate : null;
+      var invoiceName = cleanName(info.row.text);
+      // 'matched' when the fit is decisive (an explicit noun, or two independent
+      // model signals); otherwise 'review' so the tech eyeballs the assignment.
+      var status = chosenScore >= 2 ? 'matched' : 'review';
+      results[chosen] = {
+        rawLine: info.row.text,
         matchedName: invoiceName,
         displayName: invoiceName,
         catalogName: null,
@@ -263,14 +305,13 @@
         sku: null,                                     // set by the catalog upsert in app.js
         priceInr: invoicePrice,
         invoicePriceInr: invoicePrice,
-        invoiceLineTotal: t.row.total,
+        invoiceLineTotal: info.row.total,
         catalogPriceInr: null,
         priceSource: invoicePrice != null ? 'invoice' : 'none',
-        confidence: Math.min(1, 0.6 + t.kw * 0.12),
+        confidence: Math.min(1, 0.55 + chosenScore * 0.1),
         status: status,
-        category: t.category
+        category: chosen
       };
-      usedRows.push(t.row);
     });
 
     var filledCount = 0, reviewCount = 0;
@@ -293,6 +334,7 @@
     _stripRowNoise: stripRowNoise,
     _cleanInvoiceName: cleanInvoiceName,
     _keywordScore: keywordScore,
+    _rankCategories: rankCategories,
     ALL_CATEGORIES: ALL_CATEGORIES
   };
 

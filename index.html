@@ -22,9 +22,15 @@
       <span id="update-status-pill" class="update-status-pill" style="display:none;"></span>
     </div>
     <div class="titlebar-controls">
-      <button id="win-btn-minimize" class="titlebar-btn minimize" title="Minimize">—</button>
-      <button id="win-btn-maximize" class="titlebar-btn maximize" title="Maximize">⬜</button>
-      <button id="win-btn-close" class="titlebar-btn close" title="Close">&times;</button>
+      <button id="win-btn-minimize" class="titlebar-btn minimize" title="Minimize" aria-label="Minimize window">
+        <svg viewBox="0 0 10 10" aria-hidden="true"><line x1="1.6" y1="5" x2="8.4" y2="5" /></svg>
+      </button>
+      <button id="win-btn-maximize" class="titlebar-btn maximize" title="Maximize" aria-label="Maximize window">
+        <svg viewBox="0 0 10 10" aria-hidden="true"><rect x="1.8" y="1.8" width="6.4" height="6.4" rx="1.4" fill="none" /></svg>
+      </button>
+      <button id="win-btn-close" class="titlebar-btn close" title="Close" aria-label="Close window">
+        <svg viewBox="0 0 10 10" aria-hidden="true"><line x1="2.2" y1="2.2" x2="7.8" y2="7.8" /><line x1="7.8" y1="2.2" x2="2.2" y2="7.8" /></svg>
+      </button>
     </div>
   </div>
 
@@ -2261,21 +2267,21 @@
     <div class="glass-slab modal-card" style="max-width: 650px; width: 100%; padding: 30px; border-radius: 20px;">
       <div class="modal-header" style="border-bottom: 1px solid var(--glass-border); padding-bottom: 15px; margin-bottom: 20px;">
         <h2 style="font-family: 'Syncopate', sans-serif; font-size: 1.3rem; color: var(--primary-pink); letter-spacing: 0.05em; margin: 0;">NEO QC UPDATED</h2>
-        <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; font-weight: 700; background: rgba(231, 1, 78, 0.1); color: var(--primary-pink); padding: 4px 8px; border-radius: 4px;">v1.8.4</span>
+        <span data-app-version style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; font-weight: 700; background: rgba(231, 1, 78, 0.1); color: var(--primary-pink); padding: 4px 8px; border-radius: 4px;">v1.8.4</span>
       </div>
       <div class="modal-body" style="font-size: 0.92rem; line-height: 1.6; color: var(--text-dark); max-height: 420px; overflow-y: auto; padding-right: 5px;">
-        <p style="margin-top: 0;">An update has been installed. Here are the key improvements in NeoQC <strong>v1.8.4</strong>:</p>
+        <p style="margin-top: 0;">An update has been installed. Here are the key improvements in NeoQC <strong data-app-version>v1.8.5</strong>:</p>
         <ul style="padding-left: 20px; display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px;">
-          <li><strong>Fixed: garbled text everywhere.</strong> The previous build (1.8.3) showed icons and symbols as gibberish across the whole app — a text-encoding fault introduced during packaging. Fixed at the source and guarded so it cannot happen again.</li>
-          <li><strong>Fixed: Cinebench now actually runs and scores.</strong> It was launched with a test-duration value R23 does not accept, so it quit about three seconds after starting — without benchmarking and without any error. It now runs to completion and reports a real score.</li>
-          <li><strong>Fixed: CPU temperature no longer reads blank.</strong> A driver-free sensor source was added, restoring CPU MIN / MAX / AVG even when the usual sensor path is unavailable.</li>
-          <li><strong>Fixed: RAM &amp; SSD cards no longer reset to "Idle"</strong> after a finished, passing test.</li>
-          <li><strong>More accurate SSD speeds</strong> — read/write now use the same scale as CrystalDiskMark (they were ~4.9% low before).</li>
-          <li><strong>Admin side no longer runs benchmarks</strong>; temperatures and stress progress sync from the Testing Client to the ticket and dashboard. Customer-supplied parts persist. Testing Client columns balanced; report gaps removed.</li>
+          <li><strong>Fixed: RAM sometimes read as only 32&nbsp;GB.</strong> A memory module occasionally reported no size to Windows, halving the total. Detection now cross-checks against the operating system's own memory figure and always reports the true installed amount.</li>
+          <li><strong>Fixed: invoice reader mis-filing parts.</strong> A component from the invoice could land under the wrong category (e.g. a part shown as Storage). Categorisation is rebuilt so each line is placed by its strongest evidence and is never forced into an unrelated slot — anything unclear is flagged for review instead of guessed.</li>
+          <li><strong>Full component detail on the report.</strong> Every part's make, model, part number, serial and speed is now captured directly from the machine (no third-party tools) and printed on the QC report — including RAM running below its rated speed (XMP/EXPO off), drive health, network adapters and OS build.</li>
+          <li><strong>New: glass window controls</strong> — the minimise, maximise and close buttons are redesigned with a frosted-glass look.</li>
+          <li><strong>Friendlier notifications</strong> — pop-up alerts are replaced with non-blocking on-screen toasts and confirmation dialogs that no longer freeze the window.</li>
+          <li><strong>Safer local storage</strong> — the ticket database is now written atomically with an automatic backup, and any read problem is surfaced and recovered instead of silently starting blank.</li>
         </ul>
       </div>
       <div class="modal-footer" style="border-top: 1px solid var(--glass-border); padding-top: 15px; display: flex; justify-content: flex-end; margin-top: 20px;">
-        <button id="btn-close-changelog" class="primary-pink-btn" style="padding: 10px 24px; font-weight: 700; font-size: 0.95rem;">Launch NeoQC v1.8.4</button>
+        <button id="btn-close-changelog" data-app-version-label class="primary-pink-btn" style="padding: 10px 24px; font-weight: 700; font-size: 0.95rem;">Launch NeoQC v1.8.5</button>
       </div>
     </div>
   </div>

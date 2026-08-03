@@ -346,26 +346,81 @@ ipcMain.handle('app:get-version', () => {
   try { return app.getVersion(); } catch (e) { return null; }
 });
 
+// Health of the last db:read — the renderer queries this via `db:health`
+// right after boot so a corrupt or missing local database is never a silent
+// blank slate (a technician could otherwise "start over" on top of recoverable
+// data). status: 'ok' | 'recovered' (restored from .bak) | 'error' (lost).
+let dbHealth = { status: 'ok', recovered: false, message: null };
+ipcMain.handle('db:health', () => dbHealth);
+
 // IPC Handler: Read Database
+// Corruption-tolerant: a truncated/garbled db.json (e.g. from a crash during a
+// non-atomic write in an OLD build) no longer wipes the app. We keep the corrupt
+// file for forensics and fall back to the rotating .bak written by db:write.
 ipcMain.handle('db:read', () => {
+  const dbPath = getDbPath();
+  const bakPath = dbPath + '.bak';
   try {
-    const dbPath = getDbPath();
-    const data = fs.readFileSync(dbPath, 'utf-8');
-    return JSON.parse(data);
+    if (!fs.existsSync(dbPath)) {
+      // Fresh install — no file yet is normal, not an error.
+      dbHealth = { status: 'ok', recovered: false, message: null };
+      return null;
+    }
+    const parsed = JSON.parse(fs.readFileSync(dbPath, 'utf-8'));
+    dbHealth = { status: 'ok', recovered: false, message: null };
+    return parsed;
   } catch (err) {
-    console.error("Read DB Error:", err);
+    log.error('db:read primary failed:', err);
+    // Preserve the corrupt file so we can inspect it later.
+    try {
+      const corruptCopy = dbPath + '.corrupt-' + Date.now();
+      fs.copyFileSync(dbPath, corruptCopy);
+      log.error('Preserved corrupt database to ' + corruptCopy);
+    } catch (e) { log.error('Could not preserve corrupt database:', e); }
+    // Try the last-good backup.
+    try {
+      if (fs.existsSync(bakPath)) {
+        const bak = JSON.parse(fs.readFileSync(bakPath, 'utf-8'));
+        dbHealth = {
+          status: 'recovered', recovered: true,
+          message: 'The local ticket file was corrupt and has been restored from the last good backup. A copy of the corrupt file was kept for the developer.'
+        };
+        log.warn('db:read recovered from .bak');
+        return bak;
+      }
+    } catch (e2) {
+      log.error('db:read backup also failed:', e2);
+    }
+    dbHealth = {
+      status: 'error', recovered: false,
+      message: 'The local ticket database could not be read and no backup was available. Cloud sync will try to restore your tickets — do NOT create new tickets until they reappear.'
+    };
     return null;
   }
 });
 
-// IPC Handler: Write Database
+// IPC Handler: Write Database (atomic)
+// Write to db.json.tmp, then rename it over db.json. A rename on the same volume
+// is atomic on Windows (ReplaceFile semantics), so a crash/power-loss can only
+// ever leave a stray .tmp — the real db.json is either the old version or the
+// new one, never a half-written truncation. The previous good copy is kept as a
+// rotating .bak before each overwrite so db:read can recover from corruption.
 ipcMain.handle('db:write', (event, data) => {
+  const dbPath = getDbPath();
+  const tmpPath = dbPath + '.tmp';
+  const bakPath = dbPath + '.bak';
   try {
-    const dbPath = getDbPath();
-    fs.writeFileSync(dbPath, JSON.stringify(data, null, 2), 'utf-8');
+    const json = JSON.stringify(data, null, 2);
+    fs.writeFileSync(tmpPath, json, 'utf-8');
+    if (fs.existsSync(dbPath)) {
+      try { fs.copyFileSync(dbPath, bakPath); }
+      catch (e) { log.error('db backup copy failed (continuing):', e); }
+    }
+    fs.renameSync(tmpPath, dbPath); // atomic replace
     return { success: true };
   } catch (err) {
-    console.error("Write DB Error:", err);
+    log.error('Write DB Error:', err);
+    try { if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath); } catch (e) {}
     return { success: false, error: err.message };
   }
 });
@@ -559,7 +614,9 @@ ipcMain.handle('sys:detect-hw', () => {
         runPs("(Get-CimInstance Win32_Processor).Name"),
         runPs("Get-CimInstance Win32_VideoController | Select-Object -ExpandProperty Name"),
         runPs("$mb=Get-CimInstance Win32_BaseBoard; ($mb.Manufacturer + ' ' + $mb.Product).Trim()"),
-        runPs("[Math]::Round((Get-CimInstance Win32_PhysicalMemory | Measure-Object -Property Capacity -Sum).Sum / 1GB)"),
+        // Return the RAW SMBIOS sum in bytes (not pre-rounded to GB) so Node can
+        // cross-check it against os.totalmem() below.
+        runPs("(Get-CimInstance Win32_PhysicalMemory | Measure-Object -Property Capacity -Sum).Sum"),
         runPs("(Get-PhysicalDisk | Where-Object MediaType -eq 'SSD' | Select-Object -First 1).FriendlyName"),
         runPs("(Get-PhysicalDisk | Select-Object -First 1).FriendlyName")
       ]);
@@ -581,7 +638,20 @@ ipcMain.handle('sys:detect-hw', () => {
         }
       }
 
-      const ramLine = ramOut ? ramOut.replace(/[^0-9]/g, '') + " GB" : "";
+      // RAM: prefer the SMBIOS per-module sum (the true INSTALLED capacity), but
+      // guard against the intermittent WMI flake where one module reports a null
+      // Capacity and the sum silently halves — the "sometimes only 32 GB" field
+      // bug. os.totalmem() is the OS-visible physical memory, always slightly
+      // BELOW installed (hardware reserves a little), so a COMPLETE SMBIOS sum is
+      // always >= it. If the SMBIOS sum comes back below the OS total, a module
+      // was dropped → fall back to the OS figure so we never under-report. A
+      // complete SMBIOS sum rounds exactly (capacities are whole GB); only the
+      // degraded fallback carries the small reserved-memory fuzz.
+      const smbiosRamBytes = parseFloat(ramOut) || 0;
+      const osRamBytes = os.totalmem();
+      const bestRamBytes = Math.max(smbiosRamBytes, osRamBytes);
+      const ramGB = bestRamBytes > 0 ? Math.round(bestRamBytes / (1024 ** 3)) : 0;
+      const ramLine = ramGB > 0 ? ramGB + " GB" : "";
       const storage = ssdOut ? (ssdOut + " (SSD)") : diskOut;
 
       resolve({
@@ -1157,7 +1227,7 @@ ipcMain.handle('sys:run-diagnostics', async (event, config) => {
             }
             if (parsed.tempSource && parsed.cpuTemp != null) cpuTempSource = parsed.tempSource;
             event.sender.send('sys:sensor-update', parsed);
-          } catch(e) {}
+          } catch(e) { log.debug('sensor line parse skipped:', e.message); } // partial stdout lines are expected; a persistent failure here means broken sensors
         }
       }
     });
@@ -1445,7 +1515,7 @@ ipcMain.handle('sys:run-diagnostics', async (event, config) => {
             }
           }
         }
-      } catch(e) {}
+      } catch(e) { log.warn('FurMark CSV parse failed (will try stdout fallback):', e.message); }
       // Try stdout fallback (some builds print "Score: XXXXX")
       if (furmarkScore === 0 && furmarkStdout) {
         const m = furmarkStdout.match(/score[:\s=]+(\d+)/i);
@@ -1504,7 +1574,7 @@ ipcMain.handle('sys:run-diagnostics', async (event, config) => {
       if (fs.existsSync(cbLogPath)) {
         try {
           outputStr = fs.readFileSync(cbLogPath, 'utf-8');
-        } catch(e) {}
+        } catch(e) { log.warn('Cinebench log read failed:', e.message); }
       }
 
       if (outputStr) {
