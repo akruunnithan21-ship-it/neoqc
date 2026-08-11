@@ -1378,7 +1378,6 @@ function updateTimeDisplay() {
 let currentUser = null;      // Supabase auth user
 let currentProfile = null;   // row from public.profiles (tier, name, designation…)
 
-const TIER_LABELS = { 1: 'T1 · Sales', 2: 'T2 · Technician', 3: 'T3 · Service Head', 4: 'T4 · Exec', 5: 'T5 · Owner' };
 
 // Decide the initial screen: existing session → route by tier; else login.
 async function routeAfterAuth() {
@@ -1478,11 +1477,10 @@ function renderUserChip() {
   if (!currentProfile) { chip.classList.add('hidden'); return; }
   chip.classList.remove('hidden');
   const nameEl = document.getElementById('tbu-name');
-  const tierEl = document.getElementById('tbu-tier');
   const avEl = document.getElementById('tbu-avatar');
   const first = (currentProfile.full_name || currentProfile.email || '?').trim();
   if (nameEl) nameEl.textContent = first.split(' ')[0];
-  if (tierEl) tierEl.textContent = 'T' + (currentProfile.tier || '?');
+  // Tier is an internal differentiator only — never shown to the user.
   if (avEl) {
     if (currentProfile.avatar_url) {
       avEl.style.backgroundImage = `url("${currentProfile.avatar_url}")`;
