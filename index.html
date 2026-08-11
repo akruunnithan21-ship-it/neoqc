@@ -158,7 +158,7 @@
       <div class="mode-buttons-row">
         <button id="btn-launch-staff" class="mode-btn primary-pink">
           <div class="mode-icon">🖥️</div>
-          <div class="mode-title">Staff System</div>
+          <div class="mode-title">Admin Dashboard</div>
           <div class="mode-text">Full dashboard, manage tickets, technicians & print reports.</div>
         </button>
         <button id="btn-launch-client" class="mode-btn dark-slate">
@@ -220,7 +220,7 @@
       <div class="nav-brand">
         <button id="btn-show-settings" class="hamburger-btn" title="Open Settings Sidebar">☰</button>
         <svg class="brand-logo-svg" viewBox="0 0 100 100" style="width: 22px; height: 22px; vertical-align: middle; margin-right: 6px; color: var(--primary-pink);"><circle cx="50" cy="50" r="40" stroke="currentColor" stroke-width="10" fill="none" stroke-dasharray="78.776 5" stroke-dashoffset="60.332" /><path d="M 50,23 L 72,70 C 58,58 50,56 50,56 C 50,56 42,58 28,70 Z" fill="currentColor" /></svg>
-        <span class="nav-title">NEO TOKYO // STAFF PORTAL</span>
+        <span class="nav-title">NEO TOKYO // ADMIN DASHBOARD</span>
       </div>
       <div class="nav-controls">
         <button id="btn-staff-exit" class="secondary-btn text-crimson" style="margin-right: 10px;">🚪 Switch Mode</button>
@@ -269,7 +269,7 @@
           </div>
         </div>
 
-        <h2 class="section-title">ACTIVE TICKETS <span id="active-count" class="badge">0</span></h2>
+        <h2 class="section-title">TICKET PROGRESS / STATUS <span id="active-count" class="badge">0</span></h2>
         <div id="tickets-grid" class="grid-container">
           <!-- Grid items dynamically injected -->
           <div class="empty-state">
@@ -564,6 +564,10 @@
                   <span class="smt-name">🛡️ Stability</span>
                   <span class="smt-desc">Ultimate torture · Prime95 · 30 min</span>
                 </button>
+                <button type="button" class="stress-mode-tab" data-mode="extreme">
+                  <span class="smt-name">🔥 Extreme</span>
+                  <span class="smt-desc">Endurance soak · Prime95 · 1–2 days</span>
+                </button>
               </div>
 
               <div class="stress-mode-config">
@@ -583,6 +587,15 @@
                     <option value="3600">60 minutes (maximum)</option>
                   </select>
                   <span class="smc-note">Prime95 Blend (CPU + RAM) is always included in Stability mode.</span>
+                </div>
+                <div class="smc-row" id="c-extreme-config" style="display:none;">
+                  <label class="smc-label">Duration</label>
+                  <select id="c-extreme-duration" class="smc-select">
+                    <option value="86400" selected>24 hours (1 day)</option>
+                    <option value="129600">36 hours</option>
+                    <option value="172800">48 hours (2 days)</option>
+                  </select>
+                  <span class="smc-note">⚠ Extreme runs Prime95 for 1–2 days — for high-value / exceptional builds only. The PC must stay powered and undisturbed.</span>
                 </div>
               </div>
 
@@ -834,9 +847,33 @@
                 <select id="form-technician">
                   <!-- Injected from settings -->
                 </select>
+                <span class="dr-muted" style="font-size:0.72rem;">Auto-assigned by workload — override only if needed.</span>
               </div>
             </div>
-            
+
+            <!-- v2.0.0 — the build BELONGS to the sales executive who closed it;
+                 build priority classifies the ticket (auto from value, override-able). -->
+            <div class="form-grid-2 margin-top">
+              <div class="form-group">
+                <label for="form-sales-exec">Sales Executive (closed the deal) *</label>
+                <select id="form-sales-exec">
+                  <option value="">— Select who closed this sale —</option>
+                </select>
+                <span class="dr-muted" style="font-size:0.72rem;">This build is theirs — flags &amp; updates route to them.</span>
+              </div>
+              <div class="form-group">
+                <label for="form-build-importance">Build Priority</label>
+                <select id="form-build-importance">
+                  <option value="light">Light</option>
+                  <option value="medium">Medium</option>
+                  <option value="important">Important</option>
+                  <option value="high_value">High Value</option>
+                  <option value="exceptional">Exceptional</option>
+                </select>
+                <span id="build-priority-hint" class="dr-muted" style="font-size:0.72rem;">Auto-set from build value — change if needed.</span>
+              </div>
+            </div>
+
             <div class="form-grid-2 margin-top">
               <div class="form-group">
                 <label for="form-ticket-type">Ticket Type</label>
@@ -2332,16 +2369,17 @@
         <span data-app-version style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; font-weight: 700; background: rgba(231, 1, 78, 0.1); color: var(--primary-pink); padding: 4px 8px; border-radius: 4px;">v1.8.4</span>
       </div>
       <div class="modal-body" style="font-size: 0.92rem; line-height: 1.6; color: var(--text-dark); max-height: 420px; overflow-y: auto; padding-right: 5px;">
-        <p style="margin-top: 0;">A major update has been installed. Here's what's new in NeoQC <strong data-app-version>v1.8.7</strong>:</p>
+        <p style="margin-top: 0;">A major update has been installed. Here's what's new in NeoQC <strong data-app-version>v1.8.8</strong>:</p>
         <ul style="padding-left: 20px; display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px;">
-          <li><strong>New: staff sign-in.</strong> NeoQC now opens to a secure login — sign in with your Neo Tokyo email and PIN. Ask your admin for your PIN if you don't have it yet.</li>
-          <li><strong>Your role, your workspace.</strong> The app now recognises who you are and opens the right screen for your role — technicians get the Testing Client, service heads and above get the full dashboard.</li>
-          <li><strong>New staff web portal.</strong> The tracker site (neoqctracker.netlify.app) now has a staff area behind login where you can update your photo, mobile number and PIN — alongside the public "Track your build" page for customers.</li>
-          <li><strong>Foundation for what's next</strong> — this login is the groundwork for the service, inventory and workflow features coming in the v2.0 series.</li>
+          <li><strong>Every build has an owner.</strong> A build ticket now records the <strong>sales executive who closed the deal</strong> — the build is theirs, and updates flow back to them.</li>
+          <li><strong>Build priority.</strong> Each ticket gets a priority (Light → Exceptional) that auto-sets from the build value and can be adjusted — used to route work behind the scenes.</li>
+          <li><strong>Clearer dashboard.</strong> Renamed to <strong>Admin Dashboard</strong> with a <strong>Ticket Progress / Status</strong> board and a prominent deadline countdown on every card.</li>
+          <li><strong>New: Extreme stress mode.</strong> A 1–2 day endurance soak for high-value builds, alongside Throttle and Stability.</li>
+          <li><em>This is a staged test build on the road to v2.0 — more of the ticket redesign is coming next.</em></li>
         </ul>
       </div>
       <div class="modal-footer" style="border-top: 1px solid var(--glass-border); padding-top: 15px; display: flex; justify-content: flex-end; margin-top: 20px;">
-        <button id="btn-close-changelog" data-app-version-label class="primary-pink-btn" style="padding: 10px 24px; font-weight: 700; font-size: 0.95rem;">Launch NeoQC v1.8.7</button>
+        <button id="btn-close-changelog" data-app-version-label class="primary-pink-btn" style="padding: 10px 24px; font-weight: 700; font-size: 0.95rem;">Launch NeoQC v1.8.8</button>
       </div>
     </div>
   </div>

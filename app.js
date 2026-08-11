@@ -118,6 +118,73 @@ async function syncCatalogCache() {
 // second lookup once a real catalog suggestion has been picked.
 const specFieldMatches = {};
 
+// ── v2.0.0 — build ownership + priority tiers ──────────────────────────────
+// Every build belongs to the sales executive who closed it; the build priority
+// (5 levels) classifies the ticket. Priority auto-sets from the build value and
+// maps to an internal tier (never shown to staff). Stored in specs.__build so
+// cross-machine sync carries it with no schema change.
+const BUILD_TIER_BY_IMPORTANCE = { light: 1, medium: 2, important: 3, high_value: 4, exceptional: 5 };
+let salesExecsCache = null;
+let buildImportanceManual = false;   // true once the coordinator overrides the auto value
+
+// Amount → priority: <1.5L Light, 1.5–2L Medium (2L inclusive), >2L Important.
+// High Value / Exceptional are manual-only (the coordinator sets them).
+function importanceFromAmount(total) {
+  if (!total || total <= 0) return null;
+  if (total < 150000) return 'light';
+  if (total <= 200000) return 'medium';
+  return 'important';
+}
+
+function computeBuildTotal() {
+  let t = 0;
+  Object.keys(specFieldMatches).forEach(k => {
+    const m = specFieldMatches[k];
+    if (m && typeof m.priceInr === 'number' && m.priceInr > 0) t += m.priceInr;
+  });
+  // On edit, this session has no fresh picks — fall back to the ticket's stored prices.
+  if (t === 0 && editingTicketId) {
+    const et = appState.tickets.find(x => x.id === editingTicketId);
+    const sp = et && (et.specPrices || (et.specs && et.specs.__prices));
+    if (sp) Object.values(sp).forEach(v => { if (typeof v === 'number' && v > 0) t += v; });
+  }
+  return t;
+}
+
+async function populateSalesExecs(selected) {
+  const sel = document.getElementById('form-sales-exec');
+  if (!sel) return;
+  try {
+    if (!salesExecsCache && supabaseClient) {
+      const { data } = await supabaseClient.from('profiles')
+        .select('full_name,email,designation').ilike('designation', '%Sales Executive%');
+      salesExecsCache = (data || []).filter(p => p.full_name).sort((a, b) => a.full_name.localeCompare(b.full_name));
+    }
+  } catch (e) { console.warn('sales execs load failed:', e && e.message); }
+  const list = salesExecsCache || [];
+  const cur = selected != null ? selected : sel.value;
+  sel.innerHTML = '<option value="">— Select who closed this sale —</option>' +
+    list.map(p => `<option value="${escapeHtmlLite(p.email)}">${escapeHtmlLite(p.full_name)}</option>`).join('');
+  if (cur) sel.value = cur;
+}
+
+function updateBuildPriorityAuto() {
+  const sel = document.getElementById('form-build-importance');
+  const hint = document.getElementById('build-priority-hint');
+  if (!sel) return;
+  const total = computeBuildTotal();
+  if (!buildImportanceManual) {
+    const imp = importanceFromAmount(total);
+    if (imp) sel.value = imp;
+  }
+  const tier = BUILD_TIER_BY_IMPORTANCE[sel.value] || '';
+  if (hint) {
+    hint.textContent = total > 0
+      ? `Build value ≈ ₹${total.toLocaleString('en-IN')} · internal tier T${tier} ${buildImportanceManual ? '(manual)' : '(auto)'}`
+      : 'Auto-set from build value — change if needed.';
+  }
+}
+
 // Track SKUs we've already tried to price this session so a quick pick →
 // re-pick doesn't spam the retailer lookup for the same item.
 const priceLookupTried = new Set();
@@ -1780,7 +1847,7 @@ function renderDashboard() {
 
         <div class="card-meta-footer">
           <span class="card-type-badge">${t.type === 'build' ? '⚙️ Build' : '🔧 Repair'}</span>
-          <span style="font-family:'JetBrains Mono',monospace;font-size:0.75rem;color:var(--text-muted);">📅 ${formatDateShort(t.deadline)}</span>
+          <span class="card-deadline ${isUrgent ? 'urgent' : ''}">📅 ${formatDateShort(t.deadline)} · <strong>${deadlineCountdown(t.deadline)}</strong></span>
         </div>
       `;
 
@@ -1874,6 +1941,18 @@ function calculateQcPercentage(t) {
   return Math.round((count / qcKeys.length) * 100);
 }
 
+// Short, human countdown for the prominent deadline pill on ticket cards.
+function deadlineCountdown(deadlineStr) {
+  if (!deadlineStr) return '';
+  const d = new Date(deadlineStr);
+  if (isNaN(d.getTime())) return '';
+  const days = Math.ceil((d.getTime() - Date.now()) / 86400000);
+  if (days < 0) return `Overdue ${Math.abs(days)}d`;
+  if (days === 0) return 'Due today';
+  if (days === 1) return '1 day left';
+  return `${days} days left`;
+}
+
 function checkIsUrgent(deadlineStr) {
   if (!deadlineStr) return false;
   const diffMs = new Date(deadlineStr) - new Date();
@@ -1964,6 +2043,18 @@ function openTicketModal(ticketId = null) {
   document.getElementById('modal-spec-ram').textContent = '--';
   document.getElementById('modal-spec-storage').textContent = '--';
 
+  // v2.0.0 — reset sales-exec ownership + build priority (auto until overridden)
+  buildImportanceManual = false;
+  const impSelReset = document.getElementById('form-build-importance');
+  if (impSelReset) {
+    impSelReset.value = 'light';
+    if (!impSelReset._wired) {
+      impSelReset._wired = true;
+      impSelReset.addEventListener('change', () => { buildImportanceManual = true; updateBuildPriorityAuto(); });
+    }
+  }
+  populateSalesExecs('');
+
   if (ticketId) {
     title.textContent = "Edit Service Ticket";
     const ticket = appState.tickets.find(t => t.id === ticketId);
@@ -1976,7 +2067,17 @@ function openTicketModal(ticketId = null) {
       document.getElementById('btn-change-deadline').style.display = 'block';
       document.getElementById('form-technician').value = ticket.technician;
       document.getElementById('form-ticket-type').value = ticket.type;
-      
+
+      // v2.0.0 — load saved sales-exec owner + build priority (keep the saved
+      // value; don't let the auto-recalc override an intentional setting).
+      const _b = (ticket.specs && ticket.specs.__build) || {};
+      buildImportanceManual = true;
+      const _impSel = document.getElementById('form-build-importance');
+      if (_impSel) _impSel.value = _b.importance || 'light';
+      populateSalesExecs(_b.salesExec || '');
+      updateBuildPriorityAuto();
+
+
       // Load target specs into manual inputs
       document.getElementById('form-spec-mobo').value = ticket.specs ? (ticket.specs.mobo || '') : '';
       document.getElementById('form-spec-cpu').value = ticket.specs ? (ticket.specs.cpu || '') : '';
@@ -3158,6 +3259,20 @@ async function handleTicketFormSubmit(e) {
   // schema change). Empty array when nothing is flagged.
   updatedTicket.damagedComponents = damagedComponentsList.slice();
   updatedTicket.specs.__damaged = damagedComponentsList.slice();
+
+  // v2.0.0 — sales-exec owner + build priority/tier. Nested in specs (JSONB) so
+  // cross-machine sync carries it without a schema change. Tier is derived from
+  // the priority level and is internal-only (never displayed to staff).
+  {
+    const seEl = document.getElementById('form-sales-exec');
+    const impEl = document.getElementById('form-build-importance');
+    const importance = (impEl && impEl.value) || 'light';
+    updatedTicket.specs.__build = {
+      salesExec: (seEl && seEl.value) || (existingTicket && existingTicket.specs && existingTicket.specs.__build && existingTicket.specs.__build.salesExec) || '',
+      importance: importance,
+      tier: BUILD_TIER_BY_IMPORTANCE[importance] || 1
+    };
+  }
 
   // v1.4.9 — detected specs are merged PER FIELD, never gated on CPU alone.
   // The old logic threw away the entire panel when the CPU probe failed
@@ -4447,6 +4562,7 @@ function setupEventListeners() {
 
         const summary = applyInvoiceBuild(build);
         renderConfigSynergy(); // surface any socket/RAM mismatch from the imported build
+        updateBuildPriorityAuto(); // re-suggest build priority from the imported total
         // Grow the catalog from this invoice (background — invoice price wins,
         // dedupes against existing rows). Resolves each field's SKU too.
         upsertInvoiceComponentsToCatalog(build).catch(err => console.warn('invoice catalog sync failed:', err && err.message));
@@ -7211,10 +7327,23 @@ document.addEventListener('DOMContentLoaded', () => {
 let clientStressMode = 'stability';
 let stabilityQuickUnlocked = false;
 
+function stressModeLabel(mode) {
+  return mode === 'throttle' ? '▶ Run Throttle Test'
+    : mode === 'extreme' ? '▶ Run Extreme Test (1–2 days)'
+    : '▶ Run Stability Test';
+}
+
 function getClientStressConfig() {
   if (clientStressMode === 'throttle') {
     const d = document.getElementById('c-throttle-duration');
     return { useCase: 'studio', duration: d ? parseInt(d.value) : 900, runPrime95: false, prime95Duration: 0 };
+  }
+  if (clientStressMode === 'extreme') {
+    // Extreme = a 1–2 day Prime95 torture soak (default 24h). Cinebench/FurMark/RAM
+    // still run a capped slice up front; Prime95 then runs for the full soak.
+    const d = document.getElementById('c-extreme-duration');
+    const secs = d ? parseInt(d.value) : 86400;
+    return { useCase: 'studio', duration: Math.min(600, secs), runPrime95: true, prime95Duration: secs, extreme: true };
   }
   // stability
   const d = document.getElementById('c-stability-duration');
@@ -7231,11 +7360,14 @@ function setClientStressMode(mode) {
   });
   const tCfg = document.getElementById('c-throttle-config');
   const sCfg = document.getElementById('c-stability-config');
+  const eCfg = document.getElementById('c-extreme-config');
   if (tCfg) tCfg.style.display = mode === 'throttle' ? '' : 'none';
   if (sCfg) sCfg.style.display = mode === 'stability' ? '' : 'none';
+  if (eCfg) eCfg.style.display = mode === 'extreme' ? '' : 'none';
   const btn = document.getElementById('btn-run-auto-diagnostics');
-  if (btn && !btn.disabled) btn.textContent = mode === 'throttle' ? '▶ Run Throttle Test' : '▶ Run Stability Test';
-  else if (btn) btn.dataset.label = mode === 'throttle' ? '▶ Run Throttle Test' : '▶ Run Stability Test';
+  const label = stressModeLabel(mode);
+  if (btn && !btn.disabled) btn.textContent = label;
+  else if (btn) btn.dataset.label = label;
 }
 
 // ── Client-side stress progress + torture sign-off (moved from admin) ──

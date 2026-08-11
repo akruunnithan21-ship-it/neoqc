@@ -4301,6 +4301,29 @@ body.dark-mode .card-type-badge {
   background: rgba(255,255,255,0.06);
 }
 
+/* v2.0.0 — prominent deadline pill on ticket cards (countdown + urgency). */
+.card-deadline {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.76rem;
+  font-weight: 600;
+  color: var(--text-dark);
+  background: rgba(231, 1, 78, 0.09);
+  border: 1px solid rgba(231, 1, 78, 0.22);
+  padding: 3px 10px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.card-deadline strong { font-weight: 800; }
+.card-deadline.urgent {
+  color: #fff;
+  background: var(--status-urgent);
+  border-color: var(--status-urgent);
+  box-shadow: 0 2px 10px rgba(239, 68, 68, 0.35);
+}
+
 /* ==========================================================================
    TECHNICIAN AVATAR CHIP
    ========================================================================== */
