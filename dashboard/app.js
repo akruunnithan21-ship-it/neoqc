@@ -44,11 +44,68 @@ function getView() {
   return new URLSearchParams(location.search).get('view') || 'customer';
 }
 
+// ── Auth + view routing + hamburger menu (v2.0.0 P3) ──────
+let currentProfile = null;
+const VIEWS = ['customer', 'login', 'dashboard', 'profile', 'ticket-status'];
+
 function activateView(name) {
-  document.getElementById('view-customer').classList.toggle('hidden', name !== 'customer');
-  document.getElementById('view-sales').classList.toggle('hidden', name !== 'sales');
-  document.getElementById('nav-customer').classList.toggle('active', name === 'customer');
-  document.getElementById('nav-sales').classList.toggle('active', name === 'sales');
+  if (name === 'sales') name = currentProfile ? 'dashboard' : 'login';           // legacy deep-link
+  if (['dashboard', 'profile', 'ticket-status'].includes(name) && !currentProfile) name = 'login';
+  VIEWS.forEach(v => {
+    const el = document.getElementById('view-' + v);
+    if (el) el.classList.toggle('hidden', v !== name);
+  });
+  closeMenu();
+  if (name === 'dashboard') ensureDashboardLoaded();
+  else if (name === 'ticket-status') ensureTicketStatusLoaded();
+  else if (name === 'profile') renderProfile();
+  else if (name === 'login') setTimeout(() => { const e = document.getElementById('web-login-email'); if (e) e.focus(); }, 120);
+}
+
+function openMenu() {
+  document.getElementById('side-menu').classList.add('open');
+  document.getElementById('menu-overlay').classList.remove('hidden');
+  document.getElementById('hamburger-btn').setAttribute('aria-expanded', 'true');
+  document.getElementById('side-menu').setAttribute('aria-hidden', 'false');
+}
+function closeMenu() {
+  const sm = document.getElementById('side-menu'); if (!sm) return;
+  sm.classList.remove('open');
+  document.getElementById('menu-overlay').classList.add('hidden');
+  document.getElementById('hamburger-btn').setAttribute('aria-expanded', 'false');
+  sm.setAttribute('aria-hidden', 'true');
+}
+function initMenu() {
+  document.getElementById('hamburger-btn').addEventListener('click', openMenu);
+  document.getElementById('menu-close').addEventListener('click', closeMenu);
+  document.getElementById('menu-overlay').addEventListener('click', closeMenu);
+  const brand = document.getElementById('brand-home');
+  if (brand) brand.addEventListener('click', e => { e.preventDefault(); activateView('customer'); });
+  document.querySelectorAll('.menu-item[data-nav]').forEach(btn =>
+    btn.addEventListener('click', () => activateView(btn.getAttribute('data-nav'))));
+  const so = document.getElementById('menu-signout');
+  if (so) so.addEventListener('click', webSignOut);
+}
+
+// Public vs staff menu; fill the user chip; Ticket Status only for T1.
+function applyMenu() {
+  const pub = document.getElementById('menu-public');
+  const staff = document.getElementById('menu-staff');
+  if (currentProfile) {
+    pub.classList.add('hidden');
+    staff.classList.remove('hidden');
+    const first = (currentProfile.full_name || currentProfile.email || '?').trim();
+    document.getElementById('menu-uname').textContent = first;
+    document.getElementById('menu-utier').textContent =
+      'Tier ' + currentProfile.tier + (currentProfile.designation ? ' · ' + currentProfile.designation : '');
+    const av = document.getElementById('menu-avatar');
+    if (currentProfile.avatar_url) { av.style.backgroundImage = `url("${currentProfile.avatar_url}")`; av.textContent = ''; }
+    else { av.style.backgroundImage = ''; av.textContent = first.charAt(0).toUpperCase(); }
+    document.getElementById('menu-ticketstatus').classList.toggle('hidden', Number(currentProfile.tier) !== 1);
+  } else {
+    pub.classList.remove('hidden');
+    staff.classList.add('hidden');
+  }
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -238,53 +295,176 @@ function hideError() {
 //  SALES VIEW
 // ═══════════════════════════════════════════════════════════
 
-const SESSION_KEY = 'ntk_sales_unlocked';
+// ═══════════════════════════════════════════════════════════
+//  AUTH (v2.0.0 P3) — staff sign in with email + PIN (Supabase Auth).
+//  Replaces the old shared SALES_PIN gate. The profile's tier decides which
+//  menu items + views the person gets. Session persists across reloads.
+// ═══════════════════════════════════════════════════════════
+let dashboardLoaded = false;
+let tsLoaded = false;
 
-function initSalesView() {
-  document.getElementById('btn-pin-submit').addEventListener('click', tryPin);
-  document.getElementById('pin-input').addEventListener('keydown', e => { if (e.key === 'Enter') tryPin(); });
-  document.getElementById('pin-input').addEventListener('input', () => {
-    document.getElementById('pin-error').classList.add('hidden');
+async function loadWebProfile() {
+  try {
+    const { data: u } = await db.auth.getUser();
+    if (!u || !u.user) return false;
+    const { data: p, error } = await db.from('profiles').select('*').eq('id', u.user.id).single();
+    if (error || !p || p.active === false) return false;
+    currentProfile = p;
+    return true;
+  } catch (e) { console.error('profile load failed', e); return false; }
+}
+
+async function webSignIn(email, pin) {
+  const { data, error } = await db.auth.signInWithPassword({ email, password: pin });
+  if (error || !data || !data.user) return { ok: false, msg: 'Incorrect email or PIN.' };
+  const ok = await loadWebProfile();
+  if (!ok) {
+    try { await db.auth.signOut(); } catch (e) {}
+    return { ok: false, msg: 'Your account isn’t set up yet or has been deactivated. Contact the admin.' };
+  }
+  return { ok: true };
+}
+
+async function webSignOut() {
+  try { await db.auth.signOut(); } catch (e) {}
+  currentProfile = null;
+  dashboardLoaded = false; tsLoaded = false;
+  if (realtimeChannel) { try { db.removeChannel(realtimeChannel); } catch (e) {} realtimeChannel = null; }
+  allTickets = [];
+  applyMenu();
+  activateView('customer');
+}
+
+function initLoginForm() {
+  const form = document.getElementById('web-login-form');
+  if (!form) return;
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const email = (document.getElementById('web-login-email').value || '').trim().toLowerCase();
+    const pin = (document.getElementById('web-login-pin').value || '').trim();
+    const err = document.getElementById('web-login-error');
+    const btn = document.getElementById('web-login-submit');
+    err.classList.add('hidden');
+    if (!email || !pin) { err.textContent = 'Enter your email and PIN.'; err.classList.remove('hidden'); return; }
+    btn.disabled = true; const old = btn.textContent; btn.textContent = 'Signing in…';
+    const res = await webSignIn(email, pin);
+    btn.disabled = false; btn.textContent = old;
+    if (!res.ok) { err.textContent = res.msg; err.classList.remove('hidden'); document.getElementById('web-login-pin').value = ''; return; }
+    document.getElementById('web-login-pin').value = '';
+    applyMenu();
+    routeAfterWebLogin();
+  });
+}
+
+function routeAfterWebLogin() {
+  activateView(Number(currentProfile.tier) === 1 ? 'ticket-status' : 'dashboard');
+}
+
+// ── Dashboard (all builds) — auth-gated (was unlockSales) ──────────────────
+async function ensureDashboardLoaded() {
+  if (!currentProfile) { activateView('login'); return; }
+  if (!dashboardLoaded) {
+    await loadAllTickets();
+    loadQueryCounts();
+    subscribeSales();
+    dashboardLoaded = true;
+  } else {
+    renderTable();
+  }
+}
+
+// ── Ticket Status (T1, read-only list) ─────────────────────────────────────
+async function ensureTicketStatusLoaded() {
+  if (!currentProfile) { activateView('login'); return; }
+  if (!allTickets.length) await loadAllTickets();
+  tsLoaded = true;
+  const s = document.getElementById('ts-search');
+  if (s && !s._wired) { s._wired = true; s.addEventListener('input', renderTicketStatus); }
+  renderTicketStatus();
+}
+function renderTicketStatus() {
+  const q = (document.getElementById('ts-search').value || '').toLowerCase().trim();
+  const rows = allTickets.filter(t => !q
+    || (t.customer_name || '').toLowerCase().includes(q)
+    || (t.id || '').toLowerCase().includes(q));
+  document.getElementById('ts-empty').classList.toggle('hidden', rows.length > 0);
+  document.getElementById('ts-body').innerHTML = rows.map(t => `<tr>
+    <td class="mono">#${escHtml((t.id || '').slice(-6))}</td>
+    <td>${escHtml(t.customer_name || '')}</td>
+    <td>${t.type === 'build' ? 'Build' : 'Repair'}</td>
+    <td>${escHtml(STATUS_LABELS[t.status] || t.status || '')}</td>
+    <td>${escHtml(t.technician || '—')}</td>
+    <td>${t.deadline ? fmtDateTime(t.deadline) : '—'}</td>
+  </tr>`).join('');
+}
+
+// ── Edit Profile (avatar / mobile / PIN; name+designation read-only) ───────
+function renderProfile() {
+  if (!currentProfile) { activateView('login'); return; }
+  const p = currentProfile;
+  document.getElementById('pf-name').textContent = p.full_name || '—';
+  document.getElementById('pf-designation').textContent = p.designation || '—';
+  document.getElementById('pf-email').textContent = p.email || '—';
+  document.getElementById('pf-tier').textContent = 'Tier ' + p.tier;
+  document.getElementById('pf-mobile').value = p.mobile || '';
+  const av = document.getElementById('pf-avatar');
+  if (p.avatar_url) { av.style.backgroundImage = `url("${p.avatar_url}")`; av.textContent = ''; }
+  else { av.style.backgroundImage = ''; av.textContent = (p.full_name || p.email || '?').charAt(0).toUpperCase(); }
+  const st = document.getElementById('pf-status'); if (st) { st.textContent = ''; st.className = 'pf-status'; }
+}
+
+function initProfileUI() {
+  const mSave = document.getElementById('pf-mobile-save');
+  if (mSave) mSave.addEventListener('click', async () => {
+    const st = document.getElementById('pf-status');
+    const mobile = (document.getElementById('pf-mobile').value || '').trim();
+    try {
+      const { error } = await db.from('profiles').update({ mobile, updated_at: new Date().toISOString() }).eq('id', currentProfile.id);
+      if (error) throw error;
+      currentProfile.mobile = mobile;
+      st.textContent = 'Mobile number saved.'; st.className = 'pf-status ok';
+    } catch (e) { st.textContent = 'Could not save: ' + e.message; st.className = 'pf-status err'; }
   });
 
-  document.getElementById('btn-logout').addEventListener('click', logout);
-  document.getElementById('filter-status').addEventListener('change', renderTable);
-  document.getElementById('filter-search').addEventListener('input', renderTable);
-  initQueryUI();
+  const pSave = document.getElementById('pf-pin-save');
+  if (pSave) pSave.addEventListener('click', async () => {
+    const st = document.getElementById('pf-status');
+    const a = (document.getElementById('pf-new-pin').value || '').trim();
+    const b = (document.getElementById('pf-confirm-pin').value || '').trim();
+    const need = Number(currentProfile.tier) >= 4 ? 8 : 6;
+    if (!/^\d+$/.test(a)) { st.textContent = 'PIN must be digits only.'; st.className = 'pf-status err'; return; }
+    if (a.length !== need) { st.textContent = `Your tier needs a ${need}-digit PIN.`; st.className = 'pf-status err'; return; }
+    if (a !== b) { st.textContent = 'PINs do not match.'; st.className = 'pf-status err'; return; }
+    try {
+      const { error } = await db.auth.updateUser({ password: a });
+      if (error) throw error;
+      document.getElementById('pf-new-pin').value = '';
+      document.getElementById('pf-confirm-pin').value = '';
+      st.textContent = 'PIN updated — use it next time you sign in.'; st.className = 'pf-status ok';
+    } catch (e) { st.textContent = 'Could not update PIN: ' + e.message; st.className = 'pf-status err'; }
+  });
 
-  // Check if already unlocked this session
-  if (sessionStorage.getItem(SESSION_KEY) === '1') {
-    unlockSales();
-  }
-}
-
-function tryPin() {
-  const val = document.getElementById('pin-input').value;
-  if (val === SALES_PIN) {
-    sessionStorage.setItem(SESSION_KEY, '1');
-    unlockSales();
-  } else {
-    document.getElementById('pin-error').classList.remove('hidden');
-    document.getElementById('pin-input').value = '';
-    document.getElementById('pin-input').focus();
-  }
-}
-
-async function unlockSales() {
-  document.getElementById('pin-gate').classList.add('hidden');
-  document.getElementById('sales-content').classList.remove('hidden');
-  await loadAllTickets();
-  loadQueryCounts();
-  subscribeSales();
-}
-
-function logout() {
-  sessionStorage.removeItem(SESSION_KEY);
-  document.getElementById('sales-content').classList.add('hidden');
-  document.getElementById('pin-gate').classList.remove('hidden');
-  document.getElementById('pin-input').value = '';
-  if (realtimeChannel) { db.removeChannel(realtimeChannel); realtimeChannel = null; }
-  allTickets = [];
+  const avInput = document.getElementById('pf-avatar-input');
+  if (avInput) avInput.addEventListener('change', async (e) => {
+    const st = document.getElementById('pf-status');
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    if (file.size > 3 * 1024 * 1024) { st.textContent = 'Image too large (max 3 MB).'; st.className = 'pf-status err'; return; }
+    st.textContent = 'Uploading photo…'; st.className = 'pf-status';
+    try {
+      const ext = ((file.name.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '')) || 'jpg';
+      const path = `${currentProfile.id}/dp.${ext}`;
+      const { error: upErr } = await db.storage.from('avatars').upload(path, file, { upsert: true, contentType: file.type });
+      if (upErr) throw upErr;
+      const { data: pub } = db.storage.from('avatars').getPublicUrl(path);
+      const url = (pub && pub.publicUrl ? pub.publicUrl : '') + '?t=' + Date.now();
+      const { error: updErr } = await db.from('profiles').update({ avatar_url: url, updated_at: new Date().toISOString() }).eq('id', currentProfile.id);
+      if (updErr) throw updErr;
+      currentProfile.avatar_url = url;
+      renderProfile(); applyMenu();
+      st.textContent = 'Photo updated.'; st.className = 'pf-status ok';
+    } catch (err) { st.textContent = 'Upload failed: ' + err.message; st.className = 'pf-status err'; }
+  });
 }
 
 async function loadAllTickets() {
@@ -443,18 +623,34 @@ function showLoading(show) {
 //  BOOT
 // ═══════════════════════════════════════════════════════════
 
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
   db = initSupabase();
   if (!db) {
     document.body.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100vh;font-family:sans-serif;color:#e91e8c;">Supabase library failed to load. Check your internet connection.</div>';
     return;
   }
 
-  const view = getView();
-  activateView(view);
-
+  initMenu();
+  initLoginForm();
+  initProfileUI();
   initCustomerView();
-  initSalesView();
+  initQueryUI();
+  document.getElementById('filter-status').addEventListener('change', renderTable);
+  document.getElementById('filter-search').addEventListener('input', renderTable);
+
+  // Restore any existing staff session (Supabase persists it across reloads).
+  await loadWebProfile();
+  applyMenu();
+
+  // Routing: honour ?view= deep-links (legacy 'sales' → dashboard).
+  let requested = getView();
+  if (requested === 'sales') requested = 'dashboard';
+  if (currentProfile) {
+    if (['dashboard', 'profile', 'ticket-status'].includes(requested)) activateView(requested);
+    else routeAfterWebLogin();
+  } else {
+    activateView(requested === 'login' ? 'login' : 'customer');
+  }
 });
 
 // ═══════════════════════════════════════════════════════════

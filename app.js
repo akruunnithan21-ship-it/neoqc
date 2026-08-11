@@ -1079,6 +1079,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
   setSplashStatus('Preparing workspace…');
   setupEventListeners();
+  setupAuthListeners();
   injectInlineIcons();
   setupSpecsAutocomplete();
   updateTimeDisplay();
@@ -1126,7 +1127,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     await new Promise(resolve => setTimeout(resolve, 450));
   }
 
-  switchScreen(bootMode);
+  // v2.0.0 P1 — the exe now requires a staff sign-in. If a Supabase Auth session
+  // is already stored (persisted across launches), we route straight in by tier;
+  // otherwise the login screen is shown. bootMode is kept only as a legacy hint.
+  await routeAfterAuth(bootMode);
 });
 
 // Load DB from local Electron AppData Storage
@@ -1362,6 +1366,188 @@ function updateTimeDisplay() {
   const options = { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' };
   const timeStr = new Date().toLocaleDateString('en-US', options);
   // Add a nice status line if elements exist
+}
+
+// ==========================================================================
+//  AUTHENTICATION & TIERS (v2.0.0 P1)
+//  Staff sign in with email + PIN (Supabase Auth). Their profile row carries a
+//  tier (1-5) that decides where they land and, later, what they can do. This
+//  is ADDITIVE — it gates the exe but does not change how tickets are stored,
+//  so machines still on 1.8.5 are unaffected until the 2.0.0 fleet cutover.
+// ==========================================================================
+let currentUser = null;      // Supabase auth user
+let currentProfile = null;   // row from public.profiles (tier, name, designation…)
+
+const TIER_LABELS = { 1: 'T1 · Sales', 2: 'T2 · Technician', 3: 'T3 · Service Head', 4: 'T4 · Exec', 5: 'T5 · Owner' };
+
+// Decide the initial screen: existing session → route by tier; else login.
+async function routeAfterAuth() {
+  try {
+    if (supabaseClient && supabaseClient.auth) {
+      const { data } = await supabaseClient.auth.getSession();
+      if (data && data.session) {
+        const ok = await loadCurrentProfile();
+        if (ok) { routeByTier(); return; }
+        // Session exists but no usable profile → sign out and fall through.
+        try { await supabaseClient.auth.signOut(); } catch (e) {}
+      }
+    }
+  } catch (e) {
+    console.error('Auth session check failed:', e);
+  }
+  showLoginScreen();
+}
+
+// Load the signed-in user's profile row. Returns false if missing/deactivated.
+// Falls back to a locally-cached copy when the network hiccups, so a tech who
+// signed in earlier isn't locked out by an internet blip.
+async function loadCurrentProfile() {
+  try {
+    if (!supabaseClient || !supabaseClient.auth) return loadCachedProfile();
+    const { data: u } = await supabaseClient.auth.getUser();
+    if (!u || !u.user) return loadCachedProfile();
+    currentUser = u.user;
+    const { data: p, error } = await supabaseClient
+      .from('profiles').select('*').eq('id', u.user.id).single();
+    if (error || !p) {
+      console.error('Profile load failed, trying cache:', error && error.message);
+      return loadCachedProfile(u.user.id);
+    }
+    if (p.active === false) return false; // explicitly deactivated → deny
+    currentProfile = p;
+    try { localStorage.setItem('neo_profile', JSON.stringify(p)); } catch (e) {}
+    return true;
+  } catch (e) {
+    console.error('loadCurrentProfile error:', e);
+    return loadCachedProfile();
+  }
+}
+
+function loadCachedProfile(expectId) {
+  try {
+    const raw = localStorage.getItem('neo_profile');
+    if (!raw) return false;
+    const p = JSON.parse(raw);
+    if (expectId && p.id !== expectId) return false;
+    if (p.active === false) return false;
+    currentProfile = p;
+    return true;
+  } catch (e) { return false; }
+}
+
+function showLoginScreen() {
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  const ls = document.getElementById('login-screen');
+  if (ls) ls.classList.add('active');
+  renderUserChip();
+  const err = document.getElementById('login-error');
+  if (err) { err.classList.add('hidden'); err.textContent = ''; }
+  const pinEl = document.getElementById('login-pin');
+  if (pinEl) pinEl.value = '';
+  const emailEl = document.getElementById('login-email');
+  if (emailEl) setTimeout(() => { try { emailEl.focus(); } catch (e) {} }, 120);
+}
+
+// Route by tier: T3+ get the full staff dashboard, T2 the Testing Client, and
+// T1 (sales, web-only) a friendly "use the web portal" notice.
+function routeByTier() {
+  renderUserChip();
+  const tier = currentProfile ? Number(currentProfile.tier) : 0;
+  if (tier >= 3) {
+    switchScreen('staff');
+  } else if (tier === 2) {
+    switchScreen('client');
+  } else {
+    showTierNotice();
+  }
+}
+
+function showTierNotice() {
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  const el = document.getElementById('tier-notice-screen');
+  if (el) el.classList.add('active');
+  const nameEl = document.getElementById('tier-notice-name');
+  if (nameEl && currentProfile) nameEl.textContent = (currentProfile.full_name || 'staff').split(' ')[0];
+}
+
+// The titlebar chip: avatar + name + tier + one-click sign-out. Shown on every
+// screen once signed in; hidden on the login screen itself.
+function renderUserChip() {
+  const chip = document.getElementById('titlebar-user');
+  if (!chip) return;
+  if (!currentProfile) { chip.classList.add('hidden'); return; }
+  chip.classList.remove('hidden');
+  const nameEl = document.getElementById('tbu-name');
+  const tierEl = document.getElementById('tbu-tier');
+  const avEl = document.getElementById('tbu-avatar');
+  const first = (currentProfile.full_name || currentProfile.email || '?').trim();
+  if (nameEl) nameEl.textContent = first.split(' ')[0];
+  if (tierEl) tierEl.textContent = 'T' + (currentProfile.tier || '?');
+  if (avEl) {
+    if (currentProfile.avatar_url) {
+      avEl.style.backgroundImage = `url("${currentProfile.avatar_url}")`;
+      avEl.textContent = '';
+    } else {
+      avEl.style.backgroundImage = '';
+      avEl.textContent = first.charAt(0).toUpperCase();
+    }
+  }
+}
+
+async function neoLogout() {
+  try { if (supabaseClient && supabaseClient.auth) await supabaseClient.auth.signOut(); }
+  catch (e) { console.error('signOut failed:', e); }
+  currentUser = null;
+  currentProfile = null;
+  showLoginScreen();
+}
+
+function setupAuthListeners() {
+  const form = document.getElementById('login-form');
+  if (form) {
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const emailEl = document.getElementById('login-email');
+      const pinEl = document.getElementById('login-pin');
+      const errEl = document.getElementById('login-error');
+      const btn = document.getElementById('login-submit');
+      const email = (emailEl && emailEl.value || '').trim().toLowerCase();
+      const pin = (pinEl && pinEl.value || '').trim();
+      const showErr = (m) => { if (errEl) { errEl.textContent = m; errEl.classList.remove('hidden'); } };
+      if (errEl) errEl.classList.add('hidden');
+      if (!email || !pin) { showErr('Enter your email and PIN.'); return; }
+      if (!supabaseClient || !supabaseClient.auth) { showErr('No cloud connection — check your internet and restart.'); return; }
+      const old = btn ? btn.textContent : '';
+      if (btn) { btn.disabled = true; btn.textContent = 'Signing in…'; }
+      try {
+        const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password: pin });
+        if (error || !data || !data.user) {
+          showErr('Incorrect email or PIN.');
+          if (btn) { btn.disabled = false; btn.textContent = old; }
+          return;
+        }
+        const ok = await loadCurrentProfile();
+        if (!ok) {
+          showErr('Your account isn’t set up yet or has been deactivated. Contact the admin.');
+          try { await supabaseClient.auth.signOut(); } catch (e) {}
+          if (btn) { btn.disabled = false; btn.textContent = old; }
+          return;
+        }
+        if (pinEl) pinEl.value = '';
+        if (btn) { btn.disabled = false; btn.textContent = old; }
+        routeByTier();
+      } catch (ex) {
+        showErr('Sign-in failed: ' + (ex && ex.message ? ex.message : ex));
+        if (btn) { btn.disabled = false; btn.textContent = old; }
+      }
+    });
+  }
+  const chip = document.getElementById('titlebar-user');
+  if (chip) chip.addEventListener('click', async () => {
+    if (await showConfirm('Sign out of Neo QC?', { title: 'Sign out', okText: 'Sign out' })) neoLogout();
+  });
+  const tierLogout = document.getElementById('btn-tier-logout');
+  if (tierLogout) tierLogout.addEventListener('click', neoLogout);
 }
 
 // ==========================================================================
@@ -4740,9 +4926,11 @@ function setupEventListeners() {
     if (e.ctrlKey && e.altKey && e.key.toLowerCase() === 's') {
       openSettingsModal();
     }
-    // Secret technician shortcut to access staff portal directly (Ctrl + Alt + P)
+    // Secret technician shortcut to jump to the staff portal (Ctrl + Alt + P).
+    // v2.0.0: must be signed in as T3+ — it can no longer bypass the login gate.
     if (e.ctrlKey && e.altKey && e.key.toLowerCase() === 'p') {
-      switchScreen('staff');
+      if (currentProfile && Number(currentProfile.tier) >= 3) switchScreen('staff');
+      else showToast('Sign in as Service Head or above to open the staff portal.', 'warning');
     }
   });
 }

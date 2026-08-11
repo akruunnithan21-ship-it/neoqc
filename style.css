@@ -371,6 +371,127 @@
   .neo-confirm-ok.danger { background: var(--status-urgent); }
   .neo-confirm-ok.danger:hover { background: #dc2626; }
 
+  /* ---- Staff login + tier notice (v2.0.0 P1) ---- */
+  /* Centre the card, like #mode-selector-screen (the generic .screen.active is
+     flex-column but does not centre, so without this the card stretches full-width). */
+  #login-screen, #tier-notice-screen {
+    justify-content: center;
+    align-items: center;
+    height: calc(100vh - 32px);
+    overflow: hidden;
+  }
+  .login-card {
+    width: min(440px, 92vw);
+    padding: 38px 34px 28px;
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+  .login-card h2 {
+    font-family: 'Syncopate', sans-serif;
+    font-size: 1.1rem;
+    letter-spacing: 0.04em;
+    color: var(--text-dark);
+    margin-top: 12px;
+  }
+  .login-form {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    margin-top: 18px;
+    text-align: left;
+  }
+  .login-label {
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    margin-top: 10px;
+    margin-bottom: 5px;
+  }
+  .login-input {
+    width: 100%;
+    padding: 12px 14px;
+    border-radius: 12px;
+    border: 1px solid var(--glass-border);
+    background: var(--glass-bg);
+    color: var(--text-dark);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.95rem;
+    outline: none;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  }
+  .login-input:focus {
+    border-color: var(--primary-pink);
+    box-shadow: 0 0 0 3px rgba(231, 1, 78, 0.15);
+  }
+  #login-pin { letter-spacing: 0.3em; }
+  .login-error {
+    margin-top: 14px;
+    padding: 10px 12px;
+    border-radius: 10px;
+    background: rgba(239, 68, 68, 0.12);
+    border: 1px solid rgba(239, 68, 68, 0.4);
+    color: var(--status-urgent);
+    font-size: 0.85rem;
+    font-weight: 600;
+  }
+  .login-submit-btn {
+    margin-top: 20px;
+    width: 100%;
+    padding: 13px;
+    font-size: 0.95rem;
+    font-weight: 700;
+  }
+  .login-foot {
+    margin-top: 22px;
+    font-size: 0.75rem;
+    line-height: 1.5;
+    color: var(--text-muted);
+    max-width: 340px;
+  }
+  .login-foot strong { color: var(--primary-pink); }
+
+  /* Titlebar user chip (who's signed in + one-click sign-out) */
+  .titlebar-user {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    -webkit-app-region: no-drag;
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    border-radius: 999px;
+    padding: 2px 9px 2px 3px;
+    margin-right: 8px;
+    cursor: pointer;
+    color: var(--text-dark);
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 0.72rem;
+    height: 22px;
+    transition: background 0.15s ease, border-color 0.15s ease;
+  }
+  .titlebar-user:hover { border-color: var(--status-urgent); }
+  .titlebar-user.hidden { display: none; }
+  .tbu-avatar {
+    width: 18px; height: 18px; border-radius: 50%;
+    background: linear-gradient(135deg, #ff1a75, #b3003b);
+    background-size: cover; background-position: center;
+    color: #fff; font-weight: 700; font-size: 0.6rem;
+    display: flex; align-items: center; justify-content: center;
+    flex: none;
+  }
+  .tbu-name { font-weight: 700; }
+  .tbu-tier {
+    font-size: 0.6rem; font-weight: 700; letter-spacing: 0.04em;
+    color: var(--primary-pink);
+    background: rgba(231, 1, 78, 0.1);
+    border-radius: 999px; padding: 1px 6px;
+  }
+  .tbu-logout { color: var(--text-muted); font-size: 0.9rem; line-height: 1; }
+  .titlebar-user:hover .tbu-logout { color: var(--status-urgent); }
+
   /* Reset and Base Styles */
   * {
     box-sizing: border-box;

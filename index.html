@@ -21,6 +21,12 @@
       <span class="titlebar-text">NEO TOKYO // QC & Diagnostics Lab Portal</span>
       <span id="update-status-pill" class="update-status-pill" style="display:none;"></span>
     </div>
+    <button id="titlebar-user" class="titlebar-user hidden" title="Sign out">
+      <span class="tbu-avatar" id="tbu-avatar"></span>
+      <span class="tbu-name" id="tbu-name"></span>
+      <span class="tbu-tier" id="tbu-tier"></span>
+      <span class="tbu-logout" title="Sign out">⎋</span>
+    </button>
     <div class="titlebar-controls">
       <button id="win-btn-minimize" class="titlebar-btn minimize" title="Minimize" aria-label="Minimize window">
         <svg viewBox="0 0 10 10" aria-hidden="true"><line x1="1.6" y1="5" x2="8.4" y2="5" /></svg>
@@ -65,6 +71,63 @@
   </div>
 
   <!-- LAUNCH MODE SELECTION SCREEN -->
+  <!-- STAFF LOGIN SCREEN (v2.0.0 P1) — shown after the splash; every launch of
+       the exe requires a staff sign-in. Routing after login is by tier. -->
+  <div id="login-screen" class="screen">
+    <div class="ambient-glow pink-glow"></div>
+    <div class="ambient-glow blue-glow"></div>
+    <div class="glass-slab login-card">
+      <div class="brand-header">
+        <div class="hanko-stamp">ネオ東京</div>
+        <div class="brand-logo-wrapper">
+          <svg class="brand-logo-svg" viewBox="0 0 100 100">
+            <defs>
+              <linearGradient id="login-logo-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stop-color="#ff1a75" />
+                <stop offset="50%" stop-color="#e7014e" />
+                <stop offset="100%" stop-color="#b3003b" />
+              </linearGradient>
+            </defs>
+            <circle cx="50" cy="50" r="40" stroke="url(#login-logo-grad)" stroke-width="10" fill="none" stroke-dasharray="78.776 5" stroke-dashoffset="60.332" />
+            <path d="M 50,23 L 72,70 C 58,58 50,56 50,56 C 50,56 42,58 28,70 Z" fill="url(#login-logo-grad)" />
+          </svg>
+          <div class="brand-text-col">
+            <h1 class="logo-title">NEO TOKYO</h1>
+            <p class="logo-tagline">ACCELERATING YOUR INFRA</p>
+          </div>
+        </div>
+        <p class="logo-subtitle">QUALITY CONTROL LAB SYSTEM</p>
+      </div>
+      <h2>Staff Sign-In</h2>
+      <p class="selector-desc">Enter your Neo Tokyo credentials to continue.</p>
+      <form id="login-form" class="login-form" autocomplete="off">
+        <label class="login-label" for="login-email">Email</label>
+        <input type="email" id="login-email" class="login-input" placeholder="you@neotokyo.in" autocomplete="username" spellcheck="false" required>
+        <label class="login-label" for="login-pin">PIN</label>
+        <input type="password" id="login-pin" class="login-input" inputmode="numeric" placeholder="••••••" autocomplete="current-password" required>
+        <div id="login-error" class="login-error hidden"></div>
+        <button type="submit" id="login-submit" class="primary-pink-btn login-submit-btn">Sign In</button>
+      </form>
+      <p class="login-foot">For Neo Tokyo staff only. To reset your PIN, ask the admin or use the staff portal at <strong>neoqctracker.netlify.app</strong>.</p>
+    </div>
+  </div>
+
+  <!-- TIER NOTICE — for accounts with no workspace in the desktop app (e.g. T1
+       sales, who work on the web portal). Gives them a clear message + sign-out. -->
+  <div id="tier-notice-screen" class="screen">
+    <div class="ambient-glow pink-glow"></div>
+    <div class="ambient-glow blue-glow"></div>
+    <div class="glass-slab login-card">
+      <div class="brand-header">
+        <div class="hanko-stamp">ネオ東京</div>
+        <p class="logo-subtitle" style="margin-top:8px;">QUALITY CONTROL LAB SYSTEM</p>
+      </div>
+      <h2>Welcome, <span id="tier-notice-name">staff</span></h2>
+      <p class="selector-desc" id="tier-notice-msg">Your Neo Tokyo workspace is on the web portal. Please sign in at <strong>neoqctracker.netlify.app</strong> to manage your work.</p>
+      <button id="btn-tier-logout" class="secondary-btn" style="margin-top:18px;">Sign out</button>
+    </div>
+  </div>
+
   <div id="mode-selector-screen" class="screen">
     <!-- Ambient glow backdrops -->
     <div class="ambient-glow pink-glow"></div>
@@ -2270,18 +2333,16 @@
         <span data-app-version style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; font-weight: 700; background: rgba(231, 1, 78, 0.1); color: var(--primary-pink); padding: 4px 8px; border-radius: 4px;">v1.8.4</span>
       </div>
       <div class="modal-body" style="font-size: 0.92rem; line-height: 1.6; color: var(--text-dark); max-height: 420px; overflow-y: auto; padding-right: 5px;">
-        <p style="margin-top: 0;">An update has been installed. Here are the key improvements in NeoQC <strong data-app-version>v1.8.5</strong>:</p>
+        <p style="margin-top: 0;">A major update has been installed. Here's what's new in NeoQC <strong data-app-version>v1.8.7</strong>:</p>
         <ul style="padding-left: 20px; display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px;">
-          <li><strong>Fixed: RAM sometimes read as only 32&nbsp;GB.</strong> A memory module occasionally reported no size to Windows, halving the total. Detection now cross-checks against the operating system's own memory figure and always reports the true installed amount.</li>
-          <li><strong>Fixed: invoice reader mis-filing parts.</strong> A component from the invoice could land under the wrong category (e.g. a part shown as Storage). Categorisation is rebuilt so each line is placed by its strongest evidence and is never forced into an unrelated slot — anything unclear is flagged for review instead of guessed.</li>
-          <li><strong>Full component detail on the report.</strong> Every part's make, model, part number, serial and speed is now captured directly from the machine (no third-party tools) and printed on the QC report — including RAM running below its rated speed (XMP/EXPO off), drive health, network adapters and OS build.</li>
-          <li><strong>New: glass window controls</strong> — the minimise, maximise and close buttons are redesigned with a frosted-glass look.</li>
-          <li><strong>Friendlier notifications</strong> — pop-up alerts are replaced with non-blocking on-screen toasts and confirmation dialogs that no longer freeze the window.</li>
-          <li><strong>Safer local storage</strong> — the ticket database is now written atomically with an automatic backup, and any read problem is surfaced and recovered instead of silently starting blank.</li>
+          <li><strong>New: staff sign-in.</strong> NeoQC now opens to a secure login — sign in with your Neo Tokyo email and PIN. Ask your admin for your PIN if you don't have it yet.</li>
+          <li><strong>Your role, your workspace.</strong> The app now recognises who you are and opens the right screen for your role — technicians get the Testing Client, service heads and above get the full dashboard.</li>
+          <li><strong>New staff web portal.</strong> The tracker site (neoqctracker.netlify.app) now has a staff area behind login where you can update your photo, mobile number and PIN — alongside the public "Track your build" page for customers.</li>
+          <li><strong>Foundation for what's next</strong> — this login is the groundwork for the service, inventory and workflow features coming in the v2.0 series.</li>
         </ul>
       </div>
       <div class="modal-footer" style="border-top: 1px solid var(--glass-border); padding-top: 15px; display: flex; justify-content: flex-end; margin-top: 20px;">
-        <button id="btn-close-changelog" data-app-version-label class="primary-pink-btn" style="padding: 10px 24px; font-weight: 700; font-size: 0.95rem;">Launch NeoQC v1.8.5</button>
+        <button id="btn-close-changelog" data-app-version-label class="primary-pink-btn" style="padding: 10px 24px; font-weight: 700; font-size: 0.95rem;">Launch NeoQC v1.8.7</button>
       </div>
     </div>
   </div>
