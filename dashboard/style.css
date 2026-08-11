@@ -443,11 +443,13 @@ body {
   border-radius: var(--radius);
   border: 1px solid var(--glass-border);
 }
-#sales-table {
+#sales-table,
+#ts-table {
   width: 100%;
   border-collapse: collapse;
 }
-#sales-table thead th {
+#sales-table thead th,
+#ts-table thead th {
   background: rgba(255,255,255,0.04);
   padding: 11px 14px;
   font-size: 0.75rem;
@@ -459,18 +461,23 @@ body {
   border-bottom: 1px solid var(--glass-border);
   white-space: nowrap;
 }
-#sales-table tbody tr {
+#sales-table tbody tr,
+#ts-table tbody tr {
   border-bottom: 1px solid rgba(255,255,255,0.04);
   transition: background 0.15s;
   cursor: default;
 }
-#sales-table tbody tr:last-child { border-bottom: none; }
-#sales-table tbody tr:hover { background: rgba(255,255,255,0.03); }
-#sales-table td {
+#sales-table tbody tr:last-child,
+#ts-table tbody tr:last-child { border-bottom: none; }
+#sales-table tbody tr:hover,
+#ts-table tbody tr:hover { background: rgba(255,255,255,0.03); }
+#sales-table td,
+#ts-table td {
   padding: 11px 14px;
   font-size: 0.84rem;
   vertical-align: middle;
 }
+#ts-table td:first-child { white-space: nowrap; }
 
 .cell-id {
   font-family: 'JetBrains Mono', monospace;

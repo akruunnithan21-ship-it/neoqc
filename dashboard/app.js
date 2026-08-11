@@ -96,8 +96,8 @@ function applyMenu() {
     staff.classList.remove('hidden');
     const first = (currentProfile.full_name || currentProfile.email || '?').trim();
     document.getElementById('menu-uname').textContent = first;
-    document.getElementById('menu-utier').textContent =
-      'Tier ' + currentProfile.tier + (currentProfile.designation ? ' · ' + currentProfile.designation : '');
+    // Show the designation only — the internal tier number is never shown to users.
+    document.getElementById('menu-utier').textContent = currentProfile.designation || '';
     const av = document.getElementById('menu-avatar');
     if (currentProfile.avatar_url) { av.style.backgroundImage = `url("${currentProfile.avatar_url}")`; av.textContent = ''; }
     else { av.style.backgroundImage = ''; av.textContent = first.charAt(0).toUpperCase(); }
@@ -405,7 +405,6 @@ function renderProfile() {
   document.getElementById('pf-name').textContent = p.full_name || '—';
   document.getElementById('pf-designation').textContent = p.designation || '—';
   document.getElementById('pf-email').textContent = p.email || '—';
-  document.getElementById('pf-tier').textContent = 'Tier ' + p.tier;
   document.getElementById('pf-mobile').value = p.mobile || '';
   const av = document.getElementById('pf-avatar');
   if (p.avatar_url) { av.style.backgroundImage = `url("${p.avatar_url}")`; av.textContent = ''; }
