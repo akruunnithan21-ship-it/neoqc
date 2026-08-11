@@ -1,0 +1,7 @@
+# Netlify configuration for the Neo Tokyo Kochi build-tracker website.
+# The site is the static contents of dashboard/ (no build step). This file is
+# the source of truth for continuous deployment — it overrides the dashboard UI
+# fields, so the publish directory is always dashboard/ on every git push.
+[build]
+  publish = "dashboard"
+  command = ""
