@@ -824,8 +824,23 @@
   <!-- NEW TICKET / EDIT TICKET MODAL -->
   <div id="ticket-modal" class="modal-overlay">
     <div class="glass-slab modal-card">
-      <div class="modal-header">
-        <h2 id="modal-title">Create Service Ticket</h2>
+      <div class="modal-header ticket-modal-header">
+        <div class="tmh-left">
+          <h2 id="modal-title">Create Service Ticket</h2>
+          <div class="tmh-meta">
+            <span id="tmh-customer" class="tmh-customer"></span>
+            <span id="tmh-priority" class="tmh-chip hidden"></span>
+            <span id="tmh-owner" class="tmh-chip subtle hidden"></span>
+            <span id="tmh-deadline" class="tmh-chip subtle hidden"></span>
+          </div>
+        </div>
+        <!-- The build journey, always in view while you scroll the ticket. -->
+        <div id="tmh-journey" class="tmh-journey" aria-label="Build journey">
+          <div class="tmj-step" data-stage="awaiting"><i></i><span>Parts</span></div>
+          <div class="tmj-step" data-stage="building"><i></i><span>Assembly</span></div>
+          <div class="tmj-step" data-stage="qc"><i></i><span>QC</span></div>
+          <div class="tmj-step" data-stage="completed"><i></i><span>Ready</span></div>
+        </div>
         <button id="btn-close-ticket-modal" class="close-btn">&times;</button>
       </div>
       
@@ -1078,6 +1093,17 @@
                technician must match the serial on the invoice line — and its box
                condition recorded. Sits directly below the target specs so the
                technician works top-down: what was ordered → what arrived. -->
+          <!-- Shown only while CREATING a ticket: the build-workflow sections
+               below are hidden until the ticket exists, so the create form is a
+               short focused task instead of a wall of locked panels. -->
+          <div id="new-ticket-hint" class="new-ticket-hint hidden">
+            <span class="nth-icon">✨</span>
+            <div>
+              <strong>Create the ticket first.</strong>
+              Component verification, assembly, QC and diagnostics unlock as soon as this build is saved.
+            </div>
+          </div>
+
           <div id="component-verify-section" class="form-section margin-top">
             <div class="section-header-row">
               <h3>🔍 Component Verification <span class="cv-gate-tag">First QC gate</span></h3>
@@ -2434,10 +2460,11 @@
         <span data-app-version style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; font-weight: 700; background: rgba(231, 1, 78, 0.1); color: var(--primary-pink); padding: 4px 8px; border-radius: 4px;">v1.8.4</span>
       </div>
       <div class="modal-body" style="font-size: 0.92rem; line-height: 1.6; color: var(--text-dark); max-height: 420px; overflow-y: auto; padding-right: 5px;">
-        <p style="margin-top: 0;">A major update has been installed. Here's what's new in NeoQC <strong data-app-version>v1.9.2</strong>:</p>
+        <p style="margin-top: 0;">A major update has been installed. Here's what's new in NeoQC <strong data-app-version>v1.9.3</strong>:</p>
         <ul style="padding-left: 20px; display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px;">
-          <li><strong>New: My Bench.</strong> The Testing Client now opens on a board of the builds assigned to <em>you</em> — with stage, progress and deadline at a glance — instead of a dropdown of everything. Pick one to start testing. Service heads and above still see the whole floor.</li>
-          <li><strong>Redesigned build ticket.</strong> The ticket now uses far more of the screen while keeping its glass edges, and the two short checklists sit side by side instead of stacked — denser, with much less scrolling.</li>
+          <li><strong>Redesigned build ticket.</strong> The ticket now uses far more of the screen while keeping its glass edges, with the two short checklists side by side. A new header keeps the customer, priority, owner and deadline in view, and a journey strip shows exactly where the build has reached — Parts → Assembly → QC → Ready.</li>
+          <li><strong>Creating a ticket is now a short, focused form.</strong> The verification, assembly, QC and diagnostics panels stay out of the way until the build actually exists, instead of filling the screen greyed out.</li>
+          <li><strong>New: My Bench.</strong> The Testing Client opens on a board of the builds assigned to <em>you</em> — stage, progress and deadline at a glance — instead of a dropdown of everything. Service heads and above still see the whole floor.</li>
           <li><strong>New: hover to peek.</strong> Rest on a ticket card and a summary rises up — progress, specs, technician, deadline — so you can check a build without opening it.</li>
           <li><strong>New: automatic technician assignment.</strong> Builds are now handed to whoever genuinely has room, based on what they're already working on. Nobody has to track who's free — and if everyone is at capacity, the build waits in a queue and starts by itself the moment someone finishes.</li>
           <li><strong>New: flags &amp; the notification bell.</strong> Raise a flag from any part of a build — components, assembly or QC — and it reaches the sales executive who owns that build. The bell in the top bar shows everything still open.</li>
@@ -2448,7 +2475,7 @@
         </ul>
       </div>
       <div class="modal-footer" style="border-top: 1px solid var(--glass-border); padding-top: 15px; display: flex; justify-content: flex-end; margin-top: 20px;">
-        <button id="btn-close-changelog" data-app-version-label class="primary-pink-btn" style="padding: 10px 24px; font-weight: 700; font-size: 0.95rem;">Launch NeoQC v1.9.2</button>
+        <button id="btn-close-changelog" data-app-version-label class="primary-pink-btn" style="padding: 10px 24px; font-weight: 700; font-size: 0.95rem;">Launch NeoQC v1.9.3</button>
       </div>
     </div>
   </div>

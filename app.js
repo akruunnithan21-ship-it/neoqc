@@ -2980,9 +2980,12 @@ function openTicketModal(ticketId = null) {
     deleteBtn.classList.add('hidden');
     updateModalDiagnosticsStatus();
 
-    // Set default technician
+    // Default the technician. Auto-assign is the intended default (the engine
+    // picks by live workload); only fall back to a configured default tech if
+    // the shop has explicitly set one in Settings.
     populateTechnicianDropdowns();
-    document.getElementById('form-technician').value = appState.settings.defaultTech || '';
+    document.getElementById('form-technician').value =
+      appState.settings.defaultTech || AUTO_ASSIGN_VALUE;
 
     // Auto-detect system specs if option is enabled
     if (appState.settings.autoDetectHw) {
@@ -2999,7 +3002,71 @@ function openTicketModal(ticketId = null) {
   // Show any component-compatibility disparities for the loaded specs.
   renderConfigSynergy();
 
+  // Header context + focused create-mode (must run after the branches above so
+  // it reflects the values they just loaded).
+  updateTicketModalChrome(ticketId);
+
   modal.classList.add('active');
+}
+
+/*
+  updateTicketModalChrome(ticketId)
+
+  Two jobs:
+  1. Fill the header strip — customer, priority, owner, deadline — and light up
+     the build-journey stepper, so the ticket's context stays visible while you
+     scroll a long form.
+  2. Toggle focused CREATE mode. When there is no ticket yet, the workflow
+     panels (verification, assembly, QC, diagnostics, inventory) are hidden
+     entirely rather than shown locked — creating a build becomes a short,
+     obvious task instead of a wall of greyed-out panels.
+*/
+function updateTicketModalChrome(ticketId) {
+  const modal = document.getElementById('ticket-modal');
+  if (!modal) return;
+  const isNew = !ticketId;
+  modal.classList.toggle('is-new-ticket', isNew);
+  const hint = document.getElementById('new-ticket-hint');
+  if (hint) hint.classList.toggle('hidden', !isNew);
+
+  const t = ticketId ? appState.tickets.find(x => x.id === ticketId) : null;
+  const set = (id, text, show) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.textContent = text || '';
+    el.classList.toggle('hidden', !show);
+  };
+
+  set('tmh-customer', t ? (t.customerName || '') : 'New build', true);
+
+  const b = (t && t.specs && t.specs.__build) || {};
+  const IMP_LABEL = { light: 'Light', medium: 'Medium', important: 'Important',
+                      high_value: 'High Value', exceptional: 'Exceptional' };
+  const prEl = document.getElementById('tmh-priority');
+  if (prEl) {
+    const imp = b.importance;
+    prEl.textContent = imp ? IMP_LABEL[imp] || imp : '';
+    prEl.className = 'tmh-chip prio-' + (imp || 'light') + (imp ? '' : ' hidden');
+  }
+  set('tmh-owner', b.salesExec ? '👤 ' + b.salesExec : '', !!b.salesExec);
+  set('tmh-deadline', t && t.deadline ? '📅 ' + deadlineCountdown(t.deadline) : '', !!(t && t.deadline));
+
+  // Journey stepper: mark every stage up to the current one as reached.
+  const order = ['awaiting', 'building', 'qc', 'completed'];
+  let reachedIdx = 0;
+  if (t) {
+    const buildPct = calculateBuildPercentage(t) || 0;
+    const qcPct = calculateQcPercentage(t) || 0;
+    if (t.status === 'completed') reachedIdx = 3;
+    else if (qcPct > 0 || buildPct >= 100) reachedIdx = 2;
+    else if (buildPct > 0 || t.status === 'building') reachedIdx = 1;
+    else reachedIdx = 0;
+  }
+  document.querySelectorAll('#tmh-journey .tmj-step').forEach((el, i) => {
+    el.classList.toggle('done', !!t && i < reachedIdx);
+    el.classList.toggle('current', !!t && i === reachedIdx);
+    el.classList.toggle('idle', !t);
+  });
 }
 
 function updateFormLockStates(buildPct) {

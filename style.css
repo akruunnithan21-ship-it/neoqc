@@ -1603,6 +1603,114 @@
   #ticket-modal .modal-body .form-section { padding: 16px 18px; }
   #ticket-modal .modal-body .form-section h3 { margin-bottom: 10px; }
   #ticket-modal .modal-body .panel-info-text { margin-bottom: 10px; }
+
+  /* ── Ticket header: context that stays with you ───────────────────────── */
+  .ticket-modal-header {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    flex-wrap: wrap;
+  }
+  .tmh-left { flex: 1 1 260px; min-width: 0; }
+  .tmh-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 5px; }
+  .tmh-customer {
+    font-family: 'Space Grotesk', sans-serif;
+    font-weight: 700; font-size: 0.9rem; color: var(--text-muted);
+  }
+  .tmh-chip {
+    font-size: 0.68rem; font-weight: 800; letter-spacing: 0.05em;
+    padding: 3px 10px; border-radius: 999px;
+    background: rgba(127, 127, 127, 0.14); color: var(--text-muted);
+    white-space: nowrap;
+  }
+  .tmh-chip.hidden { display: none; }
+  .tmh-chip.subtle { font-weight: 600; letter-spacing: 0; }
+  /* Priority reads at a glance — calm for routine, hot for the ones that matter. */
+  .tmh-chip.prio-light       { background: rgba(148,163,184,0.18); color: #64748b; }
+  .tmh-chip.prio-medium      { background: rgba(56,189,248,0.18);  color: #0284c7; }
+  .tmh-chip.prio-important   { background: rgba(245,158,11,0.20);  color: #b45309; }
+  .tmh-chip.prio-high_value  { background: rgba(231,1,78,0.16);    color: var(--primary-pink); }
+  .tmh-chip.prio-exceptional {
+    background: linear-gradient(120deg, var(--primary-pink), #7c3aed);
+    color: #fff; box-shadow: 0 2px 10px rgba(231,1,78,0.35);
+  }
+  body.dark-mode .tmh-chip.prio-light      { color: #cbd5e1; }
+  body.dark-mode .tmh-chip.prio-medium     { color: #7dd3fc; }
+  body.dark-mode .tmh-chip.prio-important  { color: #fbbf24; }
+
+  /* Build journey stepper */
+  .tmh-journey { display: flex; align-items: center; gap: 4px; }
+  .tmj-step { display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 58px; position: relative; }
+  .tmj-step i {
+    width: 11px; height: 11px; border-radius: 50%;
+    background: rgba(127,127,127,0.3);
+    border: 2px solid transparent;
+    transition: background 0.25s ease, box-shadow 0.25s ease, transform 0.25s ease;
+  }
+  .tmj-step span {
+    font-size: 0.6rem; letter-spacing: 0.07em; text-transform: uppercase;
+    color: var(--text-muted); font-weight: 700;
+  }
+  /* Connector line between steps */
+  .tmj-step + .tmj-step::before {
+    content: ''; position: absolute;
+    left: -50%; top: 5px; width: 100%; height: 2px;
+    background: rgba(127,127,127,0.22);
+  }
+  .tmj-step.done i { background: #22c55e; }
+  .tmj-step.done + .tmj-step::before { background: #22c55e; }
+  .tmj-step.current i {
+    background: var(--primary-pink);
+    transform: scale(1.35);
+    box-shadow: 0 0 0 4px rgba(231, 1, 78, 0.18);
+  }
+  .tmj-step.current span { color: var(--primary-pink); }
+  .tmj-step.idle i { background: rgba(127,127,127,0.22); }
+  @media (max-width: 900px) { .tmh-journey { display: none; } }
+
+  /* ── Focused CREATE mode ──────────────────────────────────────────────── */
+  #ticket-modal.is-new-ticket #component-verify-section,
+  #ticket-modal.is-new-ticket #assembly-section,
+  #ticket-modal.is-new-ticket #qc-testing-section,
+  #ticket-modal.is-new-ticket #diagnostics-section,
+  #ticket-modal.is-new-ticket #modal-inventory-section,
+  #ticket-modal.is-new-ticket .event-log-section { display: none !important; }
+
+  .new-ticket-hint {
+    display: flex; align-items: flex-start; gap: 12px;
+    padding: 14px 16px; border-radius: 14px;
+    background: linear-gradient(120deg, rgba(231,1,78,0.08), rgba(124,58,237,0.06));
+    border: 1px dashed rgba(231, 1, 78, 0.35);
+    color: var(--text-muted); font-size: 0.85rem; line-height: 1.5;
+  }
+  .new-ticket-hint.hidden { display: none; }
+  .new-ticket-hint strong { color: var(--text-dark); display: block; margin-bottom: 2px; }
+  .nth-icon { font-size: 1.1rem; flex: none; }
+
+  /* ── Section polish: a brand rail so each panel reads as its own step ─── */
+  #ticket-modal .modal-body .form-section > h3,
+  #ticket-modal .modal-body .section-header-row > h3 {
+    position: relative;
+    padding-left: 11px;
+  }
+  #ticket-modal .modal-body .form-section > h3::before,
+  #ticket-modal .modal-body .section-header-row > h3::before {
+    content: '';
+    position: absolute; left: 0; top: 50%; transform: translateY(-50%);
+    width: 3px; height: 15px; border-radius: 2px;
+    background: linear-gradient(180deg, var(--primary-pink), #7c3aed);
+  }
+
+  /* Inputs: a calmer resting state and an unmistakable focus. */
+  #ticket-modal .modal-body input[type="text"]:focus,
+  #ticket-modal .modal-body input[type="number"]:focus,
+  #ticket-modal .modal-body input[type="datetime-local"]:focus,
+  #ticket-modal .modal-body select:focus,
+  #ticket-modal .modal-body textarea:focus {
+    border-color: var(--primary-pink);
+    box-shadow: 0 0 0 3px rgba(231, 1, 78, 0.14);
+    outline: none;
+  }
   
   .modal-footer {
     padding: 16px 24px;
