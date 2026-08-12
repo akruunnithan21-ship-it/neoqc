@@ -1632,6 +1632,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   setupEventListeners();
   setupAuthListeners();
   setupFlagsAndBell();
+  setupBenchBoard();
   injectInlineIcons();
   setupSpecsAutocomplete();
   updateTimeDisplay();
@@ -1882,6 +1883,7 @@ function switchScreen(mode, selectedId = null) {
   } else if (mode === 'client') {
     document.getElementById('client-welcome-screen').classList.add('active');
     populateWelcomeTicketSelect();
+    renderBenchBoard();
     
     // Hide or show exit button depending on isMaster
     const welcomeExitBtn = document.getElementById('btn-welcome-exit');
@@ -2178,6 +2180,100 @@ function populateWelcomeTicketSelect() {
   }
 }
 
+// ══════════════════════════════════════════════════════════════════════════
+//  THE BENCH (v2.0.0 Chunk E) — the Testing Client's own board.
+//  A technician signs in and sees the builds that are actually theirs. Tickets
+//  store a SHORT technician name ("Athul") while profiles carry the full name
+//  ("Athul Sudheer"), so the two are matched on shared name tokens rather than
+//  string equality. Service heads and above see everything — they supervise.
+// ══════════════════════════════════════════════════════════════════════════
+let benchShowAll = false;
+
+function technicianMatchesProfile(techName, profile) {
+  if (!techName || !profile) return false;
+  const norm = (s) => String(s).toLowerCase().replace(/[^a-z\s]/g, ' ').split(/\s+/).filter(w => w.length > 2);
+  const a = norm(techName), b = norm(profile.full_name || '');
+  if (!a.length || !b.length) return false;
+  return a.some(w => b.includes(w));
+}
+
+function benchTicketsFor(profile) {
+  const active = (appState.tickets || []).filter(t => t && t.status !== 'completed');
+  const tier = profile ? Number(profile.tier) : 0;
+  // Supervisors (T3+) and the "show all" escape hatch see the whole floor.
+  if (benchShowAll || tier >= 3 || !profile) return active;
+  return active.filter(t => technicianMatchesProfile(t.technician, profile));
+}
+
+function renderBenchBoard() {
+  const grid = document.getElementById('bench-grid');
+  const empty = document.getElementById('bench-empty');
+  const countEl = document.getElementById('bench-count');
+  const subEl = document.getElementById('bench-subtitle');
+  if (!grid || !empty) return;
+
+  const list = benchTicketsFor(currentProfile).sort((a, b) =>
+    new Date(a.deadline || 0) - new Date(b.deadline || 0));
+  if (countEl) countEl.textContent = String(list.length);
+  if (subEl) {
+    const tier = currentProfile ? Number(currentProfile.tier) : 0;
+    subEl.textContent = (benchShowAll || tier >= 3)
+      ? 'All active builds on the floor.'
+      : (currentProfile ? `Builds assigned to ${(currentProfile.full_name || '').split(' ')[0]}.` : 'Builds assigned to you.');
+  }
+
+  empty.classList.toggle('hidden', list.length > 0);
+  grid.innerHTML = list.map(t => {
+    const b = (t.specs && t.specs.__build) || {};
+    const specs = t.specs || {};
+    const buildPct = Math.round(calculateBuildPercentage(t) || 0);
+    const qcPct = Math.round(calculateQcPercentage(t) || 0);
+    const urgent = checkIsUrgent(t.deadline);
+    const stage = t.queued ? 'Queued'
+      : buildPct < 100 ? 'Assembly'
+      : qcPct < 100 ? 'QC & Testing' : 'Ready';
+    return `<button type="button" class="bench-card ${urgent ? 'urgent' : ''}" data-ticket="${escapeHtmlLite(t.id)}">
+      <div class="bench-card-top">
+        <span class="bench-stage">${escapeHtmlLite(stage)}</span>
+        <span class="bench-cid">#${escapeHtmlLite((t.id || '').slice(-6))}</span>
+      </div>
+      <div class="bench-cust">${escapeHtmlLite(t.customerName || '')}</div>
+      <div class="bench-specline">${escapeHtmlLite([specs.cpu, specs.gpu].filter(Boolean).join('  ·  ') || 'Specs not set')}</div>
+      <div class="bench-bars">
+        <div class="bench-bar"><span>Build</span><div class="bench-track"><i style="width:${buildPct}%"></i></div><b>${buildPct}%</b></div>
+        <div class="bench-bar"><span>QC</span><div class="bench-track"><i class="qc" style="width:${qcPct}%"></i></div><b>${qcPct}%</b></div>
+      </div>
+      <div class="bench-card-foot">
+        <span class="bench-deadline ${urgent ? 'urgent' : ''}">📅 ${escapeHtmlLite(deadlineCountdown(t.deadline) || formatDateShort(t.deadline))}</span>
+        <span class="bench-go">Open bench →</span>
+      </div>
+    </button>`;
+  }).join('');
+}
+
+function setupBenchBoard() {
+  const grid = document.getElementById('bench-grid');
+  if (grid) grid.addEventListener('click', (e) => {
+    const card = e.target.closest('.bench-card');
+    if (!card) return;
+    const id = card.getAttribute('data-ticket');
+    if (!id) return;
+    // Keep the legacy select in step, then open the console for that build.
+    const sel = document.getElementById('welcome-ticket-select');
+    if (sel) sel.value = id;
+    switchScreen('client-console', id);
+  });
+  const refresh = document.getElementById('btn-bench-refresh');
+  if (refresh) refresh.addEventListener('click', async () => {
+    refresh.disabled = true;
+    try { await syncFromCloud(); } catch (e) { console.warn('bench refresh failed:', e && e.message); }
+    renderBenchBoard();
+    refresh.disabled = false;
+  });
+  const showAll = document.getElementById('btn-bench-showall');
+  if (showAll) showAll.addEventListener('click', () => { benchShowAll = true; renderBenchBoard(); });
+}
+
 function formatDateShort(dateStr) {
   if (!dateStr) return '';
   const d = new Date(dateStr);
@@ -2450,10 +2546,9 @@ function calculateQcPercentage(t) {
 //  Rest on a ticket card and a summary rises into view — the Instagram
 //  press-and-hold idea: you get a proper look WITHOUT entering the ticket.
 //  Moving the pointer away dismisses it; clicking still opens the ticket.
-//  TUNING: PEEK_DELAY_MS is the hold time. Set to the 10s you asked for; drop
-//  it to ~700ms if that feels sluggish in daily use (one-line change).
+//  TUNING: PEEK_DELAY_MS is the hold time before the preview appears.
 // ══════════════════════════════════════════════════════════════════════════
-const PEEK_DELAY_MS = 10000;
+const PEEK_DELAY_MS = 700;
 let peekTimer = null;
 let peekEl = null;
 

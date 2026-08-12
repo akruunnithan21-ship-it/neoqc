@@ -4529,6 +4529,110 @@ body.dark-mode .card-type-badge {
 .notif-actions { display: flex; gap: 12px; margin-top: 7px; }
 
 /* ==========================================================================
+   v2.0.0 Chunk E — THE BENCH (Testing Client board)
+   Deliberately a sibling of the admin dashboard, not a twin: same glass
+   language and card rhythm, but a cyan identity instead of the admin pink, so
+   a technician always knows which surface they're on at a glance.
+   ========================================================================== */
+:root { --bench-accent: #22d3ee; --bench-accent-2: #0891b2; }
+
+.bench-container {
+  max-width: 1500px;
+  margin: 0 auto;
+  padding: 4px 20px 40px;
+}
+.bench-head {
+  display: flex; align-items: flex-end; justify-content: space-between;
+  gap: 16px; flex-wrap: wrap; margin-bottom: 18px;
+}
+.bench-title {
+  font-family: 'Syncopate', sans-serif;
+  font-size: 1.15rem; letter-spacing: 0.06em;
+  color: var(--text-dark); margin: 0;
+}
+.bench-sub { color: var(--text-muted); font-size: 0.84rem; margin-top: 4px; }
+.bench-head-right { display: flex; align-items: center; gap: 14px; }
+.bench-stat {
+  display: flex; flex-direction: column; align-items: center;
+  padding: 6px 16px; border-radius: 12px;
+  background: rgba(34, 211, 238, 0.1);
+  border: 1px solid rgba(34, 211, 238, 0.28);
+}
+.bench-stat span { font-family: 'JetBrains Mono', monospace; font-size: 1.25rem; font-weight: 800; color: var(--bench-accent); line-height: 1; }
+.bench-stat small { font-size: 0.58rem; letter-spacing: 0.12em; color: var(--text-muted); margin-top: 3px; }
+
+.bench-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(310px, 1fr));
+  gap: 16px;
+}
+
+.bench-card {
+  text-align: left;
+  display: flex; flex-direction: column; gap: 10px;
+  padding: 16px 18px;
+  border-radius: 16px;
+  cursor: pointer;
+  font-family: inherit;
+  color: var(--text-dark);
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  border-top: 3px solid var(--bench-accent);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  box-shadow: 0 6px 20px rgba(15, 23, 42, 0.06);
+  transition: transform 0.2s cubic-bezier(0.2, 0.9, 0.25, 1), box-shadow 0.2s ease, border-color 0.2s ease;
+}
+.bench-card:hover {
+  transform: translateY(-3px);
+  border-color: rgba(34, 211, 238, 0.5);
+  box-shadow: 0 14px 34px rgba(8, 145, 178, 0.22);
+}
+.bench-card.urgent { border-top-color: var(--status-urgent); }
+
+.bench-card-top { display: flex; align-items: center; justify-content: space-between; }
+.bench-stage {
+  font-size: 0.62rem; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase;
+  color: var(--bench-accent-2);
+  background: rgba(34, 211, 238, 0.14);
+  border-radius: 999px; padding: 3px 10px;
+}
+body.dark-mode .bench-stage { color: var(--bench-accent); }
+.bench-cid { font-family: 'JetBrains Mono', monospace; font-size: 0.7rem; color: var(--text-muted); }
+.bench-cust { font-family: 'Space Grotesk', sans-serif; font-weight: 800; font-size: 1.02rem; }
+.bench-specline {
+  font-size: 0.75rem; color: var(--text-muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+.bench-bars { display: flex; flex-direction: column; gap: 5px; }
+.bench-bar { display: flex; align-items: center; gap: 8px; font-size: 0.68rem; color: var(--text-muted); }
+.bench-bar span { width: 40px; flex: none; }
+.bench-bar b { width: 34px; text-align: right; font-family: 'JetBrains Mono', monospace; color: var(--text-dark); }
+.bench-track { flex: 1; height: 5px; border-radius: 99px; background: rgba(127,127,127,0.22); overflow: hidden; }
+.bench-track i { display: block; height: 100%; border-radius: 99px; background: linear-gradient(90deg, var(--bench-accent), var(--bench-accent-2)); }
+.bench-track i.qc { background: linear-gradient(90deg, #a78bfa, #7c3aed); }
+
+.bench-card-foot {
+  display: flex; align-items: center; justify-content: space-between;
+  padding-top: 9px; border-top: 1px solid var(--glass-border);
+}
+.bench-deadline { font-family: 'JetBrains Mono', monospace; font-size: 0.72rem; color: var(--text-muted); }
+.bench-deadline.urgent { color: var(--status-urgent); font-weight: 700; }
+.bench-go { font-size: 0.72rem; font-weight: 700; color: var(--bench-accent-2); }
+body.dark-mode .bench-go { color: var(--bench-accent); }
+
+.bench-empty {
+  text-align: center; padding: 54px 20px;
+  border: 1px dashed var(--glass-border); border-radius: 18px;
+  color: var(--text-muted);
+}
+.bench-empty.hidden { display: none; }
+.bench-empty-icon { font-size: 2.4rem; margin-bottom: 10px; }
+.bench-empty h3 { color: var(--text-dark); margin-bottom: 6px; font-size: 1rem; }
+.bench-empty p { font-size: 0.85rem; max-width: 380px; margin: 0 auto 16px; line-height: 1.5; }
+
+/* ==========================================================================
    v2.0.0 Chunk D — hover-to-peek ticket preview
    A quick look at a build without entering it. Fixed-position so it is never
    clipped by the card grid; pointer-events:none so it can't steal the click.

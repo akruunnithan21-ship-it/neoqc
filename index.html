@@ -176,41 +176,47 @@
       <div class="nav-brand">
         <button id="btn-welcome-show-settings" class="hamburger-btn" title="Open Settings Sidebar">☰</button>
         <svg class="brand-logo-svg" viewBox="0 0 100 100" style="width: 22px; height: 22px; vertical-align: middle; margin-right: 6px; color: var(--primary-pink);"><circle cx="50" cy="50" r="40" stroke="currentColor" stroke-width="10" fill="none" stroke-dasharray="78.776 5" stroke-dashoffset="60.332" /><path d="M 50,23 L 72,70 C 58,58 50,56 50,56 C 50,56 42,58 28,70 Z" fill="currentColor" /></svg>
-        <span class="nav-title">NEO TOKYO // CLIENT PORTAL</span>
+        <span class="nav-title">NEO TOKYO // TESTING CLIENT</span>
       </div>
       <div class="nav-controls">
         <button id="btn-welcome-exit" class="secondary-btn text-crimson">🚪 Switch Mode</button>
       </div>
     </header>
 
-    <div class="mode-container" style="display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: calc(100vh - 120px); padding: 20px;">
-      <div class="glass-slab welcome-card-box" style="max-width: 650px; width: 100%; text-align: center; padding: 40px; border-radius: 20px; box-shadow: var(--glass-shadow);">
-        <svg viewBox="0 0 100 100" style="width: 70px; height: 70px; fill: none; stroke: var(--primary-pink); stroke-width: 8; margin-bottom: 20px; display: inline-block;"><circle cx="50" cy="50" r="40" stroke="var(--primary-pink)" stroke-width="8" fill="none" stroke-dasharray="78.776 5" stroke-dashoffset="60.332" /><path d="M 50,23 L 72,70 C 58,58 50,56 50,56 C 50,56 42,58 28,70 Z" fill="var(--primary-pink)" /></svg>
-        <h1 style="font-family: 'Syncopate', sans-serif; font-weight: 700; letter-spacing: 0.05em; margin-bottom: 8px;">NEO TOKYO</h1>
-        <p class="subtitle" style="color: var(--text-muted); margin-bottom: 30px; font-size: 0.95rem; text-transform: uppercase; letter-spacing: 0.1em;">QC & Diagnostics Portal</p>
-        
-        <div class="form-group" style="text-align: left; margin-bottom: 24px;">
-          <label for="welcome-ticket-select" style="font-weight: 700; margin-bottom: 8px; display: block; color: var(--text-dark);">Select Build / Service Ticket to Test:</label>
-          <select id="welcome-ticket-select" class="large-select" style="width: 100%; padding: 12px; border-radius: 8px; border: 1px solid var(--glass-border); background: var(--glass-bg); color: var(--text-dark); outline: none;">
-            <option value="">-- Choose Active Ticket --</option>
-          </select>
+    <!-- v2.0.0 Chunk E — the bench board. A technician signs in and sees the
+         builds that are actually theirs, not a dropdown of everything. Shares
+         the dashboard's language but wears its own cyan identity so nobody
+         confuses the bench with the admin floor view. -->
+    <main class="bench-container">
+      <section class="bench-head">
+        <div>
+          <h2 class="bench-title">My Bench</h2>
+          <p class="bench-sub" id="bench-subtitle">Builds assigned to you.</p>
         </div>
-
-        <!-- Spec preview banner -->
-        <div id="welcome-spec-preview" class="glass-slab hidden" style="padding: 16px; border-radius: 12px; text-align: left; margin-bottom: 24px; border: 1px dashed var(--primary-pink);">
-          <h4 style="color: var(--primary-pink); margin-bottom: 8px; font-size: 0.85rem; text-transform: uppercase;">Ticket Specifications</h4>
-          <div style="font-size: 0.85rem; line-height: 1.5; color: var(--text-dark);">
-            <div><strong>CPU:</strong> <span id="w-spec-cpu">--</span></div>
-            <div><strong>Integrated GPU (iGPU):</strong> <span id="w-spec-igpu">--</span></div>
-            <div><strong>Discrete GPU (dGPU):</strong> <span id="w-spec-gpu">--</span></div>
-            <div><strong>RAM:</strong> <span id="w-spec-ram">--</span></div>
-            <div><strong>SSD:</strong> <span id="w-spec-storage">--</span></div>
-          </div>
+        <div class="bench-head-right">
+          <div class="bench-stat"><span id="bench-count">0</span><small>ASSIGNED</small></div>
+          <button type="button" id="btn-bench-refresh" class="secondary-btn">↻ Refresh</button>
         </div>
+      </section>
 
-        <button id="btn-welcome-launch" class="primary-pink-btn large-btn" style="width: 100%; padding: 14px; font-size: 1.05rem;" disabled>🔌 Launch Testing Console</button>
+      <div id="bench-grid" class="bench-grid"></div>
+
+      <div id="bench-empty" class="bench-empty hidden">
+        <div class="bench-empty-icon">🧰</div>
+        <h3>No builds on your bench</h3>
+        <p>When a build is assigned to you it appears here automatically. Check with the coordinator if you're expecting one.</p>
+        <button type="button" id="btn-bench-showall" class="secondary-btn">Show all active builds</button>
       </div>
-    </div>
+
+      <!-- Legacy control kept (hidden): existing code reads the chosen ticket
+           from here, and the board writes the selection into it. -->
+      <select id="welcome-ticket-select" class="hidden"><option value="">-- Choose Active Ticket --</option></select>
+      <div id="welcome-spec-preview" class="hidden">
+        <span id="w-spec-cpu"></span><span id="w-spec-igpu"></span><span id="w-spec-gpu"></span>
+        <span id="w-spec-ram"></span><span id="w-spec-storage"></span>
+      </div>
+      <button id="btn-welcome-launch" class="hidden" disabled>Launch</button>
+    </main>
   </div>
 
   <!-- STAFF SYSTEM SCREEN -->
@@ -2428,8 +2434,9 @@
         <span data-app-version style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; font-weight: 700; background: rgba(231, 1, 78, 0.1); color: var(--primary-pink); padding: 4px 8px; border-radius: 4px;">v1.8.4</span>
       </div>
       <div class="modal-body" style="font-size: 0.92rem; line-height: 1.6; color: var(--text-dark); max-height: 420px; overflow-y: auto; padding-right: 5px;">
-        <p style="margin-top: 0;">A major update has been installed. Here's what's new in NeoQC <strong data-app-version>v1.9.1</strong>:</p>
+        <p style="margin-top: 0;">A major update has been installed. Here's what's new in NeoQC <strong data-app-version>v1.9.2</strong>:</p>
         <ul style="padding-left: 20px; display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px;">
+          <li><strong>New: My Bench.</strong> The Testing Client now opens on a board of the builds assigned to <em>you</em> — with stage, progress and deadline at a glance — instead of a dropdown of everything. Pick one to start testing. Service heads and above still see the whole floor.</li>
           <li><strong>Redesigned build ticket.</strong> The ticket now uses far more of the screen while keeping its glass edges, and the two short checklists sit side by side instead of stacked — denser, with much less scrolling.</li>
           <li><strong>New: hover to peek.</strong> Rest on a ticket card and a summary rises up — progress, specs, technician, deadline — so you can check a build without opening it.</li>
           <li><strong>New: automatic technician assignment.</strong> Builds are now handed to whoever genuinely has room, based on what they're already working on. Nobody has to track who's free — and if everyone is at capacity, the build waits in a queue and starts by itself the moment someone finishes.</li>
@@ -2441,7 +2448,7 @@
         </ul>
       </div>
       <div class="modal-footer" style="border-top: 1px solid var(--glass-border); padding-top: 15px; display: flex; justify-content: flex-end; margin-top: 20px;">
-        <button id="btn-close-changelog" data-app-version-label class="primary-pink-btn" style="padding: 10px 24px; font-weight: 700; font-size: 0.95rem;">Launch NeoQC v1.9.1</button>
+        <button id="btn-close-changelog" data-app-version-label class="primary-pink-btn" style="padding: 10px 24px; font-weight: 700; font-size: 0.95rem;">Launch NeoQC v1.9.2</button>
       </div>
     </div>
   </div>
