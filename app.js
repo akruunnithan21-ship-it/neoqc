@@ -2355,6 +2355,7 @@ function renderDashboard() {
       `;
 
       card.addEventListener('click', () => openTicketModal(t.id));
+      attachTicketPeek(card, t);
       grid.appendChild(card);
     });
   }
@@ -2443,6 +2444,87 @@ function calculateQcPercentage(t) {
   });
   return Math.round((count / qcKeys.length) * 100);
 }
+
+// ══════════════════════════════════════════════════════════════════════════
+//  HOVER-TO-PEEK (v2.0.0 Chunk D)
+//  Rest on a ticket card and a summary rises into view — the Instagram
+//  press-and-hold idea: you get a proper look WITHOUT entering the ticket.
+//  Moving the pointer away dismisses it; clicking still opens the ticket.
+//  TUNING: PEEK_DELAY_MS is the hold time. Set to the 10s you asked for; drop
+//  it to ~700ms if that feels sluggish in daily use (one-line change).
+// ══════════════════════════════════════════════════════════════════════════
+const PEEK_DELAY_MS = 10000;
+let peekTimer = null;
+let peekEl = null;
+
+function closeTicketPeek() {
+  if (peekTimer) { clearTimeout(peekTimer); peekTimer = null; }
+  if (peekEl) { peekEl.remove(); peekEl = null; }
+}
+
+function showTicketPeek(card, t) {
+  closeTicketPeek();
+  const b = (t.specs && t.specs.__build) || {};
+  const v = (t.specs && t.specs.__verify) || {};
+  const specs = t.specs || {};
+  const pct = (n) => Math.max(0, Math.min(100, Math.round(n || 0)));
+  const buildPct = pct(calculateBuildPercentage(t));
+  const qcPct = pct(calculateQcPercentage(t));
+  const row = (label, value) => value
+    ? `<div class="peek-row"><span>${escapeHtmlLite(label)}</span><strong>${escapeHtmlLite(value)}</strong></div>` : '';
+
+  const el = document.createElement('div');
+  el.className = 'ticket-peek';
+  el.innerHTML =
+    `<div class="peek-head">
+       <span class="peek-name">${escapeHtmlLite(t.customerName || '')}</span>
+       <span class="peek-id">#${escapeHtmlLite((t.id || '').slice(-6))}</span>
+     </div>
+     <div class="peek-bars">
+       <div class="peek-bar"><span>Assembly</span><div class="peek-track"><i style="width:${buildPct}%"></i></div><b>${buildPct}%</b></div>
+       <div class="peek-bar"><span>QC</span><div class="peek-track"><i class="qc" style="width:${qcPct}%"></i></div><b>${qcPct}%</b></div>
+     </div>
+     <div class="peek-specs">
+       ${row('CPU', specs.cpu)}
+       ${row('GPU', specs.gpu)}
+       ${row('RAM', specs.ram)}
+       ${row('Storage', specs.storage)}
+     </div>
+     <div class="peek-foot">
+       ${row('Technician', t.queued ? 'Waiting for a technician' : t.technician)}
+       ${row('Sales', b.salesExec)}
+       ${row('Deadline', formatDateShort(t.deadline) + ' · ' + deadlineCountdown(t.deadline))}
+       ${v.summary && v.summary.scanned ? row('Serials verified', v.summary.matched + ' / ' + v.summary.scanned) : ''}
+     </div>
+     <div class="peek-hint">Click to open the full ticket</div>`;
+
+  document.body.appendChild(el);
+  peekEl = el;
+
+  // Position beside the card, flipping/clamping so it never leaves the window.
+  const r = card.getBoundingClientRect();
+  const pw = el.offsetWidth, ph = el.offsetHeight;
+  let left = r.right + 12;
+  if (left + pw > window.innerWidth - 8) left = r.left - pw - 12;
+  if (left < 8) left = Math.max(8, (window.innerWidth - pw) / 2);
+  let top = r.top;
+  if (top + ph > window.innerHeight - 8) top = Math.max(8, window.innerHeight - ph - 8);
+  el.style.left = left + 'px';
+  el.style.top = top + 'px';
+  requestAnimationFrame(() => el.classList.add('show'));
+}
+
+function attachTicketPeek(card, t) {
+  card.addEventListener('mouseenter', () => {
+    if (peekTimer) clearTimeout(peekTimer);
+    peekTimer = setTimeout(() => showTicketPeek(card, t), PEEK_DELAY_MS);
+  });
+  card.addEventListener('mouseleave', closeTicketPeek);
+  // Any click, scroll or key dismisses it — it must never linger or block work.
+  card.addEventListener('click', closeTicketPeek);
+}
+document.addEventListener('scroll', closeTicketPeek, true);
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeTicketPeek(); });
 
 // Short, human countdown for the prominent deadline pill on ticket cards.
 function deadlineCountdown(deadlineStr) {
