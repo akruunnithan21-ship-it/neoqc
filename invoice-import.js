@@ -171,6 +171,22 @@
   // Weighted keyword score for one (line, category): explicit STRONG nouns
   // count 3×, broad model/brand patterns 1×. A decisive noun (score >= 3)
   // therefore outranks any pile-up of incidental model-token overlaps.
+  // Serial number printed on an invoice line. Indian retailer invoices label it
+  // "S/N", "Serial No", "SL No", "IMEI/Serial" etc., usually followed by a long
+  // alphanumeric run. We only accept a labelled serial — an unlabelled code is
+  // far too easy to confuse with an HSN code, a part number or a quantity.
+  var SERIAL_LABEL_RE = /\b(?:s\s*\/?\s*n|serial(?:\s*(?:no|number|#))?|sl\s*no)\b\s*[:.#-]?\s*([A-Za-z0-9][A-Za-z0-9\-\/]{5,})/i;
+
+  function extractSerial(line) {
+    if (!line) return null;
+    var m = String(line).match(SERIAL_LABEL_RE);
+    if (!m) return null;
+    var s = (m[1] || '').trim().replace(/[.,;]+$/, '');
+    // Reject pure-digit runs that are really HSN/SAC codes (6-9 digits).
+    if (/^\d{6,9}$/.test(s)) return null;
+    return s.length >= 6 ? s : null;
+  }
+
   function keywordScore(line, category) {
     var strong = STRONG_HINTS[category] || [];
     var model = CATEGORY_HINTS[category] || [];
@@ -310,7 +326,10 @@
         priceSource: invoicePrice != null ? 'invoice' : 'none',
         confidence: Math.min(1, 0.55 + chosenScore * 0.1),
         status: status,
-        category: chosen
+        category: chosen,
+        // Serial printed on this invoice line (null when the invoice doesn't
+        // carry one) — the technician's scan is matched against this.
+        serial: extractSerial(info.row.orig) || extractSerial(info.row.text)
       };
     });
 
@@ -335,6 +354,7 @@
     _cleanInvoiceName: cleanInvoiceName,
     _keywordScore: keywordScore,
     _rankCategories: rankCategories,
+    extractSerial: extractSerial,
     ALL_CATEGORIES: ALL_CATEGORIES
   };
 

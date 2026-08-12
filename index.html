@@ -1051,11 +1051,40 @@
 
           </div>
 
+          <!-- ══ COMPONENT VERIFICATION (v2.0.0 Chunk B) ══
+               The FIRST QC gate: every component that arrived in the build room
+               is checked against the customer's invoice — serial scanned by the
+               technician must match the serial on the invoice line — and its box
+               condition recorded. Sits directly below the target specs so the
+               technician works top-down: what was ordered → what arrived. -->
+          <div id="component-verify-section" class="form-section margin-top">
+            <div class="section-header-row">
+              <h3>🔍 Component Verification <span class="cv-gate-tag">First QC gate</span></h3>
+              <span id="cv-summary-badge" class="badge">0 / 0 verified</span>
+            </div>
+            <p class="panel-info-text">
+              Scan each component's serial as you unbox it. It's matched against the serial on the invoice line.
+              Record the box condition too — anything other than a clean arrival is flagged on the QC report.
+            </p>
+            <div class="cv-legend">
+              <span><i class="cv-dot ok"></i> Matches invoice</span>
+              <span><i class="cv-dot warn"></i> No invoice serial — scan recorded</span>
+              <span><i class="cv-dot bad"></i> Mismatch</span>
+              <span><i class="cv-dot idle"></i> Not scanned yet</span>
+            </div>
+            <div id="cv-rows" class="cv-rows"><!-- built by renderComponentVerify() --></div>
+            <div id="cv-gate-note" class="cv-gate-note"></div>
+          </div>
+
           <!-- STEP 1: PC ASSEMBLY (BUILD PHASE) -->
           <div class="form-section margin-top">
             <div class="section-header-row">
               <h3>🛠️ Step 1: PC Assembly Progress</h3>
-              <span id="build-status-badge" class="badge">0% Complete</span>
+              <div class="asm-head-right">
+                <span id="build-timer-display" class="build-timer" title="Time spent building">—</span>
+                <button type="button" id="btn-build-timer" class="secondary-btn asm-timer-btn">▶ Start Build</button>
+                <span id="build-status-badge" class="badge">0% Complete</span>
+              </div>
             </div>
             <div class="checkbox-grid">
               <label class="checkbox-label">
@@ -1356,35 +1385,15 @@
 
 
 
-          <!-- SERIAL NUMBERS & INVOICE REFERENCE -->
-          <div id="serials-section" class="form-section margin-top locked">
-            <div class="locked-overlay"></div>
-            <h3>🔍 Component Serials & Invoice Cross-Reference</h3>
-            <p class="panel-info-text">Double-click fields to toggle barcode scan mode. Red borders warn about duplicates.</p>
-            <div class="form-grid-2">
-              <div class="form-group">
-                <label for="serial-motherboard">Motherboard Serial</label>
-                <input type="text" id="serial-motherboard" placeholder="Scan or type serial number" class="serial-field">
-              </div>
-              <div class="form-group">
-                <label for="serial-ram">RAM Serial</label>
-                <input type="text" id="serial-ram" placeholder="Scan or type serial number" class="serial-field">
-              </div>
-            </div>
-            <div class="form-grid-2 margin-top">
-              <div class="form-group">
-                <label for="serial-gpu">Graphics Card Serial</label>
-                <input type="text" id="serial-gpu" placeholder="Scan or type serial number" class="serial-field">
-              </div>
-              <div class="form-group">
-                <label for="serial-ssd">SSD Serial</label>
-                <input type="text" id="serial-ssd" placeholder="Scan or type serial number" class="serial-field">
-              </div>
-            </div>
-            <div class="form-group margin-top">
-              <label for="serial-cabinet">Cabinet Serial / Box Barcode</label>
-              <input type="text" id="serial-cabinet" placeholder="Scan or type serial number" class="serial-field">
-            </div>
+          <!-- Legacy serial inputs — the visible scan fields now live in the
+               Component Verification section above (kept as hidden mirrors so
+               every existing save/load/report path keeps working unchanged). -->
+          <div id="serials-section" class="hidden">
+            <input type="text" id="serial-motherboard" class="serial-field">
+            <input type="text" id="serial-ram" class="serial-field">
+            <input type="text" id="serial-gpu" class="serial-field">
+            <input type="text" id="serial-ssd" class="serial-field">
+            <input type="text" id="serial-cabinet" class="serial-field">
           </div>
         </div>
 
@@ -2369,17 +2378,18 @@
         <span data-app-version style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; font-weight: 700; background: rgba(231, 1, 78, 0.1); color: var(--primary-pink); padding: 4px 8px; border-radius: 4px;">v1.8.4</span>
       </div>
       <div class="modal-body" style="font-size: 0.92rem; line-height: 1.6; color: var(--text-dark); max-height: 420px; overflow-y: auto; padding-right: 5px;">
-        <p style="margin-top: 0;">A major update has been installed. Here's what's new in NeoQC <strong data-app-version>v1.8.8</strong>:</p>
+        <p style="margin-top: 0;">A major update has been installed. Here's what's new in NeoQC <strong data-app-version>v1.8.9</strong>:</p>
         <ul style="padding-left: 20px; display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px;">
-          <li><strong>Every build has an owner.</strong> A build ticket now records the <strong>sales executive who closed the deal</strong> — the build is theirs, and updates flow back to them.</li>
-          <li><strong>Build priority.</strong> Each ticket gets a priority (Light → Exceptional) that auto-sets from the build value and can be adjusted — used to route work behind the scenes.</li>
-          <li><strong>Clearer dashboard.</strong> Renamed to <strong>Admin Dashboard</strong> with a <strong>Ticket Progress / Status</strong> board and a prominent deadline countdown on every card.</li>
-          <li><strong>New: Extreme stress mode.</strong> A 1–2 day endurance soak for high-value builds, alongside Throttle and Stability.</li>
-          <li><em>This is a staged test build on the road to v2.0 — more of the ticket redesign is coming next.</em></li>
+          <li><strong>New: Component Verification — the first QC gate.</strong> Scan each part's serial as you unbox it; it's matched against the serial printed on the customer's invoice. Mismatches are called out immediately, right below the target specs.</li>
+          <li><strong>Box condition on arrival.</strong> Record how each component arrived — sealed, open, box damaged, minor mark, or DOA — so anything questionable is on record from day one.</li>
+          <li><strong>New: build timer.</strong> Start the clock when assembly begins and finish once every step is ticked, so we can tell the customer exactly how long their PC took to craft. Finish is only available after the full checklist is complete.</li>
+          <li><strong>Every build has an owner</strong> — the sales executive who closed the deal — plus a build priority (Light → Exceptional) that auto-sets from the build value.</li>
+          <li><strong>Clearer dashboard</strong> (Admin Dashboard · Ticket Progress / Status), prominent deadline countdowns, and a new <strong>Extreme</strong> stress mode (1–2 day soak).</li>
+          <li><em>Staged test build on the road to v2.0 — flags, notifications and auto-assignment are coming next.</em></li>
         </ul>
       </div>
       <div class="modal-footer" style="border-top: 1px solid var(--glass-border); padding-top: 15px; display: flex; justify-content: flex-end; margin-top: 20px;">
-        <button id="btn-close-changelog" data-app-version-label class="primary-pink-btn" style="padding: 10px 24px; font-weight: 700; font-size: 0.95rem;">Launch NeoQC v1.8.8</button>
+        <button id="btn-close-changelog" data-app-version-label class="primary-pink-btn" style="padding: 10px 24px; font-weight: 700; font-size: 0.95rem;">Launch NeoQC v1.8.9</button>
       </div>
     </div>
   </div>

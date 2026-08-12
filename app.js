@@ -168,6 +168,245 @@ async function populateSalesExecs(selected) {
   if (cur) sel.value = cur;
 }
 
+// ══ COMPONENT VERIFICATION (v2.0.0 Chunk B) ═══════════════════════════════
+// The first QC gate. For each component the technician scans the serial off the
+// physical box; we compare it to the serial captured from that component's
+// invoice line and record the box condition. Everything is stored in
+// specs.__verify (JSONB) so cross-machine sync carries it with no schema change.
+const CV_COMPONENTS = [
+  { key: 'motherboard', label: 'Motherboard', specField: 'form-spec-mobo',         legacy: 'serial-motherboard' },
+  { key: 'cpu',         label: 'Processor',   specField: 'form-spec-cpu',          legacy: null },
+  { key: 'gpu',         label: 'Graphics Card', specField: 'form-spec-gpu',        legacy: 'serial-gpu' },
+  { key: 'ram',         label: 'Memory (RAM)', specField: 'form-spec-ram',         legacy: 'serial-ram' },
+  { key: 'storage',     label: 'Storage',     specField: 'form-spec-storage',      legacy: 'serial-ssd' },
+  { key: 'psu',         label: 'Power Supply', specField: 'form-spec-psu',         legacy: null },
+  { key: 'cooler',      label: 'Cooler',      specField: 'form-spec-cooler-model', legacy: null },
+  { key: 'case',        label: 'Cabinet',     specField: 'form-spec-case',         legacy: 'serial-cabinet' }
+];
+
+// Box condition on arrival — short labels, honest meanings.
+const BOX_STATUSES = [
+  { v: '',            t: '— Box condition —' },
+  { v: 'sealed',      t: 'Sealed box' },
+  { v: 'open',        t: 'Open box' },
+  { v: 'box_damaged', t: 'Box damaged · component OK' },
+  { v: 'minor_mark',  t: 'Minor mark · works fine' },
+  { v: 'doa',         t: 'Damaged on arrival (DOA)' }
+];
+
+// Serials read off the invoice, per category: { cpu: 'ABC123', ... }
+let invoiceSerials = {};
+// Technician scans + box status: { cpu: { scan, box }, ... }
+let cvState = {};
+
+// Serials differ cosmetically between print and scan (spaces, dashes, case).
+function normSerial(s) { return String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, ''); }
+
+function cvStatusFor(key) {
+  const st = cvState[key] || {};
+  const scan = normSerial(st.scan);
+  const inv = normSerial(invoiceSerials[key]);
+  if (!scan) return 'idle';
+  if (!inv) return 'warn';           // nothing on the invoice to compare against
+  return scan === inv ? 'ok' : 'bad';
+}
+
+function renderComponentVerify() {
+  const wrap = document.getElementById('cv-rows');
+  if (!wrap) return;
+  const supplied = (typeof customerSuppliedSet !== 'undefined' && customerSuppliedSet) ? customerSuppliedSet : new Set();
+  const awaiting = new Set((awaitingComponentsList || []).map(a => a.category));
+
+  let html = '', total = 0, done = 0;
+  CV_COMPONENTS.forEach(c => {
+    const specEl = document.getElementById(c.specField);
+    const specName = specEl ? (specEl.value || '').trim() : '';
+    if (!specName) return;                       // only show components on this build
+    total++;
+    const st = cvState[c.key] || {};
+    const status = cvStatusFor(c.key);
+    if (status === 'ok' || status === 'warn') done++;
+    const isAwaiting = awaiting.has(c.key);
+    const isSupplied = supplied.has(c.key);
+    const inv = invoiceSerials[c.key];
+    html += `
+      <div class="cv-row ${status}" data-key="${c.key}">
+        <div class="cv-main">
+          <div class="cv-cat">${escapeHtmlLite(c.label)}
+            ${isAwaiting ? '<span class="cv-chip await">⏳ Awaiting</span>' : ''}
+            ${isSupplied ? '<span class="cv-chip cust">♻ Customer part</span>' : ''}
+          </div>
+          <div class="cv-name" title="${escapeHtmlLite(specName)}">${escapeHtmlLite(specName)}</div>
+        </div>
+        <div class="cv-serials">
+          <div class="cv-invoice" title="Serial captured from the invoice">
+            <span class="cv-slabel">Invoice</span>
+            <span class="cv-sval">${inv ? escapeHtmlLite(inv) : '—'}</span>
+          </div>
+          <input type="text" class="cv-scan" data-key="${c.key}" value="${escapeHtmlLite(st.scan || '')}"
+                 placeholder="Scan / type serial" autocomplete="off" spellcheck="false">
+        </div>
+        <select class="cv-box" data-key="${c.key}">
+          ${BOX_STATUSES.map(b => `<option value="${b.v}"${(st.box || '') === b.v ? ' selected' : ''}>${b.t}</option>`).join('')}
+        </select>
+        <span class="cv-status-ic" title="${status}">${status === 'ok' ? '✓' : status === 'bad' ? '✕' : status === 'warn' ? '!' : '·'}</span>
+      </div>`;
+  });
+
+  wrap.innerHTML = html || '<div class="cv-empty">Add the target build specs above — components to verify will appear here.</div>';
+  const badge = document.getElementById('cv-summary-badge');
+  if (badge) badge.textContent = `${done} / ${total} verified`;
+
+  const mismatches = CV_COMPONENTS.filter(c => cvStatusFor(c.key) === 'bad');
+  const doa = CV_COMPONENTS.filter(c => (cvState[c.key] || {}).box === 'doa');
+  const note = document.getElementById('cv-gate-note');
+  if (note) {
+    if (mismatches.length) {
+      note.className = 'cv-gate-note bad';
+      note.textContent = '✕ Serial mismatch on: ' + mismatches.map(c => c.label).join(', ') +
+        ' — the part that arrived is not the one on the invoice. Flag this before building.';
+    } else if (doa.length) {
+      note.className = 'cv-gate-note bad';
+      note.textContent = '✕ Damaged on arrival: ' + doa.map(c => c.label).join(', ') + ' — raise a replacement.';
+    } else if (total && done === total) {
+      note.className = 'cv-gate-note ok';
+      note.textContent = '✓ All components verified against the invoice. Cleared to build.';
+    } else {
+      note.className = 'cv-gate-note';
+      note.textContent = total ? `${total - done} component(s) still to scan.` : '';
+    }
+  }
+}
+
+// Mirror scans into the legacy hidden serial inputs so every existing
+// save/load/report path keeps working untouched.
+function syncLegacySerialFields() {
+  CV_COMPONENTS.forEach(c => {
+    if (!c.legacy) return;
+    const el = document.getElementById(c.legacy);
+    if (el) el.value = (cvState[c.key] && cvState[c.key].scan) || '';
+  });
+}
+
+function setupComponentVerify() {
+  const wrap = document.getElementById('cv-rows');
+  if (!wrap) return;
+  // Keep the verification list in step with the target specs (a component only
+  // appears once it's on the build). Debounced so typing stays smooth.
+  let cvSpecTimer = null;
+  CV_COMPONENTS.forEach(c => {
+    const el = document.getElementById(c.specField);
+    if (!el) return;
+    el.addEventListener('input', () => {
+      clearTimeout(cvSpecTimer);
+      cvSpecTimer = setTimeout(renderComponentVerify, 250);
+    });
+  });
+  wrap.addEventListener('input', (e) => {
+    const inp = e.target.closest('.cv-scan');
+    if (!inp) return;
+    const k = inp.dataset.key;
+    cvState[k] = cvState[k] || {};
+    cvState[k].scan = inp.value;
+    syncLegacySerialFields();
+    // Repaint just this row's state so typing isn't interrupted by a re-render.
+    const row = inp.closest('.cv-row');
+    if (row) {
+      const s = cvStatusFor(k);
+      row.className = 'cv-row ' + s;
+      const ic = row.querySelector('.cv-status-ic');
+      if (ic) ic.textContent = s === 'ok' ? '✓' : s === 'bad' ? '✕' : s === 'warn' ? '!' : '·';
+    }
+    updateCvSummaryOnly();
+  });
+  wrap.addEventListener('change', (e) => {
+    const sel = e.target.closest('.cv-box');
+    if (!sel) return;
+    const k = sel.dataset.key;
+    cvState[k] = cvState[k] || {};
+    cvState[k].box = sel.value;
+    renderComponentVerify();
+  });
+}
+
+function updateCvSummaryOnly() {
+  let total = 0, done = 0;
+  CV_COMPONENTS.forEach(c => {
+    const el = document.getElementById(c.specField);
+    if (!el || !(el.value || '').trim()) return;
+    total++;
+    const s = cvStatusFor(c.key);
+    if (s === 'ok' || s === 'warn') done++;
+  });
+  const badge = document.getElementById('cv-summary-badge');
+  if (badge) badge.textContent = `${done} / ${total} verified`;
+}
+
+// ══ BUILD TIMER (v2.0.0 Chunk B) ══════════════════════════════════════════
+// Start when assembly begins, finish only once every assembly checkbox is
+// ticked. Purely for data + the warm line on the QC report — never a stopwatch
+// held over the technician.
+let buildTimerState = { startedAt: null, finishedAt: null };
+let buildTimerTick = null;
+
+function fmtDuration(ms) {
+  if (!ms || ms < 0) return '—';
+  const s = Math.floor(ms / 1000);
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+  return (h ? h + 'h ' : '') + (h || m ? m + 'm ' : '') + sec + 's';
+}
+
+function renderBuildTimer() {
+  const disp = document.getElementById('build-timer-display');
+  const btn = document.getElementById('btn-build-timer');
+  if (!disp || !btn) return;
+  const { startedAt, finishedAt } = buildTimerState;
+  if (finishedAt && startedAt) {
+    disp.textContent = '⏱ ' + fmtDuration(new Date(finishedAt) - new Date(startedAt));
+    disp.classList.add('done');
+    btn.textContent = '✓ Build Finished';
+    btn.disabled = true;
+    if (buildTimerTick) { clearInterval(buildTimerTick); buildTimerTick = null; }
+  } else if (startedAt) {
+    disp.textContent = '⏱ ' + fmtDuration(Date.now() - new Date(startedAt));
+    disp.classList.remove('done');
+    btn.textContent = '■ Finish Build';
+    btn.disabled = false;
+    if (!buildTimerTick) buildTimerTick = setInterval(renderBuildTimer, 1000);
+  } else {
+    disp.textContent = '—';
+    disp.classList.remove('done');
+    btn.textContent = '▶ Start Build';
+    btn.disabled = false;
+    if (buildTimerTick) { clearInterval(buildTimerTick); buildTimerTick = null; }
+  }
+}
+
+function assemblyAllChecked() {
+  return ['check-cpu-ram-ssd', 'check-mobo-case', 'check-cooler', 'check-cables', 'check-posted']
+    .every(id => { const el = document.getElementById(id); return el && el.checked; });
+}
+
+function setupBuildTimer() {
+  const btn = document.getElementById('btn-build-timer');
+  if (!btn) return;
+  btn.addEventListener('click', () => {
+    if (!buildTimerState.startedAt) {
+      buildTimerState.startedAt = new Date().toISOString();
+      showToast('Build started — the clock is running.', 'success');
+    } else if (!buildTimerState.finishedAt) {
+      if (!assemblyAllChecked()) {
+        showToast('Tick every assembly step before finishing the build.', 'warning');
+        return;
+      }
+      buildTimerState.finishedAt = new Date().toISOString();
+      const took = fmtDuration(new Date(buildTimerState.finishedAt) - new Date(buildTimerState.startedAt));
+      showToast(`Build finished in ${took}. Nice work.`, 'success', 7000);
+    }
+    renderBuildTimer();
+  });
+}
+
 function updateBuildPriorityAuto() {
   const sel = document.getElementById('form-build-importance');
   const hint = document.getElementById('build-priority-hint');
@@ -2043,6 +2282,15 @@ function openTicketModal(ticketId = null) {
   document.getElementById('modal-spec-ram').textContent = '--';
   document.getElementById('modal-spec-storage').textContent = '--';
 
+  // v2.0.0 Chunk B — reset component verification + build timer for a fresh modal
+  invoiceSerials = {};
+  cvState = {};
+  buildTimerState = { startedAt: null, finishedAt: null };
+  if (buildTimerTick) { clearInterval(buildTimerTick); buildTimerTick = null; }
+  syncLegacySerialFields();
+  renderComponentVerify();
+  renderBuildTimer();
+
   // v2.0.0 — reset sales-exec ownership + build priority (auto until overridden)
   buildImportanceManual = false;
   const impSelReset = document.getElementById('form-build-importance');
@@ -2076,6 +2324,23 @@ function openTicketModal(ticketId = null) {
       if (_impSel) _impSel.value = _b.importance || 'light';
       populateSalesExecs(_b.salesExec || '');
       updateBuildPriorityAuto();
+
+      // v2.0.0 Chunk B — restore component verification + build timer.
+      // Fall back to the legacy flat serials so pre-2.0 tickets show their scans.
+      const _v = (ticket.specs && ticket.specs.__verify) || {};
+      invoiceSerials = _v.invoiceSerials || {};
+      cvState = _v.components || {};
+      if (!Object.keys(cvState).length && ticket.serials) {
+        const legacyMap = { motherboard: 'motherboard', gpu: 'gpu', ram: 'ram', storage: 'ssd', case: 'cabinet' };
+        Object.keys(legacyMap).forEach(k => {
+          const val = ticket.serials[legacyMap[k]];
+          if (val) cvState[k] = { scan: val, box: '' };
+        });
+      }
+      buildTimerState = {
+        startedAt: _v.buildStartedAt || null,
+        finishedAt: _v.buildFinishedAt || null
+      };
 
 
       // Load target specs into manual inputs
@@ -2220,6 +2485,10 @@ function openTicketModal(ticketId = null) {
       renderInventoryPanel(ticket);
       renderStressProgress(ticket);
       renderCustomerSupplied(ticket.customerSupplied || (ticket.specs && ticket.specs.__customerSupplied) || []);
+      // Chunk B — paint verification rows + timer once specs/awaiting/supplied are loaded
+      syncLegacySerialFields();
+      renderComponentVerify();
+      renderBuildTimer();
     }
   } else {
     hideTicketQueriesSection();
@@ -3272,6 +3541,31 @@ async function handleTicketFormSubmit(e) {
       importance: importance,
       tier: BUILD_TIER_BY_IMPORTANCE[importance] || 1
     };
+  }
+
+  // v2.0.0 Chunk B — component verification (invoice serial vs scan + box
+  // condition) and the assembly build timer. Nested in specs (JSONB) so
+  // cross-machine sync carries it with no schema change.
+  {
+    const verify = {
+      invoiceSerials: invoiceSerials || {},
+      components: cvState || {},
+      buildStartedAt: buildTimerState.startedAt,
+      buildFinishedAt: buildTimerState.finishedAt,
+      buildDurationMs: (buildTimerState.startedAt && buildTimerState.finishedAt)
+        ? (new Date(buildTimerState.finishedAt) - new Date(buildTimerState.startedAt)) : null
+    };
+    // Derived summary the report/dashboard can read without recomputing.
+    let matched = 0, mismatched = 0, scanned = 0;
+    Object.keys(verify.components).forEach(k => {
+      const scan = normSerial(verify.components[k] && verify.components[k].scan);
+      if (!scan) return;
+      scanned++;
+      const inv = normSerial(verify.invoiceSerials[k]);
+      if (inv) { (scan === inv) ? matched++ : mismatched++; }
+    });
+    verify.summary = { scanned, matched, mismatched };
+    updatedTicket.specs.__verify = verify;
   }
 
   // v1.4.9 — detected specs are merged PER FIELD, never gated on CPU alone.
@@ -4563,6 +4857,13 @@ function setupEventListeners() {
         const summary = applyInvoiceBuild(build);
         renderConfigSynergy(); // surface any socket/RAM mismatch from the imported build
         updateBuildPriorityAuto(); // re-suggest build priority from the imported total
+        // Chunk B — capture each line's printed serial so the technician's scan
+        // can be matched against the invoice in Component Verification.
+        Object.keys(build.results).forEach(cat => {
+          const s = build.results[cat] && build.results[cat].serial;
+          if (s) invoiceSerials[cat] = s;
+        });
+        renderComponentVerify();
         // Grow the catalog from this invoice (background — invoice price wins,
         // dedupes against existing rows). Resolves each field's SKU too.
         upsertInvoiceComponentsToCatalog(build).catch(err => console.warn('invoice catalog sync failed:', err && err.message));
@@ -5033,6 +5334,8 @@ function setupEventListeners() {
 
   setupFormCalculations();
   setupSerialVerification();
+  setupComponentVerify();   // v2.0.0 Chunk B — serial scan + box condition rows
+  setupBuildTimer();        // v2.0.0 Chunk B — assembly start/finish timer
   setupClientMode();
 
   // Secret technician shortcut to open settings (Ctrl + Alt + S)

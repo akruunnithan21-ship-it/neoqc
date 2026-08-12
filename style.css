@@ -4301,6 +4301,90 @@ body.dark-mode .card-type-badge {
   background: rgba(255,255,255,0.06);
 }
 
+/* ══ v2.0.0 Chunk B — Component Verification + build timer ══════════════ */
+.cv-gate-tag {
+  font-size: 0.6rem; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--primary-pink); background: rgba(231, 1, 78, 0.12);
+  border: 1px solid rgba(231, 1, 78, 0.3); border-radius: 999px;
+  padding: 2px 8px; margin-left: 8px; vertical-align: middle;
+}
+.cv-legend {
+  display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 8px 0 12px;
+  font-size: 0.7rem; color: var(--text-muted);
+}
+.cv-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.cv-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.cv-dot.ok { background: #22c55e; } .cv-dot.warn { background: #f59e0b; }
+.cv-dot.bad { background: var(--status-urgent); } .cv-dot.idle { background: var(--text-muted); }
+
+.cv-rows { display: flex; flex-direction: column; gap: 7px; }
+.cv-row {
+  display: grid;
+  grid-template-columns: minmax(150px, 1.3fr) minmax(220px, 1.6fr) minmax(150px, 0.9fr) 22px;
+  gap: 10px; align-items: center;
+  padding: 9px 12px; border-radius: 10px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--glass-border);
+  border-left: 3px solid var(--text-muted);
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.cv-row.ok   { border-left-color: #22c55e; }
+.cv-row.warn { border-left-color: #f59e0b; }
+.cv-row.bad  { border-left-color: var(--status-urgent); background: rgba(239, 68, 68, 0.07); }
+.cv-main { min-width: 0; }
+.cv-cat { font-size: 0.78rem; font-weight: 800; color: var(--text-dark); display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.cv-name {
+  font-size: 0.72rem; color: var(--text-muted); margin-top: 2px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.cv-chip {
+  font-size: 0.58rem; font-weight: 700; padding: 1px 6px; border-radius: 999px;
+  border: 1px solid var(--glass-border); color: var(--text-muted);
+}
+.cv-chip.await { color: #f59e0b; border-color: rgba(245, 158, 11, 0.4); }
+.cv-chip.cust  { color: #38bdf8; border-color: rgba(56, 189, 248, 0.4); }
+.cv-serials { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.cv-invoice { display: flex; flex-direction: column; min-width: 92px; }
+.cv-slabel { font-size: 0.56rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); }
+.cv-sval {
+  font-family: 'JetBrains Mono', monospace; font-size: 0.72rem; font-weight: 700;
+  color: var(--text-dark); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 130px;
+}
+.cv-scan {
+  flex: 1; min-width: 0; padding: 7px 10px; border-radius: 8px;
+  border: 1px solid var(--glass-border); background: var(--glass-bg);
+  color: var(--text-dark); font-family: 'JetBrains Mono', monospace; font-size: 0.76rem; outline: none;
+}
+.cv-scan:focus { border-color: var(--primary-pink); box-shadow: 0 0 0 3px rgba(231, 1, 78, 0.12); }
+.cv-box {
+  padding: 7px 8px; border-radius: 8px; font-size: 0.72rem;
+  border: 1px solid var(--glass-border); background: var(--glass-bg);
+  color: var(--text-dark); outline: none; cursor: pointer;
+}
+.cv-status-ic { font-size: 0.95rem; font-weight: 800; text-align: center; color: var(--text-muted); }
+.cv-row.ok .cv-status-ic { color: #22c55e; }
+.cv-row.warn .cv-status-ic { color: #f59e0b; }
+.cv-row.bad .cv-status-ic { color: var(--status-urgent); }
+.cv-empty { font-size: 0.8rem; color: var(--text-muted); padding: 14px; text-align: center; }
+.cv-gate-note { margin-top: 10px; font-size: 0.78rem; color: var(--text-muted); }
+.cv-gate-note.ok  { color: #22c55e; font-weight: 600; }
+.cv-gate-note.bad { color: var(--status-urgent); font-weight: 700; }
+
+@media (max-width: 900px) {
+  .cv-row { grid-template-columns: 1fr; gap: 7px; }
+  .cv-status-ic { text-align: left; }
+}
+
+/* Assembly header: build timer + start/finish control */
+.asm-head-right { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.build-timer {
+  font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; font-weight: 700;
+  color: var(--text-dark); background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--glass-border); border-radius: 999px; padding: 3px 11px;
+}
+.build-timer.done { color: #22c55e; border-color: rgba(34, 197, 94, 0.4); }
+.asm-timer-btn { padding: 5px 13px; font-size: 0.78rem; white-space: nowrap; }
+
 /* v2.0.0 — prominent deadline pill on ticket cards (countdown + urgency). */
 .card-deadline {
   display: inline-flex;
