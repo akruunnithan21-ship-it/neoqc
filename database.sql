@@ -284,5 +284,51 @@ CREATE INDEX IF NOT EXISTS idx_ticket_queries_ticket
 -- v1.4.8.x: who in sales asked the query — RUN THIS ONCE in the SQL editor.
 -- (The dashboard degrades gracefully until then: sends without the name.)
 ALTER TABLE public.ticket_queries ADD COLUMN IF NOT EXISTS asked_by TEXT;
+
+-- ==========================================================================
+-- ticket_flags (v2.0.0 Chunk C) — RUN THIS ONCE in the SQL editor.
+--
+-- A flag is raised from any segment of a build ticket (component verification,
+-- assembly, QC, stress…) when something needs attention. Flags drive the
+-- notification bell in the app and the sales executive's feed on the website:
+-- the build BELONGS to the sales exec who closed it, so anything that blocks
+-- or endangers it must reach them, not just the technician.
+--
+--   segment    'components' | 'assembly' | 'qc' | 'stress' | 'general'
+--   severity   'info' | 'warn' | 'critical'
+--   status     'open' | 'ack' | 'resolved'
+--   for_email  the sales executive this flag is routed to (build owner)
+-- ==========================================================================
+CREATE TABLE IF NOT EXISTS public.ticket_flags (
+  id            BIGSERIAL PRIMARY KEY,
+  ticket_id     TEXT        NOT NULL,
+  segment       TEXT        NOT NULL DEFAULT 'general',
+  severity      TEXT        NOT NULL DEFAULT 'warn',
+  message       TEXT        NOT NULL,
+  status        TEXT        NOT NULL DEFAULT 'open',
+  raised_by     TEXT,                    -- email of whoever raised it
+  raised_by_name TEXT,
+  for_email     TEXT,                    -- sales exec who owns the build
+  customer_name TEXT,                    -- denormalised so the feed reads well
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  resolved_at   TIMESTAMPTZ,
+  resolved_by   TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_ticket_flags_ticket ON public.ticket_flags (ticket_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_ticket_flags_open   ON public.ticket_flags (status, created_at DESC);
+
+ALTER TABLE public.ticket_flags ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tf_read  ON public.ticket_flags;
+DROP POLICY IF EXISTS tf_write ON public.ticket_flags;
+-- Signed-in staff only (the app and website both authenticate now).
+CREATE POLICY tf_read  ON public.ticket_flags FOR SELECT TO authenticated USING (true);
+CREATE POLICY tf_write ON public.ticket_flags FOR ALL    TO authenticated USING (true) WITH CHECK (true);
+-- Machines still on an older build use the anon key; keep them working until
+-- the whole fleet is on 2.0.0, then DROP these two.
+CREATE POLICY tf_read_anon  ON public.ticket_flags FOR SELECT TO anon USING (true);
+CREATE POLICY tf_write_anon ON public.ticket_flags FOR ALL    TO anon USING (true) WITH CHECK (true);
+
+-- Optional: instant bell updates across machines
+-- ALTER PUBLICATION supabase_realtime ADD TABLE public.ticket_flags;
 -- Optional future enhancement:
 -- ALTER TABLE public.ticket_queries ADD COLUMN IF NOT EXISTS answered_by TEXT;

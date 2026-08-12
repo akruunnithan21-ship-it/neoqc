@@ -407,6 +407,251 @@ function setupBuildTimer() {
   });
 }
 
+// Sentinel for "let the app choose" in the technician dropdown.
+const AUTO_ASSIGN_VALUE = '__auto__';
+
+/*
+  resolveTechnician(buildTier, existingTicket) — decide who builds this PC.
+
+  Auto is the default: the engine picks by live workload so nobody has to track
+  who is free. An explicit name always wins (the coordinator overrode on
+  purpose). When every technician is at capacity the ticket is QUEUED rather
+  than forced onto someone — it is picked up automatically the moment a build
+  is delivered (see drainAssignmentQueue).
+*/
+function resolveTechnician(buildTier, existingTicket) {
+  const chosen = (document.getElementById('form-technician') || {}).value || '';
+  if (chosen && chosen !== AUTO_ASSIGN_VALUE) {
+    return { technician: chosen, queued: false, reason: 'Manually assigned to ' + chosen + '.' };
+  }
+  // Keep an already-assigned technician on an edit unless the coordinator changes it.
+  if (existingTicket && existingTicket.technician && !existingTicket.queued) {
+    return { technician: existingTicket.technician, queued: false, reason: 'Kept with ' + existingTicket.technician + '.' };
+  }
+  if (!window.NeoQcTechAssign) {
+    const fallback = (appState.technicians && appState.technicians[0]) || '';
+    return { technician: fallback, queued: false, reason: 'Assignment engine unavailable — defaulted.' };
+  }
+  // Exclude this ticket from the load calculation so re-saving doesn't
+  // double-count the build against its own technician.
+  const others = (appState.tickets || []).filter(t => !existingTicket || t.id !== existingTicket.id);
+  return window.NeoQcTechAssign.pickTechnician(buildTier, others);
+}
+
+/*
+  drainAssignmentQueue() — called after a save. If a build was just delivered,
+  capacity opened up, so pull the longest-waiting queued ticket onto the free
+  technician. Repeats while tickets keep fitting.
+*/
+async function drainAssignmentQueue() {
+  if (!window.NeoQcTechAssign) return;
+  let moved = 0;
+  for (let guard = 0; guard < 10; guard++) {
+    const next = window.NeoQcTechAssign.nextFromQueue(appState.tickets || []);
+    if (!next) break;
+    const t = appState.tickets.find(x => x.id === next.ticket.id);
+    if (!t) break;
+    t.technician = next.technician;
+    t.queued = false;
+    t.updatedAt = new Date().toISOString();
+    addEventLog(t, `Released from the waiting queue — assigned to ${next.technician}.`, 'NeoQC');
+    try { await syncTicketToCloud(t); } catch (e) { console.warn('queue sync failed:', e && e.message); }
+    moved++;
+  }
+  if (moved) {
+    await saveDatabase();
+    renderDashboard();
+    showToast(`${moved} queued build(s) started — a technician became free.`, 'success');
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+//  FLAGS & NOTIFICATIONS (v2.0.0 Chunk C)
+//  A flag is raised from any segment of a build. Because the build belongs to
+//  the sales executive who closed it, every flag is routed to them (for_email)
+//  as well as showing in the bell here. Backed by public.ticket_flags.
+// ══════════════════════════════════════════════════════════════════════════
+const FLAG_SEGMENT_LABELS = {
+  components: 'Component Verification',
+  assembly: 'Assembly',
+  qc: 'Quality Control',
+  stress: 'Stress & Benchmarks',
+  general: 'General'
+};
+let openFlags = [];
+let flagModalSegment = null;
+
+function openFlagModal(segment) {
+  if (!editingTicketId) {
+    showToast('Open the ticket you want to flag first.', 'warning');
+    return;
+  }
+  flagModalSegment = segment || 'general';
+  const t = appState.tickets.find(x => x.id === editingTicketId);
+  const ctx = document.getElementById('flag-modal-context');
+  if (ctx) {
+    const owner = (t && t.specs && t.specs.__build && t.specs.__build.salesExec) || '';
+    ctx.textContent = `${FLAG_SEGMENT_LABELS[flagModalSegment] || flagModalSegment} · ${t ? t.customerName : ''}` +
+      (owner ? ` — goes to ${owner}` : ' — no sales executive set on this build yet');
+  }
+  const msg = document.getElementById('flag-message');
+  if (msg) msg.value = '';
+  const st = document.getElementById('flag-modal-status');
+  if (st) st.textContent = '';
+  document.getElementById('flag-modal').classList.add('active');
+  setTimeout(() => { try { msg.focus(); } catch (e) {} }, 100);
+}
+
+async function submitFlag() {
+  const t = appState.tickets.find(x => x.id === editingTicketId);
+  const st = document.getElementById('flag-modal-status');
+  const message = (document.getElementById('flag-message').value || '').trim();
+  const severity = document.getElementById('flag-severity').value || 'warn';
+  if (!message) { if (st) { st.textContent = 'Describe the issue first.'; st.style.color = 'var(--status-urgent)'; } return; }
+  if (!supabaseClient) { if (st) { st.textContent = 'No cloud connection — flags need to reach the team.'; st.style.color = 'var(--status-urgent)'; } return; }
+  const btn = document.getElementById('btn-submit-flag');
+  if (btn) { btn.disabled = true; btn.textContent = 'Raising…'; }
+  try {
+    const owner = (t && t.specs && t.specs.__build && t.specs.__build.salesExec) || null;
+    const { error } = await supabaseClient.from('ticket_flags').insert({
+      ticket_id: editingTicketId,
+      segment: flagModalSegment,
+      severity: severity,
+      message: message,
+      status: 'open',
+      raised_by: currentProfile ? currentProfile.email : null,
+      raised_by_name: currentProfile ? currentProfile.full_name : null,
+      for_email: owner,
+      customer_name: t ? t.customerName : null
+    });
+    if (error) throw error;
+    if (t) {
+      addEventLog(t, `⚑ Flag raised (${FLAG_SEGMENT_LABELS[flagModalSegment] || flagModalSegment}): ${message}`,
+        currentProfile ? currentProfile.full_name : 'Staff');
+      await saveDatabase();
+      await syncTicketToCloud(t);
+    }
+    document.getElementById('flag-modal').classList.remove('active');
+    showToast('Flag raised' + (owner ? ' — ' + owner + ' has been notified.' : '.'), 'success');
+    loadOpenFlags();
+  } catch (e) {
+    if (st) {
+      st.textContent = /relation .* does not exist/i.test(e.message || '')
+        ? 'The flags table isn\'t set up yet — run the ticket_flags SQL in Supabase.'
+        : 'Could not raise the flag: ' + e.message;
+      st.style.color = 'var(--status-urgent)';
+    }
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Raise flag'; }
+  }
+}
+
+async function loadOpenFlags() {
+  if (!supabaseClient) return;
+  try {
+    const { data, error } = await supabaseClient.from('ticket_flags')
+      .select('*').eq('status', 'open').order('created_at', { ascending: false }).limit(50);
+    if (error) throw error;
+    openFlags = data || [];
+  } catch (e) {
+    // Table not created yet, or offline — the bell simply stays quiet.
+    console.warn('flags unavailable:', e && e.message);
+    openFlags = [];
+  }
+  renderNotifBell();
+}
+
+function renderNotifBell() {
+  const badge = document.getElementById('notif-badge');
+  const list = document.getElementById('notif-list');
+  if (!badge || !list) return;
+  const n = openFlags.length;
+  badge.textContent = n > 9 ? '9+' : String(n);
+  badge.classList.toggle('hidden', n === 0);
+  const bell = document.getElementById('btn-notif-bell');
+  if (bell) bell.classList.toggle('has-critical', openFlags.some(f => f.severity === 'critical'));
+
+  if (!n) { list.innerHTML = '<div class="notif-empty">Nothing needs attention right now.</div>'; return; }
+  list.innerHTML = openFlags.map(f => {
+    const when = f.created_at ? new Date(f.created_at).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '';
+    return `<div class="notif-item sev-${escapeHtmlLite(f.severity || 'warn')}" data-flag-id="${escapeHtmlLite(String(f.id))}" data-ticket="${escapeHtmlLite(f.ticket_id || '')}">
+      <div class="notif-item-head">
+        <span class="notif-seg">${escapeHtmlLite(FLAG_SEGMENT_LABELS[f.segment] || f.segment || 'General')}</span>
+        <span class="notif-when">${escapeHtmlLite(when)}</span>
+      </div>
+      <div class="notif-cust">${escapeHtmlLite(f.customer_name || f.ticket_id || '')}</div>
+      <div class="notif-msg">${escapeHtmlLite(f.message || '')}</div>
+      <div class="notif-actions">
+        <button type="button" class="text-btn notif-open" data-ticket="${escapeHtmlLite(f.ticket_id || '')}">Open ticket</button>
+        <button type="button" class="text-btn notif-resolve" data-flag-id="${escapeHtmlLite(String(f.id))}">Mark resolved</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+async function resolveFlag(id) {
+  if (!supabaseClient) return;
+  try {
+    const { error } = await supabaseClient.from('ticket_flags')
+      .update({ status: 'resolved', resolved_at: new Date().toISOString(),
+                resolved_by: currentProfile ? currentProfile.email : null })
+      .eq('id', id);
+    if (error) throw error;
+    openFlags = openFlags.filter(f => String(f.id) !== String(id));
+    renderNotifBell();
+    showToast('Flag resolved.', 'success');
+  } catch (e) {
+    showToast('Could not resolve the flag: ' + e.message, 'error');
+  }
+}
+
+function setupFlagsAndBell() {
+  // Flag buttons live in section headers throughout the ticket modal.
+  document.addEventListener('click', (e) => {
+    const fb = e.target.closest('.flag-btn');
+    if (fb) { e.preventDefault(); openFlagModal(fb.getAttribute('data-flag-segment')); }
+  });
+  const closeFlag = () => document.getElementById('flag-modal').classList.remove('active');
+  const cf = document.getElementById('btn-close-flag-modal');
+  if (cf) cf.addEventListener('click', closeFlag);
+  const cancel = document.getElementById('btn-cancel-flag');
+  if (cancel) cancel.addEventListener('click', closeFlag);
+  const submit = document.getElementById('btn-submit-flag');
+  if (submit) submit.addEventListener('click', submitFlag);
+
+  const bell = document.getElementById('btn-notif-bell');
+  const panel = document.getElementById('notif-panel');
+  if (bell && panel) {
+    bell.addEventListener('click', (e) => {
+      e.stopPropagation();
+      panel.classList.toggle('hidden');
+      if (!panel.classList.contains('hidden')) loadOpenFlags();
+    });
+    document.addEventListener('click', (e) => {
+      if (!panel.classList.contains('hidden') && !panel.contains(e.target) && e.target !== bell) {
+        panel.classList.add('hidden');
+      }
+    });
+    panel.addEventListener('click', (e) => {
+      const openBtn = e.target.closest('.notif-open');
+      if (openBtn) {
+        const tid = openBtn.getAttribute('data-ticket');
+        panel.classList.add('hidden');
+        if (tid) openTicketModal(tid);
+        return;
+      }
+      const resBtn = e.target.closest('.notif-resolve');
+      if (resBtn) resolveFlag(resBtn.getAttribute('data-flag-id'));
+    });
+  }
+  const refresh = document.getElementById('btn-notif-refresh');
+  if (refresh) refresh.addEventListener('click', loadOpenFlags);
+
+  // Poll every 60s so a flag raised on another machine surfaces here too.
+  loadOpenFlags();
+  setInterval(loadOpenFlags, 60000);
+}
+
 function updateBuildPriorityAuto() {
   const sel = document.getElementById('form-build-importance');
   const hint = document.getElementById('build-priority-hint');
@@ -1386,6 +1631,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   setSplashStatus('Preparing workspace…');
   setupEventListeners();
   setupAuthListeners();
+  setupFlagsAndBell();
   injectInlineIcons();
   setupSpecsAutocomplete();
   updateTimeDisplay();
@@ -1866,6 +2112,21 @@ function populateTechnicianDropdowns() {
     staffFilter.innerHTML = '<option value="all">All Technicians</option>';
     formTech.innerHTML = '';
 
+    // v2.0.0 — the app picks the technician by live workload; the coordinator
+    // only overrides deliberately. Each name carries a "free / busy" hint so an
+    // override is an informed one.
+    const loadByName = {};
+    try {
+      if (window.NeoQcTechAssign) {
+        window.NeoQcTechAssign.workloadSummary(appState.tickets || []).forEach(s => { loadByName[s.name] = s; });
+      }
+    } catch (e) { console.warn('workload summary failed:', e && e.message); }
+
+    const autoOpt = document.createElement('option');
+    autoOpt.value = AUTO_ASSIGN_VALUE;
+    autoOpt.textContent = '⚡ Auto-assign (recommended)';
+    formTech.appendChild(autoOpt);
+
     appState.technicians.forEach(tech => {
       const opt1 = document.createElement('option');
       opt1.value = tech;
@@ -1874,7 +2135,10 @@ function populateTechnicianDropdowns() {
 
       const opt2 = document.createElement('option');
       opt2.value = tech;
-      opt2.textContent = tech;
+      const s = loadByName[tech];
+      opt2.textContent = s
+        ? `${tech} — ${s.full ? 'at capacity' : s.jobs + ' build(s), room free'}`
+        : tech;
       formTech.appendChild(opt2);
     });
   }
@@ -2044,7 +2308,7 @@ function renderDashboard() {
         <div style="margin-bottom:14px;">
           <span class="tech-chip">
             <span class="tech-chip-dot"></span>
-            ${escapeHtmlLite(t.technician || 'Unassigned')}
+            ${t.queued ? '⏳ Waiting for a technician' : escapeHtmlLite(t.technician || 'Unassigned')}
           </span>
         </div>
         
@@ -2303,6 +2567,12 @@ function openTicketModal(ticketId = null) {
   }
   populateSalesExecs('');
 
+  // Refresh the technician list so its live "free / at capacity" hints are
+  // current, and default a NEW ticket to auto-assign.
+  populateTechnicianDropdowns();
+  const _techSel = document.getElementById('form-technician');
+  if (_techSel && !ticketId) _techSel.value = AUTO_ASSIGN_VALUE;
+
   if (ticketId) {
     title.textContent = "Edit Service Ticket";
     const ticket = appState.tickets.find(t => t.id === ticketId);
@@ -2313,7 +2583,10 @@ function openTicketModal(ticketId = null) {
       document.getElementById('form-deadline').value = formatDateTimeLocal(ticket.deadline);
       document.getElementById('form-deadline').disabled = true;
       document.getElementById('btn-change-deadline').style.display = 'block';
-      document.getElementById('form-technician').value = ticket.technician;
+      // A queued ticket has no technician yet — show it as auto so saving
+      // re-runs the assignment instead of blanking the field.
+      document.getElementById('form-technician').value =
+        (ticket.queued || !ticket.technician) ? AUTO_ASSIGN_VALUE : ticket.technician;
       document.getElementById('form-ticket-type').value = ticket.type;
 
       // v2.0.0 — load saved sales-exec owner + build priority (keep the saved
@@ -3363,7 +3636,14 @@ async function handleTicketFormSubmit(e) {
   } else {
     deadline = new Date().toISOString();
   }
-  const technician = document.getElementById('form-technician').value;
+  // v2.0.0 — the technician is chosen by workload (or kept/overridden). The
+  // build tier is read first because it decides who is capable and who is free.
+  const _existingForAssign = editingTicketId ? appState.tickets.find(t => t.id === editingTicketId) : null;
+  const _impNow = (document.getElementById('form-build-importance') || {}).value || 'light';
+  const _tierNow = BUILD_TIER_BY_IMPORTANCE[_impNow] || 1;
+  const _assign = resolveTechnician(_tierNow, _existingForAssign);
+  const technician = _assign.technician || '';
+  const isQueued = !!_assign.queued;
 
   const missingComponentsToggle = document.getElementById('form-missing-components-toggle').checked;
   // Serialize the multi-part array. Store as JSON string so the existing
@@ -3465,6 +3745,7 @@ async function handleTicketFormSubmit(e) {
     diagnostics,
     serials,
     status,
+    queued: isQueued,          // true = waiting for a technician to free up
     completedAt: status === 'completed' ? new Date().toISOString() : null
   };
 
@@ -3660,6 +3941,16 @@ async function handleTicketFormSubmit(e) {
     }
   }
 
+  // Record how this build got its technician (or that it queued) — the
+  // coordinator can always see why the app chose who it chose.
+  if (!_existingForAssign) {
+    addEventLog(updatedTicket, isQueued
+      ? 'Waiting queue — all technicians at capacity.'
+      : (_assign.reason || ('Assigned to ' + technician + '.')), 'NeoQC');
+  } else if (_existingForAssign.technician !== technician && technician) {
+    addEventLog(updatedTicket, `Technician changed to ${technician}.`, 'NeoQC');
+  }
+
   updatedTicket.updatedAt = new Date().toISOString();
 
   if (editingTicketId) {
@@ -3675,6 +3966,15 @@ async function handleTicketFormSubmit(e) {
   editingTicketId = null;
   hideConflictBanner();
   renderDashboard();
+
+  // Tell the coordinator who picked it up (or that it's waiting), then see if a
+  // just-completed build frees capacity for anything in the queue.
+  if (isQueued) {
+    showToast('All technicians are at capacity — this build is in the waiting queue and starts automatically when one frees up.', 'warning', 9000);
+  } else if (_assign && _assign.reason && !_existingForAssign) {
+    showToast(_assign.reason, 'success');
+  }
+  drainAssignmentQueue().catch(e => console.warn('queue drain failed:', e && e.message));
   } catch (err) {
     // Never fail silently — surface the reason so a save problem is visible.
     console.error('Ticket save failed:', err);
@@ -5433,6 +5733,9 @@ async function syncTicketToCloud(ticket) {
     const specsPayload = Object.assign({}, ticket.specs || {});
     if (ticket.detectedSpecs) specsPayload.__detected = ticket.detectedSpecs;
     if (ticket.customerSupplied) specsPayload.__customerSupplied = ticket.customerSupplied;
+    // The waiting-queue flag has no column of its own; carry it in specs (JSONB)
+    // like __prices/__detected, or it would be lost on every cloud round-trip.
+    specsPayload.__queued = !!ticket.queued;
 
     // Stress-test progress has no dedicated columns; diagnostics is JSONB and
     // already syncs, so carry it there (same pattern as specs.__detected).
@@ -5527,6 +5830,7 @@ function mapDbRowToTicket(dbRow) {
     detectedSpecs: dbRow.detectedSpecs || specs.__detected || null,
     customerSupplied: specs.__customerSupplied || [],
     damagedComponents: dbRow.damagedComponents || specs.__damaged || null,
+    queued: !!specs.__queued,
     status: dbRow.status,
     completedAt: dbRow.completed_at
   };
