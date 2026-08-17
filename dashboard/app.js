@@ -48,9 +48,24 @@ function getView() {
 let currentProfile = null;
 const VIEWS = ['customer', 'login', 'dashboard', 'profile', 'ticket-status'];
 
+// Match a ticket's short technician name ("Athul") to a profile's full name
+// ("Athul Sudheer") — same logic as the app's My Bench so a technician's web
+// view lists exactly the builds assigned to them.
+function technicianMatchesProfile(techName, profile) {
+  if (!techName || !profile) return false;
+  const norm = (s) => String(s).toLowerCase().replace(/[^a-z\s]/g, ' ').split(/\s+/).filter(w => w.length > 2);
+  const a = norm(techName), b = norm(profile.full_name || '');
+  if (!a.length || !b.length) return false;
+  return a.some(w => b.includes(w));
+}
+
 function activateView(name) {
   if (name === 'sales') name = currentProfile ? 'dashboard' : 'login';           // legacy deep-link
   if (['dashboard', 'profile', 'ticket-status'].includes(name) && !currentProfile) name = 'login';
+  // Role guard: a technician (T2) never gets the full-floor Dashboard — even via
+  // a ?view=dashboard deep-link — they're sent to their own My Builds list. (T1
+  // sales and T3+ leads are unchanged.)
+  if (name === 'dashboard' && currentProfile && Number(currentProfile.tier) === 2) name = 'ticket-status';
   VIEWS.forEach(v => {
     const el = document.getElementById('view-' + v);
     if (el) el.classList.toggle('hidden', v !== name);
@@ -101,7 +116,14 @@ function applyMenu() {
     const av = document.getElementById('menu-avatar');
     if (currentProfile.avatar_url) { av.style.backgroundImage = `url("${currentProfile.avatar_url}")`; av.textContent = ''; }
     else { av.style.backgroundImage = ''; av.textContent = first.charAt(0).toUpperCase(); }
-    document.getElementById('menu-ticketstatus').classList.toggle('hidden', Number(currentProfile.tier) !== 1);
+    // Role-based nav: technicians (T2) get "My Builds" (their own) and NOT the
+    // full-floor Dashboard; T3+ keep the Dashboard; T1 keeps read-only Ticket Status.
+    const tier = Number(currentProfile.tier);
+    document.getElementById('menu-dashboard').classList.toggle('hidden', tier === 2);
+    const tsBtn = document.getElementById('menu-ticketstatus');
+    tsBtn.classList.toggle('hidden', !(tier === 1 || tier === 2));
+    const tsLabel = document.getElementById('menu-ts-label');
+    if (tsLabel) tsLabel.textContent = tier === 2 ? 'My Builds' : 'Ticket Status';
   } else {
     pub.classList.remove('hidden');
     staff.classList.add('hidden');
@@ -354,7 +376,7 @@ function initLoginForm() {
 }
 
 function routeAfterWebLogin() {
-  activateView(Number(currentProfile.tier) === 1 ? 'ticket-status' : 'dashboard');
+  activateView(Number(currentProfile.tier) >= 3 ? 'dashboard' : 'ticket-status');
 }
 
 // ── Dashboard (all builds) — auth-gated (was unlockSales) ──────────────────
@@ -380,8 +402,18 @@ async function ensureTicketStatusLoaded() {
   renderTicketStatus();
 }
 function renderTicketStatus() {
+  const tier = currentProfile ? Number(currentProfile.tier) : 0;
+  // Technicians (T2) see only builds assigned to them; T1 sees the whole list.
+  let base = allTickets;
+  if (tier === 2) base = base.filter(t => technicianMatchesProfile(t.technician, currentProfile));
+  const titleEl = document.getElementById('ts-title');
+  if (titleEl) titleEl.textContent = tier === 2 ? 'My Builds' : 'Ticket Status';
+  const hintEl = document.getElementById('ts-hint');
+  if (hintEl) hintEl.textContent = tier === 2
+    ? 'The builds currently assigned to you.'
+    : 'Live status of builds. (Raising new tickets from the web is coming soon.)';
   const q = (document.getElementById('ts-search').value || '').toLowerCase().trim();
-  const rows = allTickets.filter(t => !q
+  const rows = base.filter(t => !q
     || (t.customer_name || '').toLowerCase().includes(q)
     || (t.id || '').toLowerCase().includes(q));
   document.getElementById('ts-empty').classList.toggle('hidden', rows.length > 0);

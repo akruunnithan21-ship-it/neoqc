@@ -53,8 +53,8 @@
           <div class="menu-utier" id="menu-utier"></div>
         </div>
       </div>
-      <button class="menu-item" data-nav="dashboard"><span class="mi-ic">📊</span> Dashboard</button>
-      <button class="menu-item hidden" id="menu-ticketstatus" data-nav="ticket-status"><span class="mi-ic">🎫</span> Ticket Status</button>
+      <button class="menu-item" id="menu-dashboard" data-nav="dashboard"><span class="mi-ic">📊</span> Dashboard</button>
+      <button class="menu-item hidden" id="menu-ticketstatus" data-nav="ticket-status"><span class="mi-ic">🎫</span> <span id="menu-ts-label">Ticket Status</span></button>
       <button class="menu-item" data-nav="profile"><span class="mi-ic">👤</span> Edit Profile</button>
       <button class="menu-item" data-nav="customer"><span class="mi-ic">🔍</span> Track a build</button>
       <button class="menu-item menu-signout" id="menu-signout"><span class="mi-ic">⎋</span> Sign out</button>
@@ -148,12 +148,12 @@
   <!-- ───────────────────────────────── TICKET STATUS (T1, read-only) ─── -->
   <main id="view-ticket-status" class="view hidden">
     <div class="sales-toolbar">
-      <div class="toolbar-left"><h2 class="sales-title">Ticket Status</h2></div>
+      <div class="toolbar-left"><h2 class="sales-title" id="ts-title">Ticket Status</h2></div>
       <div class="toolbar-right">
         <input id="ts-search" class="filter-input" placeholder="Search customer…">
       </div>
     </div>
-    <p class="ts-hint">Live status of builds. (Raising new tickets from the web is coming soon.)</p>
+    <p class="ts-hint" id="ts-hint">Live status of builds. (Raising new tickets from the web is coming soon.)</p>
     <div class="table-wrapper">
       <table id="ts-table">
         <thead>
