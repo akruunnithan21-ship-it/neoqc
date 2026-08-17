@@ -211,6 +211,22 @@ function cvStatusFor(key) {
   return scan === inv ? 'ok' : 'bad';
 }
 
+// QoL (v1.9.5) — has this serial already been recorded on a DIFFERENT ticket?
+// Catches double-entry (same part logged on two builds). Checks both the legacy
+// serials map and the newer component-verification scans. Warns, never blocks —
+// a re-scan of a moved part is legitimate; the tech decides.
+function serialExistsOnOtherTicket(val) {
+  const v = String(val || '').trim().toLowerCase();
+  if (v.length < 4) return false;
+  return (appState.tickets || []).some(t => {
+    if (t.id === editingTicketId) return false;
+    if (t.serials && Object.values(t.serials).some(s => s && String(s).trim().toLowerCase() === v)) return true;
+    const comps = t.specs && t.specs.__verify && t.specs.__verify.components;
+    if (comps && Object.values(comps).some(c => c && c.scan && String(c.scan).trim().toLowerCase() === v)) return true;
+    return false;
+  });
+}
+
 function renderComponentVerify() {
   const wrap = document.getElementById('cv-rows');
   if (!wrap) return;
@@ -230,7 +246,7 @@ function renderComponentVerify() {
     const isSupplied = supplied.has(c.key);
     const inv = invoiceSerials[c.key];
     html += `
-      <div class="cv-row ${status}" data-key="${c.key}">
+      <div class="cv-row ${status}${serialExistsOnOtherTicket(st.scan) ? ' dup-serial' : ''}" data-key="${c.key}">
         <div class="cv-main">
           <div class="cv-cat">${escapeHtmlLite(c.label)}
             ${isAwaiting ? '<span class="cv-chip await">⏳ Awaiting</span>' : ''}
@@ -259,12 +275,17 @@ function renderComponentVerify() {
 
   const mismatches = CV_COMPONENTS.filter(c => cvStatusFor(c.key) === 'bad');
   const doa = CV_COMPONENTS.filter(c => (cvState[c.key] || {}).box === 'doa');
+  const dups = CV_COMPONENTS.filter(c => serialExistsOnOtherTicket((cvState[c.key] || {}).scan));
   const note = document.getElementById('cv-gate-note');
   if (note) {
     if (mismatches.length) {
       note.className = 'cv-gate-note bad';
       note.textContent = '✕ Serial mismatch on: ' + mismatches.map(c => c.label).join(', ') +
         ' — the part that arrived is not the one on the invoice. Flag this before building.';
+    } else if (dups.length) {
+      note.className = 'cv-gate-note bad';
+      note.textContent = '⚠ Serial already recorded on another ticket: ' + dups.map(c => c.label).join(', ') +
+        ' — check you haven\'t double-entered a part.';
     } else if (doa.length) {
       note.className = 'cv-gate-note bad';
       note.textContent = '✕ Damaged on arrival: ' + doa.map(c => c.label).join(', ') + ' — raise a replacement.';
@@ -313,7 +334,9 @@ function setupComponentVerify() {
     const row = inp.closest('.cv-row');
     if (row) {
       const s = cvStatusFor(k);
-      row.className = 'cv-row ' + s;
+      const dup = serialExistsOnOtherTicket(inp.value);
+      row.className = 'cv-row ' + s + (dup ? ' dup-serial' : '');
+      inp.title = dup ? 'This serial is already recorded on another ticket' : '';
       const ic = row.querySelector('.cv-status-ic');
       if (ic) ic.textContent = s === 'ok' ? '✓' : s === 'bad' ? '✕' : s === 'warn' ? '!' : '·';
     }
@@ -1855,8 +1878,19 @@ async function saveDatabase() {
 
 // Switch between screens
 function switchScreen(mode, selectedId = null) {
+  // SECURITY (v1.9.6) — the admin dashboard is tier 3+ only. Block ANY path
+  // that tries to open it for a lower-tier account (the mode-selector's "Admin"
+  // button had no check, so a technician could bounce through "Switch Mode" →
+  // selector → Admin). routeByTier() only ever sends tier 3+ here, so a known
+  // sub-T3 profile reaching 'staff' is always an escalation attempt → redirect
+  // them to their own screen. (currentProfile null = offline/boot: left alone.)
+  if (mode === 'staff' && currentProfile && Number(currentProfile.tier) < 3) {
+    showToast('The admin dashboard is restricted to service leads. Opening your Testing Client.', 'warning');
+    routeByTier();
+    return;
+  }
   currentMode = mode;
-  
+
   // Programmatic scroll resets to prevent offsets
   window.scrollTo(0, 0);
   document.body.scrollTop = 0;
@@ -1870,7 +1904,12 @@ function switchScreen(mode, selectedId = null) {
     document.getElementById('staff-screen').classList.add('active');
     populateTechnicianDropdowns();
     renderDashboard();
-    
+    // A build may have been delivered — here or on another machine — since this
+    // dashboard was last shown, freeing capacity. Pull anything waiting in the
+    // queue onto the freed technician NOW, not only after the next manual save.
+    // (Closes loophole #2: the queue previously drained on ticket-save only.)
+    drainAssignmentQueue().catch(e => console.warn('queue drain failed:', e && e.message));
+
     // Hide or show exit button depending on lockAdminMode
     const staffExitBtn = document.getElementById('btn-staff-exit');
     if (staffExitBtn) {
@@ -1885,28 +1924,24 @@ function switchScreen(mode, selectedId = null) {
     populateWelcomeTicketSelect();
     renderBenchBoard();
     
-    // Hide or show exit button depending on isMaster
+    // SECURITY (v1.9.6) — "Switch Mode" reaches the mode selector, the OWNER's
+    // tool only. Gate on the signed-in user's tier (5), not the per-machine
+    // isMaster flag, so a technician can never bounce out to the admin portal.
     const welcomeExitBtn = document.getElementById('btn-welcome-exit');
     if (welcomeExitBtn) {
-      if (appState.settings.isMaster) {
-        welcomeExitBtn.classList.remove('hidden');
-      } else {
-        welcomeExitBtn.classList.add('hidden');
-      }
+      welcomeExitBtn.classList.toggle('hidden', !(currentProfile && Number(currentProfile.tier) >= 5));
     }
   } else if (mode === 'client-console') {
     document.getElementById('client-screen').classList.add('active');
     populateClientTicketSelect(selectedId);
     handleClientTicketSelect();
     
-    // Hide or show exit button depending on isMaster
+    // SECURITY (v1.9.6) — testing-client "Switch Mode" is owner-only (tier 5).
+    // Technicians (T2) sign out via the titlebar chip instead; they never get
+    // the mode selector, which closes the bypass into the admin portal.
     const clientExitBtn = document.getElementById('btn-client-exit');
     if (clientExitBtn) {
-      if (appState.settings.isMaster) {
-        clientExitBtn.classList.remove('hidden');
-      } else {
-        clientExitBtn.classList.add('hidden');
-      }
+      clientExitBtn.classList.toggle('hidden', !(currentProfile && Number(currentProfile.tier) >= 5));
     }
   } else {
     document.getElementById('mode-selector-screen').classList.add('active');
@@ -2212,8 +2247,14 @@ function renderBenchBoard() {
   const subEl = document.getElementById('bench-subtitle');
   if (!grid || !empty) return;
 
-  const list = benchTicketsFor(currentProfile).sort((a, b) =>
-    new Date(a.deadline || 0) - new Date(b.deadline || 0));
+  const q = ((document.getElementById('bench-search') || {}).value || '').trim().toLowerCase();
+  let list = benchTicketsFor(currentProfile);
+  if (q) list = list.filter(t => {
+    const sp = t.specs || {};
+    return [t.customerName, t.id, t.technician, sp.cpu, sp.gpu]
+      .filter(Boolean).some(v => String(v).toLowerCase().includes(q));
+  });
+  list = list.sort((a, b) => new Date(a.deadline || 0) - new Date(b.deadline || 0));
   if (countEl) countEl.textContent = String(list.length);
   if (subEl) {
     const tier = currentProfile ? Number(currentProfile.tier) : 0;
@@ -2229,6 +2270,7 @@ function renderBenchBoard() {
     const buildPct = Math.round(calculateBuildPercentage(t) || 0);
     const qcPct = Math.round(calculateQcPercentage(t) || 0);
     const urgent = checkIsUrgent(t.deadline);
+    const dRisk = t.status === 'completed' ? '' : deadlineRisk(t.deadline);
     const stage = t.queued ? 'Queued'
       : buildPct < 100 ? 'Assembly'
       : qcPct < 100 ? 'QC & Testing' : 'Ready';
@@ -2244,7 +2286,7 @@ function renderBenchBoard() {
         <div class="bench-bar"><span>QC</span><div class="bench-track"><i class="qc" style="width:${qcPct}%"></i></div><b>${qcPct}%</b></div>
       </div>
       <div class="bench-card-foot">
-        <span class="bench-deadline ${urgent ? 'urgent' : ''}">📅 ${escapeHtmlLite(deadlineCountdown(t.deadline) || formatDateShort(t.deadline))}</span>
+        <span class="bench-deadline ${urgent ? 'urgent' : ''}${dRisk ? ' risk-' + dRisk : ''}">📅 ${escapeHtmlLite(deadlineCountdown(t.deadline) || formatDateShort(t.deadline))}</span>
         <span class="bench-go">Open bench →</span>
       </div>
     </button>`;
@@ -2272,6 +2314,8 @@ function setupBenchBoard() {
   });
   const showAll = document.getElementById('btn-bench-showall');
   if (showAll) showAll.addEventListener('click', () => { benchShowAll = true; renderBenchBoard(); });
+  const search = document.getElementById('bench-search');
+  if (search) search.addEventListener('input', renderBenchBoard);
 }
 
 function formatDateShort(dateStr) {
@@ -2383,6 +2427,7 @@ function renderDashboard() {
       const isAwaitingParts = t.missingComponentsToggle;
       
       const isUrgent = checkIsUrgent(t.deadline);
+      const dRisk = t.status === 'completed' ? '' : deadlineRisk(t.deadline);
       const statusText = getStatusLabelText(t.status);
 
       const damaged = hasDamagedComponents(t);
@@ -2446,7 +2491,7 @@ function renderDashboard() {
 
         <div class="card-meta-footer">
           <span class="card-type-badge">${t.type === 'build' ? '⚙️ Build' : '🔧 Repair'}</span>
-          <span class="card-deadline ${isUrgent ? 'urgent' : ''}">📅 ${formatDateShort(t.deadline)} · <strong>${deadlineCountdown(t.deadline)}</strong></span>
+          <span class="card-deadline ${isUrgent ? 'urgent' : ''}${dRisk ? ' risk-' + dRisk : ''}">📅 ${formatDateShort(t.deadline)} · <strong>${deadlineCountdown(t.deadline)}</strong></span>
         </div>
       `;
 
@@ -2639,6 +2684,18 @@ function checkIsUrgent(deadlineStr) {
   return diffMs > 0 && diffMs < 24 * 60 * 60 * 1000; // Less than 24 hours
 }
 
+// QoL (v1.9.5): deadline risk level for colour cues.
+//   'overdue' → red (past due), 'soon' → amber (< 24h left), '' → normal.
+// Call sites suppress it for completed builds (a shipped PC isn't "overdue").
+function deadlineRisk(deadlineStr) {
+  if (!deadlineStr) return '';
+  const diffMs = new Date(deadlineStr) - new Date();
+  if (isNaN(diffMs)) return '';
+  if (diffMs <= 0) return 'overdue';
+  if (diffMs < 24 * 60 * 60 * 1000) return 'soon';
+  return '';
+}
+
 function getStatusLabelText(status) {
   switch (status) {
     case 'awaiting': return 'Awaiting Components';
@@ -2661,8 +2718,27 @@ function isI514thGen(cpuStr) {
 // ==========================================================================
 
 
+// QoL (v1.9.5) — track unsaved edits so closing the ticket with unfinished
+// work asks before discarding. Flipped true by any input/change inside the
+// modal; reset on open (deferred past programmatic population) and on save.
+let ticketFormDirty = false;
+async function requestCloseTicketModal() {
+  if (ticketFormDirty) {
+    const ok = await showConfirm('You have unsaved changes on this ticket. Discard them and close?',
+      { title: 'Unsaved changes', okText: 'Discard', danger: true });
+    if (!ok) return;
+  }
+  document.getElementById('ticket-modal').classList.remove('active');
+  editingTicketId = null;
+  ticketFormDirty = false;
+  hideConflictBanner();
+}
+
 function openTicketModal(ticketId = null) {
   editingTicketId = ticketId;
+  // Reset AFTER this synchronous open (and any change events it dispatches
+  // during programmatic population) so the modal never opens already "dirty".
+  setTimeout(() => { ticketFormDirty = false; }, 0);
   adminDetectedSpecs = null;   // fresh modal — stale detect runs must not leak between tickets
   hideConflictBanner();
   const modal = document.getElementById('ticket-modal');
@@ -3050,6 +3126,12 @@ function updateTicketModalChrome(ticketId) {
   }
   set('tmh-owner', b.salesExec ? '👤 ' + b.salesExec : '', !!b.salesExec);
   set('tmh-deadline', t && t.deadline ? '📅 ' + deadlineCountdown(t.deadline) : '', !!(t && t.deadline));
+  const dlEl = document.getElementById('tmh-deadline');
+  if (dlEl) {
+    const r = (t && t.deadline && t.status !== 'completed') ? deadlineRisk(t.deadline) : '';
+    dlEl.classList.remove('risk-soon', 'risk-overdue');
+    if (r) dlEl.classList.add('risk-' + r);
+  }
 
   // Journey stepper: mark every stage up to the current one as reached.
   const order = ['awaiting', 'building', 'qc', 'completed'];
@@ -3377,7 +3459,6 @@ function handleClientTicketSelect() {
   const portUsb = !!(ticket.qcChecks && ticket.qcChecks.portUsb);
   const portVideo = !!(ticket.qcChecks && ticket.qcChecks.portVideo);
   const portAudio = !!(ticket.qcChecks && ticket.qcChecks.portAudio);
-  const portRgb = !!(ticket.qcChecks && ticket.qcChecks.portRgb);
 
   // Update badges
   const setBadgeState = (badgeId, passed) => {
@@ -3390,17 +3471,7 @@ function handleClientTicketSelect() {
   setBadgeState('badge-port-usb', portUsb);
   setBadgeState('badge-port-video', portVideo);
   setBadgeState('badge-port-audio', portAudio);
-  setBadgeState('badge-port-rgb', portRgb);
 
-  // Show/hide RGB control panel
-  const openrgbPanel = document.getElementById('openrgb-control-panel');
-  if (openrgbPanel) {
-    if (portRgb) {
-      openrgbPanel.classList.remove('hidden');
-    } else {
-      openrgbPanel.classList.add('hidden');
-    }
-  }
 
   // Load status display depending on existing data
   const hasTemps = ticket.diagnostics.cpuTempAvg !== null;
@@ -3550,167 +3621,6 @@ async function savePortScanResult(data) {
   await syncTicketToCloud(ticket);
 }
 
-// Persist the rgbSyncV2 result into the selected ticket
-async function saveRgbSyncResult(rgbResult) {
-  const ticketId = document.getElementById('client-ticket-select').value;
-  if (!ticketId) return;
-  const index = appState.tickets.findIndex(t => t.id === ticketId);
-  if (index === -1) return;
-  const ticket = appState.tickets[index];
-
-  if (!ticket.diagnostics) ticket.diagnostics = {};
-  ticket.diagnostics.rgbSyncV2 = { ...rgbResult, ranAt: new Date().toISOString() };
-  if (!ticket.qcChecks) ticket.qcChecks = {};
-  ticket.qcChecks.portRgb = rgbResult.overallStatus === 'pass' || rgbResult.overallStatus === 'partial';
-
-  ticket.updatedAt = new Date().toISOString();
-  appState.tickets[index] = ticket;
-  await saveDatabase();
-  await syncTicketToCloud(ticket);
-}
-
-// Cached RGB device list (from the last Detect Devices run) for apply actions
-let lastRgbDevices = [];
-
-function renderRgbDeviceControls(detailed) {
-  const container = document.getElementById('openrgb-device-list');
-  if (!container) return;
-  container.innerHTML = '';
-  detailed.forEach(dev => {
-    const zones = dev.zones && dev.zones.length ? dev.zones : ['(whole device)'];
-    const devEl = document.createElement('div');
-    devEl.className = 'dr-list';
-    devEl.innerHTML = zones.map((zone, zi) => `
-      <div class="dr-list-item">
-        <span>${dev.name}${zones.length > 1 || zone !== '(whole device)' ? ' — ' + zone : ''}</span>
-        <span style="display:flex;align-items:center;gap:6px;">
-          <input type="color" value="#e7014e" data-rgb-device="${dev.index}" data-rgb-zone="${dev.zones && dev.zones.length ? zi : ''}"
-                 style="width:34px;height:22px;padding:0;border:none;border-radius:4px;cursor:pointer;">
-          <button type="button" class="secondary-btn btn-rgb-zone-apply" data-rgb-device="${dev.index}" data-rgb-zone="${dev.zones && dev.zones.length ? zi : ''}"
-                  style="padding:2px 8px;font-size:0.7rem;">Apply</button>
-          <span class="rgb-zone-status dr-muted" data-rgb-status="${dev.index}-${zi}"></span>
-        </span>
-      </div>`).join('');
-    container.appendChild(devEl);
-  });
-
-  container.querySelectorAll('.btn-rgb-zone-apply').forEach(btn => {
-    btn.addEventListener('click', async () => {
-      const deviceIndex = btn.getAttribute('data-rgb-device');
-      const zoneIndex = btn.getAttribute('data-rgb-zone');
-      const picker = container.querySelector(`input[type="color"][data-rgb-device="${deviceIndex}"][data-rgb-zone="${zoneIndex}"]`);
-      const color = picker ? picker.value : '#e7014e';
-      const statusEl = container.querySelector(`[data-rgb-status="${deviceIndex}-${zoneIndex || 0}"]`);
-
-      btn.disabled = true;
-      if (statusEl) statusEl.textContent = 'Applying...';
-      try {
-        const result = await ipcRenderer.invoke('rgb:set-device-color', { deviceIndex, zoneIndex, mode: 'static', color });
-        if (statusEl) statusEl.textContent = result.success
-          ? (result.verified ? 'Applied ✦ controller OK' : 'Applied, unconfirmed')
-          : `Failed: ${result.error || 'unknown'}`;
-        // Record the zone-level result
-        const dev = lastRgbDevices.find(d => String(d.index) === String(deviceIndex));
-        if (dev) {
-          const zoneName = (dev.zones && dev.zones.length) ? dev.zones[parseInt(zoneIndex)] : dev.name;
-          await saveRgbSyncResult(buildRgbSyncResult(lastRgbDevices, { device: dev.name, zone: zoneName, color, verified: !!result.verified }));
-        }
-      } catch (e) {
-        if (statusEl) statusEl.textContent = `Error: ${e.message}`;
-      } finally {
-        btn.disabled = false;
-      }
-    });
-  });
-}
-
-// Build the diagnostics.rgbSyncV2 shape from the detected device list, merging
-// in the latest applied-color info (appliedInfo optional).
-function buildRgbSyncResult(detailed, appliedInfo) {
-  const existing = (() => {
-    const ticketId = document.getElementById('client-ticket-select').value;
-    const t = appState.tickets.find(t => t.id === ticketId);
-    return (t && t.diagnostics && t.diagnostics.rgbSyncV2) || null;
-  })();
-
-  const devices = detailed.map(dev => {
-    const zones = (dev.zones && dev.zones.length ? dev.zones : [dev.name]).map(zoneName => {
-      const prior = existing && existing.devices
-        ? (existing.devices.find(d => d.name === dev.name)?.zones || []).find(z => z.name === zoneName)
-        : null;
-      const isApplied = appliedInfo && appliedInfo.device === dev.name && appliedInfo.zone === zoneName;
-      return {
-        name: zoneName,
-        colorApplied: isApplied ? appliedInfo.color : (prior ? prior.colorApplied : null),
-        colorVerified: null, // CLI cannot read colors back — never claim it can
-        verified: isApplied ? appliedInfo.verified : (prior ? prior.verified : false)
-      };
-    });
-    return { name: dev.name, zones };
-  });
-
-  const anyVerified = devices.some(d => d.zones.some(z => z.verified));
-  const allVerified = devices.length > 0 && devices.every(d => d.zones.every(z => z.verified));
-  return {
-    controllerFound: detailed.length > 0,
-    devices,
-    overallStatus: detailed.length === 0 ? 'not-detected' : allVerified ? 'pass' : anyVerified ? 'partial' : 'pass'
-  };
-}
-
-function setupOpenRgbController() {
-  const applyBtn = document.getElementById('btn-apply-openrgb');
-  if (!applyBtn) return;
-
-  applyBtn.addEventListener('click', async () => {
-    const ticketId = document.getElementById('client-ticket-select').value;
-    if (!ticketId) {
-      showToast("Please select a ticket first before applying RGB Sync.", 'warning');
-      return;
-    }
-    const ticket = appState.tickets.find(t => t.id === ticketId);
-    if (!ticket) return;
-
-    const mode = document.getElementById('openrgb-mode').value;
-    const color = document.getElementById('openrgb-color-picker').value;
-    const statusEl = document.getElementById('openrgb-apply-status');
-
-    applyBtn.disabled = true;
-    applyBtn.textContent = 'Applying...';
-
-    try {
-      appendConsoleLine('c-console-box', `[RGB CONTROLLER] Applying RGB effect '${mode.toUpperCase()}' to all devices...`);
-      const result = await ipcRenderer.invoke('rgb:set-color', { mode, color, brightness: 100 });
-      if (result && result.success) {
-        const verifiedNote = result.verified ? 'controller re-enumerated OK' : 'controller did not re-confirm';
-        appendConsoleLine('c-console-box', `[RGB CONTROLLER] Applied via OpenRGB (${verifiedNote}).`);
-        if (statusEl) statusEl.textContent = result.verified ? `Applied — ${verifiedNote}` : 'Applied, unconfirmed';
-        // Record apply across every detected device/zone
-        if (lastRgbDevices.length) {
-          const applied = { color: mode === 'off' ? '#000000' : color, verified: !!result.verified };
-          let rgbResult = buildRgbSyncResult(lastRgbDevices, null);
-          rgbResult.devices = rgbResult.devices.map(d => ({
-            ...d,
-            zones: d.zones.map(z => ({ ...z, colorApplied: applied.color, verified: applied.verified }))
-          }));
-          const anyV = applied.verified;
-          rgbResult.overallStatus = rgbResult.controllerFound ? (anyV ? 'pass' : 'partial') : 'not-detected';
-          await saveRgbSyncResult(rgbResult);
-        }
-      } else {
-        appendConsoleLine('c-console-box', `[RGB CONTROLLER ERROR] Failed to sync: ${result ? result.error : 'Unknown error'}`);
-        if (statusEl) statusEl.textContent = `Failed: ${result ? result.error : 'unknown'}`;
-      }
-    } catch (err) {
-      console.error("OpenRGB apply error:", err);
-      appendConsoleLine('c-console-box', `[RGB CONTROLLER ERROR] Exception: ${err.message}`);
-    } finally {
-      applyBtn.disabled = false;
-      applyBtn.textContent = 'Apply Lighting Effect';
-    }
-  });
-}
-
 // Port Checker v3 — passive enumeration.
 // The shop just needs to know what Windows recognises: USB controllers and
 // their generations (2.0 / 3.x / USB4 / Type-C), the video outputs actually in
@@ -3781,71 +3691,6 @@ function setupPortsChecker() {
       }
     });
   }
-
-  // RGB — detect controllable devices, expose per-device/zone controls
-  const rgbBtn = document.getElementById('btn-scan-rgb');
-  if (rgbBtn) {
-    rgbBtn.addEventListener('click', async () => {
-      const ticketId = document.getElementById('client-ticket-select').value;
-      if (!ticketId) { showToast("Please select a ticket first before detecting RGB devices.", 'warning'); return; }
-      rgbBtn.disabled = true;
-      setBadge('rgb', 'unverified', 'Detecting…');
-      const panel = document.getElementById('openrgb-control-panel');
-      const listEl = document.getElementById('list-port-rgb');
-      try {
-        const res = await ipcRenderer.invoke('rgb:list-devices');
-        const detailed = res.detailed || [];
-        lastRgbDevices = detailed;
-        if (detailed.length > 0) {
-          setBadge('rgb', 'pass', `${detailed.length} device(s)`);
-          renderRgbDeviceControls(detailed);
-          if (panel) panel.classList.remove('hidden');
-          if (listEl) listEl.classList.add('hidden');
-          await saveRgbSyncResult(buildRgbSyncResult(detailed, null));
-        } else {
-          setBadge('rgb', 'unverified', 'None detected');
-          if (panel) panel.classList.add('hidden');
-          // If OpenRGB.exe isn't found, it was most likely quarantined by
-          // Windows Defender (its SMBus driver trips RiskWare heuristics).
-          // Offer a one-click authorize that adds a Defender exclusion and
-          // un-quarantines it, then re-detects.
-          const notFound = res.reason === 'not-found' || res.reason === 'launch-failed';
-          if (listEl) {
-            listEl.classList.remove('hidden');
-            if (notFound) {
-              listEl.innerHTML =
-                `<div class="dr-list-item" style="flex-direction:column;align-items:flex-start;gap:6px;">` +
-                `<span class="dr-muted">RGB engine (OpenRGB) isn't running — Windows Defender may have quarantined it (its low-level lighting driver is a common false positive).</span>` +
-                `<button type="button" id="btn-rgb-authorize" class="primary-pink-btn" style="padding:5px 12px;font-size:0.75rem;">⚡ Enable RGB Control (authorize with Windows Defender)</button>` +
-                `<span id="rgb-authorize-status" class="dr-muted"></span></div>`;
-              const authBtn = document.getElementById('btn-rgb-authorize');
-              const authStatus = document.getElementById('rgb-authorize-status');
-              if (authBtn) authBtn.addEventListener('click', async () => {
-                authBtn.disabled = true;
-                if (authStatus) authStatus.textContent = 'Adding Defender exclusion and restoring OpenRGB…';
-                const r = await ipcRenderer.invoke('rgb:authorize');
-                if (authStatus) authStatus.textContent = r.success
-                  ? 'Authorized ✓ — re-detecting devices…'
-                  : `Could not authorize automatically (${r.error || 'unknown'}). You may need to allow OpenRGB in Windows Security manually.`;
-                if (r.success) { authBtn.remove(); setTimeout(() => rgbBtn.click(), 800); }
-                else authBtn.disabled = false;
-              });
-            } else {
-              listEl.innerHTML = `<div class="dr-list-item"><span class="dr-muted">OpenRGB is running but found no controllable lighting on this board.</span></div>`;
-            }
-          }
-        }
-        appendConsoleLine('c-console-box', `[RGB] Detected ${detailed.length} controllable device(s)${detailed.length === 0 && res.reason ? ` (${res.reason})` : ''}.`);
-      } catch (err) {
-        setBadge('rgb', 'fail', 'Error');
-        appendConsoleLine('c-console-box', `[RGB ERROR] ${err.message}`);
-      } finally {
-        rgbBtn.disabled = false;
-      }
-    });
-  }
-
-  setupOpenRgbController();
 }
 
 // Save ticket form data
@@ -4208,6 +4053,7 @@ async function handleTicketFormSubmit(e) {
   await syncTicketToCloud(updatedTicket);
   document.getElementById('ticket-modal').classList.remove('active');
   editingTicketId = null;
+  ticketFormDirty = false;
   hideConflictBanner();
   renderDashboard();
 
@@ -4217,6 +4063,8 @@ async function handleTicketFormSubmit(e) {
     showToast('All technicians are at capacity — this build is in the waiting queue and starts automatically when one frees up.', 'warning', 9000);
   } else if (_assign && _assign.reason && !_existingForAssign) {
     showToast(_assign.reason, 'success');
+  } else {
+    showToast(_existingForAssign ? '✓ Ticket saved.' : '✓ Ticket created.', 'success');
   }
   drainAssignmentQueue().catch(e => console.warn('queue drain failed:', e && e.message));
   } catch (err) {
@@ -5266,16 +5114,13 @@ function setupEventListeners() {
 
   // Ticket create/edit actions
   document.getElementById('btn-new-ticket').addEventListener('click', () => openTicketModal());
-  document.getElementById('btn-close-ticket-modal').addEventListener('click', () => {
-    document.getElementById('ticket-modal').classList.remove('active');
-    editingTicketId = null;
-    hideConflictBanner();
-  });
-  document.getElementById('btn-cancel-ticket').addEventListener('click', () => {
-    document.getElementById('ticket-modal').classList.remove('active');
-    editingTicketId = null;
-    hideConflictBanner();
-  });
+  document.getElementById('btn-close-ticket-modal').addEventListener('click', requestCloseTicketModal);
+  document.getElementById('btn-cancel-ticket').addEventListener('click', requestCloseTicketModal);
+  // QoL (v1.9.5) — any edit inside the ticket modal marks it dirty so the
+  // close/cancel guard can warn before discarding unsaved work.
+  const tModal = document.getElementById('ticket-modal');
+  tModal.addEventListener('input', () => { ticketFormDirty = true; });
+  tModal.addEventListener('change', () => { ticketFormDirty = true; });
   document.getElementById('btn-reload-conflict-form').addEventListener('click', () => {
     if (editingTicketId) openTicketModal(editingTicketId);
   });
@@ -8305,8 +8150,8 @@ document.addEventListener('DOMContentLoaded', () => {
   const right = document.getElementById('client-panel-right');
   if (!grid || !right) return;
   const left = grid.querySelector('.client-panel');            // first panel = left
-  const portrgb = document.querySelector('#client-screen .port-rgb-checker-section')
-    || document.querySelector('.port-rgb-checker-section');
+  const portrgb = document.querySelector('#client-screen .port-checker-section')
+    || document.querySelector('.port-checker-section');
   if (!left || !right || left === right || !portrgb) return;
   // Move the Benchmark & Thermal content (all of the right panel) into the left.
   while (right.firstChild) left.appendChild(right.firstChild);

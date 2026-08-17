@@ -224,34 +224,6 @@
       '</div>';
   }
 
-  // ─── RGB sync panel ─────────────────────────────────────────────────
-
-  function renderRgbSyncPanel(data) {
-    if (!data || !data.controllerFound) {
-      return '<div class="dr-card">' +
-        '<div class="dr-card-header">' + icon('rgb') + '<span class="dr-card-title">RGB Sync</span>' + statusPill('unverified', data ? 'Not detected' : 'Not checked') + '</div>' +
-        emptyState('No RGB controller detected (OpenRGB).') +
-        '</div>';
-    }
-    var devicesHtml = (data.devices || []).map(function (dev) {
-      var zonesHtml = (dev.zones || []).map(function (z) {
-        return '<div class="dr-list-item">' +
-          '<span>' + esc(z.name) + '</span>' +
-          '<span class="dr-row-value" style="display:flex;align-items:center;gap:6px;">' +
-            '<span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:' + esc(z.colorApplied || '#888') + ';border:1px solid var(--dr-border);"></span>' +
-            statusPill(z.verified ? 'pass' : 'warn', z.verified ? 'Verified' : 'Applied, unconfirmed') +
-          '</span>' +
-          '</div>';
-      }).join('');
-      return '<div class="dr-card">' +
-        '<div class="dr-card-header">' + icon('rgb') + '<span class="dr-card-title">' + esc(dev.name) + '</span></div>' +
-        (zonesHtml ? '<div class="dr-list">' + zonesHtml + '</div>' : emptyState('No zones reported.')) +
-        '</div>';
-    }).join('');
-
-    return '<div class="dr-grid">' + (devicesHtml || emptyState('No devices found.')) + '</div>';
-  }
-
   // ─── PPI panel ──────────────────────────────────────────────────────
 
   function renderPpiPanel(row) {
@@ -321,7 +293,6 @@
     renderPassportCard: renderPassportCard,
     renderPassportGrid: renderPassportGrid,
     renderPortCheckPanel: renderPortCheckPanel,
-    renderRgbSyncPanel: renderRgbSyncPanel,
     renderPpiPanel: renderPpiPanel
   };
 

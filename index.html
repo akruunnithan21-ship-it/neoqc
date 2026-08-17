@@ -194,6 +194,7 @@
           <p class="bench-sub" id="bench-subtitle">Builds assigned to you.</p>
         </div>
         <div class="bench-head-right">
+          <input type="text" id="bench-search" class="bench-search" placeholder="Search customer / #id / spec…" />
           <div class="bench-stat"><span id="bench-count">0</span><small>ASSIGNED</small></div>
           <button type="button" id="btn-bench-refresh" class="secondary-btn">↻ Refresh</button>
         </div>
@@ -452,9 +453,9 @@
               <span id="client-win-key" style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; font-weight: 700; color: var(--text-dark);">--</span>
             </div>
 
-            <!-- Port & RGB Sync Verification Checker (v2 — guided verify flow) -->
-            <div class="port-rgb-checker-section margin-top">
-              <h4 style="color: var(--primary-pink); font-size: 0.82rem; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 12px; display: flex; align-items: center; gap: 6px;"><span class="dr-inline-icon" data-icon="port"></span>Port Verification &amp; RGB Sync</h4>
+            <!-- Port Verification Checker (v2 — guided verify flow) -->
+            <div class="port-checker-section margin-top">
+              <h4 style="color: var(--primary-pink); font-size: 0.82rem; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 12px; display: flex; align-items: center; gap: 6px;"><span class="dr-inline-icon" data-icon="port"></span>Port Verification</h4>
 
               <div style="display: flex; flex-direction: column; gap: 12px;">
                 <!-- Passive port enumeration (v3): one scan reports what Windows
@@ -528,39 +529,6 @@
                   </div>
                 </div>
 
-                <!-- RGB Sync v2 — per-device / per-zone control -->
-                <div class="dr-card scan-item-card" data-port-card="rgb">
-                  <div class="dr-card-header">
-                    <span class="dr-inline-icon" data-icon="rgb"></span>
-                    <span class="dr-card-title" style="font-size: 0.85rem;">RGB Sync (OpenRGB)</span>
-                    <span id="badge-port-rgb" class="dr-pill dr-status-unverified">Not checked</span>
-                    <button type="button" id="btn-scan-rgb" class="secondary-btn" style="padding: 4px 10px; font-size: 0.72rem;">Detect Devices</button>
-                  </div>
-                  <div id="list-port-rgb" class="dr-list hidden"></div>
-                  <div id="openrgb-device-list" style="margin-top: 8px;"></div>
-
-                  <!-- Global effect controls (all devices at once) -->
-                  <div id="openrgb-control-panel" class="hidden" style="margin-top: 10px; border-top: 1px solid var(--dr-border); padding-top: 10px;">
-                    <div class="dr-muted" style="margin-bottom: 6px;">Apply to all devices:</div>
-                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
-                      <div class="form-group mini">
-                        <label style="font-size:0.75rem; color: var(--text-muted);">Effect Mode</label>
-                        <select id="openrgb-mode" style="width: 100%; padding: 4px; font-size: 0.75rem; border-radius: 4px; border: 1px solid var(--glass-border); background: var(--glass-bg); color: var(--text-dark);">
-                          <option value="static">Static Color</option>
-                          <option value="breathing">Breathing</option>
-                          <option value="rainbow">Rainbow / Cycle</option>
-                          <option value="off">Off</option>
-                        </select>
-                      </div>
-                      <div class="form-group mini" id="openrgb-color-group">
-                        <label style="font-size:0.75rem; color: var(--text-muted);">Select Color</label>
-                        <input type="color" id="openrgb-color-picker" value="#e7014e" style="width: 100%; height: 26px; padding: 0; border: none; border-radius: 4px; cursor: pointer;">
-                      </div>
-                    </div>
-                    <button type="button" id="btn-apply-openrgb" class="primary-pink-btn full-width" style="padding: 6px; font-size: 0.75rem; margin-top: 8px; font-weight: bold;">Apply Lighting Effect</button>
-                    <div id="openrgb-apply-status" class="dr-muted" style="margin-top: 6px;"></div>
-                  </div>
-                </div>
               </div>
             </div>
           </div>
@@ -857,12 +825,6 @@
         <input type="hidden" id="form-created-at">
 
         <div class="modal-body">
-          <!-- SALES QUERIES — questions raised by the sales team; technician answers here -->
-          <div class="form-section tq-section" id="modal-queries-section" style="display:none;">
-            <h3>💬 Sales Queries <span id="modal-queries-count" class="tq-count"></span></h3>
-            <div id="modal-queries-list" class="tq-list"></div>
-          </div>
-
           <!-- BASIC INFO TAB/SECTION -->
           <div class="form-section">
             <h3>📋 Basic Details</h3>
@@ -947,6 +909,12 @@
             </div>
           </div>
 
+          <!-- SALES QUERIES — questions raised by the sales team; technician answers here -->
+          <div class="form-section tq-section" id="modal-queries-section" style="display:none;">
+            <h3>💬 Sales Queries <span id="modal-queries-count" class="tq-count"></span></h3>
+            <div id="modal-queries-list" class="tq-list"></div>
+          </div>
+
           <!-- TARGET BUILD SPECIFICATIONS -->
           <div class="form-section margin-top">
             <div class="section-header">
@@ -1028,6 +996,45 @@
             </div>
           </div>
 
+          <!-- ══ COMPONENT VERIFICATION (v2.0.0 Chunk B) ══
+               The FIRST QC gate: every component that arrived in the build room
+               is checked against the customer's invoice — serial scanned by the
+               technician must match the serial on the invoice line — and its box
+               condition recorded. Sits directly below the target specs so the
+               technician works top-down: what was ordered → what arrived. -->
+          <!-- Shown only while CREATING a ticket: the build-workflow sections
+               below are hidden until the ticket exists, so the create form is a
+               short focused task instead of a wall of locked panels. -->
+          <div id="new-ticket-hint" class="new-ticket-hint hidden">
+            <span class="nth-icon">✨</span>
+            <div>
+              <strong>Create the ticket first.</strong>
+              Component verification, assembly, QC and diagnostics unlock as soon as this build is saved.
+            </div>
+          </div>
+
+          <div id="component-verify-section" class="form-section margin-top">
+            <div class="section-header-row">
+              <h3>🔍 Component Verification <span class="cv-gate-tag">First QC gate</span></h3>
+              <div style="display:flex;align-items:center;gap:8px;">
+                <button type="button" class="flag-btn" data-flag-segment="components" title="Flag a component problem">⚑ Flag</button>
+                <span id="cv-summary-badge" class="badge">0 / 0 verified</span>
+              </div>
+            </div>
+            <p class="panel-info-text">
+              Scan each component's serial as you unbox it. It's matched against the serial on the invoice line.
+              Record the box condition too — anything other than a clean arrival is flagged on the QC report.
+            </p>
+            <div class="cv-legend">
+              <span><i class="cv-dot ok"></i> Matches invoice</span>
+              <span><i class="cv-dot warn"></i> No invoice serial — scan recorded</span>
+              <span><i class="cv-dot bad"></i> Mismatch</span>
+              <span><i class="cv-dot idle"></i> Not scanned yet</span>
+            </div>
+            <div id="cv-rows" class="cv-rows"><!-- built by renderComponentVerify() --></div>
+            <div id="cv-gate-note" class="cv-gate-note"></div>
+          </div>
+
           <div class="form-section margin-top">
             <div class="section-header">
               <h3>🛠️ Component Condition Report</h3>
@@ -1085,45 +1092,6 @@
               </div>
             </div>
 
-          </div>
-
-          <!-- ══ COMPONENT VERIFICATION (v2.0.0 Chunk B) ══
-               The FIRST QC gate: every component that arrived in the build room
-               is checked against the customer's invoice — serial scanned by the
-               technician must match the serial on the invoice line — and its box
-               condition recorded. Sits directly below the target specs so the
-               technician works top-down: what was ordered → what arrived. -->
-          <!-- Shown only while CREATING a ticket: the build-workflow sections
-               below are hidden until the ticket exists, so the create form is a
-               short focused task instead of a wall of locked panels. -->
-          <div id="new-ticket-hint" class="new-ticket-hint hidden">
-            <span class="nth-icon">✨</span>
-            <div>
-              <strong>Create the ticket first.</strong>
-              Component verification, assembly, QC and diagnostics unlock as soon as this build is saved.
-            </div>
-          </div>
-
-          <div id="component-verify-section" class="form-section margin-top">
-            <div class="section-header-row">
-              <h3>🔍 Component Verification <span class="cv-gate-tag">First QC gate</span></h3>
-              <div style="display:flex;align-items:center;gap:8px;">
-                <button type="button" class="flag-btn" data-flag-segment="components" title="Flag a component problem">⚑ Flag</button>
-                <span id="cv-summary-badge" class="badge">0 / 0 verified</span>
-              </div>
-            </div>
-            <p class="panel-info-text">
-              Scan each component's serial as you unbox it. It's matched against the serial on the invoice line.
-              Record the box condition too — anything other than a clean arrival is flagged on the QC report.
-            </p>
-            <div class="cv-legend">
-              <span><i class="cv-dot ok"></i> Matches invoice</span>
-              <span><i class="cv-dot warn"></i> No invoice serial — scan recorded</span>
-              <span><i class="cv-dot bad"></i> Mismatch</span>
-              <span><i class="cv-dot idle"></i> Not scanned yet</span>
-            </div>
-            <div id="cv-rows" class="cv-rows"><!-- built by renderComponentVerify() --></div>
-            <div id="cv-gate-note" class="cv-gate-note"></div>
           </div>
 
           <!-- STEP 1: PC ASSEMBLY (BUILD PHASE) -->
@@ -2034,6 +2002,13 @@
       </div>
     </div>
 
+    <!-- A warm, human note on how long the build took (only when the tech ran
+         the build timer). Populated by print-render; hidden otherwise. -->
+    <div id="print-craft-note" class="print-craft-note" style="display:none;">
+      <span class="pcn-icon">✦</span>
+      <span id="print-craft-text"></span>
+    </div>
+
     <div class="print-page-footline">
       <span>NEO TOKYO — Quality Control Certificate · retain this document; verify with the Integrity Code on page 4</span>
       <span>Page 1 of 4</span>
@@ -2462,16 +2437,15 @@
       <div class="modal-body" style="font-size: 0.92rem; line-height: 1.6; color: var(--text-dark); max-height: 420px; overflow-y: auto; padding-right: 5px;">
         <p style="margin-top: 0;">A major update has been installed. Here's what's new in NeoQC <strong data-app-version>v1.9.3</strong>:</p>
         <ul style="padding-left: 20px; display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px;">
-          <li><strong>Redesigned build ticket.</strong> The ticket now uses far more of the screen while keeping its glass edges, with the two short checklists side by side. A new header keeps the customer, priority, owner and deadline in view, and a journey strip shows exactly where the build has reached — Parts → Assembly → QC → Ready.</li>
-          <li><strong>Creating a ticket is now a short, focused form.</strong> The verification, assembly, QC and diagnostics panels stay out of the way until the build actually exists, instead of filling the screen greyed out.</li>
-          <li><strong>New: My Bench.</strong> The Testing Client opens on a board of the builds assigned to <em>you</em> — stage, progress and deadline at a glance — instead of a dropdown of everything. Service heads and above still see the whole floor.</li>
-          <li><strong>New: hover to peek.</strong> Rest on a ticket card and a summary rises up — progress, specs, technician, deadline — so you can check a build without opening it.</li>
-          <li><strong>New: automatic technician assignment.</strong> Builds are now handed to whoever genuinely has room, based on what they're already working on. Nobody has to track who's free — and if everyone is at capacity, the build waits in a queue and starts by itself the moment someone finishes.</li>
-          <li><strong>New: flags &amp; the notification bell.</strong> Raise a flag from any part of a build — components, assembly or QC — and it reaches the sales executive who owns that build. The bell in the top bar shows everything still open.</li>
-          <li><strong>Component Verification — the first QC gate.</strong> Scan each part's serial as you unbox it; it's matched against the serial on the customer's invoice, with box condition recorded on arrival.</li>
-          <li><strong>Build timer</strong>, so we can tell the customer exactly how long their PC took to craft.</li>
-          <li><strong>Every build has an owner</strong> — the sales executive who closed it — plus a priority that auto-sets from the build value.</li>
-          <li><strong>Clearer dashboard</strong>, prominent deadline countdowns, and an <strong>Extreme</strong> stress mode (1–2 day soak).</li>
+          <li><strong>Invoice auto-fill fixed.</strong> Attaching a customer invoice now reads <em>every</em> component correctly — the graphics card and power supply that used to go missing are imported properly, with the right per-part prices and totals.</li>
+          <li><strong>Ticket sections reordered</strong> to follow the real build flow: Basic Details → Sales Queries → Target Specs → Customer-Supplied Parts → Component Verification → Condition Report → Detected Hardware → Assembly → QC.</li>
+          <li><strong>Deadline cues.</strong> Countdowns now turn <strong>amber</strong> under 24 hours and <strong>red</strong> when overdue — on the dashboard, on My Bench, and in the ticket header.</li>
+          <li><strong>Save confirmation + unsaved-changes warning</strong>, so a ticket is never closed with work lost by accident.</li>
+          <li><strong>Search your bench</strong> by customer, ticket number or spec.</li>
+          <li><strong>Duplicate-serial guard.</strong> If a serial you scan is already recorded on another build, the row is flagged so you can catch a double-entry.</li>
+          <li><strong>A warm line on the QC certificate</strong> telling the customer how long their PC took to hand-build.</li>
+          <li><strong>Security.</strong> The Testing Client no longer lets a technician switch across into the admin dashboard — access now follows each person's role.</li>
+          <li><strong>RGB control removed.</strong> Lighting is now set with each motherboard's own software. This also cleared the antivirus false-positive that was blocking installs on some machines.</li>
         </ul>
       </div>
       <div class="modal-footer" style="border-top: 1px solid var(--glass-border); padding-top: 15px; display: flex; justify-content: flex-end; margin-top: 20px;">

@@ -4493,6 +4493,9 @@ body.dark-mode .card-type-badge {
 .cv-row.ok   { border-left-color: #22c55e; }
 .cv-row.warn { border-left-color: #f59e0b; }
 .cv-row.bad  { border-left-color: var(--status-urgent); background: rgba(239, 68, 68, 0.07); }
+/* QoL (v1.9.5) — serial already used on another ticket (warn, doesn't block). */
+.cv-row.dup-serial { border-left-color: #f59e0b; background: rgba(245, 158, 11, 0.08); }
+.cv-row.dup-serial .cv-scan { border-color: #f59e0b; background: rgba(245, 158, 11, 0.06); }
 .cv-main { min-width: 0; }
 .cv-cat { font-size: 0.78rem; font-weight: 800; color: var(--text-dark); display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .cv-name {
@@ -4727,6 +4730,17 @@ body.dark-mode .bench-stage { color: var(--bench-accent); }
 }
 .bench-deadline { font-family: 'JetBrains Mono', monospace; font-size: 0.72rem; color: var(--text-muted); }
 .bench-deadline.urgent { color: var(--status-urgent); font-weight: 700; }
+
+/* QoL (v1.9.5) — My Bench search box (cyan bench identity). */
+.bench-search {
+  padding: 7px 12px; border-radius: 8px;
+  border: 1px solid var(--glass-border);
+  background: rgba(0, 0, 0, 0.25); color: var(--text-dark);
+  font-size: 0.82rem; outline: none; min-width: 210px;
+  transition: border-color 0.2s;
+}
+.bench-search:focus { border-color: var(--bench-accent, #22d3ee); }
+.bench-search::placeholder { color: var(--text-muted); }
 .bench-go { font-size: 0.72rem; font-weight: 700; color: var(--bench-accent-2); }
 body.dark-mode .bench-go { color: var(--bench-accent); }
 
@@ -4817,6 +4831,27 @@ body.dark-mode .bench-go { color: var(--bench-accent); }
   border-color: var(--status-urgent);
   box-shadow: 0 2px 10px rgba(239, 68, 68, 0.35);
 }
+
+/* QoL (v1.9.5) — deadline risk cues: amber under 24h, red when overdue.
+   Solid fills keep them legible in both light and dark themes. Placed AFTER
+   .urgent so a <24h ticket reads amber rather than the old flat red. */
+.card-deadline.risk-soon {
+  color: #3a2500; background: #f59e0b; border-color: #f59e0b;
+  box-shadow: none; font-weight: 700;
+}
+.card-deadline.risk-overdue {
+  color: #fff; background: #dc2626; border-color: #dc2626;
+  box-shadow: 0 2px 12px rgba(220, 38, 38, 0.45); font-weight: 800;
+  animation: deadlinePulse 1.8s ease-in-out infinite;
+}
+@keyframes deadlinePulse {
+  0%, 100% { box-shadow: 0 2px 10px rgba(220, 38, 38, 0.30); }
+  50%      { box-shadow: 0 2px 18px rgba(220, 38, 38, 0.70); }
+}
+.bench-deadline.risk-soon { color: #f59e0b; font-weight: 700; }
+.bench-deadline.risk-overdue { color: #ef4444; font-weight: 800; }
+#tmh-deadline.risk-soon { color: #f59e0b; font-weight: 700; }
+#tmh-deadline.risk-overdue { color: #ef4444; font-weight: 800; }
 
 /* ==========================================================================
    TECHNICIAN AVATAR CHIP
@@ -5272,7 +5307,7 @@ body.dark-mode #client-screen .client-panel {
   letter-spacing: 0.01em;
 }
 #client-screen .client-panel > * + * { margin-top: 16px; }
-#client-screen .port-rgb-checker-section { margin-top: 26px; }
+#client-screen .port-checker-section { margin-top: 26px; }
 #client-screen .sv-row { padding: 11px 14px; }
 #client-screen .full-width { margin-top: 18px; }
 #client-screen .dr-card { padding: 16px 18px; border-radius: 14px; }

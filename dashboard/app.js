@@ -234,9 +234,6 @@ function renderDiagnosticsDetail(diag) {
   if (diag.portScan && (diag.portScan.usbControllers || diag.portScan.audioEndpoints)) {
     html += `<div class="sc-diag-section"><div class="sc-diag-title">System Ports &amp; Connectivity</div>${R.renderPortCheckPanel(diag.portScan)}</div>`;
   }
-  if (diag.rgbSyncV2 && diag.rgbSyncV2.controllerFound) {
-    html += `<div class="sc-diag-section"><div class="sc-diag-title">RGB Lighting</div>${R.renderRgbSyncPanel(diag.rgbSyncV2)}</div>`;
-  }
   return html;
 }
 

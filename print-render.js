@@ -141,6 +141,31 @@
 
     var checklist = populateChecklist(ticket);
 
+    // ── Warm build-time note (page 1) ──
+    // Shown only when the technician ran the build timer. The phrase is chosen
+    // deterministically from the ticket id so a reprint always reads the same.
+    (function () {
+      var vf = (ticket.specs && ticket.specs.__verify) || {};
+      var ms = vf.buildDurationMs;
+      var note = document.getElementById('print-craft-note');
+      var txt = document.getElementById('print-craft-text');
+      if (!note || !txt) return;
+      if (!ms || ms < 1000) { note.style.display = 'none'; return; }
+      var mins = Math.floor(ms / 60000), secs = Math.round((ms % 60000) / 1000);
+      var human = (mins > 0 ? mins + ' min ' : '') + secs + ' sec';
+      var phrases = [
+        'Masterfully crafted with the utmost care in ' + human + '.',
+        'Hand-assembled and quality-checked in ' + human + '.',
+        'Built with precision — every cable and screw set in ' + human + '.',
+        'Assembled with care and attention to detail in ' + human + '.',
+        'Your machine was brought to life in ' + human + ', then rigorously tested.'
+      ];
+      var h = 0, id = ticket.id || '';
+      for (var i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) & 0xffffffff;
+      txt.textContent = phrases[Math.abs(h) % phrases.length];
+      note.style.display = '';
+    })();
+
     // ── Header ──
     var shortId = ticket.id.slice(-6).toUpperCase();
     setText('print-ticket-id', shortId);

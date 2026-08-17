@@ -20,3 +20,6 @@ output/
 __pycache__/
 .claude/
 .harness-fixtures/
+
+# Local Netlify folder
+.netlify

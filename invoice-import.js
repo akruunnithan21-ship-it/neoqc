@@ -21,12 +21,16 @@
   // deliberately broad; overlaps (e.g. "rog strix" is both a board and a card
   // line) are resolved by the catalog scorer, not these.
   var CATEGORY_HINTS = {
-    cpu: [/\bryzen\b/i, /\bcore\s*i[3579]\b/i, /\bintel\s+core\b/i, /\bprocessor\b/i, /\bthreadripper\b/i, /\d{3,5}x3d\b/i, /\b\d{4,5}(k|kf|f|x|xt|g|ge)?\b\s*(processor|cpu)?/i, /\bpentium\b/i, /\bceleron\b/i, /\bathlon\b/i],
-    gpu: [/\brtx\b/i, /\bgtx\b/i, /\bradeon\b/i, /\brx\s*\d{3,4}\b/i, /\bgeforce\b/i, /\bgraphics?\s*card\b/i, /\bventus\b/i, /\bwindforce\b/i, /\beagle\b/i, /\bgaming\s*oc\b/i, /\barc\s*a\d{3}\b/i, /\bgpu\b/i],
+    // NOTE: the bare model-number hint REQUIRES a CPU suffix (9700X, 12400F,
+    // 14700K). A plain 4-digit number is NOT counted — GPU model numbers (5060,
+    // 4070, 7900) are also 4 digits and were tying the card's line with CPU,
+    // which dropped the GPU. Suffix-less CPUs still classify via ryzen/core/etc.
+    cpu: [/\bryzen\b/i, /\bcore\s*i[3579]\b/i, /\bintel\s+core\b/i, /\bcore\s*ultra\b/i, /\bprocessor\b/i, /\bthreadripper\b/i, /\d{3,5}x3d\b/i, /\b\d{4,5}(kf|ks|k|f|xt|x|ge|g)\b/i, /\bpentium\b/i, /\bceleron\b/i, /\bathlon\b/i],
+    gpu: [/\brtx\b/i, /\bgtx\b/i, /\bradeon\b/i, /\brx\s*\d{3,4}\b/i, /\bgeforce\b/i, /\bgraphics?\s*card\b/i, /\bventus\b/i, /\bwindforce\b/i, /\beagle\b/i, /\bgaming\s*oc\b/i, /\barc\s*a\d{3}\b/i, /\bgddr\d?\b/i, /\btwin\s*x2\b/i, /\bgpu\b/i],
     motherboard: [/\bmotherboard\b/i, /\bmainboard\b/i, /\bmobo\b/i, /\b[abxzh]\d{3}[a-z]?\b/i, /\btuf\s*gaming\b/i, /\bmag\b/i, /\bmortar\b/i, /\btomahawk\b/i, /\baorus\b/i, /\bsteel\s*legend\b/i, /\bgaming\s*plus\b/i, /\bprime\s+[abxzh]\d/i],
     ram: [/\bddr[45]\b/i, /\bmemory\b/i, /\bdimm\b/i, /\bvengeance\b/i, /\bripjaws\b/i, /\btrident\b/i, /\bfury\b/i, /\b\d{1,3}\s*gb\b.*\b\d{4,5}\s*mhz\b/i, /\b(2\s*x\s*\d{1,2}gb|\d{1,2}gb\s*x\s*2)\b/i, /\bram\b/i],
     storage: [/\bssd\b/i, /\bnvme\b/i, /\bhdd\b/i, /\bm\.?2\b/i, /\bhard\s*(disk|drive)\b/i, /\bsata\s*ssd\b/i, /\b\d+\s*(gb|tb)\b.*\b(ssd|nvme|hdd|drive)\b/i, /\b(970|980|990)\s*(evo|pro)?\b/i, /\bsn\d{3}\b/i, /\bwd\s*(blue|black|green)\b/i],
-    psu: [/\bpsu\b/i, /\bpower\s*supply\b/i, /\bsmps\b/i, /\b\d{3,4}\s*w(att)?\b/i, /\b80\s*\+?\s*plus\b/i, /\b(gold|bronze|platinum|titanium)\b/i, /\bmodular\b/i, /\brm\d{3,4}\b/i, /\bcv\d{3}\b/i, /\bmwe\b/i],
+    psu: [/\bpsu\b/i, /\bpower\s*supply\b/i, /\bsmps\b/i, /\b\d{3,4}\s*w(att)?\b/i, /\b80\s*\+?\s*plus\b/i, /\b(gold|bronze|platinum|titanium)\b/i, /\bmodular\b/i, /\brm\d{3,4}\b/i, /\bcv\d{3}\b/i, /\bmwe\b/i, /\b(mag|mpg)\s*a\d{3}\w{0,2}\b/i, /\ba\d{3}(gl|gf|gd|bn|bw|bp)\b/i],
     case: [/\bcabinet\b/i, /\bchassis\b/i, /\btower\b/i, /\batx\s*case\b/i, /\bmid[\s-]*tower\b/i, /\blian\s*li\b/i, /\bnzxt\b/i, /\bmeshify\b/i, /\blancool\b/i, /\bcase\b/i],
     cooler: [/\bcooler\b/i, /\baio\b/i, /\bliquid\s*(cooler|freezer)\b/i, /\bair\s*cooler\b/i, /\bhyper\s*212\b/i, /\bak\d{3}\b/i, /\bnh[\s-]*[du]\d{2}\b/i, /\bpeerless\b/i, /\bkraken\b/i, /\bml\d{3}\b/i, /\b(240|280|360|420)\s*mm\b/i, /\b(le|lt|ls|as)\d{3}\b/i, /\bassassin\b/i, /\bgammaxx\b/i, /\bfrost\s*flow\b/i, /\bcastle\b/i, /\bgalahad\b/i]
   };
@@ -42,7 +46,10 @@
     motherboard: [/\bmotherboard\b/i, /\bmainboard\b/i, /\bmobo\b/i],
     ram: [/\bmemory\b/i, /\bdimm\b/i, /\bram\b/i, /\bddr[45]\b/i],
     storage: [/\bssd\b/i, /\bnvme\b/i, /\bhdd\b/i, /\bhard\s*(disk|drive)\b/i, /\bsolid[\s-]*state\b/i],
-    psu: [/\bpsu\b/i, /\bpower\s*supply\b/i, /\bsmps\b/i],
+    // MSI's MAG/MPG "A###" prefix names a POWER SUPPLY (A750GL, A650BN), while
+    // MSI's MAG *boards* are chipset-named (MAG B650). Treat "MAG A###" as a
+    // decisive PSU signal so it outranks the incidental "mag" board hint.
+    psu: [/\bpsu\b/i, /\bpower\s*supply\b/i, /\bsmps\b/i, /\b(mag|mpg)\s*a\d{3}\w{0,2}\b/i],
     case: [/\bcabinet\b/i, /\bchassis\b/i, /\b(mid|full)[\s-]*tower\b/i, /\bpc\s*case\b/i, /\bcase\b/i],
     cooler: [/\bcpu\s*cooler\b/i, /\bcooler\b/i, /\baio\b/i, /\bliquid\s*cool/i, /\bair\s*cool/i, /\bheat\s*sink\b/i]
   };
@@ -131,6 +138,10 @@
     l = l.replace(/₹/g, ' ');
     l = l.replace(/\b(?:rs|inr)\b\.?/ig, ' ');
     l = l.replace(/\b\d{1,3}(,\d{2,3})+(\.\d{1,2})?\b/g, ' '); // 1,23,456.00 amounts
+    // Plain money WITHOUT comma grouping (sub-₹1000 tax/rate figures like
+    // "990.31", "837.92"). A standalone number with exactly two decimals is a
+    // price, never a spec — specs use one decimal or a unit (5.4GHz, 2.5").
+    l = l.replace(/\b\d{1,6}\.\d{2}\b/g, ' ');
     l = l.replace(/\s{2,}/g, ' ').trim();
     return l;
   }
@@ -231,12 +242,36 @@
     lines.forEach(function (orig) {
       var pr = extractPrices(orig);
       var hasPrice = pr.rate != null;
-      if (startsNewRow(orig, hasPrice)) {
+      // A line that carries a price but, once its HSN/qty/warranty/price columns
+      // are stripped, has NO product words is the numeric TAIL of the item whose
+      // name is above it (common when a long name wraps: the "HSN … Rate Tax
+      // Total" columns land on their own physical line). It must feed its price
+      // to the current row, NOT start a new one — otherwise the wrapped item
+      // loses its price and the tail becomes a junk row. This is what dropped
+      // the RAM/case/storage/GPU prices and hid the GPU entirely.
+      var nameText = cleanInvoiceName(orig);
+      var isMetaTail = !/[a-z]{2,}/i.test(nameText);
+      // Leading item index ("1 AMD…", "9) INNO3D…") — the strongest new-row
+      // signal. A number glued to a unit ("16GB", "2TB") is never an index.
+      var hasIndex = /^\s*\d{1,3}[\).\-]\s*[A-Za-z]/.test(orig) ||
+        (/^\s*\d{1,2}\s+[A-Za-z]/.test(orig) &&
+          !/^\s*\d{1,3}\s*(gb|tb|mhz|ghz|w|watt|mm)\b/i.test(orig));
+
+      var startNew;
+      if (isMetaTail) startNew = false;         // numeric/HSN/price tail → attach
+      else if (hasIndex) startNew = true;       // "N  Product…" → new item
+      else if (!rows.length) startNew = true;   // first real product line
+      else if (hasPrice) startNew = true;       // priced product line, no index → new item
+      else startNew = false;                    // wrapped-name continuation
+
+      if (startNew) {
         rows.push({ parts: [orig], rate: pr.rate, total: pr.total });
       } else if (rows.length) {
-        // continuation of the current row
+        // continuation of the current row. A wrapped NAME contributes its text;
+        // a numeric TAIL contributes only its price (its HSN/qty digits must not
+        // pollute the name — that's what left a stray "8471" on the case).
         var row = rows[rows.length - 1];
-        row.parts.push(orig);
+        if (!isMetaTail) row.parts.push(orig);
         if (row.rate == null && hasPrice) { row.rate = pr.rate; row.total = pr.total; }
       } else {
         leading.push(orig);

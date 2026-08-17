@@ -783,6 +783,19 @@
   display: flex; align-items: center; gap: 8px;
 }
 
+/* Warm build-time note — a small human touch on the certificate. */
+#print-report-container .print-craft-note {
+  margin-top: 10px; padding: 9px 14px; border-radius: 8px;
+  background: linear-gradient(90deg, #fdf2f6, #f6f0ff);
+  border: 1px solid #efd6e6;
+  font-size: 9pt; font-style: italic; color: #6b2140;
+  display: flex; align-items: center; gap: 9px;
+  -webkit-print-color-adjust: exact; print-color-adjust: exact;
+}
+#print-report-container .print-craft-note .pcn-icon {
+  font-style: normal; color: var(--print-accent, #e7014e); font-size: 11pt; flex: none;
+}
+
 /* v1.8.2 — guarantee hidden sections reserve ZERO space in the report (the
    global .hidden might be overridden inside the print container), and tighten
    the top so removing the verdict banner leaves no gap. */

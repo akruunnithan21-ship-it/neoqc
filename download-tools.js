@@ -25,11 +25,6 @@ const TOOLS = [
     destFolder: 'Cinebench'
   },
   {
-    name: 'OpenRGB',
-    url: 'https://codeberg.org/OpenRGB/OpenRGB/releases/download/release_0.9/OpenRGB_0.9_Windows_64_b5f46e3.zip',
-    destFolder: 'OpenRGB'
-  },
-  {
     // Prime95 / mprime — GIMPS project, freeware, redistributable per the
     // license.txt bundled in the zip. Used for the CPU+RAM Blend torture test.
     name: 'Prime95',
@@ -121,8 +116,6 @@ async function start() {
       checkFile = path.join(outDir, 'Cinebench.exe');
     } else if (tool.name === 'FurMark') {
       checkFile = path.join(outDir, 'FurMark_win64', 'furmark.exe');
-    } else if (tool.name === 'OpenRGB') {
-      checkFile = path.join(outDir, 'OpenRGB.exe');
     } else if (tool.name === 'Prime95') {
       checkFile = path.join(outDir, 'prime95.exe');
     } else if (tool.name === 'DiskSpd') {
