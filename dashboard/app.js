@@ -7,9 +7,8 @@
 const SUPABASE_URL  = 'https://ggsxkhenzdhaachubrsc.supabase.co';
 const SUPABASE_KEY  = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imdnc3hraGVuemRoYWFjaHVicnNjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE3MTEwNjEsImV4cCI6MjA5NzI4NzA2MX0.bDhUK-qJSgcBEcNdEdOaZGg5vsUF6jH2gbSRQaMhjBo';
 
-// Change this PIN to whatever the staff password should be.
-// Anyone who knows the URL + this PIN can view all tickets.
-const SALES_PIN = '9374';
+// (Removed the old shared SALES_PIN gate — staff now sign in with their own
+// Supabase account, and each PC keeps its own login. See webSignIn() below.)
 // ─────────────────────────────────────────────────────────
 
 // Status ordering used for the customer stepper
@@ -56,7 +55,11 @@ function technicianMatchesProfile(techName, profile) {
   const norm = (s) => String(s).toLowerCase().replace(/[^a-z\s]/g, ' ').split(/\s+/).filter(w => w.length > 2);
   const a = norm(techName), b = norm(profile.full_name || '');
   if (!a.length || !b.length) return false;
-  return a.some(w => b.includes(w));
+  // Require EVERY word of the ticket's technician name to appear in the profile
+  // (was .some, which matched on any single shared word). NOTE: names are not a
+  // reliable identity key — real per-technician scoping is enforced server-side by
+  // RLS on tickets (by profile uid). This client filter is UX only.
+  return a.every(w => b.includes(w));
 }
 
 function activateView(name) {
@@ -154,14 +157,25 @@ async function doLookup() {
   hideError();
 
   try {
-    const { data, error } = await db
-      .from('tickets')
-      .select('id, customer_name, status, type, technician, created_at, deadline, completed_at, diagnostics')
-      .filter('id', 'ilike', `%${raw.toLowerCase()}`)
-      .limit(1);
+    // Prefer the secure RPC (get_ticket_public), which works after the DB lockdown
+    // where anon can no longer read the tickets table directly. Fall back to the
+    // direct query when the RPC isn't deployed yet, so this page works BEFORE and
+    // AFTER you run Part 2 of database-hardening.sql — deploy order no longer matters.
+    let { data, error } = await db.rpc('get_ticket_public', { code: raw.toLowerCase() });
+    if (error && (error.code === 'PGRST202' || /function|not exist|not found|schema cache/i.test(error.message || ''))) {
+      ({ data, error } = await db
+        .from('tickets')
+        .select('id, customer_name, status, type, technician, created_at, deadline, completed_at, diagnostics')
+        .filter('id', 'ilike', `%${raw.toLowerCase()}`)
+        .limit(2));
+    }
 
     if (error) throw error;
     if (!data || data.length === 0) { showError('No ticket found for that code. Please double-check and try again.'); return; }
+    // A short suffix code can match more than one ticket id. Rather than silently
+    // show an arbitrary one (limit(1) had no ordering → could be the WRONG build),
+    // ask the customer for a few more characters.
+    if (data.length > 1) { showError('That code matches more than one build. Please enter a few more characters of your ticket code.'); return; }
 
     renderStatusCard(data[0]);
     appendPpiSection(data[0].id);
@@ -183,16 +197,11 @@ function renderStatusCard(row) {
   const statusLabel = STATUS_LABELS[row.status] || row.status || 'Unknown';
   const isComplete  = row.status === 'completed';
 
-  // QC result — look inside diagnostics JSONB
+  // QC result — look inside diagnostics JSONB. Uses the SAME qcVerdict() helper as
+  // the staff PASS/FAIL badge, so the customer can never be told "passed" while the
+  // staff badge says fail (previously this ignored the RAM stress result).
   const diag = row.diagnostics || {};
-  const qcPassed = isComplete
-    ? (diag.cinebench || diag.furmark || diag.ssdRead)
-      ? (
-          (diag.cpuTempMax == null || diag.cpuTempMax <= 85) &&
-          (diag.gpuTempMax == null || diag.gpuTempMax <= 80)
-        )
-      : null
-    : null;
+  const qcPassed = isComplete ? qcVerdict(diag) : null;
 
   card.innerHTML = `
     <div class="sc-header">
@@ -589,16 +598,26 @@ function renderTable() {
   }).join('');
 }
 
-function qcBadge(t) {
-  if (t.status !== 'completed') return '<span class="qc-badge na">—</span>';
-  const d = t.diagnostics || {};
-  const hasData = d.cpuTempMax != null || d.cinebench != null || d.furmark != null;
-  if (!hasData) return '<span class="qc-badge na">Pending</span>';
-  const pass =
+// Single source of truth for the QC pass/fail verdict, shared by the staff badge
+// and the customer status card so the two can never disagree. Returns true (pass),
+// false (fail), or null (not enough data yet). Any completed check that failed —
+// an over-temp CPU/GPU or a failed RAM stress — makes the whole verdict fail.
+function qcVerdict(d) {
+  d = d || {};
+  const hasData = d.cpuTempMax != null || d.cinebench != null || d.furmark != null || d.ramStress != null;
+  if (!hasData) return null;
+  return (
     (d.cpuTempMax == null || d.cpuTempMax <= 85) &&
     (d.gpuTempMax == null || d.gpuTempMax <= 80) &&
-    (d.ramStress == null  || d.ramStress === 'passed' || d.ramStress === true);
-  return pass
+    (d.ramStress == null  || d.ramStress === 'passed' || d.ramStress === true)
+  );
+}
+
+function qcBadge(t) {
+  if (t.status !== 'completed') return '<span class="qc-badge na">—</span>';
+  const v = qcVerdict(t.diagnostics);
+  if (v === null) return '<span class="qc-badge na">Pending</span>';
+  return v
     ? '<span class="qc-badge pass">✓ PASS</span>'
     : '<span class="qc-badge fail">✗ FAIL</span>';
 }

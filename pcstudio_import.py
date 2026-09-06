@@ -924,13 +924,12 @@ def consolidate_and_upsert(query: str, category: str | None = None) -> dict:
     upserted = False
     upsert_error = None
     try:
+        import os
         from supabase import create_client
-        sb = create_client(
-            "https://ggsxkhenzdhaachubrsc.supabase.co",
-            "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9"
-            ".eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imdnc3hraGVuemRoYWFjaHVicnNjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE3MTEwNjEsImV4cCI6MjA5NzI4NzA2MX0"
-            ".bDhUK-qJSgcBEcNdEdOaZGg5vsUF6jH2gbSRQaMhjBo",
-        )
+        _key = os.environ.get("SUPABASE_SERVICE_KEY")
+        if not _key:
+            raise SystemExit("Set the SUPABASE_SERVICE_KEY environment variable (your Supabase service-role key) before running this importer.")
+        sb = create_client("https://ggsxkhenzdhaachubrsc.supabase.co", _key)
         sb.table("component_prices").upsert(row, on_conflict="sku").execute()
         upserted = True
     except Exception as e:  # noqa: BLE001 — surface any failure back to the caller, don't crash the CLI

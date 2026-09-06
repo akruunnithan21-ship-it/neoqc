@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const https = require('https');
 const http = require('http');
+const crypto = require('crypto');
 
 // Use Electron's bundled extract-zip package
 const extract = require('extract-zip');
@@ -44,25 +45,52 @@ const TOOLS = [
   }
 ];
 
+// --- Supply-chain integrity -------------------------------------------------
+// These archives are extracted and BUNDLED into an Administrator-privileged app,
+// so a compromised mirror = admin-level code on every shop PC. Pin the SHA-256 of
+// each archive here after downloading it once from a trusted network and checking
+// it (PowerShell: Get-FileHash -Algorithm SHA256 <file>). With a hash set, a
+// mismatch ABORTS; left null, the download proceeds but is flagged UNVERIFIED so
+// the gap stays visible. FurMark's 'get latest' mirror in particular should be
+// swapped for a pinned versioned URL before you pin its hash.
+const EXPECTED_SHA256 = {
+  LibreHardwareMonitor: null,
+  FurMark: null,
+  CinebenchR23: null,
+  Prime95: null,
+  DiskSpd: null
+};
+
+function sha256(filePath) {
+  return crypto.createHash('sha256').update(fs.readFileSync(filePath)).digest('hex');
+}
+
 // Ensure directory exists
 if (!fs.existsSync(DIAGNOSTICS_DIR)) {
   fs.mkdirSync(DIAGNOSTICS_DIR, { recursive: true });
 }
 
-function downloadFile(url, destPath) {
+function downloadFile(url, destPath, depth) {
+  depth = depth || 0;
   return new Promise((resolve, reject) => {
+    // HTTPS-only: these binaries get bundled into an Administrator-privileged app,
+    // so we never fetch (or follow a redirect) over plaintext http, which could be
+    // MITM'd to swap the payload.
+    if (!/^https:\/\//i.test(url)) { reject(new Error(`Refusing non-https download URL: ${url}`)); return; }
+    if (depth > 5) { reject(new Error('Too many redirects')); return; }
     console.log(`Downloading: ${url} ...`);
-    const protocol = url.startsWith('https') ? https : http;
-    
-    const request = protocol.get(url, {
+
+    const request = https.get(url, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
       }
     }, (response) => {
-      // Handle redirects
+      // Handle redirects — but only to another https URL (never downgrade to http).
       if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
-        console.log(`Redirecting to: ${response.headers.location}`);
-        return downloadFile(response.headers.location, destPath).then(resolve).catch(reject);
+        const next = new URL(response.headers.location, url).toString();
+        if (!/^https:\/\//i.test(next)) { reject(new Error(`Refusing http redirect: ${next}`)); return; }
+        console.log(`Redirecting to: ${next}`);
+        return downloadFile(next, destPath, depth + 1).then(resolve).catch(reject);
       }
 
       if (response.statusCode !== 200) {
@@ -133,6 +161,20 @@ async function start() {
 
     try {
       await downloadFile(tool.url, zipPath);
+
+      // Verify archive integrity before extracting/bundling it.
+      const actual = sha256(zipPath);
+      const expected = EXPECTED_SHA256[tool.name];
+      if (expected) {
+        if (actual.toLowerCase() !== expected.toLowerCase()) {
+          fs.unlinkSync(zipPath);
+          throw new Error(`SHA-256 mismatch for ${tool.name}: expected ${expected}, got ${actual}. Refusing to bundle a possibly-tampered binary.`);
+        }
+        console.log(`Verified ${tool.name} SHA-256 OK.`);
+      } else {
+        console.warn(`WARNING  ${tool.name}: UNVERIFIED download (no pinned SHA-256). Computed ${actual} — pin this in EXPECTED_SHA256 after confirming it from a trusted source.`);
+      }
+
       await extractZip(zipPath, outDir);
       
       // Clean up zip file

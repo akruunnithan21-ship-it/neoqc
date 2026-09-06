@@ -519,7 +519,10 @@
       var tag = function (cat) {
         return cs.indexOf(cat) !== -1 ? ' <span class="inv-p-tag">CUSTOMER PART</span>' : '';
       };
-      var join = function (arr) { return arr.filter(Boolean).join(' · '); };
+      // esc() here escapes every inventory data field (raw WMI/CIM strings) in one
+      // place; tag() markup is concatenated OUTSIDE join(), so it stays intact while
+      // no synced/attacker-controlled inventory string can inject HTML at :561.
+      var join = function (arr) { return esc(arr.filter(Boolean).join(' · ')); };
       var irows = [];
       var imb = inv.motherboard || {};
       if (imb.model || imb.manufacturer) {

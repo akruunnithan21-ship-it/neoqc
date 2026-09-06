@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { exec, spawn, execSync } = require('child_process');
@@ -10,6 +10,18 @@ const log = require('electron-log');
 // Configure auto updater logging
 autoUpdater.logger = log;
 autoUpdater.logger.transports.file.level = 'info';
+
+// Global safety net for the main process. An unhandled exception here — e.g. a
+// spawned diagnostic child (FurMark/Cinebench/monitor) emitting 'error' with no
+// listener, or a stray rejected promise — would otherwise crash the whole shop
+// tool. Log it and keep running instead. (Per-spawn 'error' handlers that also
+// unblock the diagnostics promise are a recommended follow-up.)
+process.on('uncaughtException', (err) => {
+  try { log.error('Uncaught exception in main process:', err); } catch (_) {}
+});
+process.on('unhandledRejection', (reason) => {
+  try { log.error('Unhandled promise rejection in main process:', reason); } catch (_) {}
+});
 log.info('NeoQC launching...');
 
 function checkAdminElevated() {
@@ -183,6 +195,26 @@ function createWindow() {
   });
 
   mainWindow.loadFile('index.html');
+
+  // --- Renderer navigation hardening (defense-in-depth for the nodeIntegration
+  // renderer). The app is a single local page. Block any navigation that would take
+  // the main window away from the bundled file (an injected <a> or location change
+  // to a remote/hostile page), and never open child windows in-process — a child
+  // window would inherit Node access. Genuine external links open in the system
+  // browser instead. Zero functional impact: the app never uses window.open.
+  mainWindow.webContents.on('will-navigate', (e, url) => {
+    if (!url.startsWith('file://')) {
+      e.preventDefault();
+      log.warn('Blocked navigation to non-local URL:', url);
+    }
+  });
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    try {
+      const u = new URL(url);
+      if (u.protocol === 'https:') shell.openExternal(url);
+    } catch (e) { /* ignore malformed URLs */ }
+    return { action: 'deny' };
+  });
 
   // Dev mode: NEOQC_DEV=1 opens DevTools and watches renderer files for changes,
   // reloading the window on save. Zero-setup live-reload for the "edit in VS Code,
@@ -1703,7 +1735,7 @@ ipcMain.handle('sys:check-port-hardware', async (event, portType) => {
         return;
       }
 
-      exec(`powershell.exe -NoProfile -ExecutionPolicy Bypass -File "${portScript}" -Type ${portType}`, (err, stdout) => {
+      exec(`powershell.exe -NoProfile -ExecutionPolicy Bypass -File "${portScript}" -Type ${String(portType).replace(/[^A-Za-z0-9_-]/g, '')}`, (err, stdout) => {
         const output = (stdout || '').trim();
         if (err || !output) {
           resolve({ passed: false, devices: [], count: 0 });
@@ -1968,8 +2000,20 @@ ipcMain.handle('ppi:compute', async (event, { ticketId, useCase }) => {
 ipcMain.handle('catalog:fetch-url', async (event, { url }) => {
   const { net } = require('electron');
   try {
-    if (!/^https:\/\//i.test(String(url))) {
+    let parsed;
+    try { parsed = new URL(String(url)); } catch (_) { return { ok: false, error: 'Invalid URL.' }; }
+    if (parsed.protocol !== 'https:') {
       return { ok: false, error: 'Only https URLs are allowed.' };
+    }
+    // SSRF guard: block loopback, private and link-local hosts so this bridge can
+    // only reach public sites (price lookups), never internal services or the cloud
+    // metadata endpoint (169.254.169.254).
+    const host = parsed.hostname.toLowerCase();
+    if (host === 'localhost' || host === '127.0.0.1' || host === '::1' ||
+        /^10\./.test(host) || /^192\.168\./.test(host) ||
+        /^172\.(1[6-9]|2\d|3[01])\./.test(host) ||
+        /^169\.254\./.test(host) || host.endsWith('.local') || host.endsWith('.internal')) {
+      return { ok: false, error: 'Blocked non-public host.' };
     }
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 20000);

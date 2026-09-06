@@ -737,6 +737,9 @@
 
       grid.innerHTML = '';
 
+      // XSS-safe: escape all user/customer/spec fields before they enter innerHTML.
+      const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
       const filtered = tickets.filter(t => {
         // Status filter
         if (statusFilter !== 'all' && t.status !== statusFilter) return false;
@@ -776,7 +779,7 @@
         if (t.missing_components_toggle && t.missing_components) {
           missingPartsHtml = `
             <div class="missing-parts-banner">
-              ⚠️ <strong>Missing parts:</strong> ${t.missing_components}
+              ⚠️ <strong>Missing parts:</strong> ${esc(t.missing_components)}
             </div>
           `;
         }
@@ -788,10 +791,10 @@
           minute: '2-digit'
         }) : 'No Deadline';
 
-        const cpuSpec = t.specs && t.specs.cpu ? t.specs.cpu : '--';
-        const gpuSpec = t.specs && t.specs.gpu ? t.specs.gpu : '--';
-        const ramSpec = t.specs && t.specs.ram ? t.specs.ram : '--';
-        const diskSpec = t.specs && t.specs.storage ? t.specs.storage : '--';
+        const cpuSpec = t.specs && t.specs.cpu ? esc(t.specs.cpu) : '--';
+        const gpuSpec = t.specs && t.specs.gpu ? esc(t.specs.gpu) : '--';
+        const ramSpec = t.specs && t.specs.ram ? esc(t.specs.ram) : '--';
+        const diskSpec = t.specs && t.specs.storage ? esc(t.specs.storage) : '--';
 
         card.innerHTML = `
           <div class="card-header">
@@ -800,7 +803,7 @@
           </div>
           
           <div class="customer-info">
-            <h3>${t.customer_name}</h3>
+            <h3>${esc(t.customer_name)}</h3>
             <p>Target Deadline: <strong>${formattedDeadline}</strong></p>
           </div>
 
@@ -850,8 +853,8 @@
 
           <div class="card-footer">
             <div class="tech-tag">
-              <div class="tech-avatar">${t.technician ? t.technician[0].toUpperCase() : '?' }</div>
-              <span>Tech: <strong>${t.technician || 'Unassigned'}</strong></span>
+              <div class="tech-avatar">${t.technician ? esc(t.technician[0].toUpperCase()) : '?' }</div>
+              <span>Tech: <strong>${esc(t.technician || 'Unassigned')}</strong></span>
             </div>
             <a class="action-link" onclick="openCustomerLink('${t.id}')">Customer View ↗</a>
           </div>

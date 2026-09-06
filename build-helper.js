@@ -1,6 +1,6 @@
 const fs = require('fs');
 const path = require('path');
-const mode = process.argv[2] || 'client';
+const mode = process.argv[2] || 'selector';
 
 // v1.8.4 — BUILD-TIME ENCODING GUARD. In 1.8.3, a PowerShell round-trip
 // (Get-Content | Set-Content -Encoding utf8) read index.html's emoji as ANSI and

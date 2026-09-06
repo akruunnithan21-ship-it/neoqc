@@ -31,12 +31,12 @@ except ImportError:
 
 # ─── Config ───────────────────────────────────────────────────────────────────
 
+import os
 SUPABASE_URL = "https://ggsxkhenzdhaachubrsc.supabase.co"
-SUPABASE_KEY = (
-    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9"
-    ".eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imdnc3hraGVuemRoYWFjaHVicnNjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE3MTEwNjEsImV4cCI6MjA5NzI4NzA2MX0"
-    ".bDhUK-qJSgcBEcNdEdOaZGg5vsUF6jH2gbSRQaMhjBo"
-)
+# Service-role key from the environment — never hardcoded, never shipped in the app.
+SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_KEY", "")
+if not SUPABASE_KEY:
+    raise SystemExit("Set the SUPABASE_SERVICE_KEY environment variable (service-role key) before running.")
 
 BATCH_SIZE = 100
 SKIP_CATEGORIES = {"other"}
