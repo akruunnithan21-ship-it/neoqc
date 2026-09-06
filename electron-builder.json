@@ -29,6 +29,6 @@
     "assets/benchmarks/**"
   ],
   "directories": {
-    "output": "C:/Users/Aladeen/Desktop/final build"
+    "output": "dist"
   }
 }

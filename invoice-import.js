@@ -165,16 +165,33 @@
   }
 
   // Pull the money figures off an ORIGINAL invoice line (before stripRowNoise
-  // removes them). We require Indian comma-grouping (e.g. 35,425 / 6,351.3 /
-  // 1,52,499.78) so we never mistake an HSN code (84733010), a quantity (1), a
-  // discount (140), a percentage (18), or a spec like "5.6Ghz" for a price.
-  // Returns { rate, total }: on a "... Rate Disc Tax Total" row the first
-  // comma-number is the unit rate and the last is the line total.
+  // removes them). Primary path requires Indian comma-grouping (e.g. 35,425 /
+  // 6,351.3 / 1,52,499.78) so we never mistake an HSN code (84733010), a quantity
+  // (1), a discount (140), a percentage (18), or a spec like "5.6Ghz" for a price.
+  // FALLBACK for invoices that DON'T use thousands separators (e.g. "Rs 1200" or a
+  // bare "850.00"): only when no grouped figure exists, accept high-confidence
+  // amounts — a number carrying a ₹/Rs/INR cue, or a bare two-decimal amount (>=10,
+  // so voltages/versions like 1.20 are ignored). This recovers prices that were
+  // previously dropped without matching RAM speeds ("3200"), model numbers ("4060")
+  // or HSN codes. Returns { rate, total }: first figure = unit rate, last = total.
   function extractPrices(originalLine) {
     var line = originalLine.replace(/\([^)]*%\)/g, ' '); // drop "(0.4%)" / "(18%)"
     var matches = line.match(/\d{1,3}(?:,\d{2,3})+(?:\.\d{1,2})?/g) || [];
     var nums = matches.map(function (s) { return parseFloat(s.replace(/,/g, '')); })
                       .filter(function (n) { return !isNaN(n) && n > 0; });
+    if (!nums.length) {
+      var re = /(?:₹|rs\.?|inr)\s*(\d+(?:\.\d{1,2})?)|(\d+\.\d{2})\b/ig;
+      var m;
+      while ((m = re.exec(line)) !== null) {
+        var cued = m[1], dec = m[2];
+        var s = cued || dec;
+        var v = parseFloat(s);
+        if (isNaN(v) || v <= 0) continue;
+        if (s.indexOf('.') === -1 && /^\d{6,}$/.test(s)) continue; // bare HSN/SAC/serial (no decimals)
+        if (!cued && v < 10) continue;                     // ignore 1.20V / 5.60 specs
+        nums.push(v);
+      }
+    }
     if (!nums.length) return { rate: null, total: null };
     return { rate: nums[0], total: nums[nums.length - 1] };
   }

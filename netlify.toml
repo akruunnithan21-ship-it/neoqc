@@ -5,3 +5,18 @@
 [build]
   publish = "dashboard"
   command = ""
+
+# Security headers for the public site. All dashboard scripts are external files
+# (no inline scripts), so script-src omits 'unsafe-inline'. connect-src allows the
+# Supabase project (REST + realtime) and the jsDelivr CDN that serves supabase-js;
+# add any new external origin here. frame-ancestors 'none' blocks click-jacking.
+# If a page breaks after deploy, check the browser console for the blocked origin
+# and add it here (headers apply on the next deploy; easy to iterate).
+[[headers]]
+  for = "/*"
+  [headers.values]
+    Content-Security-Policy = "default-src 'self'; script-src 'self' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: blob: https:; font-src 'self' https://fonts.gstatic.com data:; connect-src 'self' https://ggsxkhenzdhaachubrsc.supabase.co wss://ggsxkhenzdhaachubrsc.supabase.co https://cdn.jsdelivr.net; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
+    X-Content-Type-Options = "nosniff"
+    X-Frame-Options = "DENY"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+    Permissions-Policy = "geolocation=(), microphone=(), camera=()"

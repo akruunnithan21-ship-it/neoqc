@@ -24,12 +24,25 @@
     }
     // Intel Core: generation from the model (i7-14700 → 14; i5-12400 → 12)
     if (/\bcore\s*(ultra\s*)?i[3579]\b/.test(n) || /\bintel\b/.test(n) || /\bcore\s*ultra\b/.test(n)) {
-      var mi = /\bi[3579][- ]?(\d{2})\d{2,3}/.exec(n);
-      var gen = mi ? parseInt(mi[1], 10) : null;
+      // Intel model numbers encode the generation in a length-dependent way:
+      //   10th-gen and newer use a 5-digit model → first TWO digits are the gen
+      //     (i5-14400 → 14, i9-13900 → 13, i5-10400 → 10).
+      //   2nd–9th gen use a 4-digit model → first ONE digit is the gen
+      //     (i5-9400 → 9, i7-8700 → 8, i7-6700 → 6).
+      // The old regex always took two digits, so i5-9400 parsed as gen 94 and fell
+      // through to the `gen >= 15` branch, mislabelling every 6th–9th-gen chip as
+      // LGA1851/DDR5 (wrong socket + false DDR5 warnings). Parse by model length.
+      var mi = /\bi[3579][- ]?(\d{3,5})/.exec(n);
+      var gen = null;
+      if (mi) {
+        var model = mi[1];
+        gen = model.length >= 5 ? parseInt(model.slice(0, 2), 10) : parseInt(model.charAt(0), 10);
+      }
       if (/\bcore\s*ultra\b/.test(n)) return { brand: 'intel', socket: 'LGA1851', ramGen: 'DDR5' };
       if (gen === 12 || gen === 13 || gen === 14) return { brand: 'intel', socket: 'LGA1700', ramGen: null }; // DDR4 or DDR5
       if (gen === 10 || gen === 11) return { brand: 'intel', socket: 'LGA1200', ramGen: 'DDR4' };
-      if (gen >= 15) return { brand: 'intel', socket: 'LGA1851', ramGen: 'DDR5' };
+      if (gen === 6 || gen === 7 || gen === 8 || gen === 9) return { brand: 'intel', socket: 'LGA1151', ramGen: 'DDR4' };
+      if (gen !== null && gen >= 15 && gen <= 30) return { brand: 'intel', socket: 'LGA1851', ramGen: 'DDR5' };
       return { brand: 'intel', socket: null, ramGen: null };
     }
     return null;

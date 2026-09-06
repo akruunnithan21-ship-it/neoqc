@@ -733,7 +733,7 @@ function renderDamagedComponents() {
     var tagText = entry.condition === 'doa' ? 'DOA' : 'DAMAGED';
     row.innerHTML =
       '<span class="damage-tag ' + tagClass + '">' + tagText + '</span>' +
-      '<span class="damage-part">' + (DAMAGE_CATEGORY_LABEL[entry.category] || entry.category) + '</span>' +
+      '<span class="damage-part">' + escapeHtmlLite(DAMAGE_CATEGORY_LABEL[entry.category] || entry.category) + '</span>' +
       '<span class="damage-desc">' + (entry.note ? escapeHtmlLite(entry.note) : '<em>no description</em>') + '</span>' +
       '<button type="button" class="damage-remove" data-idx="' + idx + '">Remove</button>';
     row.querySelector('.damage-remove').addEventListener('click', function () {
@@ -1814,15 +1814,14 @@ async function loadDatabase() {
   await loadCatalogCacheFromDisk();
   syncCatalogCache(); // background refresh — not awaited, never blocks boot
 
-  // Seed beautiful mock tickets if db is empty to showcase the UI immediately!
+  // Seed mock tickets LOCALLY when the local db is empty, purely to showcase the UI
+  // on a fresh/offline install. They are intentionally NOT pushed to Supabase — doing
+  // so polluted the shared production database with "Test Build" rows on every fresh
+  // install. syncFromCloud() below prunes local-only synced tickets, and these mocks
+  // are never marked cloudSynced, so they simply stay local until real data loads.
   if (!appState.tickets || appState.tickets.length === 0) {
     seedMockTickets();
     await saveDatabase();
-    if (supabaseClient) {
-      for (const t of appState.tickets) {
-        await syncTicketToCloud(t);
-      }
-    }
   }
   
   setSplashStatus('Syncing tickets…');
@@ -5858,6 +5857,11 @@ async function syncTicketToCloud(ticket) {
     if (error) {
       console.error("Supabase upsert failed:", error.message);
     } else {
+      // Mark that this ticket has reached the cloud at least once. syncFromCloud()
+      // uses this to tell "deleted remotely" (cloudSynced && absent from cloud →
+      // prune) apart from "created locally, not yet uploaded" (never synced → keep),
+      // so an offline-created ticket is never destroyed before it uploads.
+      ticket.cloudSynced = true;
       console.log(`Synced ticket ${ticket.id} to cloud.`);
     }
   } catch (err) {
@@ -5921,7 +5925,8 @@ function mapDbRowToTicket(dbRow) {
     damagedComponents: dbRow.damagedComponents || specs.__damaged || null,
     queued: !!specs.__queued,
     status: dbRow.status,
-    completedAt: dbRow.completed_at
+    completedAt: dbRow.completed_at,
+    cloudSynced: true // came from the cloud, so it is known-synced (see prune in syncFromCloud)
   };
 }
 
@@ -5957,11 +5962,14 @@ async function syncFromCloud() {
       });
       
       const oldLength = appState.tickets.length;
-      // Filter out local tickets not present in cloud
-      appState.tickets = appState.tickets.filter(t => cloudIds.has(t.id));
-      
+      // Remove tickets that were DELETED remotely — but ONLY ones we know reached the
+      // cloud before (cloudSynced). A ticket created locally while offline has no
+      // cloudSynced flag and must be KEPT, or we would permanently destroy it before
+      // it ever uploaded. (Previously this pruned every local-only ticket.)
+      appState.tickets = appState.tickets.filter(t => cloudIds.has(t.id) || !t.cloudSynced);
+
       await saveDatabase(); // Persist merged dataset locally
-      console.log(`Pulled ${data.length} tickets, removed ${oldLength - appState.tickets.length} deleted tickets from Supabase cloud.`);
+      console.log(`Pulled ${data.length} tickets, removed ${oldLength - appState.tickets.length} remotely-deleted tickets from Supabase cloud.`);
     }
   } catch (err) {
     console.error("Exception during database sync:", err);
@@ -7052,9 +7060,9 @@ function renderEventLog(ticket) {
       <div class="event-log-item${isRecent ? ' event-log-recent' : ''}">
         <div class="event-log-dot"></div>
         <div class="event-log-content">
-          <div class="event-log-event">${entry.event}</div>
+          <div class="event-log-event">${escapeHtmlLite(entry.event)}</div>
           <div class="event-log-meta">
-            <span class="event-log-user">${entry.user || 'System'}</span>
+            <span class="event-log-user">${escapeHtmlLite(entry.user || 'System')}</span>
             <span class="event-log-time">${timeStr} UTC</span>
           </div>
         </div>
@@ -7959,7 +7967,7 @@ function openGodMode() {
       input = '<select id="gm-' + key + '" class="settings-select" style="width:100%;">' +
         f[3].map(function (o) {
           const sel = String(overridden) === o ? ' selected' : '';
-          return '<option value="' + o + '"' + sel + '>' + (o === '' ? '(measured: ' + (current === '' ? '—' : current) + ')' : o) + '</option>';
+          return '<option value="' + escapeHtmlLite(o) + '"' + sel + '>' + (o === '' ? '(measured: ' + escapeHtmlLite(current === '' ? '—' : current) + ')' : escapeHtmlLite(o)) + '</option>';
         }).join('') + '</select>';
     } else {
       input = '<input id="gm-' + key + '" type="' + (kind === 'number' ? 'number' : 'text') + '" value="' + escapeHtmlLite(overridden) + '"' +

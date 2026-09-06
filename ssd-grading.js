@@ -40,8 +40,16 @@
       return { key: 'sata', label: TIERS.sata.name, tier: TIERS.sata };
     }
     if (bus === 'nvme' || bus === 'pcie' || health.mediaType === 'NVMe SSD') {
-      var gen = health.pcieCurrentGen || health.pcieMaxGen || 3;
-      var width = health.pcieCurrentWidth || health.pcieMaxWidth || 4;
+      var gen = health.pcieCurrentGen || health.pcieMaxGen;
+      var width = health.pcieCurrentWidth || health.pcieMaxWidth;
+      // If the PCIe link probe failed, we do NOT know the drive's generation.
+      // The old code defaulted to Gen3x4 (a 2800 MB/s floor), which handed an
+      // underperforming Gen4/5 drive a false PASS. Return "unknown" instead so
+      // grade() reports NOT MEASURED rather than a confident, wrong verdict.
+      if (!gen) {
+        return { key: 'nvme', label: 'NVMe SSD (link speed not detected)', tier: null, genUnknown: true };
+      }
+      if (!width) width = 4; // gen known, width missing: grade against full-width tier
       var key = 'nvme' + gen + 'x' + (width >= 4 ? 4 : 2);
       var t = TIERS[key] || TIERS.nvme4x4;
       return { key: key, label: t.name, tier: t };
@@ -66,6 +74,10 @@
     if (health && health.pcieCurrentWidth && health.pcieMaxWidth && health.pcieCurrentWidth < health.pcieMaxWidth) {
       reasons.push('Only ' + health.pcieCurrentWidth + ' PCIe lanes active (drive supports ' + health.pcieMaxWidth +
                    '). Common when the slot shares lanes with a second M.2 or GPU.');
+    }
+
+    if (cls.genUnknown) {
+      reasons.push('PCIe link generation could not be read for this NVMe drive, so its speed cannot be graded against a generation-appropriate target. Verify the drive model/slot and re-run before signing off.');
     }
 
     if (!tier || ssdRead == null || ssdWrite == null) {

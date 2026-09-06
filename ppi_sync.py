@@ -40,12 +40,13 @@ try:
 except ImportError:
     raise SystemExit("pip install supabase")
 
+import os
 SUPABASE_URL = "https://ggsxkhenzdhaachubrsc.supabase.co"
-SUPABASE_KEY = (
-    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9"
-    ".eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imdnc3hraGVuemRoYWFjaHVicnNjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE3MTEwNjEsImV4cCI6MjA5NzI4NzA2MX0"
-    ".bDhUK-qJSgcBEcNdEdOaZGg5vsUF6jH2gbSRQaMhjBo"
-)
+# Service-role key from the environment — NEVER hardcode it and NEVER ship it in
+# the app. Set it on your workstation only (see SECURITY-HARDENING.md section B3).
+SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_KEY", "")
+if not SUPABASE_KEY:
+    raise SystemExit("Set the SUPABASE_SERVICE_KEY environment variable (service-role key) before running.")
 
 BENCH_DIR = Path("assets/benchmarks")
 
