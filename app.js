@@ -2536,7 +2536,12 @@ function renderDashboard() {
     var qcAll = q.physCabinet && q.physMobo && q.physRam && q.physScrews &&
                 q.softWindows && q.softDrivers && q.softBios &&
                 q.portUsb && q.portVideo && q.portAudio && q.portWifi;
-    if (buildAll && qcAll) {
+    // v1.9.8 — stress testing is a separate phase that ends with an explicit
+    // technician sign-off. Auto-completing on the build + QC checkboxes ALONE
+    // closed the ticket while stress testing was still pending, which pushed it
+    // out of the active dashboard and made the remaining progress impossible to
+    // track. A build is only finished once stress has been signed off too.
+    if (buildAll && qcAll && t.stressSignedOff) {
       t.status = 'completed';
       if (!t.completedAt) t.completedAt = new Date().toISOString();
       t.updatedAt = new Date().toISOString();
@@ -3144,6 +3149,9 @@ function openTicketModal(ticketId = null) {
 
 
       // Diagnostics & Serials
+      // v1.9.8 — replay the stored diagnostics console so the admin sees exactly
+      // what the technician's run printed, instead of the idle placeholder.
+      renderStoredConsole('modal-console-box', ticket.diagnostics.consoleLog);
       document.getElementById('form-cpu-temp-min').value = ticket.diagnostics.cpuTempMin || '';
       document.getElementById('form-cpu-temp-max').value = ticket.diagnostics.cpuTempMax || '';
       document.getElementById('form-cpu-temp-avg').value = ticket.diagnostics.cpuTempAvg || '';
@@ -4156,18 +4164,28 @@ async function handleTicketFormSubmit(e) {
     const prev = (existingTicket && existingTicket.detectedSpecs) || {};
     const fresh = adminDetectedSpecs || {};
     const pick = (a, b) => realDetVal(a) || realDetVal(b) || '';
-    const merged = {
-      cpu:     pick(fresh.cpu, prev.cpu || detectedCpuVal),
-      igpu:    pick(fresh.igpu, prev.igpu || detectedIgpuVal) || 'None',
-      gpu:     pick(fresh.dgpu || fresh.gpu, prev.gpu || detectedGpuVal),
-      ram:     pick(fresh.ram, prev.ram || detectedRamVal),
-      storage: pick(fresh.storage, prev.storage || detectedStorageVal),
-      mobo:    pick(fresh.motherboard, prev.mobo),
-      coolerVerified: !!prev.coolerVerified,
-      psuVerified: !!prev.psuVerified,
-      caseVerified: !!prev.caseVerified
-    };
-    const hasAnything = merged.cpu || merged.gpu || merged.ram || merged.storage || merged.mobo || (merged.igpu && merged.igpu !== 'None');
+    // v1.9.8 DATA-LOSS FIX — start from the PREVIOUS object so every key this form
+    // does NOT own survives an admin "Update Ticket". The old code rebuilt
+    // detectedSpecs from a fixed key list, which silently destroyed `inventory`
+    // (the full make / model / part-number / serial capture from hw_inventory.ps1)
+    // and `capturedAt` on every save — that is why the "Hardware Inventory & Serial
+    // Numbers" panel and the report's inventory section kept going empty.
+    const merged = Object.assign({}, prev);
+    merged.cpu     = pick(fresh.cpu, prev.cpu || detectedCpuVal);
+    merged.igpu    = pick(fresh.igpu, prev.igpu || detectedIgpuVal) || 'None';
+    merged.gpu     = pick(fresh.dgpu || fresh.gpu, prev.gpu || detectedGpuVal);
+    merged.ram     = pick(fresh.ram, prev.ram || detectedRamVal);
+    merged.storage = pick(fresh.storage, prev.storage || detectedStorageVal);
+    // Keep BOTH spellings: `mobo` is what this form has always written, while the
+    // detect probe and the inventory use `motherboard`. Mirroring them stops the
+    // board name being lost when a ticket round-trips through either path.
+    merged.motherboard = pick(fresh.motherboard, prev.motherboard || prev.mobo);
+    merged.mobo    = merged.motherboard;
+    merged.coolerVerified = !!prev.coolerVerified;
+    merged.psuVerified = !!prev.psuVerified;
+    merged.caseVerified = !!prev.caseVerified;
+    if (fresh.inventory) merged.inventory = fresh.inventory;   // a fresh capture wins
+    const hasAnything = merged.cpu || merged.gpu || merged.ram || merged.storage || merged.motherboard || merged.inventory || (merged.igpu && merged.igpu !== 'None');
     if (hasAnything) {
       updatedTicket.detectedSpecs = merged;
       // Mirror into specs.__detected so the JSONB specs column carries it
@@ -4242,6 +4260,19 @@ async function handleTicketFormSubmit(e) {
       : (_assign.reason || ('Assigned to ' + technician + '.')), 'NeoQC');
   } else if (_existingForAssign.technician !== technician && technician) {
     addEventLog(updatedTicket, `Technician changed to ${technician}.`, 'NeoQC');
+  }
+
+  // v1.9.8 DATA-LOSS FIX — carry stress-test state across an admin save. This
+  // handler REPLACES the ticket object wholesale (appState.tickets[index] =
+  // updatedTicket below) and the form owns none of these fields, so every
+  // "Update Ticket" reset stress progress to zero and wiped the technician's
+  // sign-off — which is why an opened ticket kept claiming stress testing was
+  // still unsigned. existingTicket is the live appState object, so a sign-off or
+  // run recorded during this modal session is picked up here.
+  if (existingTicket) {
+    updatedTicket.stressRuns = existingTicket.stressRuns || 0;
+    updatedTicket.stressSignedOff = !!existingTicket.stressSignedOff;
+    updatedTicket.stressSignedOffAt = existingTicket.stressSignedOffAt || null;
   }
 
   updatedTicket.updatedAt = new Date().toISOString();
@@ -4596,7 +4627,12 @@ async function setupClientMode() {
     // Status transition
     t.status = 'qc_testing';
     const isQcFull = t.qcChecks.physCabinet && t.qcChecks.softWindows && t.qcChecks.softDrivers;
-    if (isQcFull && t.diagnostics.cinebench) {
+    // v1.9.8 — do NOT close the ticket just because a Cinebench score landed.
+    // Stress testing is a separate phase that ends with an explicit technician
+    // sign-off; closing before that pulled the build out of the active dashboard
+    // while work was still in progress, so its remaining progress could no longer
+    // be tracked. It stays in 'qc_testing' until stress is signed off.
+    if (isQcFull && t.diagnostics.cinebench && t.stressSignedOff) {
       t.status = 'completed';
       t.completedAt = new Date().toISOString();
     }
@@ -6065,6 +6101,10 @@ async function syncTicketToCloud(ticket) {
     if (ticket.stressRuns != null) diagPayload.__stressRuns = ticket.stressRuns;
     if (ticket.stressSignedOff != null) diagPayload.__stressSignedOff = ticket.stressSignedOff;
     if (ticket.stressSignedOffAt) diagPayload.__stressSignedOffAt = ticket.stressSignedOffAt;
+    // v1.9.8 — carry the real time-under-load + per-run log cross-machine so the
+    // progress bar and the report's "time under stress" survive a cloud round-trip.
+    if (ticket.stressTotalSec != null) diagPayload.__stressTotalSec = ticket.stressTotalSec;
+    if (Array.isArray(ticket.stressLog)) diagPayload.__stressLog = ticket.stressLog;
     if (ticket.reportOverrides) diagPayload.__reportOverrides = ticket.reportOverrides;
     else delete diagPayload.__reportOverrides;
 
@@ -6138,6 +6178,8 @@ function mapDbRowToTicket(dbRow) {
     stressRuns: diag.__stressRuns || 0,
     stressSignedOff: !!diag.__stressSignedOff,
     stressSignedOffAt: diag.__stressSignedOffAt || null,
+    stressTotalSec: diag.__stressTotalSec || 0,
+    stressLog: Array.isArray(diag.__stressLog) ? diag.__stressLog : [],
     reportOverrides: diag.__reportOverrides || null,
     id: dbRow.id,
     createdAt: dbRow.created_at,
@@ -6538,6 +6580,34 @@ function seedMockTickets() {
 // REAL-TIME DIAGNOSTICS LOGGING & TELEMETRY
 // ==========================================================================
 
+// v1.9.8 — the diagnostics console used to be a pure DOM sink: lines were appended
+// to a div and never stored anywhere, so the whole run log died when the modal
+// closed and an admin on another PC only ever saw the "[SYS] idle" placeholder.
+// Every line now also lands in this buffer, which is saved onto the ticket as
+// diagnostics.consoleLog[] (the same pattern as diagnostics.eventLog, so it syncs
+// inside the diagnostics JSONB with no schema change) and replayed into the modal.
+let diagConsoleBuffer = [];
+const DIAG_CONSOLE_MAX = 2000;   // keep the synced JSONB payload bounded
+
+function logDiagLine(text) {
+  const t = String(text == null ? '' : text);
+  diagConsoleBuffer.push({ t: new Date().toISOString(), line: t });
+  if (diagConsoleBuffer.length > DIAG_CONSOLE_MAX) {
+    diagConsoleBuffer.splice(0, diagConsoleBuffer.length - DIAG_CONSOLE_MAX);
+  }
+  appendConsoleLine('c-console-box', t);
+  appendConsoleLine('modal-console-box', t);
+}
+
+// Replay a stored console log into a box (used when an admin opens a ticket).
+function renderStoredConsole(boxId, entries) {
+  const box = document.getElementById(boxId);
+  if (!box) return;
+  if (!Array.isArray(entries) || !entries.length) return;
+  box.innerHTML = '';
+  entries.forEach(e => appendConsoleLine(boxId, (e && e.line != null) ? e.line : String(e)));
+}
+
 function appendConsoleLine(boxId, text) {
   const box = document.getElementById(boxId);
   if (!box) return;
@@ -6646,8 +6716,7 @@ ipcRenderer.on('sys:diag-log', (event, text) => {
   } else if (text.includes("LibreHardwareMonitor")) {
     modifiedText = `[PHASE: SENSOR POLLING] ` + text;
   }
-  appendConsoleLine('c-console-box', modifiedText);
-  appendConsoleLine('modal-console-box', modifiedText);
+  logDiagLine(modifiedText);
 });
 
 ipcRenderer.on('sys:sensor-update', (event, data) => {
@@ -6743,6 +6812,11 @@ async function executeDiagnosticsWorkflow(isModal) {
 
   if (!btn) return;
 
+  // v1.9.8 — start a fresh console capture for this run. The buffer is written
+  // onto the ticket when the run finishes, so the admin can replay exactly what
+  // the technician's machine printed.
+  diagConsoleBuffer = [];
+
   btn.disabled = true;
   btn.textContent = "⚡ Stress Testing...";
 
@@ -6821,6 +6895,9 @@ async function executeDiagnosticsWorkflow(isModal) {
   // Run diagnostics!
   const res = await ipcRenderer.invoke('sys:run-diagnostics', {
     ...appState.settings,
+    // v1.9.8 — tell main.js WHICH mode is running so it can echo it back on the
+    // result; the ticket then records what kind of run each entry was.
+    mode: isModal ? 'admin' : clientStressMode,
     useCase: useCase,
     duration: duration,
     runPrime95: runPrime95,
@@ -6848,7 +6925,8 @@ async function executeDiagnosticsWorkflow(isModal) {
   // only the technician's sign-off does that). Admin modal → the open ticket;
   // Testing Client → the selected build.
   const stressTicketId = isModal ? editingTicketId : (typeof clientActiveTicketId === 'function' ? clientActiveTicketId() : null);
-  if (stressTicketId) recordStressRun(stressTicketId);
+  // v1.9.8 — pass the full result so the run's real duration + mode are recorded.
+  if (stressTicketId) recordStressRun(stressTicketId, res);
 
   // Populate actual inputs
   document.getElementById(prefix + 'cpu-temp-min').value = res.cpuTempMin || '';
@@ -6958,6 +7036,9 @@ async function executeDiagnosticsWorkflow(isModal) {
       ticket.diagnostics.cpuTempMax = res.cpuTempMax || null;
       ticket.diagnostics.cpuTempAvg = res.cpuTempAvg || null;
       ticket.diagnostics.cpuTempLog = res.cpuTempLog || null;
+      // v1.9.8 — persist the run's console so it survives the modal closing and is
+      // visible to the admin on another machine (rides in the diagnostics JSONB).
+      ticket.diagnostics.consoleLog = diagConsoleBuffer.slice();
       ticket.diagnostics.gpuTempMin = res.gpuTempMin || null;
       ticket.diagnostics.gpuTempMax = res.gpuTempMax || null;
       ticket.diagnostics.gpuTempAvg = res.gpuTempAvg || null;
@@ -7746,12 +7827,27 @@ function renderInventoryPanel(ticket) {
 // ═══════════════════════════════════════════════════════════
 const STRESS_CAP_BEFORE_SIGNOFF = 90;
 
+// v1.9.8 — the bar now measures REAL WORK, not button presses. Progress is the
+// total time the machine actually spent under load, against a target of
+// STRESS_TARGET_SEC. So a 15-min Throttle fills half the bar and a second one
+// completes it, while a 30-min Stability fills it in a single run — and a 24-hour
+// Extreme soak can never count the same as a 15-minute Throttle, which is exactly
+// what the old count-based curve got wrong. Sign-off remains the ONLY way to reach
+// 100%. Tickets created before this change recorded no duration, so they fall back
+// to the historical run-count curve rather than suddenly reading 0%.
+const STRESS_TARGET_SEC = 1800;   // 30 minutes of real load = a full bar
+
 function stressProgressPercent(ticket) {
   if (!ticket) return 0;
   if (ticket.stressSignedOff) return 100;
+  const secs = ticket.stressTotalSec || 0;
+  if (secs > 0) {
+    const pct = STRESS_CAP_BEFORE_SIGNOFF * (secs / STRESS_TARGET_SEC);
+    return Math.min(STRESS_CAP_BEFORE_SIGNOFF, Math.round(pct));
+  }
   const runs = ticket.stressRuns || 0;
   if (runs <= 0) return 0;
-  // 45 / 68 / 79 / 85 / 88 … asymptotic, never hits the cap by accident.
+  // Legacy ticket (no recorded duration): old asymptotic run-count curve.
   const pct = STRESS_CAP_BEFORE_SIGNOFF * (1 - Math.pow(0.5, runs));
   return Math.min(STRESS_CAP_BEFORE_SIGNOFF, Math.round(pct));
 }
@@ -7779,17 +7875,36 @@ function renderStressProgress(ticket) {
     meta.textContent = `Signed off by the technician after ${runs} stress run${runs === 1 ? '' : 's'}` +
       (ticket.stressSignedOffAt ? ' · ' + new Date(ticket.stressSignedOffAt).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '');
   } else {
+    // v1.9.8 — the zero-run case used to read "Signed off in the Testing Client.",
+    // which made an untouched ticket look already signed off. State the truth, and
+    // show the real time under load once runs exist.
+    const totalSec0 = (ticket && ticket.stressTotalSec) || 0;
+    const totalTxt0 = totalSec0 ? ` · ${fmtDuration(totalSec0 * 1000)} under load` : '';
     meta.textContent = runs === 0
-      ? 'Signed off in the Testing Client.'
-      : `${runs} stress run${runs === 1 ? '' : 's'} completed — awaiting sign-off in the Testing Client.`;
+      ? 'No stress runs recorded yet — the technician signs off in the Testing Client.'
+      : `${runs} stress run${runs === 1 ? '' : 's'} completed${totalTxt0} — awaiting sign-off in the Testing Client.`;
   }
 }
 
 // Called whenever a diagnostics/stress run finishes for a ticket (admin OR client).
-function recordStressRun(ticketId) {
+function recordStressRun(ticketId, runInfo) {
   const t = appState.tickets.find(x => x.id === ticketId);
   if (!t) return;
   t.stressRuns = (t.stressRuns || 0) + 1;
+  // v1.9.8 — accumulate the ACTUAL time under load and keep a per-run log, so the
+  // progress bar reflects real work and the report can state how long the machine
+  // was tortured. runInfo is the diagnostics result straight from main.js.
+  const secs = (runInfo && runInfo.runDurationSec) ? Math.max(0, Math.round(runInfo.runDurationSec)) : 0;
+  if (secs > 0) t.stressTotalSec = (t.stressTotalSec || 0) + secs;
+  if (!Array.isArray(t.stressLog)) t.stressLog = [];
+  t.stressLog.push({
+    mode: (runInfo && runInfo.stressMode) || null,
+    startedAt: (runInfo && runInfo.runStartedAt) || null,
+    finishedAt: (runInfo && runInfo.runFinishedAt) || new Date().toISOString(),
+    durationSec: secs,
+    prime95Sec: (runInfo && runInfo.prime95RequestedSec) || 0
+  });
+  if (t.stressLog.length > 50) t.stressLog.splice(0, t.stressLog.length - 50);
   t.updatedAt = new Date().toISOString();
   saveDatabase();
   syncTicketToCloud(t);
@@ -8274,21 +8389,21 @@ function stressModeLabel(mode) {
 function getClientStressConfig() {
   if (clientStressMode === 'throttle') {
     const d = document.getElementById('c-throttle-duration');
-    return { useCase: 'studio', duration: d ? parseInt(d.value) : 900, runPrime95: false, prime95Duration: 0 };
+    return { mode: 'throttle', useCase: 'studio', duration: d ? parseInt(d.value) : 900, runPrime95: false, prime95Duration: 0 };
   }
   if (clientStressMode === 'extreme') {
     // Extreme = a 1–2 day Prime95 torture soak (default 24h). Cinebench/FurMark/RAM
     // still run a capped slice up front; Prime95 then runs for the full soak.
     const d = document.getElementById('c-extreme-duration');
     const secs = d ? parseInt(d.value) : 86400;
-    return { useCase: 'studio', duration: Math.min(600, secs), runPrime95: true, prime95Duration: secs, extreme: true };
+    return { mode: 'extreme', useCase: 'studio', duration: Math.min(600, secs), runPrime95: true, prime95Duration: secs, extreme: true };
   }
   // stability
   const d = document.getElementById('c-stability-duration');
   const secs = d ? parseInt(d.value) : 1800;
   // The chosen duration IS the Prime95 torture length; Cinebench/FurMark/RAM
   // run for a capped slice so the whole pass isn't gated on them.
-  return { useCase: 'studio', duration: Math.min(600, secs), runPrime95: true, prime95Duration: secs };
+  return { mode: 'stability', useCase: 'studio', duration: Math.min(600, secs), runPrime95: true, prime95Duration: secs };
 }
 
 function setClientStressMode(mode) {

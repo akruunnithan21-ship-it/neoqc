@@ -250,7 +250,69 @@ function createWindow() {
   }
 }
 
+// ── PawnIO (v1.9.8) ─────────────────────────────────────────────────────────
+// LibreHardwareMonitor 0.9.4+ dropped WinRing0 and now reads CPU MSRs through
+// PawnIO, a separate signed kernel driver. We bundle LHM 0.9.6 but PawnIO was
+// never shipped or installed — so EVERY CPU temperature and clock sensor returned
+// null, which is the root cause of "CPU Package Temp is permanently blank" on the
+// QC report. We ship the pinned, signature-verified installer (see
+// download-tools.js) and install it silently once. Never blocks startup; on
+// failure the app degrades honestly to "not measurable".
+let pawnIoState = { installed: false, checked: false, error: null };
+
+function pawnIoPresent() {
+  try {
+    const sys32 = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'PawnIOLib.dll');
+    if (fs.existsSync(sys32)) return true;
+    const pf = path.join(process.env['ProgramFiles'] || 'C:\\Program Files', 'PawnIO', 'PawnIOLib.dll');
+    return fs.existsSync(pf);
+  } catch (e) { return false; }
+}
+
+function ensurePawnIOInstalled() {
+  return new Promise((resolve) => {
+    if (pawnIoPresent()) {
+      pawnIoState = { installed: true, checked: true, error: null };
+      log.info('[PawnIO] Already installed — CPU MSR sensors available.');
+      return resolve(pawnIoState);
+    }
+    const diagnosticsPath = app.isPackaged
+      ? path.join(process.resourcesPath, 'app.asar.unpacked', 'assets', 'diagnostics')
+      : path.join(__dirname, 'assets', 'diagnostics');
+    const setupExe = path.join(diagnosticsPath, 'PawnIO', 'PawnIO_setup.exe');
+    if (!fs.existsSync(setupExe)) {
+      pawnIoState = { installed: false, checked: true, error: 'PawnIO_setup.exe not bundled — run `node download-tools.js`' };
+      log.warn('[PawnIO] Installer not bundled — CPU temperature will not be measurable.');
+      return resolve(pawnIoState);
+    }
+    log.info('[PawnIO] Not installed — running bundled signed installer silently (-install -silent)...');
+    let done = false;
+    const finish = (err) => {
+      if (done) return;
+      done = true;
+      const ok = pawnIoPresent();
+      pawnIoState = { installed: ok, checked: true, error: ok ? null : (err || 'install did not complete') };
+      log.info(`[PawnIO] Install finished — present=${ok}${err ? ' err=' + err : ''}`);
+      resolve(pawnIoState);
+    };
+    try {
+      const p = spawn(setupExe, ['-install', '-silent'], { windowsHide: true });
+      p.on('error', (e) => finish(e.message));
+      p.on('exit', (code) => finish(code === 0 ? null : `installer exit code ${code}`));
+      setTimeout(() => finish('installer timeout (120s)'), 120000);
+    } catch (e) { finish(e.message); }
+  });
+}
+
+// Report PawnIO status to the renderer so the UI can explain a blank CPU temp.
+ipcMain.handle('sys:pawnio-status', async () => {
+  if (!pawnIoState.checked) pawnIoState.installed = pawnIoPresent();
+  return pawnIoState;
+});
+
 app.whenReady().then(() => {
+  // Fire-and-forget: never delay the window on a driver install.
+  ensurePawnIOInstalled().catch(e => log.warn('[PawnIO] ensure failed:', e && e.message));
   if (!checkAdminElevated()) {
     dialog.showErrorBox(
       'Administrator Privileges Required',
@@ -1184,6 +1246,12 @@ ipcMain.handle('sys:run-diagnostics', async (event, config) => {
 
   const dismisserProc = startDialogDismisser();
 
+  // v1.9.8 — stamp the wall-clock start so the run's ACTUAL duration can be
+  // returned. Nothing before this ever recorded how long a stress run took, so
+  // the report had no "time under torture" and the progress bar could only count
+  // how many times the button was pressed.
+  const runStartedAt = Date.now();
+
   return new Promise(async (resolve) => {
     let cpuTemps = [];
     let gpuTemps = [];
@@ -1261,6 +1329,98 @@ ipcMain.handle('sys:run-diagnostics', async (event, config) => {
     // Enumerate every SSD volume then benchmark them serially so PCIe lane
     // contention can't skew results. Fire-and-forget the promise here so the
     // Cinebench/FurMark/RAM work can start; we await the result later.
+    // ── PHASE 1 — CINEBENCH, ALONE ───────────────────────────────────────────
+    // v1.9.8 FIX. Cinebench must benchmark a QUIET machine. It used to be spawned
+    // LAST, concurrently with Prime95 (every core, AVX, up to 30 min), FurMark,
+    // the 85%-RAM stress worker and DiskSpd — so R23 measured only the CPU left
+    // over and wrote a contention artefact to the ticket (the shop's long-standing
+    // "score is always lower than the CPU can do"), and under that load it often
+    // never reached a score before its ceiling, leaving the field blank entirely.
+    // It now runs FIRST and ALONE (only the lightweight sensor poller is up); every
+    // stress tool below starts only after this await resolves.
+    let cinebenchDone = false;
+    let cinebenchScore = 0;
+    {
+      const isSingleCore = config && config.useCase === 'gaming';
+      event.sender.send('sys:diag-log',
+        `Running Cinebench R23 ALONE in ${isSingleCore ? 'Single-Core (Gaming)' : 'Multi-Core (Studio)'} mode — R23 runs its own full benchmark (~10 min). Stress tools start after it.`);
+      const cbLogPath = path.join(path.dirname(cbExe), 'cb.log');
+      if (fs.existsSync(cbLogPath)) { try { fs.unlinkSync(cbLogPath); } catch (e) {} }
+
+      // v1.8.3 — do NOT pass g_CinebenchMinimumTestDuration: in R23 that is a
+      // preset selector, not a seconds value, and an out-of-range number makes
+      // Cinebench abort ~3 s in without benchmarking.
+      const cbTestFlag = isSingleCore ? 'g_CinebenchCpu1Test=true' : 'g_CinebenchCpuXTest=true';
+      const cbCmd = `"${cbExe}" ${cbTestFlag} > "${cbLogPath}"`;
+
+      // Hang-guard only, deliberately INDEPENDENT of the stress `duration` (that
+      // governs the other tools, not R23). R23's own pass is ~10 min; 30 min never
+      // truncates a healthy run on a slow CPU while still bounding a real hang.
+      const cbCeilingSec = 1800;
+
+      await new Promise((cbResolve) => {
+        let settled = false;
+        const finish = () => { if (!settled) { settled = true; cinebenchDone = true; cbResolve(); } };
+
+        const cinebenchProc = spawn('cmd.exe', ['/c', cbCmd], {
+          cwd: path.dirname(cbExe),
+          windowsHide: true
+        });
+
+        const killTimeout = setTimeout(() => {
+          event.sender.send('sys:diag-log', `Cinebench exceeded its ${cbCeilingSec}s ceiling — terminating (no score will be reported).`);
+          try { spawn('taskkill', ['/F', '/IM', 'Cinebench.exe'], { windowsHide: true }); } catch (e) {}
+          finish();   // never let a hung Cinebench block the whole diagnostics run
+        }, cbCeilingSec * 1000);
+
+        // Without this, a spawn failure (missing exe, AV block) would hang the
+        // entire diagnostics run on this await forever.
+        cinebenchProc.on('error', (e) => {
+          clearTimeout(killTimeout);
+          event.sender.send('sys:diag-log', `[ERROR] Cinebench failed to start: ${e.message} — reporting NOT MEASURED.`);
+          cinebenchScore = null;
+          finish();
+        });
+
+        cinebenchProc.on('exit', () => {
+          clearTimeout(killTimeout);
+          event.sender.send('sys:diag-log', "Cinebench R23 CPU test completed. Parsing score...");
+
+          let outputStr = '';
+          if (fs.existsSync(cbLogPath)) {
+            try { outputStr = fs.readFileSync(cbLogPath, 'utf-8'); }
+            catch (e) { log.warn('Cinebench log read failed:', e.message); }
+          }
+
+          if (outputStr) {
+            // R23 prints "CB   42315 pts". Collect every number adjacent to
+            // CB / pts / score / points and take the LARGEST plausible one.
+            const nums = [];
+            const re = /(?:\bCB\b|score|points?|pts|result)\D{0,6}([\d,]{2,})|([\d,]{2,})\s*(?:pts|points)/ig;
+            let m;
+            while ((m = re.exec(outputStr)) !== null) {
+              const n = parseInt((m[1] || m[2] || '').replace(/,/g, ''), 10);
+              if (!isNaN(n) && n >= 50) nums.push(n);
+            }
+            if (nums.length) cinebenchScore = Math.max(...nums);
+            event.sender.send('sys:diag-log',
+              `Cinebench raw output (${outputStr.length} bytes): "${outputStr.replace(/\s+/g, ' ').trim().slice(0, 160)}"`);
+          }
+
+          // v1.8.1 — NO fabricated fallback. If R23 yielded no parseable score we
+          // report NOTHING (report shows NOT MEASURED), never a made-up figure.
+          if (cinebenchScore === 0) {
+            cinebenchScore = null;
+            event.sender.send('sys:diag-log', `Cinebench produced no parseable score — reporting NOT MEASURED (no estimate fabricated).`);
+          } else {
+            event.sender.send('sys:diag-log', `Cinebench score parsed: ${cinebenchScore} pts (${isSingleCore ? 'single' : 'multi'}-core) — measured on an otherwise idle machine.`);
+          }
+          finish();
+        });
+      });
+    }
+    event.sender.send('sys:diag-log', "Cinebench phase complete — starting stress tools (Prime95 / FurMark / RAM / SSD).");
+
     event.sender.send('sys:diag-log', "Enumerating SSD volumes for benchmark...");
     const diskSpeedsPromise = (async () => {
       const dsExe = diskSpdExe();
@@ -1554,86 +1714,12 @@ ipcMain.handle('sys:run-diagnostics', async (event, config) => {
       checkAllDone();
     });
  
-    // 5. Start Cinebench CPU stress test
-    const isSingleCore = config && config.useCase === 'gaming';
-    event.sender.send('sys:diag-log', `Launching Cinebench R23 CPU stress test in ${isSingleCore ? 'Single-Core (Gaming)' : 'Multi-Core (Studio)'} mode for ${duration}s...`);
-    const cbLogPath = path.join(path.dirname(cbExe), 'cb.log');
-    if (fs.existsSync(cbLogPath)) {
-      try { fs.unlinkSync(cbLogPath); } catch(e) {}
-    }
- 
-    const cbTestFlag = isSingleCore ? 'g_CinebenchCpu1Test=true' : 'g_CinebenchCpuXTest=true';
-    // v1.8.3 — ROOT CAUSE of "Cinebench never opens / never scores": we also
-    // passed `g_CinebenchMinimumTestDuration=<seconds>`. That is NOT a seconds
-    // value in R23 — it is a preset selector — so a value like 600 is out of
-    // range and Cinebench ABORTS ~3 s after start. Verified by running the exact
-    // command by hand: with the flag the log stops dead at "CINEBENCH started"
-    // and exits 0 without benchmarking; without the flag the run proceeds
-    // normally. Dropping the flag lets R23 run its own benchmark to completion.
-    const cbCmd = `"${cbExe}" ${cbTestFlag} > "${cbLogPath}"`;
-    const cinebenchProc = spawn('cmd.exe', ['/c', cbCmd], {
-      cwd: path.dirname(cbExe),
-      windowsHide: true
-    });
-
-    let cinebenchDone = false;
-    let cinebenchScore = 0;
-
-    // Safety net only. The old timeout fired at duration+5s, which would have
-    // killed a healthy run long before R23 prints its score (a multi-core pass
-    // alone takes ~10 min). Give it a generous ceiling so we terminate a genuine
-    // hang without ever truncating a real benchmark.
-    const cbCeilingSec = Math.max(duration, 900) + 300;
-    const killTimeout = setTimeout(() => {
-      event.sender.send('sys:diag-log', `Cinebench exceeded its ${cbCeilingSec}s ceiling — terminating (no score will be reported).`);
-      spawn('taskkill', ['/F', '/IM', 'Cinebench.exe'], { windowsHide: true });
-    }, cbCeilingSec * 1000);
-
-    cinebenchProc.on('exit', () => {
-      clearTimeout(killTimeout);
-      event.sender.send('sys:diag-log', "Cinebench R23 CPU test completed. Parsing score...");
-      cinebenchDone = true;
-
-      // Try parsing log file
-      let outputStr = '';
-      if (fs.existsSync(cbLogPath)) {
-        try {
-          outputStr = fs.readFileSync(cbLogPath, 'utf-8');
-        } catch(e) { log.warn('Cinebench log read failed:', e.message); }
-      }
-
-      if (outputStr) {
-        // Cinebench R23 CLI prints the result like "CB   42315 pts" (with
-        // extra lines around it). Collect every number adjacent to CB / pts /
-        // Score / Points and take the LARGEST plausible one — on a multi-core
-        // run that's the real score, and on a single-core run it's the score
-        // on its own. Taking the first match (old behaviour) could grab a
-        // stray small number and mis-report a strong CPU.
-        const nums = [];
-        const re = /(?:\bCB\b|score|points?|pts|result)\D{0,6}([\d,]{2,})|([\d,]{2,})\s*(?:pts|points)/ig;
-        let m;
-        while ((m = re.exec(outputStr)) !== null) {
-          const n = parseInt((m[1] || m[2] || '').replace(/,/g, ''), 10);
-          if (!isNaN(n) && n >= 50) nums.push(n);
-        }
-        if (nums.length) cinebenchScore = Math.max(...nums);
-        event.sender.send('sys:diag-log',
-          `Cinebench raw output (${outputStr.length} bytes): "${outputStr.replace(/\s+/g, ' ').trim().slice(0, 160)}"`);
-      }
-      
-      // v1.8.1 — NO fabricated fallback. The old code invented a score from
-      // core count when the real run produced nothing ("i want true to its
-      // performance, not some fake numbers"). If Cinebench didn't yield a
-      // parseable score, we report NOTHING — the report shows NOT MEASURED —
-      // rather than a made-up figure that misrepresents the CPU.
-      if (cinebenchScore === 0) {
-        cinebenchScore = null;
-        event.sender.send('sys:diag-log', `Cinebench produced no parseable score — reporting NOT MEASURED (no estimate fabricated).`);
-      } else {
-        event.sender.send('sys:diag-log', `Cinebench score parsed: ${cinebenchScore} pts (${isSingleCore ? 'single' : 'multi'}-core)`);
-      }
-      checkAllDone();
-    });
+    // NOTE: Cinebench used to be spawned HERE, last, while Prime95 (all cores,
+    // AVX), FurMark, the RAM worker and DiskSpd were already saturating the
+    // machine — so R23 measured only leftover CPU and reported a contention
+    // artefact far below the CPU's real score, and often never finished at all.
+    // v1.9.8 moved it to PHASE 1 above, where it runs alone. Do NOT start any
+    // CPU-heavy tool before that await completes.
 
     async function checkAllDone() {
       if (cinebenchDone && furmarkDone && prime95Done) {
@@ -1654,6 +1740,19 @@ ipcMain.handle('sys:run-diagnostics', async (event, config) => {
         // v1.4.9 — no samples means NO DATA (null), never a fabricated
         // 35/85/68. Placeholder temps on a QC certificate are worse than an
         // honest blank (same rule as the v1.4.5 mock-data purge).
+        // v1.9.8 QC-INTEGRITY FIX — `thermal-zone-perf-counter` is NOT a CPU
+        // sensor. It is an ACPI *board* thermal zone that on most desktops either
+        // does not exist or returns a single frozen value (verified: a constant
+        // 27.9 °C for an entire run). Printing that on a QC certificate as
+        // "CPU Package Temp" is a fabricated measurement, which this app's
+        // no-placeholder rule forbids. Only a real CPU sensor counts; otherwise we
+        // report NOT MEASURED and say why (missing PawnIO driver — see
+        // ensurePawnIOInstalled()).
+        if (cpuTempSource === 'thermal-zone-perf-counter') {
+          event.sender.send('sys:diag-log',
+            '[WARN] CPU temperature came only from an ACPI board thermal zone, not a CPU sensor — discarding it rather than reporting a false CPU Package Temp. Install/repair the PawnIO driver for real CPU temps.');
+          cpuTemps = [];
+        }
         const validCpuTemps = cpuTemps.filter(t => typeof t === 'number' && !isNaN(t));
         const cpuMin = validCpuTemps.length > 0 ? Math.round(Math.min(...validCpuTemps)) : null;
         const cpuMax = validCpuTemps.length > 0 ? Math.round(Math.max(...validCpuTemps)) : null;
@@ -1666,6 +1765,17 @@ ipcMain.handle('sys:run-diagnostics', async (event, config) => {
 
         resolve({
           success: true,
+          // v1.9.8 — run timing + which mode ran. These let the ticket record how
+          // long the PC was actually under load (summed across runs for the report)
+          // and make the stress progress bar a measure of real work instead of a
+          // count of button presses.
+          runStartedAt: new Date(runStartedAt).toISOString(),
+          runFinishedAt: new Date().toISOString(),
+          runDurationSec: Math.round((Date.now() - runStartedAt) / 1000),
+          durationRequestedSec: duration,
+          prime95Requested: runPrime95,
+          prime95RequestedSec: runPrime95 ? prime95Duration : 0,
+          stressMode: (config && config.mode) || null,
           cpuTempMin: cpuMin,
           cpuTempMax: cpuMax,
           cpuTempAvg: cpuAvg,

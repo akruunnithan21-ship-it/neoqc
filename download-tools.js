@@ -42,6 +42,20 @@ const TOOLS = [
     name: 'DiskSpd',
     url: 'https://github.com/microsoft/diskspd/releases/download/v2.2/DiskSpd.zip',
     destFolder: 'DiskSpd'
+  },
+  {
+    // PawnIO — the signed kernel driver that LibreHardwareMonitor 0.9.4+ REQUIRES
+    // to read CPU MSRs. LHM 0.9.6 (which we bundle) dropped WinRing0 entirely, so
+    // without PawnIO every CPU temperature and clock sensor returns null — that is
+    // the root cause of "CPU Package Temp is permanently blank" on the QC report.
+    // Pinned to 2.2.0 and hash-verified below. Authenticode signature verified as
+    // CN=namazso.eu (the PawnIO author). main.js installs it silently on first run
+    // via `PawnIO_setup.exe -install -silent` (switches extracted from the binary).
+    name: 'PawnIO',
+    url: 'https://github.com/namazso/PawnIO.Setup/releases/download/2.2.0/PawnIO_setup.exe',
+    destFolder: 'PawnIO',
+    noExtract: true,
+    fileName: 'PawnIO_setup.exe'
   }
 ];
 
@@ -58,7 +72,10 @@ const EXPECTED_SHA256 = {
   FurMark: null,
   CinebenchR23: null,
   Prime95: null,
-  DiskSpd: null
+  DiskSpd: null,
+  // Verified on 2026-09-07: size 3,410,960 bytes, Authenticode Status=Valid,
+  // signer CN=namazso.eu / O=namazso, issuer GLOBALTRUST 2015 CODESIGNING.
+  PawnIO: '1f519a22e47187f70a1379a48ca604981c4fcf694f4e65b734aaa74a9fba3032'
 };
 
 function sha256(filePath) {
@@ -150,6 +167,9 @@ async function start() {
       // DiskSpd.zip extracts to amd64/diskspd.exe (also x86/, ARM64/).
       // main.js's runDriveBenchmark() checks both amd64/ and root for the exe.
       checkFile = path.join(outDir, 'amd64', 'diskspd.exe');
+    } else if (tool.noExtract) {
+      // A bare installer (PawnIO) — the downloaded file IS the artifact.
+      checkFile = path.join(outDir, tool.fileName);
     } else {
       checkFile = path.join(outDir, 'LibreHardwareMonitorLib.dll');
     }
@@ -175,11 +195,20 @@ async function start() {
         console.warn(`WARNING  ${tool.name}: UNVERIFIED download (no pinned SHA-256). Computed ${actual} — pin this in EXPECTED_SHA256 after confirming it from a trusted source.`);
       }
 
-      await extractZip(zipPath, outDir);
-      
-      // Clean up zip file
-      fs.unlinkSync(zipPath);
-      console.log(`Cleaned up zip: ${zipPath}`);
+      if (tool.noExtract) {
+        // Not an archive — the download IS the artifact (e.g. PawnIO_setup.exe).
+        // Move it into its folder and keep it; main.js runs it silently on first run.
+        if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
+        const finalPath = path.join(outDir, tool.fileName);
+        fs.renameSync(zipPath, finalPath);
+        console.log(`Placed installer: ${finalPath}`);
+      } else {
+        await extractZip(zipPath, outDir);
+
+        // Clean up zip file
+        fs.unlinkSync(zipPath);
+        console.log(`Cleaned up zip: ${zipPath}`);
+      }
     } catch (err) {
       console.error(`Error processing ${tool.name}: ${err.message}`);
       // Try cleaning up

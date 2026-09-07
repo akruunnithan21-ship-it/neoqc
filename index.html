@@ -1091,14 +1091,21 @@
             <div id="damage-list" style="display:flex; flex-direction:column; gap:8px; margin-top:10px;"></div>
           </div>
 
-          <!-- SYSTEM HARDWARE SPECIFICATION AUTO-DETECTION -->
-          <div class="form-section margin-top">
+          <!-- SYSTEM HARDWARE SPECIFICATION AUTO-DETECTION
+               v1.9.8 — HIDDEN. This panel was dead weight: it is a plain five-value
+               readout with NO target-vs-detected comparison (the real spec matching
+               lives in the Testing Client's checkSpecsMatch()), nothing downstream
+               ever consumed these five values, and after the v1.9.7 removal of the
+               admin Auto-Detect button it could only ever display "--". The genuinely
+               useful hardware data — make / model / part number / serial per component
+               — is the "Hardware Inventory & Serial Numbers" panel below, which the
+               v1.9.8 save fix stopped the app from deleting on every ticket update.
+               The elements are KEPT IN THE DOM (just not shown) because the ticket
+               save path still reads them to round-trip detectedSpecs; removing the
+               nodes would break ~25 call sites for no user-facing gain. -->
+          <div class="form-section margin-top" style="display:none;">
             <div class="section-header-row">
               <h3>🖥️ System Hardware Specs (Verification)</h3>
-              <!-- v1.9.7: Auto-Detect button removed from the admin ticket view. Detection
-                   belongs to the Testing Client running ON the actual build; triggering it
-                   here would read the ADMIN PC's hardware, not the customer's machine. This
-                   panel still SHOWS what the Testing Client detected, for verification. -->
             </div>
             <div class="specs-readout-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 10px;">
               <div class="spec-readout-card" style="grid-column: span 2; background: rgba(255,255,255,0.03); border: 1px solid var(--glass-border); padding: 8px 12px; border-radius: 8px;">

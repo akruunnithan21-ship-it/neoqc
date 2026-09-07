@@ -768,9 +768,30 @@
     var checked = checklist.filter(function (i) { return i.checked; }).length;
     setText('print-tile-qc', checked + ' / ' + checklist.length);
 
+    // v1.9.8 — TOTAL time the machine actually spent under stress, summed across
+    // every run. Previously the report could only ever show Prime95's own soak
+    // length, so a Throttle run (which does not use Prime95) showed no duration at
+    // all, and repeat runs were never added up. stressTotalSec is accumulated per
+    // run from the diagnostics result and syncs with the ticket.
+    var stressTotalSec = (ticket && ticket.stressTotalSec) || 0;
+    var stressRunsN = (ticket && ticket.stressRuns) || 0;
+    var stressTimeTxt = null;
+    if (stressTotalSec > 0) {
+      stressTimeTxt = (stressTotalSec >= 3600
+        ? (Math.floor(stressTotalSec / 3600) + 'h ' + Math.round((stressTotalSec % 3600) / 60) + 'm')
+        : (Math.max(1, Math.round(stressTotalSec / 60)) + ' min'))
+        + ' under load' + (stressRunsN > 1 ? ' · ' + stressRunsN + ' runs' : '');
+    }
+
     if (p95 && p95.overallResult && p95.overallResult !== 'not-run') {
       setText('print-tile-stress', p95Pass ? 'PASS' : 'FAIL');
-      setText('print-tile-stress-sub', 'Prime95 Blend, ' + (p95.durationActualSec ? Math.round(p95.durationActualSec / 60) + ' min' : '--'));
+      setText('print-tile-stress-sub',
+        (stressTimeTxt ? stressTimeTxt + ' · ' : '') +
+        'Prime95 Blend' + (p95.durationActualSec ? ' ' + Math.round(p95.durationActualSec / 60) + ' min' : ''));
+    } else if (stressTimeTxt) {
+      // Throttle mode runs no Prime95 but still put the machine under real load.
+      setText('print-tile-stress', 'RUN');
+      setText('print-tile-stress-sub', stressTimeTxt);
     } else {
       setText('print-tile-stress', '—');
       setText('print-tile-stress-sub', 'not run');

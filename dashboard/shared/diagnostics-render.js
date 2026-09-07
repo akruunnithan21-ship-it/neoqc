@@ -67,7 +67,23 @@
         '</div>';
     }
     var status = data.overallResult === 'pass' ? 'pass' : data.overallResult === 'aborted' ? 'warn' : 'fail';
-    var workers = (data.workers || []).map(function (w) {
+    // v1.9.8 — COMPACT. Listing every worker ("0 error(s), 0 warning(s)" × 16)
+    // buried the actual result in a wall of identical rows. Show a one-line
+    // summary and list ONLY the workers that need attention (failed, or reported
+    // errors/warnings). When Prime95 never wrote its per-worker log we say so
+    // rather than implying "all passed" from data we do not have.
+    var wList = (data.workers || []);
+    var wTotal = data.workerCount || wList.length || 0;
+    var wPassed = wList.filter(function (w) { return w.result === 'pass'; }).length;
+    var wErrors = wList.reduce(function (s, w) { return s + (w.errors || 0); }, 0);
+    var wWarns = wList.reduce(function (s, w) { return s + (w.roundingWarnings || 0); }, 0);
+    var wSummary = wList.length
+      ? (wPassed + '/' + wList.length + ' passed · ' + wErrors + ' error(s), ' + wWarns + ' warning(s)')
+      : (wTotal ? (wTotal + ' workers · no per-worker log') : '—');
+
+    var workers = wList.filter(function (w) {
+      return w.result !== 'pass' || (w.errors || 0) > 0 || (w.roundingWarnings || 0) > 0;
+    }).map(function (w) {
       var wStatus = w.result === 'pass' ? 'pass' : 'fail';
       return '<div class="dr-list-item">' +
         '<span>Worker #' + esc(w.id) + '</span>' +
@@ -83,7 +99,7 @@
     return '<div class="dr-card">' +
       '<div class="dr-card-header">' + icon('torture') + '<span class="dr-card-title">Prime95 Torture Test (CPU + RAM, Blend mode)</span>' + statusPill(status, data.overallResult) + '</div>' +
       '<div class="dr-row"><span class="dr-row-label">Duration</span><span class="dr-row-value">' + (durationMin !== null ? durationMin + ' min' : '—') + '</span></div>' +
-      '<div class="dr-row"><span class="dr-row-label">Workers</span><span class="dr-row-value">' + esc(data.workerCount || (data.workers || []).length || '—') + '</span></div>' +
+      '<div class="dr-row"><span class="dr-row-label">Workers</span><span class="dr-row-value">' + esc(wSummary) + '</span></div>' +
       (workers ? '<div class="dr-list">' + workers + '</div>' : '') +
       (errorLines ? '<div class="dr-list">' + errorLines + '</div>' : '') +
       '</div>';
