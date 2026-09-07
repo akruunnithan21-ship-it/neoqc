@@ -813,6 +813,7 @@
         <!-- The build journey, always in view while you scroll the ticket. -->
         <div id="tmh-journey" class="tmh-journey" aria-label="Build journey">
           <div class="tmj-step" data-stage="awaiting"><i></i><span>Parts</span></div>
+          <div class="tmj-step" data-stage="procurement"><i></i><span>Procurement</span></div>
           <div class="tmj-step" data-stage="building"><i></i><span>Assembly</span></div>
           <div class="tmj-step" data-stage="qc"><i></i><span>QC</span></div>
           <div class="tmj-step" data-stage="completed"><i></i><span>Ready</span></div>
@@ -982,6 +983,25 @@
             <div id="config-synergy-warnings" class="synergy-warnings hidden"></div>
           </div>
 
+          <!-- PROCUREMENT — INCOMING PARTS CHECK (v1.9.7) -->
+          <!-- Recorded by procurement when parts arrive: part numbers + serials that
+               weren't on the sales invoice, plus a basic incoming-QC check. Kept
+               SEPARATE from the technician's build-time serial scan (Component
+               Verification below), so that later scan is a second verification. -->
+          <div id="procurement-section" class="form-section margin-top">
+            <div class="section-header-row">
+              <h3>📦 Procurement — Incoming Parts Check</h3>
+              <span id="procurement-summary-badge" class="cv-gate-tag">Incoming QC</span>
+            </div>
+            <p class="proc-hint">Filled in by procurement as parts arrive — part numbers and serials not on the sales invoice, plus a quick incoming inspection. The technician re-scans serials later as a second check.</p>
+            <div id="procurement-rows"></div>
+            <div class="proc-checklist">
+              <label><input type="checkbox" id="proc-check-received"> All ordered parts received</label>
+              <label><input type="checkbox" id="proc-check-undamaged"> No physical damage on arrival</label>
+              <label><input type="checkbox" id="proc-check-matches"> Parts match the invoice</label>
+            </div>
+          </div>
+
           <!-- COMPONENT CONDITION / DAMAGE REPORT -->
           <!-- v1.5.1 — customer-supplied / transferred parts. Not purchased on
                the invoice, so they're excluded from build cost and never fail
@@ -1075,7 +1095,10 @@
           <div class="form-section margin-top">
             <div class="section-header-row">
               <h3>🖥️ System Hardware Specs (Verification)</h3>
-              <button type="button" id="btn-modal-detect-hw" class="primary-pink-btn" style="padding: 6px 12px; font-size: 0.8rem;">🔍 Auto-Detect Local Specs</button>
+              <!-- v1.9.7: Auto-Detect button removed from the admin ticket view. Detection
+                   belongs to the Testing Client running ON the actual build; triggering it
+                   here would read the ADMIN PC's hardware, not the customer's machine. This
+                   panel still SHOWS what the Testing Client detected, for verification. -->
             </div>
             <div class="specs-readout-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 10px;">
               <div class="spec-readout-card" style="grid-column: span 2; background: rgba(255,255,255,0.03); border: 1px solid var(--glass-border); padding: 8px 12px; border-radius: 8px;">
@@ -1107,7 +1130,8 @@
             <div class="section-header-row">
               <h3>🛠️ Step 1: PC Assembly Progress</h3>
               <div class="asm-head-right">
-                <span id="build-timer-display" class="build-timer" title="Time spent building">—</span>
+                <span id="build-timer-display" class="build-timer" title="Active build time (breaks excluded)">—</span>
+                <button type="button" id="btn-build-pause" class="secondary-btn asm-timer-btn" style="display:none;">⏸ Pause</button>
                 <button type="button" id="btn-build-timer" class="secondary-btn asm-timer-btn">▶ Start Build</button>
                 <button type="button" class="flag-btn" data-flag-segment="assembly" title="Flag an issue with the assembly">⚑ Flag</button>
                 <span id="build-status-badge" class="badge">0% Complete</span>

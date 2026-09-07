@@ -26,7 +26,7 @@
     // 4070, 7900) are also 4 digits and were tying the card's line with CPU,
     // which dropped the GPU. Suffix-less CPUs still classify via ryzen/core/etc.
     cpu: [/\bryzen\b/i, /\bcore\s*i[3579]\b/i, /\bintel\s+core\b/i, /\bcore\s*ultra\b/i, /\bprocessor\b/i, /\bthreadripper\b/i, /\d{3,5}x3d\b/i, /\b\d{4,5}(kf|ks|k|f|xt|x|ge|g)\b/i, /\bpentium\b/i, /\bceleron\b/i, /\bathlon\b/i],
-    gpu: [/\brtx\b/i, /\bgtx\b/i, /\bradeon\b/i, /\brx\s*\d{3,4}\b/i, /\bgeforce\b/i, /\bgraphics?\s*card\b/i, /\bventus\b/i, /\bwindforce\b/i, /\beagle\b/i, /\bgaming\s*oc\b/i, /\barc\s*a\d{3}\b/i, /\bgddr\d?\b/i, /\btwin\s*x2\b/i, /\bgpu\b/i],
+    gpu: [/\brtx\b/i, /\bgtx\b/i, /\bradeon\b/i, /\brx\s*\d{3,4}\b/i, /\bgeforce\b/i, /\bgraphics?\s*card\b/i, /\bventus\b/i, /\bwindforce\b/i, /\beagle\b/i, /\bgaming\s*oc\b/i, /\barc\s*[ab]\d{3}\b/i, /\bgddr\d?\b/i, /\btwin\s*x2\b/i, /\bgpu\b/i],
     motherboard: [/\bmotherboard\b/i, /\bmainboard\b/i, /\bmobo\b/i, /\b[abxzh]\d{3}[a-z]?\b/i, /\btuf\s*gaming\b/i, /\bmag\b/i, /\bmortar\b/i, /\btomahawk\b/i, /\baorus\b/i, /\bsteel\s*legend\b/i, /\bgaming\s*plus\b/i, /\bprime\s+[abxzh]\d/i],
     ram: [/\bddr[45]\b/i, /\bmemory\b/i, /\bdimm\b/i, /\bvengeance\b/i, /\bripjaws\b/i, /\btrident\b/i, /\bfury\b/i, /\b\d{1,3}\s*gb\b.*\b\d{4,5}\s*mhz\b/i, /\b(2\s*x\s*\d{1,2}gb|\d{1,2}gb\s*x\s*2)\b/i, /\bram\b/i],
     storage: [/\bssd\b/i, /\bnvme\b/i, /\bhdd\b/i, /\bm\.?2\b/i, /\bhard\s*(disk|drive)\b/i, /\bsata\s*ssd\b/i, /\b\d+\s*(gb|tb)\b.*\b(ssd|nvme|hdd|drive)\b/i, /\b(970|980|990)\s*(evo|pro)?\b/i, /\bsn\d{3}\b/i, /\bwd\s*(blue|black|green)\b/i],
@@ -42,9 +42,19 @@
   // motherboard, not RAM). Kept deliberately tight — only unambiguous nouns.
   var STRONG_HINTS = {
     cpu: [/\bprocessor\b/i, /\bcpu\b/i, /\bthreadripper\b/i],
-    gpu: [/\bgraphics?\s*card\b/i, /\bvideo\s*card\b/i, /\bgpu\b/i],
-    motherboard: [/\bmotherboard\b/i, /\bmainboard\b/i, /\bmobo\b/i],
-    ram: [/\bmemory\b/i, /\bdimm\b/i, /\bram\b/i, /\bddr[45]\b/i],
+    gpu: [/\bgraphics?\s*card\b/i, /\bvideo\s*card\b/i, /\bgpu\b/i, /\bintel\s*arc\b/i, /\barc\s*[ab]\d{3}\b/i],
+    // A desktop chipset code (B850, X670, Z790, B760, H610 …) is a near-certain
+    // MOTHERBOARD signal that nothing else carries — so it is a STRONG hint. We
+    // exclude the 'A' prefix on purpose: MSI's "A###" names a PSU (MAG A750) and
+    // Intel's Arc "A###" is a GPU, so those stay disambiguated by their own STRONG
+    // hints. (Socket/AM5/LGA were tried here but are NOT discriminative — they also
+    // appear on CPU and cooler lines — so they were removed.)
+    motherboard: [/\bmotherboard\b/i, /\bmainboard\b/i, /\bmobo\b/i, /\b[bxzh]\d{3}[a-z]?\b/i],
+    // NOTE: DDR4/DDR5 is a memory *type* that also appears on motherboard and CPU
+    // lines ("supports DDR5"), so it is NOT a decisive RAM noun — it stays only as
+    // a weak CATEGORY hint. Without this, a board advertising DDR5 outscored its
+    // own motherboard signal and got dropped when the real RAM claimed the slot.
+    ram: [/\bmemory\b/i, /\bdimm\b/i, /\bram\b/i],
     storage: [/\bssd\b/i, /\bnvme\b/i, /\bhdd\b/i, /\bhard\s*(disk|drive)\b/i, /\bsolid[\s-]*state\b/i],
     // MSI's MAG/MPG "A###" prefix names a POWER SUPPLY (A750GL, A650BN), while
     // MSI's MAG *boards* are chipset-named (MAG B650). Treat "MAG A###" as a

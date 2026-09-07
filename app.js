@@ -177,7 +177,7 @@ const CV_COMPONENTS = [
   { key: 'motherboard', label: 'Motherboard', specField: 'form-spec-mobo',         legacy: 'serial-motherboard' },
   { key: 'cpu',         label: 'Processor',   specField: 'form-spec-cpu',          legacy: null },
   { key: 'gpu',         label: 'Graphics Card', specField: 'form-spec-gpu',        legacy: 'serial-gpu' },
-  { key: 'ram',         label: 'Memory (RAM)', specField: 'form-spec-ram',         legacy: 'serial-ram' },
+  { key: 'ram',         label: 'Memory (RAM)', specField: 'form-spec-ram',         legacy: 'serial-ram', multi: true },
   { key: 'storage',     label: 'Storage',     specField: 'form-spec-storage',      legacy: 'serial-ssd' },
   { key: 'psu',         label: 'Power Supply', specField: 'form-spec-psu',         legacy: null },
   { key: 'cooler',      label: 'Cooler',      specField: 'form-spec-cooler-model', legacy: null },
@@ -260,7 +260,17 @@ function renderComponentVerify() {
             <span class="cv-sval">${inv ? escapeHtmlLite(inv) : '—'}</span>
           </div>
           <input type="text" class="cv-scan" data-key="${c.key}" value="${escapeHtmlLite(st.scan || '')}"
-                 placeholder="Scan / type serial" autocomplete="off" spellcheck="false">
+                 placeholder="${c.multi ? 'Stick 1 serial' : 'Scan / type serial'}" autocomplete="off" spellcheck="false">
+          ${c.multi ? `
+          <div class="cv-extra-serials">
+            ${((st.extraScans) || []).map((val, i) => `
+              <div class="cv-extra-serial">
+                <input type="text" class="cv-scan-extra" data-key="${c.key}" data-idx="${i}" value="${escapeHtmlLite(val || '')}"
+                       placeholder="Stick ${i + 2} serial" autocomplete="off" spellcheck="false">
+                <button type="button" class="cv-serial-remove" data-key="${c.key}" data-idx="${i}" title="Remove this serial">✕</button>
+              </div>`).join('')}
+            <button type="button" class="cv-serial-add" data-key="${c.key}">+ Add another serial</button>
+          </div>` : ''}
         </div>
         <select class="cv-box" data-key="${c.key}">
           ${BOX_STATUSES.map(b => `<option value="${b.v}"${(st.box || '') === b.v ? ' selected' : ''}>${b.t}</option>`).join('')}
@@ -305,7 +315,15 @@ function syncLegacySerialFields() {
   CV_COMPONENTS.forEach(c => {
     if (!c.legacy) return;
     const el = document.getElementById(c.legacy);
-    if (el) el.value = (cvState[c.key] && cvState[c.key].scan) || '';
+    if (!el) return;
+    const st = cvState[c.key] || {};
+    // For multi-unit components (RAM), record every stick's serial on the report,
+    // comma-joined, so both serials appear on the certificate and in the serials map.
+    if (c.multi && Array.isArray(st.extraScans) && st.extraScans.length) {
+      el.value = [st.scan].concat(st.extraScans).filter(Boolean).join(', ');
+    } else {
+      el.value = st.scan || '';
+    }
   });
 }
 
@@ -325,22 +343,55 @@ function setupComponentVerify() {
   });
   wrap.addEventListener('input', (e) => {
     const inp = e.target.closest('.cv-scan');
-    if (!inp) return;
-    const k = inp.dataset.key;
-    cvState[k] = cvState[k] || {};
-    cvState[k].scan = inp.value;
-    syncLegacySerialFields();
-    // Repaint just this row's state so typing isn't interrupted by a re-render.
-    const row = inp.closest('.cv-row');
-    if (row) {
-      const s = cvStatusFor(k);
-      const dup = serialExistsOnOtherTicket(inp.value);
-      row.className = 'cv-row ' + s + (dup ? ' dup-serial' : '');
-      inp.title = dup ? 'This serial is already recorded on another ticket' : '';
-      const ic = row.querySelector('.cv-status-ic');
-      if (ic) ic.textContent = s === 'ok' ? '✓' : s === 'bad' ? '✕' : s === 'warn' ? '!' : '·';
+    if (inp) {
+      const k = inp.dataset.key;
+      cvState[k] = cvState[k] || {};
+      cvState[k].scan = inp.value;
+      syncLegacySerialFields();
+      // Repaint just this row's state so typing isn't interrupted by a re-render.
+      const row = inp.closest('.cv-row');
+      if (row) {
+        const s = cvStatusFor(k);
+        const dup = serialExistsOnOtherTicket(inp.value);
+        row.className = 'cv-row ' + s + (dup ? ' dup-serial' : '');
+        inp.title = dup ? 'This serial is already recorded on another ticket' : '';
+        const ic = row.querySelector('.cv-status-ic');
+        if (ic) ic.textContent = s === 'ok' ? '✓' : s === 'bad' ? '✕' : s === 'warn' ? '!' : '·';
+      }
+      updateCvSummaryOnly();
+      return;
     }
-    updateCvSummaryOnly();
+    // Extra serials for multi-unit components (e.g. two RAM sticks). Stored in
+    // cvState[key].extraScans, which round-trips through the same verify save path.
+    const extra = e.target.closest('.cv-scan-extra');
+    if (extra) {
+      const k = extra.dataset.key, idx = parseInt(extra.dataset.idx, 10);
+      cvState[k] = cvState[k] || {};
+      cvState[k].extraScans = cvState[k].extraScans || [];
+      cvState[k].extraScans[idx] = extra.value;
+      syncLegacySerialFields();
+    }
+  });
+  // Add / remove extra serial fields (multi-unit components like a 2-stick RAM kit).
+  wrap.addEventListener('click', (e) => {
+    const addBtn = e.target.closest('.cv-serial-add');
+    if (addBtn) {
+      const k = addBtn.dataset.key;
+      cvState[k] = cvState[k] || {};
+      cvState[k].extraScans = cvState[k].extraScans || [];
+      cvState[k].extraScans.push('');
+      renderComponentVerify();
+      return;
+    }
+    const rmBtn = e.target.closest('.cv-serial-remove');
+    if (rmBtn) {
+      const k = rmBtn.dataset.key, idx = parseInt(rmBtn.dataset.idx, 10);
+      if (cvState[k] && Array.isArray(cvState[k].extraScans)) {
+        cvState[k].extraScans.splice(idx, 1);
+        syncLegacySerialFields();
+        renderComponentVerify();
+      }
+    }
   });
   wrap.addEventListener('change', (e) => {
     const sel = e.target.closest('.cv-box');
@@ -365,11 +416,89 @@ function updateCvSummaryOnly() {
   if (badge) badge.textContent = `${done} / ${total} verified`;
 }
 
+// ══ PROCUREMENT (v1.9.7) — incoming parts check ═══════════════════════════
+// Procurement records part numbers + serials when parts arrive (before the
+// technician's build-time scan), plus a basic incoming-QC checklist. Stored in
+// specs.__procurement so it syncs with no schema change, and kept SEPARATE from
+// the technician's cvState scan so that later scan is a second verification.
+let procState = { components: {}, received: false, undamaged: false, matches: false };
+
+function renderProcurement() {
+  const wrap = document.getElementById('procurement-rows');
+  if (!wrap) return;
+  let html = '', total = 0, done = 0;
+  CV_COMPONENTS.forEach(c => {
+    const specEl = document.getElementById(c.specField);
+    const specName = specEl ? (specEl.value || '').trim() : '';
+    if (!specName) return;                       // only components on this build
+    total++;
+    const st = procState.components[c.key] || {};
+    if ((st.partNo || '').trim() || (st.serial || '').trim()) done++;
+    html += `
+      <div class="proc-row" data-key="${c.key}">
+        <div class="proc-cat">
+          <div class="proc-label">${escapeHtmlLite(c.label)}</div>
+          <div class="proc-name" title="${escapeHtmlLite(specName)}">${escapeHtmlLite(specName)}</div>
+        </div>
+        <input type="text" class="proc-partno" data-key="${c.key}" value="${escapeHtmlLite(st.partNo || '')}" placeholder="Part number" autocomplete="off" spellcheck="false">
+        <input type="text" class="proc-serial" data-key="${c.key}" value="${escapeHtmlLite(st.serial || '')}" placeholder="Serial number" autocomplete="off" spellcheck="false">
+      </div>`;
+  });
+  wrap.innerHTML = html || '<div class="cv-empty">Add the target build specs above — components to record will appear here.</div>';
+  const rec = document.getElementById('proc-check-received');
+  const und = document.getElementById('proc-check-undamaged');
+  const mat = document.getElementById('proc-check-matches');
+  if (rec) rec.checked = !!procState.received;
+  if (und) und.checked = !!procState.undamaged;
+  if (mat) mat.checked = !!procState.matches;
+  const badge = document.getElementById('procurement-summary-badge');
+  if (badge) badge.textContent = total ? `${done}/${total} recorded` : 'Incoming QC';
+}
+
+function setupProcurement() {
+  const wrap = document.getElementById('procurement-rows');
+  if (!wrap) return;
+  wrap.addEventListener('input', (e) => {
+    const partEl = e.target.closest('.proc-partno');
+    const serEl = e.target.closest('.proc-serial');
+    const el = partEl || serEl;
+    if (!el) return;
+    const k = el.dataset.key;
+    procState.components[k] = procState.components[k] || {};
+    if (partEl) procState.components[k].partNo = partEl.value;
+    if (serEl) procState.components[k].serial = serEl.value;
+    const badge = document.getElementById('procurement-summary-badge');
+    if (badge) {
+      let total = 0, done = 0;
+      CV_COMPONENTS.forEach(c => {
+        const s = document.getElementById(c.specField);
+        if (!s || !(s.value || '').trim()) return;
+        total++;
+        const st = procState.components[c.key] || {};
+        if ((st.partNo || '').trim() || (st.serial || '').trim()) done++;
+      });
+      badge.textContent = total ? `${done}/${total} recorded` : 'Incoming QC';
+    }
+  });
+  const bind = (id, key) => { const cb = document.getElementById(id); if (cb) cb.addEventListener('change', () => { procState[key] = cb.checked; }); };
+  bind('proc-check-received', 'received');
+  bind('proc-check-undamaged', 'undamaged');
+  bind('proc-check-matches', 'matches');
+  // Keep the procurement rows in step with the target specs (debounced), so a
+  // component appears here as soon as it's added to the build.
+  let procTimer = null;
+  CV_COMPONENTS.forEach(c => {
+    const el = document.getElementById(c.specField);
+    if (!el) return;
+    el.addEventListener('input', () => { clearTimeout(procTimer); procTimer = setTimeout(renderProcurement, 250); });
+  });
+}
+
 // ══ BUILD TIMER (v2.0.0 Chunk B) ══════════════════════════════════════════
 // Start when assembly begins, finish only once every assembly checkbox is
 // ticked. Purely for data + the warm line on the QC report — never a stopwatch
 // held over the technician.
-let buildTimerState = { startedAt: null, finishedAt: null };
+let buildTimerState = { startedAt: null, finishedAt: null, pausedMs: 0, pausedAt: null };
 let buildTimerTick = null;
 
 function fmtDuration(ms) {
@@ -379,29 +508,55 @@ function fmtDuration(ms) {
   return (h ? h + 'h ' : '') + (h || m ? m + 'm ' : '') + sec + 's';
 }
 
+// Net active build time = wall time between start and (finish or now), minus any
+// paused ("on break") spans. Works while running, paused, and after finishing.
+function buildTimerElapsed() {
+  const { startedAt, finishedAt, pausedMs, pausedAt } = buildTimerState;
+  if (!startedAt) return 0;
+  const end = finishedAt ? new Date(finishedAt).getTime() : Date.now();
+  let paused = pausedMs || 0;
+  if (pausedAt && !finishedAt) paused += Date.now() - new Date(pausedAt).getTime();
+  return Math.max(0, end - new Date(startedAt).getTime() - paused);
+}
+
 function renderBuildTimer() {
   const disp = document.getElementById('build-timer-display');
   const btn = document.getElementById('btn-build-timer');
+  const pauseBtn = document.getElementById('btn-build-pause');
   if (!disp || !btn) return;
-  const { startedAt, finishedAt } = buildTimerState;
+  const { startedAt, finishedAt, pausedAt } = buildTimerState;
+  const stopTick = () => { if (buildTimerTick) { clearInterval(buildTimerTick); buildTimerTick = null; } };
   if (finishedAt && startedAt) {
-    disp.textContent = '⏱ ' + fmtDuration(new Date(finishedAt) - new Date(startedAt));
-    disp.classList.add('done');
+    disp.textContent = '⏱ ' + fmtDuration(buildTimerElapsed());
+    disp.classList.add('done'); disp.classList.remove('paused');
     btn.textContent = '✓ Build Finished';
     btn.disabled = true;
-    if (buildTimerTick) { clearInterval(buildTimerTick); buildTimerTick = null; }
-  } else if (startedAt) {
-    disp.textContent = '⏱ ' + fmtDuration(Date.now() - new Date(startedAt));
-    disp.classList.remove('done');
+    if (pauseBtn) pauseBtn.style.display = 'none';
+    stopTick();
+  } else if (startedAt && pausedAt) {
+    // Paused — freeze the display, offer Resume.
+    disp.textContent = '⏸ ' + fmtDuration(buildTimerElapsed());
+    disp.classList.remove('done'); disp.classList.add('paused');
     btn.textContent = '■ Finish Build';
     btn.disabled = false;
+    if (pauseBtn) { pauseBtn.style.display = ''; pauseBtn.textContent = '▶ Resume'; }
+    stopTick();
+  } else if (startedAt) {
+    // Running.
+    disp.textContent = '⏱ ' + fmtDuration(buildTimerElapsed());
+    disp.classList.remove('done'); disp.classList.remove('paused');
+    btn.textContent = '■ Finish Build';
+    btn.disabled = false;
+    if (pauseBtn) { pauseBtn.style.display = ''; pauseBtn.textContent = '⏸ Pause'; }
     if (!buildTimerTick) buildTimerTick = setInterval(renderBuildTimer, 1000);
   } else {
+    // Not started.
     disp.textContent = '—';
-    disp.classList.remove('done');
+    disp.classList.remove('done'); disp.classList.remove('paused');
     btn.textContent = '▶ Start Build';
     btn.disabled = false;
-    if (buildTimerTick) { clearInterval(buildTimerTick); buildTimerTick = null; }
+    if (pauseBtn) pauseBtn.style.display = 'none';
+    stopTick();
   }
 }
 
@@ -416,18 +571,43 @@ function setupBuildTimer() {
   btn.addEventListener('click', () => {
     if (!buildTimerState.startedAt) {
       buildTimerState.startedAt = new Date().toISOString();
+      buildTimerState.pausedMs = 0;
+      buildTimerState.pausedAt = null;
       showToast('Build started — the clock is running.', 'success');
     } else if (!buildTimerState.finishedAt) {
       if (!assemblyAllChecked()) {
         showToast('Tick every assembly step before finishing the build.', 'warning');
         return;
       }
+      // If the timer is paused when finishing, bank the current break first so the
+      // recorded total is active work time only.
+      if (buildTimerState.pausedAt) {
+        buildTimerState.pausedMs = (buildTimerState.pausedMs || 0) + (Date.now() - new Date(buildTimerState.pausedAt).getTime());
+        buildTimerState.pausedAt = null;
+      }
       buildTimerState.finishedAt = new Date().toISOString();
-      const took = fmtDuration(new Date(buildTimerState.finishedAt) - new Date(buildTimerState.startedAt));
-      showToast(`Build finished in ${took}. Nice work.`, 'success', 7000);
+      showToast(`Build finished in ${fmtDuration(buildTimerElapsed())} of active work. Nice work.`, 'success', 7000);
     }
     renderBuildTimer();
   });
+
+  // Pause / Resume — lets a technician stop the clock for a break without losing
+  // the elapsed time. Paused spans are excluded from the recorded build duration.
+  const pauseBtn = document.getElementById('btn-build-pause');
+  if (pauseBtn) {
+    pauseBtn.addEventListener('click', () => {
+      if (!buildTimerState.startedAt || buildTimerState.finishedAt) return;
+      if (buildTimerState.pausedAt) {
+        buildTimerState.pausedMs = (buildTimerState.pausedMs || 0) + (Date.now() - new Date(buildTimerState.pausedAt).getTime());
+        buildTimerState.pausedAt = null;
+        showToast('Timer resumed.', 'info');
+      } else {
+        buildTimerState.pausedAt = new Date().toISOString();
+        showToast('Timer paused — take your break.', 'info');
+      }
+      renderBuildTimer();
+    });
+  }
 }
 
 // Sentinel for "let the app choose" in the technician dropdown.
@@ -2801,10 +2981,12 @@ function openTicketModal(ticketId = null) {
   // v2.0.0 Chunk B — reset component verification + build timer for a fresh modal
   invoiceSerials = {};
   cvState = {};
-  buildTimerState = { startedAt: null, finishedAt: null };
+  procState = { components: {}, received: false, undamaged: false, matches: false };
+  buildTimerState = { startedAt: null, finishedAt: null, pausedMs: 0, pausedAt: null };
   if (buildTimerTick) { clearInterval(buildTimerTick); buildTimerTick = null; }
   syncLegacySerialFields();
   renderComponentVerify();
+  renderProcurement();
   renderBuildTimer();
 
   // v2.0.0 — reset sales-exec ownership + build priority (auto until overridden)
@@ -2864,7 +3046,16 @@ function openTicketModal(ticketId = null) {
       }
       buildTimerState = {
         startedAt: _v.buildStartedAt || null,
-        finishedAt: _v.buildFinishedAt || null
+        finishedAt: _v.buildFinishedAt || null,
+        pausedMs: _v.buildPausedMs || 0,
+        pausedAt: _v.buildPausedAt || null
+      };
+      const _p = (ticket.specs && ticket.specs.__procurement) || {};
+      procState = {
+        components: _p.components || {},
+        received: !!_p.received,
+        undamaged: !!_p.undamaged,
+        matches: !!_p.matches
       };
 
 
@@ -3013,6 +3204,7 @@ function openTicketModal(ticketId = null) {
       // Chunk B — paint verification rows + timer once specs/awaiting/supplied are loaded
       syncLegacySerialFields();
       renderComponentVerify();
+      renderProcurement();
       renderBuildTimer();
     }
   } else {
@@ -3133,15 +3325,19 @@ function updateTicketModalChrome(ticketId) {
   }
 
   // Journey stepper: mark every stage up to the current one as reached.
-  const order = ['awaiting', 'building', 'qc', 'completed'];
+  // v1.9.7 — added a Procurement stage between Parts and Assembly.
+  const order = ['awaiting', 'procurement', 'building', 'qc', 'completed'];
   let reachedIdx = 0;
   if (t) {
     const buildPct = calculateBuildPercentage(t) || 0;
     const qcPct = calculateQcPercentage(t) || 0;
-    if (t.status === 'completed') reachedIdx = 3;
-    else if (qcPct > 0 || buildPct >= 100) reachedIdx = 2;
-    else if (buildPct > 0 || t.status === 'building') reachedIdx = 1;
-    else reachedIdx = 0;
+    const proc = (t.specs && t.specs.__procurement) || {};
+    const procDone = !!(proc.received && proc.undamaged && proc.matches);
+    if (t.status === 'completed') reachedIdx = 4;
+    else if (qcPct > 0 || buildPct >= 100) reachedIdx = 3;
+    else if (buildPct > 0 || t.status === 'building') reachedIdx = 2;
+    else if (procDone) reachedIdx = 2;   // parts checked in → Assembly is up next
+    else reachedIdx = 1;                  // ticket created → Procurement in progress
   }
   document.querySelectorAll('#tmh-journey .tmj-step').forEach((el, i) => {
     el.classList.toggle('done', !!t && i < reachedIdx);
@@ -3921,8 +4117,10 @@ async function handleTicketFormSubmit(e) {
       components: cvState || {},
       buildStartedAt: buildTimerState.startedAt,
       buildFinishedAt: buildTimerState.finishedAt,
+      buildPausedMs: buildTimerState.pausedMs || 0,
+      buildPausedAt: buildTimerState.pausedAt || null,
       buildDurationMs: (buildTimerState.startedAt && buildTimerState.finishedAt)
-        ? (new Date(buildTimerState.finishedAt) - new Date(buildTimerState.startedAt)) : null
+        ? buildTimerElapsed() : null
     };
     // Derived summary the report/dashboard can read without recomputing.
     let matched = 0, mismatched = 0, scanned = 0;
@@ -3935,6 +4133,13 @@ async function handleTicketFormSubmit(e) {
     });
     verify.summary = { scanned, matched, mismatched };
     updatedTicket.specs.__verify = verify;
+    // v1.9.7 — procurement incoming-check record (part#/serial + checklist).
+    updatedTicket.specs.__procurement = {
+      components: procState.components || {},
+      received: !!procState.received,
+      undamaged: !!procState.undamaged,
+      matches: !!procState.matches
+    };
   }
 
   // v1.4.9 — detected specs are merged PER FIELD, never gated on CPU alone.
@@ -5137,8 +5342,12 @@ function setupEventListeners() {
 
   document.getElementById('ticket-form').addEventListener('submit', handleTicketFormSubmit);
 
-  // Staff Modal System Auto-Detect Local Specs click handler
-  document.getElementById('btn-modal-detect-hw').addEventListener('click', async () => {
+  // Staff Modal System Auto-Detect Local Specs click handler.
+  // v1.9.7 — the button was removed from the admin ticket view (detection belongs to
+  // the Testing Client). Guarded so the missing button never throws at setup; the
+  // handler stays for any legacy build that still renders the button.
+  const _modalDetectBtn = document.getElementById('btn-modal-detect-hw');
+  if (_modalDetectBtn) _modalDetectBtn.addEventListener('click', async () => {
     const btn = document.getElementById('btn-modal-detect-hw');
     const oldText = btn.textContent;
     btn.textContent = "🔍 Detecting hardware...";
@@ -5252,6 +5461,7 @@ function setupEventListeners() {
           if (s) invoiceSerials[cat] = s;
         });
         renderComponentVerify();
+        renderProcurement();
         // Grow the catalog from this invoice (background — invoice price wins,
         // dedupes against existing rows). Resolves each field's SKU too.
         upsertInvoiceComponentsToCatalog(build).catch(err => console.warn('invoice catalog sync failed:', err && err.message));
@@ -5276,6 +5486,29 @@ function setupEventListeners() {
         if (summary.skipped.length) {
           html += `<div style="margin-top:8px; opacity:0.75;">Skipped (marked awaiting): ${summary.skipped.map(c => catLabel[c] || c).join(', ')}</div>`;
         }
+        // v1.9.7 SAFETY NET — surface invoice line items that were NOT matched to a
+        // build component, so a genuinely-missed part can never be silently dropped.
+        // (Monitors, peripherals, labour etc. legitimately land here.) Wrapped in
+        // try/catch so this display can never break the import itself.
+        try {
+          const mappedTexts = new Set(Object.values(build.results).map(r => r && r.rawLine).filter(Boolean));
+          const noiseRe = /(sub\s*total|grand\s*total|\btotal\b|\bgst\b|\bcgst\b|\bsgst\b|\btax\b|bill\s*to|ship\s*to|\bbank\b|transfer|\bmobile\b|place\s*of\s*supply|proforma|\binvoice\b)/i;
+          const unmatched = (build.candidateLines || []).filter(row => {
+            if (!row || !row.text) return false;
+            if (row.rate == null && row.total == null) return false;   // priced lines only
+            if (mappedTexts.has(row.text)) return false;               // already used
+            if (noiseRe.test(row.text)) return false;                  // header/tax/bank noise
+            return /[a-z]{3,}/i.test(row.text);
+          });
+          if (unmatched.length) {
+            html += `<div style="margin-top:8px; padding-top:6px; border-top:1px dashed currentColor;"><strong>ⓘ ${unmatched.length} invoice line(s) not added as a build part — check nothing was missed:</strong></div>`;
+            unmatched.forEach(row => {
+              const pr = row.rate != null ? ' — ₹' + Math.round(row.rate).toLocaleString('en-IN') : '';
+              html += `<div style="margin-top:3px; opacity:0.85; font-size:0.76rem;">• ${escapeHtmlLite(row.text.slice(0, 70))}${pr}</div>`;
+            });
+            html += `<div style="margin-top:4px; opacity:0.7; font-size:0.72rem;">Monitors, keyboards, labour etc. belong here. If a CPU / GPU / RAM / board / PSU / SSD / cooler / case is in this list, type it into the matching field above.</div>`;
+          }
+        } catch (e) { /* safety net must never break the import */ }
         html += `<div style="margin-top:8px; opacity:0.7; font-size:0.72rem;">Names and per-unit prices are taken straight from your invoice and added to the catalogue. Review each field before saving.</div>`;
         const kind = needsLook.length ? 'warn' : 'ok';
         setInvoiceStatus(html, kind);
@@ -5723,6 +5956,7 @@ function setupEventListeners() {
   setupFormCalculations();
   setupSerialVerification();
   setupComponentVerify();   // v2.0.0 Chunk B — serial scan + box condition rows
+  setupProcurement();       // v1.9.7 — procurement incoming parts check
   setupBuildTimer();        // v2.0.0 Chunk B — assembly start/finish timer
   setupClientMode();
 

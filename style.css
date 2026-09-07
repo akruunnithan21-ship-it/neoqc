@@ -4521,6 +4521,42 @@ body.dark-mode .card-type-badge {
   color: var(--text-dark); font-family: 'JetBrains Mono', monospace; font-size: 0.76rem; outline: none;
 }
 .cv-scan:focus { border-color: var(--primary-pink); box-shadow: 0 0 0 3px rgba(231, 1, 78, 0.12); }
+/* v1.9.7 — extra serials for multi-unit components (e.g. two-stick RAM kits) */
+.cv-serials { flex-wrap: wrap; }
+.cv-extra-serials { display: flex; flex-direction: column; gap: 6px; flex-basis: 100%; margin-top: 2px; }
+.cv-extra-serial { display: flex; align-items: center; gap: 6px; }
+.cv-scan-extra {
+  flex: 1; min-width: 0; padding: 6px 10px; border-radius: 8px;
+  border: 1px solid var(--glass-border); background: var(--glass-bg);
+  color: var(--text-dark); font-family: 'JetBrains Mono', monospace; font-size: 0.74rem; outline: none;
+}
+.cv-scan-extra:focus { border-color: var(--primary-pink); box-shadow: 0 0 0 3px rgba(231, 1, 78, 0.12); }
+.cv-serial-remove {
+  flex: none; width: 26px; height: 26px; border-radius: 6px; cursor: pointer;
+  border: 1px solid var(--glass-border); background: var(--glass-bg); color: var(--text-muted); font-size: 0.7rem;
+}
+.cv-serial-remove:hover { color: var(--status-urgent); border-color: var(--status-urgent); }
+.cv-serial-add {
+  align-self: flex-start; padding: 4px 10px; border-radius: 6px; cursor: pointer;
+  border: 1px dashed var(--glass-border); background: transparent; color: var(--primary-pink);
+  font-size: 0.68rem; font-weight: 700;
+}
+.cv-serial-add:hover { border-color: var(--primary-pink); background: rgba(231, 1, 78, 0.06); }
+/* v1.9.7 — Procurement incoming-parts panel */
+.proc-hint { font-size: 0.76rem; color: var(--text-muted); margin: 4px 0 12px; line-height: 1.5; }
+.proc-row { display: grid; grid-template-columns: minmax(120px, 1.2fr) 1fr 1fr; gap: 10px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--glass-border); }
+.proc-row:last-child { border-bottom: none; }
+.proc-label { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); }
+.proc-name { font-family: 'JetBrains Mono', monospace; font-size: 0.76rem; font-weight: 700; color: var(--text-dark); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.proc-partno, .proc-serial {
+  width: 100%; min-width: 0; padding: 7px 10px; border-radius: 8px;
+  border: 1px solid var(--glass-border); background: var(--glass-bg);
+  color: var(--text-dark); font-family: 'JetBrains Mono', monospace; font-size: 0.76rem; outline: none;
+}
+.proc-partno:focus, .proc-serial:focus { border-color: var(--primary-pink); box-shadow: 0 0 0 3px rgba(231, 1, 78, 0.12); }
+.proc-checklist { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 12px; }
+.proc-checklist label { display: flex; align-items: center; gap: 6px; font-size: 0.8rem; color: var(--text-dark); cursor: pointer; }
+@media (max-width: 640px) { .proc-row { grid-template-columns: 1fr; gap: 6px; } }
 .cv-box {
   padding: 7px 8px; border-radius: 8px; font-size: 0.72rem;
   border: 1px solid var(--glass-border); background: var(--glass-bg);
@@ -4548,6 +4584,7 @@ body.dark-mode .card-type-badge {
   border: 1px solid var(--glass-border); border-radius: 999px; padding: 3px 11px;
 }
 .build-timer.done { color: #22c55e; border-color: rgba(34, 197, 94, 0.4); }
+.build-timer.paused { color: #f59e0b; border-color: rgba(245, 158, 11, 0.4); }
 .asm-timer-btn { padding: 5px 13px; font-size: 0.78rem; white-space: nowrap; }
 
 /* ==========================================================================
