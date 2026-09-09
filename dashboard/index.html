@@ -56,6 +56,7 @@
       <button class="menu-item" id="menu-dashboard" data-nav="dashboard"><span class="mi-ic">📊</span> Dashboard</button>
       <button class="menu-item hidden" id="menu-ticketstatus" data-nav="ticket-status"><span class="mi-ic">🎫</span> <span id="menu-ts-label">Ticket Status</span></button>
       <button class="menu-item hidden" id="menu-newbuild" data-nav="new-build"><span class="mi-ic">➕</span> New Build</button>
+      <button class="menu-item hidden" id="menu-board" data-nav="board"><span class="mi-ic">🗂</span> Pipeline</button>
       <button class="menu-item" data-nav="profile"><span class="mi-ic">👤</span> Edit Profile</button>
       <button class="menu-item" data-nav="customer"><span class="mi-ic">🔍</span> Track a build</button>
       <button class="menu-item menu-signout" id="menu-signout"><span class="mi-ic">⎋</span> Sign out</button>
@@ -169,6 +170,22 @@
   <!-- ───────────────────────────────── NEW BUILD / QUOTE BUILDER (sales) ─── -->
   <!-- Phase 1 (v1.9.9): sales executives build a quote from the live catalogue.
        Ticket creation + the interactive PPI comparison land in the next phases. -->
+  <!-- ───────────────────────────────── PIPELINE BOARD (sales) ─── -->
+  <main id="view-board" class="view hidden">
+    <div class="sales-toolbar">
+      <div class="toolbar-left">
+        <h2 class="sales-title">Pipeline</h2>
+        <span id="board-live" class="live-indicator"><span class="live-dot"></span>LIVE</span>
+      </div>
+      <div class="toolbar-right">
+        <label class="board-mine"><input type="checkbox" id="board-mine"> Mine only</label>
+        <input id="board-search" class="filter-input" type="search" placeholder="Customer, technician or #code" autocomplete="off">
+      </div>
+    </div>
+    <p class="qb-hint">Every build in the shop, left to right. Columns are worked out from what the technicians have actually ticked off — nothing here is a separate status anyone has to keep up to date.</p>
+    <div id="board-cols" class="board-cols"></div>
+  </main>
+
   <main id="view-new-build" class="view hidden">
     <div class="sales-toolbar">
       <div class="toolbar-left"><h2 class="sales-title">New Build</h2></div>
@@ -251,7 +268,8 @@
           <div class="qb-total-row qb-total-main">
             <span>Subtotal</span><span id="qb-subtotal" class="mono">₹0</span>
           </div>
-          <p class="qb-note" id="qb-next-note">Price-to-performance comparison and ticket creation arrive in the next update.</p>
+          <button id="qb-create" class="btn-primary qb-create" type="button">Create build ticket →</button>
+          <div id="qb-create-status" class="qb-note"></div>
         </section>
       </aside>
     </div>
