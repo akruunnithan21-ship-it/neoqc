@@ -55,6 +55,7 @@
       </div>
       <button class="menu-item" id="menu-dashboard" data-nav="dashboard"><span class="mi-ic">📊</span> Dashboard</button>
       <button class="menu-item hidden" id="menu-ticketstatus" data-nav="ticket-status"><span class="mi-ic">🎫</span> <span id="menu-ts-label">Ticket Status</span></button>
+      <button class="menu-item hidden" id="menu-newbuild" data-nav="new-build"><span class="mi-ic">➕</span> New Build</button>
       <button class="menu-item" data-nav="profile"><span class="mi-ic">👤</span> Edit Profile</button>
       <button class="menu-item" data-nav="customer"><span class="mi-ic">🔍</span> Track a build</button>
       <button class="menu-item menu-signout" id="menu-signout"><span class="mi-ic">⎋</span> Sign out</button>
@@ -165,6 +166,84 @@
     <p id="ts-empty" class="no-tickets hidden">No builds to show.</p>
   </main>
 
+  <!-- ───────────────────────────────── NEW BUILD / QUOTE BUILDER (sales) ─── -->
+  <!-- Phase 1 (v1.9.9): sales executives build a quote from the live catalogue.
+       Ticket creation + the interactive PPI comparison land in the next phases. -->
+  <main id="view-new-build" class="view hidden">
+    <div class="sales-toolbar">
+      <div class="toolbar-left"><h2 class="sales-title">New Build</h2></div>
+      <div class="toolbar-right">
+        <span id="qb-draft-note" class="qb-draft-note"></span>
+        <button id="qb-clear" class="btn-ghost" type="button">Clear</button>
+      </div>
+    </div>
+
+    <div class="qb-grid">
+      <!-- LEFT: customer + components -->
+      <div class="qb-main">
+        <section class="glass qb-card">
+          <h3 class="qb-card-title">Customer</h3>
+          <div class="qb-cust-grid">
+            <label class="qb-field">
+              <span>Customer name</span>
+              <input id="qb-cust-name" class="filter-input" placeholder="e.g. Arjun R Kumar" autocomplete="off">
+            </label>
+            <label class="qb-field">
+              <span>Phone</span>
+              <input id="qb-cust-phone" class="filter-input" placeholder="10-digit mobile" autocomplete="off">
+            </label>
+            <label class="qb-field">
+              <span>Target deadline</span>
+              <input id="qb-deadline" class="filter-input" type="datetime-local">
+            </label>
+            <label class="qb-field">
+              <span>Build type</span>
+              <select id="qb-type" class="filter-select">
+                <option value="build">New PC Build</option>
+                <option value="repair">Service / Repair</option>
+              </select>
+            </label>
+            <label class="qb-field">
+              <span>Intended use</span>
+              <select id="qb-usecase" class="filter-select">
+                <option value="gaming-1080p">Gaming — 1080p</option>
+                <option value="gaming-1440p" selected>Gaming — 1440p</option>
+                <option value="gaming-4k">Gaming — 4K</option>
+                <option value="streaming">Streaming</option>
+                <option value="video-editing">Video Editing</option>
+                <option value="cad-3d">CAD / 3D</option>
+                <option value="content-creation">Content Creation</option>
+                <option value="ai-ml">AI / ML</option>
+                <option value="office">Office / General</option>
+              </select>
+            </label>
+          </div>
+        </section>
+
+        <section class="glass qb-card">
+          <h3 class="qb-card-title">Components</h3>
+          <p class="qb-hint">Search the live price catalogue, or enter a part by hand if it isn't listed. Every picked part links to its product page so you can verify it with the customer.</p>
+          <div id="qb-rows"></div>
+        </section>
+      </div>
+
+      <!-- RIGHT: running quote -->
+      <aside class="qb-side">
+        <section class="glass qb-card qb-summary">
+          <h3 class="qb-card-title">Quotation</h3>
+          <div id="qb-lines" class="qb-lines"></div>
+          <div class="qb-total-row">
+            <span>Components</span><span id="qb-count" class="mono">0</span>
+          </div>
+          <div class="qb-total-row qb-total-main">
+            <span>Subtotal</span><span id="qb-subtotal" class="mono">₹0</span>
+          </div>
+          <p class="qb-note" id="qb-next-note">Price-to-performance comparison and ticket creation arrive in the next update.</p>
+        </section>
+      </aside>
+    </div>
+  </main>
+
   <!-- ───────────────────────────────── EDIT PROFILE (staff) ─── -->
   <main id="view-profile" class="view hidden">
     <div class="profile-card glass">
@@ -237,6 +316,8 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="shared/icons.js"></script>
   <script src="shared/diagnostics-render.js"></script>
+  <script src="shared/matcher.js"></script>
+  <script src="shared/ppi.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

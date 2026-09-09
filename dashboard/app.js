@@ -45,7 +45,7 @@ function getView() {
 
 // ── Auth + view routing + hamburger menu (v2.0.0 P3) ──────
 let currentProfile = null;
-const VIEWS = ['customer', 'login', 'dashboard', 'profile', 'ticket-status'];
+const VIEWS = ['customer', 'login', 'dashboard', 'profile', 'ticket-status', 'new-build'];
 
 // Match a ticket's short technician name ("Athul") to a profile's full name
 // ("Athul Sudheer") — same logic as the app's My Bench so a technician's web
@@ -64,11 +64,13 @@ function technicianMatchesProfile(techName, profile) {
 
 function activateView(name) {
   if (name === 'sales') name = currentProfile ? 'dashboard' : 'login';           // legacy deep-link
-  if (['dashboard', 'profile', 'ticket-status'].includes(name) && !currentProfile) name = 'login';
+  if (['dashboard', 'profile', 'ticket-status', 'new-build'].includes(name) && !currentProfile) name = 'login';
   // Role guard: a technician (T2) never gets the full-floor Dashboard — even via
   // a ?view=dashboard deep-link — they're sent to their own My Builds list. (T1
   // sales and T3+ leads are unchanged.)
   if (name === 'dashboard' && currentProfile && Number(currentProfile.tier) === 2) name = 'ticket-status';
+  // Quote building is a sales/lead activity — a technician (T2) is sent to My Builds.
+  if (name === 'new-build' && currentProfile && Number(currentProfile.tier) === 2) name = 'ticket-status';
   VIEWS.forEach(v => {
     const el = document.getElementById('view-' + v);
     if (el) el.classList.toggle('hidden', v !== name);
@@ -76,6 +78,7 @@ function activateView(name) {
   closeMenu();
   if (name === 'dashboard') ensureDashboardLoaded();
   else if (name === 'ticket-status') ensureTicketStatusLoaded();
+  else if (name === 'new-build') ensureQuoteBuilderLoaded();
   else if (name === 'profile') renderProfile();
   else if (name === 'login') setTimeout(() => { const e = document.getElementById('web-login-email'); if (e) e.focus(); }, 120);
 }
@@ -127,6 +130,9 @@ function applyMenu() {
     tsBtn.classList.toggle('hidden', !(tier === 1 || tier === 2));
     const tsLabel = document.getElementById('menu-ts-label');
     if (tsLabel) tsLabel.textContent = tier === 2 ? 'My Builds' : 'Ticket Status';
+    // Quote builder: sales (T1) and leads/admin (T3+). Technicians build, not sell.
+    const nbBtn = document.getElementById('menu-newbuild');
+    if (nbBtn) nbBtn.classList.toggle('hidden', tier === 2);
   } else {
     pub.classList.remove('hidden');
     staff.classList.add('hidden');
@@ -879,4 +885,323 @@ function fmtDateTime(iso) {
   try {
     return new Date(iso).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
   } catch { return ''; }
+}
+
+// ═══════════════════════════════════════════════════════════
+//  QUOTE BUILDER — "New Build" (v1.9.9, Phase 1)
+//  Sales executives assemble a quotation from the live price catalogue.
+//  Every picked part keeps its product URL so the exec can open the real
+//  product page and verify it with the customer on the spot.
+//
+//  Phase 2 adds the interactive price-to-performance comparison (shared/ppi.js
+//  and the PassMark JSONs are already published alongside this site); Phase 3
+//  turns a finished quote into a real build ticket.
+// ═══════════════════════════════════════════════════════════
+
+const QB_CATEGORIES = [
+  { key: 'cpu',         label: 'Processor (CPU)', icon: '🧠' },
+  { key: 'motherboard', label: 'Motherboard',     icon: '🔌' },
+  { key: 'ram',         label: 'Memory (RAM)',    icon: '🧮' },
+  { key: 'gpu',         label: 'Graphics Card',   icon: '🎮' },
+  { key: 'storage',     label: 'Storage',         icon: '💾' },
+  { key: 'psu',         label: 'Power Supply',    icon: '⚡' },
+  { key: 'cooler',      label: 'Cooler',          icon: '❄' },
+  { key: 'case',        label: 'Cabinet',         icon: '🗄' }
+];
+
+const QB_DRAFT_KEY = 'neoqc-quote-draft';
+let qbState = { customer: {}, items: {} };
+let qbLoaded = false;
+let qbSearchTimers = {};
+
+function qbMoney(n) {
+  if (n == null || isNaN(n)) return '—';
+  return '₹' + Math.round(Number(n)).toLocaleString('en-IN');
+}
+
+function ensureQuoteBuilderLoaded() {
+  if (qbLoaded) { qbRenderAll(); return; }
+  qbLoaded = true;
+  qbLoadDraft();
+  qbBuildRows();
+  qbBindCustomerFields();
+  // Click anywhere outside a picker closes the open dropdown.
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('.qb-pick')) qbCloseResults(null);
+  });
+  const clearBtn = document.getElementById('qb-clear');
+  if (clearBtn) clearBtn.addEventListener('click', () => {
+    if (!confirm('Clear this quotation and start over?')) return;
+    qbState = { customer: {}, items: {} };
+    try { localStorage.removeItem(QB_DRAFT_KEY); } catch (e) {}
+    ['qb-cust-name', 'qb-cust-phone', 'qb-deadline'].forEach(id => {
+      const el = document.getElementById(id); if (el) el.value = '';
+    });
+    qbRenderAll();
+  });
+  qbRenderAll();
+}
+
+// ── Draft persistence (survives a refresh; per-browser only) ──
+function qbLoadDraft() {
+  try {
+    const raw = localStorage.getItem(QB_DRAFT_KEY);
+    if (raw) {
+      const d = JSON.parse(raw);
+      if (d && typeof d === 'object') qbState = { customer: d.customer || {}, items: d.items || {} };
+    }
+  } catch (e) { /* a corrupt draft must never block the page */ }
+}
+
+function qbSaveDraft() {
+  try { localStorage.setItem(QB_DRAFT_KEY, JSON.stringify(qbState)); } catch (e) {}
+  const note = document.getElementById('qb-draft-note');
+  if (note) {
+    note.textContent = 'Draft saved';
+    clearTimeout(qbSearchTimers.__note);
+    qbSearchTimers.__note = setTimeout(() => { note.textContent = ''; }, 1600);
+  }
+}
+
+function qbBindCustomerFields() {
+  const map = {
+    'qb-cust-name': 'name', 'qb-cust-phone': 'phone', 'qb-deadline': 'deadline',
+    'qb-type': 'type', 'qb-usecase': 'useCase'
+  };
+  Object.keys(map).forEach(id => {
+    const el = document.getElementById(id);
+    if (!el || el.dataset.qbBound) return;
+    el.dataset.qbBound = '1';
+    if (qbState.customer[map[id]] != null) el.value = qbState.customer[map[id]];
+    const ev = el.tagName === 'SELECT' ? 'change' : 'input';
+    el.addEventListener(ev, () => { qbState.customer[map[id]] = el.value; qbSaveDraft(); });
+  });
+}
+
+// ── Rows ──
+function qbBuildRows() {
+  const wrap = document.getElementById('qb-rows');
+  if (!wrap) return;
+  wrap.innerHTML = QB_CATEGORIES.map(c =>
+    '<div class="qb-row" data-cat="' + c.key + '">' +
+      '<div class="qb-cat"><span class="qb-cat-ic">' + c.icon + '</span><span>' + escHtml(c.label) + '</span></div>' +
+      '<div class="qb-pick">' +
+        '<input class="qb-search filter-input" data-cat="' + c.key + '" placeholder="Search catalogue…" autocomplete="off" spellcheck="false">' +
+        '<div class="qb-results hidden" data-cat="' + c.key + '"></div>' +
+        '<div class="qb-selected hidden" data-cat="' + c.key + '"></div>' +
+      '</div>' +
+    '</div>').join('');
+
+  wrap.querySelectorAll('.qb-search').forEach(inp => {
+    inp.addEventListener('input', () => qbOnSearch(inp.dataset.cat, inp.value));
+    inp.addEventListener('focus', () => { if (inp.value.trim().length >= 2) qbOnSearch(inp.dataset.cat, inp.value); });
+  });
+  wrap.addEventListener('click', qbOnClick);
+  wrap.addEventListener('input', (e) => {
+    const pe = e.target.closest('.qb-qprice');
+    if (!pe) return;
+    const it = qbState.items[pe.dataset.cat];
+    if (!it) return;
+    const v = parseFloat(pe.value);
+    it.quotedPrice = isNaN(v) ? null : v;
+    qbSaveDraft();
+    qbRenderSummary();
+  });
+}
+
+// ── Catalogue search (debounced) ──
+// Only ever one open dropdown. Without this, searching CPU then clicking into GPU
+// left both result lists open, stacking over the rows beneath them.
+function qbCloseResults(exceptCat) {
+  document.querySelectorAll('.qb-results').forEach(b => {
+    if (exceptCat && b.dataset.cat === exceptCat) return;
+    b.classList.add('hidden');
+    b.innerHTML = '';
+  });
+}
+
+function qbOnSearch(cat, q) {
+  clearTimeout(qbSearchTimers[cat]);
+  const box = document.querySelector('.qb-results[data-cat="' + cat + '"]');
+  if (!box) return;
+  const term = (q || '').trim();
+  qbCloseResults(cat);
+  if (term.length < 2) { box.classList.add('hidden'); box.innerHTML = ''; return; }
+  qbSearchTimers[cat] = setTimeout(() => qbRunSearch(cat, term, box), 260);
+}
+
+async function qbRunSearch(cat, term, box) {
+  if (!db) { box.classList.remove('hidden'); box.innerHTML = '<div class="qb-res-empty">Not connected.</div>'; return; }
+  box.classList.remove('hidden');
+  box.innerHTML = '<div class="qb-res-empty">Searching…</div>';
+  try {
+    // NOTE: only columns that exist today are selected. Once an image_url column
+    // is added to component_prices, add it here and the thumbnail lights up with
+    // no other change (qbRenderRow already handles it.image_url).
+    const { data, error } = await db
+      .from('component_prices')
+      .select('sku,name,price_inr,url,category')
+      .eq('category', cat)
+      .ilike('name', '%' + term + '%')
+      .order('price_inr', { ascending: true })
+      .limit(40);
+    if (error) throw error;
+    if (!data || !data.length) {
+      box.innerHTML = '<div class="qb-res-empty">No catalogue match. ' +
+        '<button type="button" class="qb-manual-btn" data-cat="' + cat + '">Enter manually</button></div>';
+      return;
+    }
+    // Relevance ranking. The catalogue appends the part code into the name, so a
+    // plain price sort surfaced accessories whose CODE happens to contain the term
+    // (a Bykski water block for "ryzen", a Lian Li cable for "rtx") above the real
+    // component. Prefer the term appearing early, and as a whole word, in the name.
+    const tl = term.toLowerCase();
+    const esc = tl.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const wordRe = new RegExp('\\b' + esc);
+    const rows = (data || []).map(r => {
+      const n = (r.name || '').toLowerCase();
+      const idx = n.indexOf(tl);
+      // Some catalogue rows are accessories filed under a component category (a
+      // vertical BRACKET kit and an NVLink BRIDGE sit under 'gpu'). They match the
+      // search term legitimately but are never what a sales exec is quoting, so
+      // sink them below real parts instead of hiding them outright.
+      if (/\b(bracket|cable|extension|bridge|riser|adapter|adaptor|waterblock|water block|mount|stand|screw|paste|sleeve|splitter|converter|holder|clip)\b/.test(n)) {
+        return { r: r, score: 0, price: r.price_inr == null ? Infinity : Number(r.price_inr) };
+      }
+      let score = 1;
+      if (idx === 0) score = 4;
+      else if (idx > -1 && idx <= 24) score = 3;
+      else if (wordRe.test(n)) score = 2;
+      return { r: r, score: score, price: r.price_inr == null ? Infinity : Number(r.price_inr) };
+    }).sort((a, b) => (b.score - a.score) || (a.price - b.price)).slice(0, 20).map(x => x.r);
+
+    box.innerHTML = rows.map(r =>
+      '<button type="button" class="qb-res" data-cat="' + cat + '"' +
+        ' data-sku="' + escHtml(r.sku) + '"' +
+        ' data-name="' + escHtml(r.name) + '"' +
+        ' data-price="' + (r.price_inr == null ? '' : r.price_inr) + '"' +
+        ' data-url="' + escHtml(r.url || '') + '">' +
+        '<span class="qb-res-name">' + escHtml(r.name) + '</span>' +
+        '<span class="qb-res-price mono">' + qbMoney(r.price_inr) + '</span>' +
+      '</button>').join('') +
+      '<div class="qb-res-foot"><button type="button" class="qb-manual-btn" data-cat="' + cat + '">Not listed — enter manually</button></div>';
+  } catch (e) {
+    box.innerHTML = '<div class="qb-res-empty">Search failed: ' + escHtml(e.message || 'unknown error') + '</div>';
+  }
+}
+
+function qbOnClick(e) {
+  const pick = e.target.closest('.qb-res');
+  if (pick) {
+    const cat = pick.dataset.cat;
+    const price = pick.dataset.price === '' ? null : parseFloat(pick.dataset.price);
+    qbState.items[cat] = {
+      sku: pick.dataset.sku,
+      name: pick.dataset.name,
+      url: pick.dataset.url || '',
+      catalogPrice: price,
+      quotedPrice: price,
+      manual: false
+    };
+    qbAfterPick(cat);
+    return;
+  }
+  const manual = e.target.closest('.qb-manual-btn');
+  if (manual) {
+    const cat = manual.dataset.cat;
+    const inp = document.querySelector('.qb-search[data-cat="' + cat + '"]');
+    const name = (inp && inp.value.trim()) || '';
+    if (!name) return;
+    qbState.items[cat] = { sku: null, name: name, url: '', catalogPrice: null, quotedPrice: null, manual: true };
+    qbAfterPick(cat);
+    return;
+  }
+  const rm = e.target.closest('.qb-remove');
+  if (rm) {
+    delete qbState.items[rm.dataset.cat];
+    qbSaveDraft();
+    qbRenderRow(rm.dataset.cat);
+    qbRenderSummary();
+  }
+}
+
+function qbAfterPick(cat) {
+  const box = document.querySelector('.qb-results[data-cat="' + cat + '"]');
+  const inp = document.querySelector('.qb-search[data-cat="' + cat + '"]');
+  if (box) { box.classList.add('hidden'); box.innerHTML = ''; }
+  if (inp) inp.value = '';
+  qbSaveDraft();
+  qbRenderRow(cat);
+  qbRenderSummary();
+}
+
+function qbRenderRow(cat) {
+  const sel = document.querySelector('.qb-selected[data-cat="' + cat + '"]');
+  const inp = document.querySelector('.qb-search[data-cat="' + cat + '"]');
+  if (!sel) return;
+  const it = qbState.items[cat];
+  if (!it) {
+    sel.classList.add('hidden');
+    sel.innerHTML = '';
+    if (inp) inp.classList.remove('hidden');
+    return;
+  }
+  if (inp) inp.classList.add('hidden');
+  sel.classList.remove('hidden');
+  // it.image_url stays undefined until an image column exists, so the thumbnail
+  // falls back to the category glyph — adding photos later needs no UI change.
+  const cfg = QB_CATEGORIES.find(c => c.key === cat) || { icon: '📦' };
+  const thumb = it.image_url
+    ? '<img class="qb-thumb-img" src="' + escHtml(it.image_url) + '" alt="">'
+    : '<span class="qb-thumb-ph">' + cfg.icon + '</span>';
+  const link = it.url
+    ? '<a class="qb-link" href="' + escHtml(it.url) + '" target="_blank" rel="noopener noreferrer">View product ↗</a>'
+    : '<span class="qb-link qb-link-none">' + (it.manual ? 'Manual entry' : 'No product link') + '</span>';
+  sel.innerHTML =
+    '<div class="qb-sel-card">' +
+      '<div class="qb-thumb">' + thumb + '</div>' +
+      '<div class="qb-sel-main">' +
+        '<div class="qb-sel-name" title="' + escHtml(it.name) + '">' + escHtml(it.name) + '</div>' +
+        '<div class="qb-sel-meta">' + link +
+          (it.catalogPrice != null ? '<span class="qb-cat-price">Catalogue ' + qbMoney(it.catalogPrice) + '</span>' : '') +
+        '</div>' +
+      '</div>' +
+      '<div class="qb-sel-price">' +
+        '<label class="qb-qprice-label">Quoted</label>' +
+        '<input type="number" class="qb-qprice" data-cat="' + cat + '" value="' +
+          (it.quotedPrice == null ? '' : it.quotedPrice) + '" placeholder="0" min="0" step="1">' +
+      '</div>' +
+      '<button type="button" class="qb-remove" data-cat="' + cat + '" title="Remove">✕</button>' +
+    '</div>';
+}
+
+function qbRenderSummary() {
+  const linesEl = document.getElementById('qb-lines');
+  const countEl = document.getElementById('qb-count');
+  const subEl = document.getElementById('qb-subtotal');
+  if (!linesEl) return;
+  const chosen = QB_CATEGORIES.filter(c => qbState.items[c.key]);
+  if (!chosen.length) {
+    linesEl.innerHTML = '<div class="qb-lines-empty">No components picked yet.</div>';
+  } else {
+    linesEl.innerHTML = chosen.map(c => {
+      const it = qbState.items[c.key];
+      return '<div class="qb-line">' +
+        '<span class="qb-line-cat">' + c.icon + ' ' + escHtml(c.label) + '</span>' +
+        '<span class="qb-line-name" title="' + escHtml(it.name) + '">' + escHtml(it.name) + '</span>' +
+        '<span class="qb-line-price mono">' + qbMoney(it.quotedPrice) + '</span>' +
+      '</div>';
+    }).join('');
+  }
+  const total = chosen.reduce((s, c) => {
+    const v = qbState.items[c.key].quotedPrice;
+    return s + (v == null || isNaN(v) ? 0 : Number(v));
+  }, 0);
+  if (countEl) countEl.textContent = String(chosen.length);
+  if (subEl) subEl.textContent = qbMoney(total);
+}
+
+function qbRenderAll() {
+  QB_CATEGORIES.forEach(c => qbRenderRow(c.key));
+  qbRenderSummary();
 }

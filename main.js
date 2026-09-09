@@ -223,7 +223,7 @@ function createWindow() {
     try {
       mainWindow.webContents.openDevTools({ mode: 'detach' });
       const watched = ['index.html', 'app.js', 'style.css', 'print-report.css',
-        'print-render.js', 'web-lookup.js', 'ppi.js', 'ppi-sync.js',
+        'print-render.js', 'web-lookup.js', 'ppi-sync.js',
         'ssd-grading.js', 'shared', 'assets/component-data'];
       let pending = null;
       const scheduleReload = (label) => {
