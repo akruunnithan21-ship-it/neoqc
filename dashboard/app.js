@@ -925,6 +925,7 @@ function ensureQuoteBuilderLoaded() {
   qbLoadDraft();
   qbBuildRows();
   qbBindCustomerFields();
+  qbInitPdfImport();
   // Click anywhere outside a picker closes the open dropdown.
   document.addEventListener('click', (e) => {
     if (!e.target.closest('.qb-pick')) qbCloseResults(null);
@@ -974,7 +975,7 @@ function qbBindCustomerFields() {
     el.dataset.qbBound = '1';
     if (qbState.customer[map[id]] != null) el.value = qbState.customer[map[id]];
     const ev = el.tagName === 'SELECT' ? 'change' : 'input';
-    el.addEventListener(ev, () => { qbState.customer[map[id]] = el.value; qbSaveDraft(); });
+    el.addEventListener(ev, () => { qbState.customer[map[id]] = el.value; qbSaveDraft(); if (map[id] === 'useCase') qbSchedulePpi(); });
   });
 }
 
@@ -1006,6 +1007,7 @@ function qbBuildRows() {
     it.quotedPrice = isNaN(v) ? null : v;
     qbSaveDraft();
     qbRenderSummary();
+    qbSchedulePpi();
   });
 }
 
@@ -1133,6 +1135,7 @@ function qbAfterPick(cat) {
   qbSaveDraft();
   qbRenderRow(cat);
   qbRenderSummary();
+  qbSchedulePpi();
 }
 
 function qbRenderRow(cat) {
@@ -1204,4 +1207,303 @@ function qbRenderSummary() {
 function qbRenderAll() {
   QB_CATEGORIES.forEach(c => qbRenderRow(c.key));
   qbRenderSummary();
+  qbSchedulePpi();
+}
+
+// ═══════════════════════════════════════════════════════════
+//  INVOICE PDF IMPORT (website) — same parser as the desktop app
+//  The categoriser is shared/invoice-import.js, the very module the Electron
+//  app uses, so the v1.9.8 fixes (chipset = strong motherboard signal, DDR5 no
+//  longer a decisive RAM signal, accessory de-prioritisation) apply here too.
+//  Text extraction mirrors main.js's invoice:parse-pdf exactly: group text
+//  items into rows by Y (2px tolerance), order left-to-right by X, so a tabular
+//  "Description … Rate … Total" row survives as ONE line — which is what the
+//  parser depends on.
+// ═══════════════════════════════════════════════════════════
+
+const QB_PDFJS_WORKER = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
+
+async function qbExtractPdfText(file) {
+  const lib = window.pdfjsLib;
+  if (!lib) throw new Error('PDF engine failed to load (check your connection).');
+  try { lib.GlobalWorkerOptions.workerSrc = QB_PDFJS_WORKER; } catch (e) {}
+  const buf = new Uint8Array(await file.arrayBuffer());
+  const doc = await lib.getDocument({ data: buf, isEvalSupported: false, useSystemFonts: true }).promise;
+  const pages = [];
+  for (let p = 1; p <= doc.numPages; p++) {
+    const page = await doc.getPage(p);
+    const content = await page.getTextContent();
+    const rows = [];
+    content.items.forEach(it => {
+      if (!it.str || !it.str.trim()) return;
+      const y = Math.round(it.transform[5]);
+      const x = it.transform[4];
+      let row = rows.find(r => Math.abs(r.y - y) <= 2);
+      if (!row) { row = { y: y, items: [] }; rows.push(row); }
+      row.items.push({ x: x, str: it.str });
+    });
+    rows.sort((a, b) => b.y - a.y);            // PDF origin is bottom-left
+    pages.push(rows.map(r => {
+      r.items.sort((a, b) => a.x - b.x);
+      return r.items.map(i => i.str).join(' ').replace(/\s{2,}/g, ' ').trim();
+    }).join('\n'));
+  }
+  return pages.join('\n');
+}
+
+// Invoice is the source of truth for the part NAME and PRICE. The catalogue is
+// consulted only to attach a product URL (and its list price for comparison), so
+// the exec can open the real product page and verify it with the customer.
+async function qbResolveFromCatalogue(cat, name) {
+  if (!db || !name) return null;
+  const words = String(name).replace(/[^\w\s.-]/g, ' ').split(/\s+/).filter(w => w.length > 2);
+  const tries = [words.slice(0, 3).join(' '), words.slice(0, 2).join(' '), words[0] || ''];
+
+  // Collect candidates across the attempts, then pick the BEST by name similarity.
+  // Taking the first row back matched a different KIOXIA drive (Rs 25,847 against a
+  // Rs 15,294 invoice line) and a different B850 board — which would hand the
+  // customer a link to the WRONG product. Below the confidence floor we attach no
+  // link at all: no link is far better than a confidently wrong one.
+  const seen = new Set();
+  const candidates = [];
+  for (const t of tries) {
+    if (!t) continue;
+    try {
+      const { data, error } = await db
+        .from('component_prices')
+        .select('sku,name,price_inr,url')
+        .eq('category', cat)
+        .ilike('name', '%' + t + '%')
+        .limit(10);
+      if (error || !data) continue;
+      data.forEach(r => { if (r && r.sku && !seen.has(r.sku)) { seen.add(r.sku); candidates.push(r); } });
+      if (candidates.length >= 10) break;
+    } catch (e) { /* try the next, shorter term */ }
+  }
+  if (!candidates.length) return null;
+
+  const M = window.NeoQcMatcher;
+  if (!M || !M.tokenize || !M.score) return null;   // no scorer → no guessing
+  const q = M.tokenize(M.cleanName ? M.cleanName(name) : name);
+  let best = null, bestScore = 0;
+  candidates.forEach(r => {
+    const s = M.score(q, new Set(M.tokenize(M.cleanName ? M.cleanName(r.name) : r.name)));
+    if (s > bestScore) { bestScore = s; best = r; }
+  });
+  return bestScore >= 0.45 ? best : null;
+}
+
+function qbImportStatus(html, kind) {
+  const el = document.getElementById('qb-import-status');
+  if (!el) return;
+  el.className = 'qb-import-status' + (kind ? ' ' + kind : '');
+  el.innerHTML = html;
+  el.classList.remove('hidden');
+}
+
+async function qbImportPdf(file) {
+  const btn = document.getElementById('qb-pdf-btn');
+  const old = btn ? btn.textContent : '';
+  if (btn) { btn.disabled = true; btn.textContent = 'Reading…'; }
+  try {
+    qbImportStatus('Reading the invoice…', '');
+    const text = await qbExtractPdfText(file);
+    if (!text || text.replace(/[^A-Za-z0-9]/g, '').length < 40) {
+      qbImportStatus('No readable text in this PDF. It is probably a scan or image — enter the parts by hand.', 'warn');
+      return;
+    }
+    const II = window.NeoQcInvoiceImport;
+    if (!II) throw new Error('Invoice parser not loaded.');
+    const build = II.buildFromInvoice(text, null, {});
+    const cats = Object.keys(build.results || {});
+    if (!cats.length) {
+      qbImportStatus('No recognisable PC components were found in this invoice. You can still enter them by hand.', 'warn');
+      return;
+    }
+
+    qbImportStatus('Matching ' + cats.length + ' component(s) to the catalogue…', '');
+    let filled = 0;
+    for (const cat of cats) {
+      if (!QB_CATEGORIES.some(c => c.key === cat)) continue;
+      const r = build.results[cat];
+      const invName = r.displayName || r.matchedName || r.rawLine;
+      const invPrice = r.priceInr != null ? r.priceInr : null;
+      const hit = await qbResolveFromCatalogue(cat, invName);
+      qbState.items[cat] = {
+        sku: hit ? hit.sku : null,
+        name: invName,                                   // invoice wins on naming
+        url: hit ? (hit.url || '') : '',                 // catalogue supplies the link
+        catalogPrice: hit && hit.price_inr != null ? Number(hit.price_inr) : null,
+        quotedPrice: invPrice,                           // invoice wins on price
+        manual: false,
+        fromInvoice: true,
+        needsReview: r.status !== 'matched'
+      };
+      filled++;
+    }
+    qbSaveDraft();
+    qbRenderAll();
+
+    // Safety net — mirror of the app's: show every priced invoice line that was
+    // NOT mapped to a build component, so a real part can never be silently lost.
+    let extra = '';
+    try {
+      const mapped = new Set(cats.map(c => build.results[c] && build.results[c].rawLine).filter(Boolean));
+      const noise = /(sub\s*total|grand\s*total|\btotal\b|\bgst\b|\bcgst\b|\bsgst\b|\btax\b|bill\s*to|ship\s*to|\bbank\b|transfer|\bmobile\b|place\s*of\s*supply|proforma|\binvoice\b)/i;
+      const unmatched = (build.candidateLines || []).filter(row =>
+        row && row.text && (row.rate != null || row.total != null) &&
+        !mapped.has(row.text) && !noise.test(row.text) && /[a-z]{3,}/i.test(row.text));
+      if (unmatched.length) {
+        extra = '<div class="qb-unmatched"><strong>' + unmatched.length +
+          ' invoice line(s) not added as a build part — check nothing was missed:</strong>' +
+          unmatched.map(row => '<div>• ' + escHtml(row.text.slice(0, 78)) +
+            (row.rate != null ? ' — ' + qbMoney(row.rate) : '') + '</div>').join('') +
+          '<div class="qb-unmatched-note">Monitors, keyboards and labour belong here. If a core component is listed, add it by hand above.</div></div>';
+      }
+    } catch (e) { /* the safety net must never break the import */ }
+
+    const review = QB_CATEGORIES.filter(c => qbState.items[c.key] && qbState.items[c.key].needsReview).length;
+    qbImportStatus(
+      '<strong>Imported ' + filled + ' component(s) from the invoice.</strong>' +
+      (review ? ' <span class="qb-review-flag">' + review + ' need a quick check (unusual wording).</span>' : '') +
+      '<div class="qb-unmatched-note">Names and prices come from the invoice; product links are matched from the catalogue.</div>' +
+      extra, review ? 'warn' : 'ok');
+  } catch (e) {
+    qbImportStatus('Import failed: ' + escHtml(e.message || 'unknown error'), 'err');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = old; }
+  }
+}
+
+function qbInitPdfImport() {
+  const btn = document.getElementById('qb-pdf-btn');
+  const input = document.getElementById('qb-pdf-input');
+  if (!btn || !input || btn.dataset.qbBound) return;
+  btn.dataset.qbBound = '1';
+  btn.addEventListener('click', () => input.click());
+  input.addEventListener('change', () => {
+    const f = input.files && input.files[0];
+    input.value = '';                       // allow re-picking the same file
+    if (f) qbImportPdf(f);
+  });
+}
+
+// ═══════════════════════════════════════════════════════════
+//  LIVE PRICE-TO-PERFORMANCE (Phase 2)
+//  Runs the SAME engine the technician app uses — shared/ppi.js driven by
+//  shared/ppi-sync.js — entirely in the browser, so a sales exec sees the score
+//  while building the quote instead of waiting for the workstation to compute it.
+//  The result is drawn with the same shared renderPpiPanel() the customer page
+//  already uses, so staff and customer see identical figures.
+// ═══════════════════════════════════════════════════════════
+
+let qbCatalogMatcher = null;
+let qbCatalogLoading = null;
+let qbPpiTimer = null;
+let qbPpiSeq = 0;
+
+// The engine scores each part against SAME-PRICE-BAND PEERS, so it needs the
+// catalogue pool — not just the chosen parts. Loaded once per session and cached.
+async function qbEnsureCatalogue() {
+  if (qbCatalogMatcher) return qbCatalogMatcher;
+  if (qbCatalogLoading) return qbCatalogLoading;
+  if (!db) throw new Error('not connected');
+  if (!window.NeoQcMatcher || !window.NeoQcMatcher.Matcher) throw new Error('matcher not loaded');
+
+  qbCatalogLoading = (async () => {
+    const cats = QB_CATEGORIES.map(c => c.key);
+    const PAGE = 1000;
+
+    // Supabase caps a response at 1000 rows and each round trip costs ~1.6s, so
+    // fetching ~6 pages one after another left the exec staring at "Scoring…" for
+    // ten seconds. Ask for the row count first, then pull every page in parallel.
+    const head = await db
+      .from('component_prices')
+      .select('sku', { count: 'exact', head: true })
+      .in('category', cats);
+    if (head.error) throw head.error;
+    const total = head.count || 0;
+    const pages = Math.max(1, Math.ceil(total / PAGE));
+
+    const results = await Promise.all(
+      Array.from({ length: pages }, (_, i) =>
+        db.from('component_prices')
+          .select('sku,name,category,price_inr')
+          .in('category', cats)
+          .range(i * PAGE, i * PAGE + PAGE - 1)
+      )
+    );
+    const rows = [];
+    results.forEach(r => { if (!r.error && r.data) rows.push.apply(rows, r.data); });
+
+    qbCatalogMatcher = new window.NeoQcMatcher.Matcher(rows);
+    qbCatalogMatcher.__rowCount = rows.length;
+    return qbCatalogMatcher;
+  })();
+
+  try {
+    return await qbCatalogLoading;
+  } catch (e) {
+    qbCatalogLoading = null;   // allow a retry on the next change
+    throw e;
+  }
+}
+
+function qbPpiMessage(html) {
+  const panel = document.getElementById('qb-ppi');
+  if (panel) panel.innerHTML = '<div class="qb-ppi-empty">' + html + '</div>';
+}
+
+async function qbComputePpi() {
+  const panel = document.getElementById('qb-ppi');
+  if (!panel) return;
+  const chosen = QB_CATEGORIES.filter(c => qbState.items[c.key]);
+  if (chosen.length < 2) {
+    qbPpiMessage('Pick at least two components to score this build.');
+    return;
+  }
+  if (!window.NeoQcPpiSync || !window.NeoQcPpiSync.computePpi) {
+    qbPpiMessage('Scoring engine not loaded.');
+    return;
+  }
+
+  const seq = ++qbPpiSeq;                  // ignore results from superseded runs
+  qbPpiMessage('Scoring this build…');
+  try {
+    const matcher = await qbEnsureCatalogue();
+    if (seq !== qbPpiSeq) return;
+
+    const ticketSpecs = {}, ticketPrices = {};
+    chosen.forEach(c => {
+      const it = qbState.items[c.key];
+      ticketSpecs[c.key] = it.name;
+      if (it.quotedPrice != null && !isNaN(it.quotedPrice)) ticketPrices[c.key] = Number(it.quotedPrice);
+    });
+
+    const res = await window.NeoQcPpiSync.computePpi({
+      ticketSpecs: ticketSpecs,
+      catalogMatcher: matcher,
+      useCase: qbState.customer.useCase || 'gaming-1440p',
+      ticketPrices: ticketPrices,
+      priceBandPct: 0.15
+      // fetchUrl / supabaseClient intentionally omitted: the live retailer
+      // lookup is an app-side concern; here we score on what we already know.
+    });
+    if (seq !== qbPpiSeq) return;
+    if (!res || !res.success) throw new Error((res && res.error) || 'could not score this build');
+
+    const R = window.NeoQcDiagnosticsRender;
+    panel.innerHTML = (R && R.renderPpiPanel)
+      ? R.renderPpiPanel(res.payload)
+      : '<div class="qb-ppi-empty">Score: ' + (res.payload.index != null ? Math.round(res.payload.index) : '—') + '</div>';
+  } catch (e) {
+    if (seq !== qbPpiSeq) return;
+    qbPpiMessage('Could not score this build: ' + escHtml(e.message || 'unknown error'));
+  }
+}
+
+// Debounced so typing a price does not fire a scoring run per keystroke.
+function qbSchedulePpi() {
+  clearTimeout(qbPpiTimer);
+  qbPpiTimer = setTimeout(qbComputePpi, 600);
 }

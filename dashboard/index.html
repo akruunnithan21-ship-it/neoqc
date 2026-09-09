@@ -221,9 +221,22 @@
         </section>
 
         <section class="glass qb-card">
-          <h3 class="qb-card-title">Components</h3>
+          <div class="qb-card-head">
+            <h3 class="qb-card-title">Components</h3>
+            <div class="qb-import">
+              <input type="file" id="qb-pdf-input" accept="application/pdf,.pdf" hidden>
+              <button type="button" id="qb-pdf-btn" class="btn-ghost">Import from invoice PDF</button>
+            </div>
+          </div>
           <p class="qb-hint">Search the live price catalogue, or enter a part by hand if it isn't listed. Every picked part links to its product page so you can verify it with the customer.</p>
+          <div id="qb-import-status" class="qb-import-status hidden"></div>
           <div id="qb-rows"></div>
+        </section>
+
+        <section class="glass qb-card">
+          <h3 class="qb-card-title">Price-to-Performance</h3>
+          <p class="qb-hint">Live score for this quotation, judged against other parts in the same price band for the chosen use case. Updates as you change components or prices.</p>
+          <div id="qb-ppi"></div>
         </section>
       </div>
 
@@ -318,6 +331,9 @@
   <script src="shared/diagnostics-render.js"></script>
   <script src="shared/matcher.js"></script>
   <script src="shared/ppi.js"></script>
+  <script src="shared/ppi-sync.js"></script>
+  <script src="shared/invoice-import.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
