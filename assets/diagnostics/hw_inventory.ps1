@@ -29,7 +29,11 @@ $ErrorActionPreference = 'SilentlyContinue'
 $PLACEHOLDER_EXACT = @(
   'to be filled by o.e.m.', 'to be filled by oem', 'filled by o.e.m.', 'filled by oem',
   'default string', 'default', 'none', 'not specified', 'not applicable', 'n/a', 'na',
-  'unknown', 'null', 'invalid', 'oem', 'o.e.m.', 'no enclosure', 'not available',
+  'null', 'invalid', 'o.e.m.', 'no enclosure', 'not available',
+  # NOTE: 'unknown' is deliberately NOT here. Get-PhysicalDisk.HealthStatus returns
+  # Healthy / Warning / Unhealthy / Unknown, and Unknown is a real state that the
+  # report must be able to show. 'oem' is likewise omitted — it is a real
+  # manufacturer string on some OEM-branded parts.
   'system product name', 'system serial number', 'system manufacturer', 'system version',
   'system name', 'system sku', 'system sku number', 'system model',
   'base board product name', 'base board serial number', 'base board version',
@@ -46,8 +50,12 @@ function S($v) {
   $l = $t.ToLower()
   if ($PLACEHOLDER_EXACT -contains $l) { return $null }
   # Repeated-character and counting dummies: 0000…, XXXX…, 1234567890, ....
+  # The counting run is an explicit set, not a prefix pattern: an earlier
+  # '^0?123456789\d*$' would have nulled a genuine serial that merely STARTS
+  # 123456789, while still missing most real dummies.
   if ($l -match '^(.)\1{3,}$') { return $null }
-  if ($l -match '^0+$' -or $l -match '^0?123456789\d*$' -or $l -match '^\.+$') { return $null }
+  if ($l -match '^0+$' -or $l -match '^\.+$') { return $null }
+  if ($l -eq '0123456789' -or $l -eq '1234567890' -or $l -eq '123456789' -or $l -eq '012345678901234567890') { return $null }
   return $t
 }
 
@@ -62,24 +70,41 @@ function DecodeDiskSerial($raw) {
     $hex = ($s -replace '[^0-9A-Fa-f]', '')
     if ($hex.Length -lt 8 -or ($hex.Length % 2) -ne 0) { return $s }
     try {
-        # Decode the LEADING printable run and stop at the first binary byte,
-        # rather than abandoning the whole string. NVMe controllers commonly pack
-        # the printed serial into the front of the identify field and pad the tail
-        # with the binary IEEE identifier — the old all-or-nothing decode bailed on
-        # that tail and printed raw hex for a drive whose sticker serial was right
-        # there. e.g. 3931_3430_3539_3633_50C6_… -> "91405963".
+        # ALL-OR-NOTHING on purpose. A partial decode cannot be validated: on a
+        # BIWIN AP823 the identify blob is 3931_3430_3539_3633_50C6_8E07_3235_3136,
+        # whose leading printable run decodes to "91405963" — but the drive's real
+        # serial is 2516191405963, and "2516" lives in the DISCARDED tail. A
+        # leading-run decode there is not truncated, it is reordered, and it
+        # produces a plausible-looking serial that silently mismatches the sticker
+        # during component verification. Raw hex is ugly but self-evidently not a
+        # serial, which correctly sends the technician to the label.
         $sb = New-Object System.Text.StringBuilder
         for ($i = 0; $i -lt $hex.Length; $i += 2) {
             $b = [Convert]::ToInt32($hex.Substring($i, 2), 16)
-            if ($b -lt 32 -or $b -gt 126) { break }
+            if ($b -lt 32 -or $b -gt 126) { return $s }   # any binary byte -> keep raw
             [void]$sb.Append([char]$b)
         }
         $out = $sb.ToString().Trim()
-        # A leading run that is all zeros/padding is a WWN, not a serial — keep raw
-        # so nobody mistakes a truncated identifier for the number on the label.
-        if ($out.Length -ge 6 -and $out -match '[A-Za-z0-9]' -and $out -notmatch '^0+$') { return $out }
+        if ($out.Length -ge 4) { return $out }
         return $s
     } catch { return $s }
+}
+
+# The authoritative serial. Windows puts the controller's own serial into the
+# device instance path as &SN_<serial>, and it is the number printed on the
+# label — verified against all five drives on the shop workstation:
+#   Samsung 980 PRO  -> S5GXNS0X203576K   (identify blob was a WWN)
+#   BIWIN AP823      -> 2516191405963     (identify blob decodes wrongly)
+#   WDC SN550        -> 202547801983
+#   XPG S70 BLADE x2 -> 7O4422195JWC / 2O042L1HN4DX
+# Win32_DiskDrive.SerialNumber and Get-PhysicalDisk both return the raw identify
+# blob for NVMe, so this is tried FIRST and the blob only as a fallback.
+function DiskSerialFor($drive) {
+    if ($drive.PNPDeviceID -and $drive.PNPDeviceID -match '&SN_([^&\\]+)') {
+        $sn = S $matches[1]
+        if ($sn) { return $sn }
+    }
+    return DecodeDiskSerial $drive.SerialNumber
 }
 
 # ── System / chassis ───────────────────────────────────────────────────────
@@ -207,7 +232,7 @@ foreach ($d in (Get-CimInstance Win32_DiskDrive)) {
     $pd = $physMap[[string]$d.Index]
     $disks += [ordered]@{
         model         = S $d.Model
-        serial        = DecodeDiskSerial $d.SerialNumber
+        serial        = DiskSerialFor $d
         serialRaw     = S $d.SerialNumber
         firmware      = S $d.FirmwareRevision
         sizeGB        = if ($d.Size) { [math]::Round($d.Size / 1GB, 0) } else { $null }

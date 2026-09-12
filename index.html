@@ -362,7 +362,7 @@
         <p class="card-subtitle">Connect this PC to an active ticket to run automated benchmarks and thermal analysis.</p>
         
         <!-- Ticket Association Redesigned -->
-        <div class="ticket-association-panel" style="background: rgba(231,1,78,0.04); border: 1px solid rgba(231,1,78,0.15); padding: 14px; border-radius: 12px; margin-bottom: 20px;">
+        <div class="ticket-association-panel" style="background: rgba(var(--primary-pink-rgb),0.04); border: 1px solid rgba(var(--primary-pink-rgb),0.15); padding: 14px; border-radius: 12px; margin-bottom: 20px;">
           <label style="font-weight: 700; color: var(--primary-pink); display: block; margin-bottom: 8px; font-size: 0.82rem; text-transform: uppercase; letter-spacing: 0.05em;">🔗 Connect to Active Ticket</label>
           <div style="display: flex; gap: 12px; align-items: center;">
             <input type="text" id="client-ticket-input" placeholder="Type Ticket ID (e.g. #AB12CD)" class="large-select" style="flex-grow: 1; padding: 8px 12px; background: rgba(0,0,0,0.25); border: 1px solid var(--glass-border); color: white; border-radius: 6px; font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; outline: none; transition: border-color 0.2s;" onfocus="this.style.borderColor='var(--primary-pink)'" onblur="this.style.borderColor='var(--glass-border)'">
@@ -1200,7 +1200,7 @@
                 <div id="modal-windows-activation-info" style="margin-top: 12px; padding: 10px; background: rgba(255,255,255,0.02); border: 1px solid var(--glass-border); border-radius: 8px; font-size: 0.8rem;">
                   <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
                     <span style="font-weight: 700; color: var(--primary-pink); text-transform: uppercase; letter-spacing: 0.05em; font-size: 0.7rem;">🛡️ Windows License Tracker</span>
-                    <button type="button" id="btn-admin-detect-license" style="background: rgba(231,1,78,0.1); border: 1px solid var(--primary-pink); color: var(--primary-pink); font-size: 0.7rem; padding: 2px 6px; border-radius: 4px; cursor: pointer; font-weight: 600; transition: all 0.2s;" onmouseover="this.style.background='var(--primary-pink)'; this.style.color='white';" onmouseout="this.style.background='rgba(231,1,78,0.1)'; this.style.color='var(--primary-pink)';">Auto-Detect</button>
+                    <button type="button" id="btn-admin-detect-license" style="background: rgba(var(--primary-pink-rgb),0.1); border: 1px solid var(--primary-pink); color: var(--primary-pink); font-size: 0.7rem; padding: 2px 6px; border-radius: 4px; cursor: pointer; font-weight: 600; transition: all 0.2s;" onmouseover="this.style.background='var(--primary-pink)'; this.style.color='white';" onmouseout="this.style.background='rgba(var(--primary-pink-rgb),0.1)'; this.style.color='var(--primary-pink)';">Auto-Detect</button>
                   </div>
                   <div style="display: flex; flex-direction: column; gap: 4px;">
                     <span id="modal-activation-os" style="display: none;">Windows</span>
@@ -1467,7 +1467,7 @@
         <div class="form-section margin-top event-log-section collapsed">
           <div class="section-header-row" id="event-log-header">
             <h3 id="event-log-heading">📋 Activity Log &amp; Event History</h3>
-            <span class="badge" style="background: rgba(231,1,78,0.15); color: var(--primary-pink); border: 1px solid rgba(231,1,78,0.3);">Chronological</span>
+            <span class="badge" style="background: rgba(var(--primary-pink-rgb),0.15); color: var(--primary-pink); border: 1px solid rgba(var(--primary-pink-rgb),0.3);">Chronological</span>
           </div>
           <div id="modal-event-log-timeline" class="event-log-timeline">
             <div class="event-log-empty">Open an existing ticket to view its activity history.</div>
@@ -1985,7 +1985,7 @@
           <tr><td><strong>Operating System</strong></td><td>Windows</td></tr>
           <tr><td><strong>Activation Status</strong></td><td id="print-win-status">--</td></tr>
           <tr><td><strong>Product Key</strong></td><td id="print-win-key" style="font-family:monospace;font-size:7.5pt;word-break:break-all;">--</td></tr>
-          <tr><td colspan="2" style="font-size:7pt;color:#666;padding-top:2px;">Masked for your protection. The full key is registered to this machine and held on file at Neo Tokyo Kochi.</td></tr>
+          <tr id="print-win-key-note" style="display:none;"><td colspan="2" style="font-size:7pt;color:#666;padding-top:2px;">Masked for your protection. The full key is registered to this machine and held on file at Neo Tokyo Kochi.</td></tr>
         </table>
       </div>
     </div>
@@ -2477,7 +2477,7 @@
     <div class="glass-slab modal-card" style="max-width: 650px; width: 100%; padding: 30px; border-radius: 20px;">
       <div class="modal-header" style="border-bottom: 1px solid var(--glass-border); padding-bottom: 15px; margin-bottom: 20px;">
         <h2 style="font-family: 'Syncopate', sans-serif; font-size: 1.3rem; color: var(--primary-pink); letter-spacing: 0.05em; margin: 0;">NEO QC UPDATED</h2>
-        <span data-app-version style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; font-weight: 700; background: rgba(231, 1, 78, 0.1); color: var(--primary-pink); padding: 4px 8px; border-radius: 4px;">v1.8.4</span>
+        <span data-app-version style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; font-weight: 700; background: rgba(var(--primary-pink-rgb), 0.1); color: var(--primary-pink); padding: 4px 8px; border-radius: 4px;">v1.8.4</span>
       </div>
       <div class="modal-body" style="font-size: 0.92rem; line-height: 1.6; color: var(--text-dark); max-height: 420px; overflow-y: auto; padding-right: 5px;">
         <p style="margin-top: 0;">A major update has been installed. Here's what's new in NeoQC <strong data-app-version>v1.9.3</strong>:</p>

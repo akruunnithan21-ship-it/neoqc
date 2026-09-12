@@ -23,6 +23,19 @@
     "owner": "akruunnithan21-ship-it",
     "repo": "neoqc"
   },
+  "files": [
+    "**/*",
+    "!__pycache__/**",
+    "!**/__pycache__/**",
+    "!dashboard/**",
+    "!action_plan_pdf.html",
+    "!build-pdf.js",
+    "!report-harness.html",
+    "!database-hardening.sql",
+    "!**/*.md",
+    "!.claude/**",
+    "!.github/**"
+  ],
   "asarUnpack": [
     "assets/diagnostics/**",
     "*.py",

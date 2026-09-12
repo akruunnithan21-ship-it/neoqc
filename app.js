@@ -3321,6 +3321,12 @@ function openTicketModal(ticketId = null) {
   // it reflects the values they just loaded).
   updateTicketModalChrome(ticketId);
 
+  // AFTER the QC checkboxes have been populated. updateFormLockStates runs twice
+  // during open (once at reset, once with the real build %), but both fire BEFORE
+  // the boxes are filled in, and setting .checked in code raises no change event —
+  // so the counter read 0 / 11 on every existing ticket until someone touched a box.
+  refreshQcBadge();
+
   modal.classList.add('active');
 
   // Land on the stage the build is actually at, rather than the top of a

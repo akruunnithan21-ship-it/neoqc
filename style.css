@@ -1047,7 +1047,9 @@
   :focus-visible {
     outline: 3px solid var(--primary-pink) !important;
     outline-offset: 2px;
-    border-radius: 10px;
+    /* No border-radius here: that would reshape the ELEMENT, not the ring —
+       it would square off pills and round square inputs the moment they take
+       keyboard focus. Modern browsers follow the element's own radius anyway. */
   }
   body.dark-mode :focus-visible {
     outline-color: #ff4d84 !important;
@@ -1545,9 +1547,17 @@
   }
   
   /* Modal Overlay dialogs */
+  /* visibility, not just opacity. An element at opacity 0 with pointer-events
+     none is STILL IN THE TAB ORDER. The ticket modal is a top-level sibling of
+     the screens, so at rest a keyboard — or a wedge scanner emitting Tab — could
+     walk into the invisible form, toggle QC checkboxes with Space and land on the
+     submit button, defeating the QC gate from the dashboard. The 0.4s visibility
+     delay below applies only on the way OUT, so the fade-out still plays; the
+     .active rule zeroes that delay so opening is immediate. */
   .modal-overlay {
     display: flex;
     opacity: 0;
+    visibility: hidden;
     pointer-events: none;
     position: fixed;
     top: 0;
@@ -1559,13 +1569,16 @@
     z-index: 1000;
     justify-content: center;
     align-items: center;
-    transition: opacity 0.4s cubic-bezier(0.16, 1, 0.3, 1), backdrop-filter 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+    transition: opacity 0.4s cubic-bezier(0.16, 1, 0.3, 1), backdrop-filter 0.4s cubic-bezier(0.16, 1, 0.3, 1), visibility 0s linear 0.4s;
   }
   
   .modal-overlay.active {
     opacity: 1;
+    visibility: visible;
     pointer-events: auto;
     backdrop-filter: blur(12px);
+    /* Same transition, but visibility flips immediately on the way in. */
+    transition: opacity 0.4s cubic-bezier(0.16, 1, 0.3, 1), backdrop-filter 0.4s cubic-bezier(0.16, 1, 0.3, 1), visibility 0s linear 0s;
   }
   
   .modal-card {
