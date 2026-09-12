@@ -191,7 +191,20 @@
 
     // ── Windows ──
     setText('print-win-status', ticket.windowsActivation || d.windowsActivation || '--');
-    setText('print-win-key', ticket.windowsKey || d.windowsKey || '--');
+    // The customer's copy gets a MASKED key. A Windows licence key is
+    // transferable, this sheet is handed over and routinely photographed at
+    // handover, and the Activation Status line directly above already carries
+    // the whole meaning for the customer. The full key stays on the ticket in
+    // the app for the shop's own records.
+    var _rawKey = ticket.windowsKey || d.windowsKey || '';
+    var _maskedKey = '--';
+    if (_rawKey && _rawKey !== '--') {
+      var _k = String(_rawKey).trim();
+      _maskedKey = _k.length >= 5
+        ? '•••••-•••••-•••••-•••••-' + _k.slice(-5)
+        : '•••••';
+    }
+    setText('print-win-key', _maskedKey);
 
     // ── Hardware Specs ──
     // Strip manufacturer part codes ("(100-100001277WOF)") for display —

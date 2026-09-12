@@ -15,7 +15,41 @@
 $ErrorActionPreference = 'SilentlyContinue'
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
-function S($v) { if ($null -eq $v) { return $null }; $t = "$v".Trim(); if ($t -eq '' -or $t -eq 'To Be Filled By O.E.M.' -or $t -eq 'Default string' -or $t -eq 'None' -or $t -eq 'Not Specified' -or $t -eq 'Not Applicable') { return $null }; return $t }
+# Consumer motherboards ship with the DMI/SMBIOS identity fields UNSET, and the
+# board then reports the field's own name back as its value: an ASUS ROG STRIX
+# returns "System Product Name" as the model, "System Serial Number" as the BIOS
+# serial and the literal "MB-1234567890" as the baseboard serial. Those are not
+# serials. Reporting them as if they were is what made serial detection look
+# broken — the technician reads "MB-1234567890" on the ticket, checks the sticker
+# on the board, and finds two different numbers.
+#
+# Returning $null here is the honest answer, and it tells the renderer to say
+# "not set by the manufacturer" so the technician knows to scan the physical
+# sticker instead of trusting the machine.
+$PLACEHOLDER_EXACT = @(
+  'to be filled by o.e.m.', 'to be filled by oem', 'filled by o.e.m.', 'filled by oem',
+  'default string', 'default', 'none', 'not specified', 'not applicable', 'n/a', 'na',
+  'unknown', 'null', 'invalid', 'oem', 'o.e.m.', 'no enclosure', 'not available',
+  'system product name', 'system serial number', 'system manufacturer', 'system version',
+  'system name', 'system sku', 'system sku number', 'system model',
+  'base board product name', 'base board serial number', 'base board version',
+  'baseboard product name', 'baseboard serial number', 'baseboard version',
+  'chassis serial number', 'chassis version', 'chassis manufacturer',
+  'mb-1234567890', 'product name', 'serial number', 'manufacturer', 'version',
+  'asset-1234567890', 'empty'
+)
+
+function S($v) {
+  if ($null -eq $v) { return $null }
+  $t = "$v".Trim()
+  if ($t -eq '') { return $null }
+  $l = $t.ToLower()
+  if ($PLACEHOLDER_EXACT -contains $l) { return $null }
+  # Repeated-character and counting dummies: 0000…, XXXX…, 1234567890, ....
+  if ($l -match '^(.)\1{3,}$') { return $null }
+  if ($l -match '^0+$' -or $l -match '^0?123456789\d*$' -or $l -match '^\.+$') { return $null }
+  return $t
+}
 
 # Win32_DiskDrive often hands back the NVMe serial as hex-encoded ASCII in
 # 4-char groups ("3931_3430_3539_3633..."), which is unreadable on a report.
@@ -28,14 +62,22 @@ function DecodeDiskSerial($raw) {
     $hex = ($s -replace '[^0-9A-Fa-f]', '')
     if ($hex.Length -lt 8 -or ($hex.Length % 2) -ne 0) { return $s }
     try {
+        # Decode the LEADING printable run and stop at the first binary byte,
+        # rather than abandoning the whole string. NVMe controllers commonly pack
+        # the printed serial into the front of the identify field and pad the tail
+        # with the binary IEEE identifier — the old all-or-nothing decode bailed on
+        # that tail and printed raw hex for a drive whose sticker serial was right
+        # there. e.g. 3931_3430_3539_3633_50C6_… -> "91405963".
         $sb = New-Object System.Text.StringBuilder
         for ($i = 0; $i -lt $hex.Length; $i += 2) {
             $b = [Convert]::ToInt32($hex.Substring($i, 2), 16)
-            if ($b -lt 32 -or $b -gt 126) { return $s }   # not printable → keep raw
+            if ($b -lt 32 -or $b -gt 126) { break }
             [void]$sb.Append([char]$b)
         }
         $out = $sb.ToString().Trim()
-        if ($out.Length -ge 4) { return $out }
+        # A leading run that is all zeros/padding is a WWN, not a serial — keep raw
+        # so nobody mistakes a truncated identifier for the number on the label.
+        if ($out.Length -ge 6 -and $out -match '[A-Za-z0-9]' -and $out -notmatch '^0+$') { return $out }
         return $s
     } catch { return $s }
 }

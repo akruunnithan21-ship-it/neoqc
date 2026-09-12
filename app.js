@@ -191,6 +191,28 @@ const CV_COMPONENTS = [
 const SCAN_FIELD_SEL = '.proc-partno, .proc-serial, .cv-scan, .cv-scan-extra';
 let _lastScanAdvance = 0;   // debounces CR+LF scanners that send two Enters
 
+// The eleven QC checkboxes, in form order. This was a local array inside the
+// "Check All" handler; the lock state and the new counter need the same list,
+// and two copies would drift the moment a check is added.
+const QC_CHECK_IDS = [
+  'qc-phys-cabinet', 'qc-phys-motherboard', 'qc-phys-ram', 'qc-phys-screws',
+  'qc-soft-windows', 'qc-soft-drivers', 'qc-soft-bios',
+  'qc-port-usb', 'qc-port-video', 'qc-port-audio', 'qc-port-wifi'
+];
+
+// Live "N / 11" beside the QC heading. Assembly, Procurement and Component
+// Verification all carried a count; QC — the longest list — carried none.
+function refreshQcBadge() {
+  const badge = document.getElementById('qc-status-badge');
+  if (!badge) return;
+  const done = QC_CHECK_IDS.filter(id => {
+    const el = document.getElementById(id);
+    return el && el.checked;
+  }).length;
+  badge.textContent = `${done} / ${QC_CHECK_IDS.length}`;
+  badge.classList.toggle('green', done === QC_CHECK_IDS.length);
+}
+
 // Box condition on arrival — short labels, honest meanings.
 const BOX_STATUSES = [
   { v: '',            t: '— Box condition —' },
@@ -2625,7 +2647,7 @@ function renderDashboard() {
       const damagedCount = damaged ? (t.damagedComponents || (t.specs && t.specs.__damaged) || []).length : 0;
 
       const card = document.createElement('div');
-      card.className = `glass-slab ticket-card ${t.status} ${isUrgent ? 'urgent' : ''} ${damaged ? 'has-damage' : ''}`;
+      card.className = `glass-slab ticket-card ${t.status} ${isUrgent ? "urgent" : ""} ${dRisk ? "risk-" + dRisk : ""} ${damaged ? "has-damage" : ""}`;
       card.innerHTML = `
         <div class="ticket-card-header">
           <span class="card-id">#${t.id.slice(-6)}</span>
@@ -2744,7 +2766,7 @@ function renderDashboard() {
 
   // Update premium stats pills
   const inQc = activeTickets.filter(t => t.status === 'qc_testing' || t.status === 'waiting_qc').length;
-  const urgentCount = activeTickets.filter(t => checkIsUrgent(t.deadline)).length;
+  const urgentCount = activeTickets.filter(t => isAtRisk(t.deadline)).length;   // includes overdue — see isAtRisk
   const el = (id) => document.getElementById(id);
   if (el('stat-active')) el('stat-active').textContent = activeTickets.length;
   if (el('stat-completed')) el('stat-completed').textContent = completedTickets.length;
@@ -2885,6 +2907,17 @@ function deadlineRisk(deadlineStr) {
   if (diffMs <= 0) return 'overdue';
   if (diffMs < 24 * 60 * 60 * 1000) return 'soon';
   return '';
+}
+
+// "At risk" = due soon OR already blown. checkIsUrgent() above deliberately
+// returns false for an overdue build (diffMs > 0), which is correct for its own
+// callers but made the dashboard lie: a card's red tint switched OFF at the
+// exact moment the deadline passed, and the Urgent pill counted DOWN as builds
+// slipped — a floor with five overdue machines and nothing due in 24 hours read
+// "Urgent: 0". Left checkIsUrgent alone; other call sites depend on its meaning.
+function isAtRisk(deadlineStr) {
+  const r = deadlineRisk(deadlineStr);
+  return r === 'soon' || r === 'overdue';
 }
 
 function getStatusLabelText(status) {
@@ -3289,6 +3322,11 @@ function openTicketModal(ticketId = null) {
   updateTicketModalChrome(ticketId);
 
   modal.classList.add('active');
+
+  // Land on the stage the build is actually at, rather than the top of a
+  // ~3,800px form. Runs after .active so the modal has layout to scroll.
+  initJourneyNav();
+  scrollModalToCurrentStage();
 }
 
 /*
@@ -3359,6 +3397,43 @@ function updateTicketModalChrome(ticketId) {
     el.classList.toggle('current', !!t && i === reachedIdx);
     el.classList.toggle('idle', !t);
   });
+  _tmjReachedIdx = reachedIdx;
+}
+
+// The journey rail sits in the modal's non-scrolling header, so it is the one
+// thing always in view — and it was five inert divs. The modal is ten panels
+// totalling ~3,800px against an ~845px viewport, with no other navigation of any
+// kind, so the technician scrolled the whole thing by hand every time.
+let _tmjReachedIdx = 0;
+function initJourneyNav() {
+  const rail = document.getElementById('tmh-journey');
+  if (!rail || rail.dataset.navBound) return;
+  rail.dataset.navBound = '1';
+  rail.addEventListener('click', (e) => {
+    const step = e.target.closest('.tmj-step');
+    if (!step || !step.dataset.target) return;
+    const target = document.querySelector(step.dataset.target);
+    if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  });
+}
+
+// On open, land on the stage the build is ACTUALLY at. The header already
+// computes and displays "you are at Assembly" and then dropped the technician at
+// Basic Details, ~1,900px away, on every open of every ticket. Skipped for a new
+// ticket, where the top of the form is genuinely the right place to start.
+function scrollModalToCurrentStage() {
+  const modal = document.getElementById('ticket-modal');
+  const body = modal && modal.querySelector('.modal-body');
+  if (!body || modal.classList.contains('is-new-ticket')) return;
+  const steps = document.querySelectorAll('#tmh-journey .tmj-step');
+  const step = steps[_tmjReachedIdx];
+  if (!step || !step.dataset.target) return;
+  const target = document.querySelector(step.dataset.target);
+  if (!target || target.offsetParent === null) return;
+  // After paint, or the modal has no layout yet and scrollIntoView is a no-op.
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => target.scrollIntoView({ behavior: 'auto', block: 'start' }));
+  });
 }
 
 function updateFormLockStates(buildPct) {
@@ -3370,16 +3445,22 @@ function updateFormLockStates(buildPct) {
   const serialsSect = document.getElementById('serials-section');
 
   const lockStrict = !appState.settings.disableQcLock;
+  const isLocked = buildPct < 100 && lockStrict;
 
-  if (buildPct < 100 && lockStrict) {
-    qcSect.classList.add('locked');
-    diagSect.classList.add('locked');
-    serialsSect.classList.add('locked');
-  } else {
-    qcSect.classList.remove('locked');
-    diagSect.classList.remove('locked');
-    serialsSect.classList.remove('locked');
-  }
+  // `pointer-events: none` (the CSS lock) stops the MOUSE and nothing else, so
+  // all eleven QC checkboxes stayed in the tab order behind an 85%-opaque
+  // overlay. A technician — or a barcode scanner emitting Tab and Enter — could
+  // tick "BIOS Updated" before assembly reached 100% and never see what they
+  // had ticked, silently defeating the exact gate this product exists to
+  // enforce. `inert` removes the subtree from the tab order AND from hit
+  // testing in one step, so the gate now holds against the keyboard too.
+  [qcSect, diagSect, serialsSect].forEach(sect => {
+    if (!sect) return;
+    sect.classList.toggle('locked', isLocked);
+    sect.toggleAttribute('inert', isLocked);
+  });
+
+  refreshQcBadge();
 }
 
 function validateDiagnosticsThresholds() {
@@ -5709,14 +5790,17 @@ function setupEventListeners() {
 
   // Autocomplete standard checks button
   document.getElementById('btn-qc-check-all').addEventListener('click', () => {
-    const qcIds = [
-      'qc-phys-cabinet', 'qc-phys-motherboard', 'qc-phys-ram', 'qc-phys-screws',
-      'qc-soft-windows', 'qc-soft-drivers', 'qc-soft-bios',
-      'qc-port-usb', 'qc-port-video', 'qc-port-audio', 'qc-port-wifi'
-    ];
-    qcIds.forEach(id => {
-      document.getElementById(id).checked = true;
+    QC_CHECK_IDS.forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.checked = true;
     });
+    refreshQcBadge();
+  });
+
+  // Keep the counter honest when boxes are ticked one at a time.
+  QC_CHECK_IDS.forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener('change', refreshQcBadge);
   });
 
   // Client exit (takes client back to selector screen)

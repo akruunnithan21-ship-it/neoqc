@@ -295,7 +295,7 @@
           </div>
           <div class="stat-pill">
             <div class="stat-pill-value" id="stat-urgent">0</div>
-            <div class="stat-pill-label">⚠️ Urgent</div>
+            <div class="stat-pill-label">⚠️ At Risk</div>
           </div>
         </div>
 
@@ -812,11 +812,11 @@
         </div>
         <!-- The build journey, always in view while you scroll the ticket. -->
         <div id="tmh-journey" class="tmh-journey" aria-label="Build journey">
-          <div class="tmj-step" data-stage="awaiting"><i></i><span>Parts</span></div>
-          <div class="tmj-step" data-stage="procurement"><i></i><span>Procurement</span></div>
-          <div class="tmj-step" data-stage="building"><i></i><span>Assembly</span></div>
-          <div class="tmj-step" data-stage="qc"><i></i><span>QC</span></div>
-          <div class="tmj-step" data-stage="completed"><i></i><span>Ready</span></div>
+          <button type="button" class="tmj-step" data-stage="awaiting" data-target="#procurement-section" title="Jump to Procurement"><i></i><span>Parts</span></button>
+          <button type="button" class="tmj-step" data-stage="procurement" data-target="#procurement-section" title="Jump to Procurement"><i></i><span>Procurement</span></button>
+          <button type="button" class="tmj-step" data-stage="building" data-target="#assembly-section" title="Jump to Assembly"><i></i><span>Assembly</span></button>
+          <button type="button" class="tmj-step" data-stage="qc" data-target="#qc-testing-section" title="Jump to QC"><i></i><span>QC</span></button>
+          <button type="button" class="tmj-step" data-stage="completed" data-target="#diagnostics-section" title="Jump to Diagnostics"><i></i><span>Ready</span></button>
         </div>
         <button id="btn-close-ticket-modal" class="close-btn">&times;</button>
       </div>
@@ -1171,6 +1171,7 @@
             <div class="section-header-row">
               <h3>🧪 Step 2: Quality Control Checklist</h3>
               <div style="display:flex;align-items:center;gap:8px;">
+                <span id="qc-status-badge" class="badge">0 / 11</span>
                 <button type="button" class="flag-btn" data-flag-segment="qc" title="Flag a QC issue">⚑ Flag</button>
                 <button type="button" id="btn-qc-check-all" class="text-btn">Check All Standard Items</button>
               </div>
@@ -1214,7 +1215,11 @@
           </div>
 
           <div id="diagnostics-section" class="form-section margin-top locked">
-            <div class="locked-overlay"></div>
+            <!-- This overlay was empty, and the panel behind it is the tallest in
+                 the modal (~1,200px), so while locked the technician scrolled
+                 through a screen and a half of unexplained frost. The QC panel
+                 above already explains itself; this one now does too. -->
+            <div class="locked-overlay"><div class="locked-message">🔒 Thermal &amp; benchmark results appear once the Testing Client has run this build.</div></div>
             <h3><span class="dr-inline-icon" data-icon="thermometer"></span> System Thermal &amp; Benchmark Results</h3>
             
             <!-- v1.8.2 — the admin side no longer RUNS benchmarks. Testing is
@@ -1980,6 +1985,7 @@
           <tr><td><strong>Operating System</strong></td><td>Windows</td></tr>
           <tr><td><strong>Activation Status</strong></td><td id="print-win-status">--</td></tr>
           <tr><td><strong>Product Key</strong></td><td id="print-win-key" style="font-family:monospace;font-size:7.5pt;word-break:break-all;">--</td></tr>
+          <tr><td colspan="2" style="font-size:7pt;color:#666;padding-top:2px;">Masked for your protection. The full key is registered to this machine and held on file at Neo Tokyo Kochi.</td></tr>
         </table>
       </div>
     </div>
@@ -2049,8 +2055,8 @@
     </div>
 
     <div class="print-page-footline">
-      <span>NEO TOKYO — Quality Control Certificate · retain this document; verify with the Integrity Code on page 4</span>
-      <span>Page 1 of 4</span>
+      <span>NEO TOKYO — Quality Control Certificate · retain this document; verify with the Integrity Code inside</span>
+      
     </div>
     </div><!-- /print-page-1 -->
 
@@ -2189,7 +2195,7 @@
 
     <div class="print-page-footline">
       <span>NEO TOKYO — Stress &amp; Diagnostics Lab Data</span>
-      <span>Page 2 of 4</span>
+      
     </div>
     </div><!-- /print-page-2 -->
 
@@ -2310,7 +2316,7 @@
 
     <div class="print-page-footline">
       <span>NEO TOKYO — Hardware Health &amp; Connectivity</span>
-      <span>Page 3 of 4</span>
+      
     </div>
     </div><!-- /print-page-2b -->
 
@@ -2375,7 +2381,7 @@
     <div id="print-event-log-section" class="print-section hidden">
       <h3>Build &amp; Service Activity Log</h3>
       <table class="print-event-table">
-        <thead><tr><th>Timestamp (UTC)</th><th>Event</th><th>By</th></tr></thead>
+        <thead><tr><th>Timestamp (IST)</th><th>Event</th><th>By</th></tr></thead>
         <tbody id="print-event-log-body"></tbody>
       </table>
     </div>
@@ -2412,7 +2418,7 @@
 
     <div class="print-page-footline">
       <span>NEO TOKYO — Value Analysis &amp; Report Provenance</span>
-      <span>Page 4 of 4</span>
+      
     </div>
     </div><!-- /print-page-3 -->
 
@@ -2476,15 +2482,16 @@
       <div class="modal-body" style="font-size: 0.92rem; line-height: 1.6; color: var(--text-dark); max-height: 420px; overflow-y: auto; padding-right: 5px;">
         <p style="margin-top: 0;">A major update has been installed. Here's what's new in NeoQC <strong data-app-version>v1.9.3</strong>:</p>
         <ul style="padding-left: 20px; display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px;">
-          <li><strong>Invoice auto-fill fixed.</strong> Attaching a customer invoice now reads <em>every</em> component correctly — the graphics card and power supply that used to go missing are imported properly, with the right per-part prices and totals.</li>
-          <li><strong>Ticket sections reordered</strong> to follow the real build flow: Basic Details → Sales Queries → Target Specs → Customer-Supplied Parts → Component Verification → Condition Report → Detected Hardware → Assembly → QC.</li>
-          <li><strong>Deadline cues.</strong> Countdowns now turn <strong>amber</strong> under 24 hours and <strong>red</strong> when overdue — on the dashboard, on My Bench, and in the ticket header.</li>
-          <li><strong>Save confirmation + unsaved-changes warning</strong>, so a ticket is never closed with work lost by accident.</li>
-          <li><strong>Search your bench</strong> by customer, ticket number or spec.</li>
-          <li><strong>Duplicate-serial guard.</strong> If a serial you scan is already recorded on another build, the row is flagged so you can catch a double-entry.</li>
-          <li><strong>A warm line on the QC certificate</strong> telling the customer how long their PC took to hand-build.</li>
-          <li><strong>Security.</strong> The Testing Client no longer lets a technician switch across into the admin dashboard — access now follows each person's role.</li>
-          <li><strong>RGB control removed.</strong> Lighting is now set with each motherboard's own software. This also cleared the antivirus false-positive that was blocking installs on some machines.</li>
+          <li><strong>Scanning a serial no longer saves and closes the ticket.</strong> A barcode scanner ends every scan with an Enter, and Enter was submitting the form — so every scan threw you back to the dashboard. Scanning now moves you to the next empty box instead. It will not jump between Procurement and Component Verification, so a goods-in scan can never land in the technician's independent check.</li>
+          <li><strong>Graphics card memory is read correctly.</strong> Windows caps the value it reports at 4 GB, which is why an 8 GB card was recorded as a 4 GB one. The real size now comes from the driver — verified against a 12 GB card that used to read as 4 GB.</li>
+          <li><strong>No more fake serial numbers.</strong> Most motherboards ship without their serial set and report placeholder text like “System Serial Number” or “MB-1234567890”. Those were being recorded as if they were real. They now show as not set, so you know to read the sticker.</li>
+          <li><strong>Overdue builds stay red.</strong> A late build used to lose its red tint and drop out of the Urgent count at the exact moment it went late. The pill is now <strong>At Risk</strong> and counts overdue builds too.</li>
+          <li><strong>The QC checklist can no longer be ticked early.</strong> The lock blocked the mouse but not the Tab key, so the checks could be completed before assembly was finished.</li>
+          <li><strong>QC now shows a live count</strong> (“7 / 11”), and every checkbox is a full-width row that fills green when ticked — you can read progress across the room instead of counting boxes.</li>
+          <li><strong>The stage rail at the top of a ticket is clickable</strong>, and opening a ticket now takes you straight to the stage the build is actually at instead of the top of the form.</li>
+          <li><strong>Bigger targets at the bench.</strong> Serial boxes, temperature fields, the timer and the flag button are all larger, and there is now a visible outline showing which field your scanner will fill.</li>
+          <li><strong>The customer's certificate no longer prints the full Windows product key</strong> — it is masked, with the full key kept on file at the shop.</li>
+          <li><strong>Theme accent colour actually works.</strong> Choosing a colour other than pink used to leave half the app pink.</li>
         </ul>
       </div>
       <div class="modal-footer" style="border-top: 1px solid var(--glass-border); padding-top: 15px; display: flex; justify-content: flex-end; margin-top: 20px;">
