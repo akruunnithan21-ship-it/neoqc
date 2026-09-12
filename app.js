@@ -184,6 +184,13 @@ const CV_COMPONENTS = [
   { key: 'case',        label: 'Cabinet',     specField: 'form-spec-case',         legacy: 'serial-cabinet' }
 ];
 
+// Every field a barcode scanner is ever pointed at, in document order:
+// procurement (goods-in) first, then component verification (build time). Used by
+// the ticket form's Enter guard to step from one scan box to the next. Keep this
+// in sync if a new scan field is added, or Enter will simply stop advancing there.
+const SCAN_FIELD_SEL = '.proc-partno, .proc-serial, .cv-scan, .cv-scan-extra';
+let _lastScanAdvance = 0;   // debounces CR+LF scanners that send two Enters
+
 // Box condition on arrival — short labels, honest meanings.
 const BOX_STATUSES = [
   { v: '',            t: '— Box condition —' },
@@ -5376,7 +5383,64 @@ function setupEventListeners() {
     }
   });
 
-  document.getElementById('ticket-form').addEventListener('submit', handleTicketFormSubmit);
+  const _ticketForm = document.getElementById('ticket-form');
+  _ticketForm.addEventListener('submit', handleTicketFormSubmit);
+
+  // ── Barcode scanners must not save the ticket ────────────────────────────
+  // A scanner is a keyboard: it types the serial, then sends Enter. Enter inside
+  // a field of a form that HAS a submit button (#btn-save-ticket, index.html:1478)
+  // fires the browser's implicit submission — so every single scan was running
+  // handleTicketFormSubmit, saving the ticket and closing the modal, throwing the
+  // technician back to the dashboard mid-scan.
+  //
+  // Nothing in this form needs Enter: every field commits on 'input' (see the
+  // .cv-scan handler and setupProcurement), and the two fields that DO use Enter
+  // — the awaiting-parts note and the damage note — handle it on the element
+  // itself, which runs before this delegated listener and already calls
+  // preventDefault. Saving is the Save Ticket button, and only the Save Ticket
+  // button. <button> and <textarea> are untouched, so the button still submits
+  // when clicked or activated by keyboard.
+  _ticketForm.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter') return;
+    if (e.isComposing || e.keyCode === 229) return;   // IME confirming a candidate
+    const el = e.target;
+    if (!el || !el.tagName) return;
+    const tag = el.tagName.toUpperCase();
+    if (tag !== 'INPUT' && tag !== 'SELECT') return;
+    e.preventDefault();
+
+    // A scanner's Enter means "that one's done". Step to the next scan box so a
+    // technician can work down the parts without reaching for the mouse.
+    if (!el.matches || !el.matches(SCAN_FIELD_SEL)) return;
+
+    // Many wedge scanners terminate with CR+LF, i.e. TWO Enter keydowns a few ms
+    // apart. Without this, the second one advances again and every remaining scan
+    // lands in the wrong component — silently, and one part out of step.
+    const now = Date.now();
+    if (now - _lastScanAdvance < 250) return;
+    _lastScanAdvance = now;
+
+    // Advance ONLY within the section being worked. Procurement (goods-in) and
+    // component verification (build time) are deliberately independent captures —
+    // "kept SEPARATE from the technician's cvState scan so that later scan is a
+    // second verification" (see setupProcurement). Letting focus cross that
+    // boundary would put a goods-in operator's scan into the technician's
+    // verification field, forge a "matches invoice" tick, and collapse a
+    // two-person double-check into one person scanning twice.
+    const section = el.closest('#procurement-rows, #cv-rows') || _ticketForm;
+    const fields = Array.from(section.querySelectorAll(SCAN_FIELD_SEL))
+      // getClientRects() rather than offsetParent: the modal is positioned, which
+      // makes offsetParent null for visible children and would filter out everything.
+      .filter(f => !f.disabled && f.getClientRects().length > 0);
+
+    // Skip boxes that already hold a serial. Focusing a filled box would either
+    // overwrite a good value on the next scan or append to it; neither is what
+    // anyone wants, and a re-scan is still one click away.
+    const i = fields.indexOf(el);
+    const next = i === -1 ? null : fields.slice(i + 1).find(f => !f.value.trim());
+    if (next) { next.focus(); next.select(); }
+    else el.blur();   // nothing left to scan here — stop, don't wrap round
+  });
 
   // Staff Modal System Auto-Detect Local Specs click handler.
   // v1.9.7 — the button was removed from the admin ticket view (detection belongs to
@@ -7181,7 +7245,14 @@ function buildComponentPassport(hwId, res, ssdHealth) {
   const ddrGen = smbiosTypes.length ? (SMBIOS_DDR_GEN[smbiosTypes[0]] || `SMBIOS type ${smbiosTypes[0]}`) : null;
 
   const vramMB = hwId.gpu && hwId.gpu.vramMB;
-  const vram = vramMB != null ? (vramMB >= 1024 ? `${Math.round(vramMB / 1024)} GB` : `${vramMB} MB`) : null;
+  // A figure that still came from Win32_VideoController.AdapterRAM is clamped to a
+  // UInt32, so anything landing at ~4 GB from that source is very likely a larger
+  // card being under-reported. Say so on the report rather than printing a number
+  // we don't trust — an 8 GB card was signed off as 4 GB this way.
+  const vramCapped = (hwId.gpu && hwId.gpu.vramSource === 'wmi-adapterram') && vramMB != null && vramMB >= 4000 && vramMB <= 4096;
+  const vram = vramMB != null
+    ? (vramMB >= 1024 ? `${Math.round(vramMB / 1024)} GB` : `${vramMB} MB`) + (vramCapped ? ' (driver did not report — verify)' : '')
+    : null;
 
   return {
     cpu: {
@@ -7659,10 +7730,10 @@ function renderTicketQueries(rows) {
     const when = fmtQueryTime(q.created_at);
     const answerArea = q.answer
       ? `<div class="tq-answer"><span class="tq-ans-label">🔧 Your reply</span><div class="tq-ans-text">${escapeHtmlLite(q.answer)}</div>
-           <button class="tq-link" data-edit="${q.id}">Edit reply</button></div>`
+           <button type="button" class="tq-link" data-edit="${q.id}">Edit reply</button></div>`
       : `<div class="tq-reply-box" data-box="${q.id}">
            <textarea class="tq-reply-input" data-input="${q.id}" rows="2" placeholder="Type your reply to sales…"></textarea>
-           <button class="tq-send-btn" data-send="${q.id}">Send reply →</button>
+           <button type="button" class="tq-send-btn" data-send="${q.id}">Send reply →</button>
          </div>`;
     return `<div class="tq-item ${resolved ? 'resolved' : ''} ${!q.answer && !resolved ? 'open' : ''}">
       <div class="tq-q">
@@ -7673,8 +7744,8 @@ function renderTicketQueries(rows) {
       ${answerArea}
       <div class="tq-foot">
         ${resolved ? '<span class="tq-resolved">✓ Resolved</span>'
-                   : `<button class="tq-link tq-resolve" data-resolve="${q.id}">Mark resolved</button>`}
-        ${resolved ? `<button class="tq-link" data-reopen="${q.id}">Reopen</button>` : ''}
+                   : `<button type="button" class="tq-link tq-resolve" data-resolve="${q.id}">Mark resolved</button>`}
+        ${resolved ? `<button type="button" class="tq-link" data-reopen="${q.id}">Reopen</button>` : ''}
       </div>
     </div>`;
   }).join('');
@@ -7733,7 +7804,7 @@ function beginEditReply(id) {
   const current = wrap.querySelector('.tq-ans-text')?.textContent || '';
   answerDiv.outerHTML = `<div class="tq-reply-box" data-box="${id}">
       <textarea class="tq-reply-input" data-input="${id}" rows="2">${escapeHtmlLite(current)}</textarea>
-      <button class="tq-send-btn" data-send="${id}">Update reply →</button>
+      <button type="button" class="tq-send-btn" data-send="${id}">Update reply →</button>
     </div>`;
   const box = wrap.querySelector(`[data-send="${id}"]`);
   if (box) box.addEventListener('click', () => submitTechAnswer(id));

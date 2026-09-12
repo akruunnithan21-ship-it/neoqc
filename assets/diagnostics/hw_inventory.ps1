@@ -115,22 +115,40 @@ foreach ($m in (Get-CimInstance Win32_PhysicalMemory)) {
 $gpus = @()
 foreach ($g in (Get-CimInstance Win32_VideoController)) {
     $vram = $null
-    # AdapterRAM is unreliable/negative >4GB; prefer the registry qword.
+    $vramSource = $null
+    # AdapterRAM is a UInt32 and cannot exceed 4 GiB, so every card >= 4 GB reads as
+    # ~4 GB. The driver writes the true size as a QWORD in its registry class key.
+    #
+    # Pair the registry key to the adapter by MatchingDeviceId, NOT by comparing
+    # DriverDesc to the WMI Name: those two strings routinely differ (AMD ships
+    # "... Series" in one and not the other), and an exact-equality match silently
+    # fell through to the capped AdapterRAM — which is how an 8 GB RX 9050 was
+    # recorded as a 4 GB card. MatchingDeviceId is 'pci\ven_xxxx&dev_yyyy' and
+    # PNPDeviceID is that plus the subsys/rev tail, so a prefix test always pairs.
     try {
         $key = "HKLM:\SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}"
+        $needle = if ($g.PNPDeviceID) { ([string]$g.PNPDeviceID).ToLower() } else { $null }
         foreach ($sub in (Get-ChildItem $key -ErrorAction SilentlyContinue)) {
-            $desc = (Get-ItemProperty $sub.PSPath -Name 'DriverDesc' -ErrorAction SilentlyContinue).DriverDesc
-            if ($desc -and $desc -eq $g.Name) {
-                $qw = (Get-ItemProperty $sub.PSPath -Name 'HardwareInformation.qwMemorySize' -ErrorAction SilentlyContinue).'HardwareInformation.qwMemorySize'
-                if ($qw) { $vram = [math]::Round($qw / 1GB, 0) }
-            }
+            if ($sub.PSChildName -notmatch '^[0-9]{4}$') { continue }
+            $p = Get-ItemProperty $sub.PSPath -ErrorAction SilentlyContinue
+            if (-not $p) { continue }
+            $mid  = if ($p.MatchingDeviceId) { ([string]$p.MatchingDeviceId).ToLower() } else { $null }
+            $desc = $p.DriverDesc
+            $hit = ($needle -and $mid -and $needle.StartsWith($mid)) -or ($desc -and $desc -eq $g.Name)
+            if (-not $hit) { continue }
+            $qw = $p.'HardwareInformation.qwMemorySize'
+            if ($qw) { $vram = [math]::Round([int64]$qw / 1GB, 0); $vramSource = 'registry'; break }
         }
     } catch {}
-    if (-not $vram -and $g.AdapterRAM -gt 0) { $vram = [math]::Round($g.AdapterRAM / 1GB, 0) }
+    if (-not $vram -and $g.AdapterRAM -gt 0) {
+        $vram = [math]::Round($g.AdapterRAM / 1GB, 0)
+        $vramSource = 'wmi-adapterram'   # suspect at ~4 GB: may be a larger card
+    }
     $gpus += [ordered]@{
         name           = S $g.Name
         manufacturer   = S $g.AdapterCompatibility
         vramGB         = if ($vram) { $vram } else { $null }   # 0 = integrated/shared → null, not "0 GB"
+        vramSource     = $vramSource
         driverVersion  = S $g.DriverVersion
         driverDate     = if ($g.DriverDate) { $g.DriverDate.ToString('yyyy-MM-dd') } else { $null }
         videoProcessor = S $g.VideoProcessor
