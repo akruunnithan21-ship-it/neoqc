@@ -34,7 +34,8 @@
     "!database-hardening.sql",
     "!**/*.md",
     "!.claude/**",
-    "!.github/**"
+    "!.github/**",
+    "!*.log"
   ],
   "asarUnpack": [
     "assets/diagnostics/**",
