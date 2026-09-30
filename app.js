@@ -190,6 +190,7 @@ const CV_COMPONENTS = [
 // in sync if a new scan field is added, or Enter will simply stop advancing there.
 const SCAN_FIELD_SEL = '.proc-partno, .proc-serial, .cv-scan, .cv-scan-extra';
 let _lastScanAdvance = 0;   // debounces CR+LF scanners that send two Enters
+let _lastScanEl = null;     // paired with the clock so CR+LF is told apart from a fast rescan
 
 // The eleven QC checkboxes, in form order. This was a local array inside the
 // "Check All" handler; the lock state and the new counter need the same list,
@@ -5471,7 +5472,35 @@ function setupEventListeners() {
   });
 
   const _ticketForm = document.getElementById('ticket-form');
-  _ticketForm.addEventListener('submit', handleTicketFormSubmit);
+
+  // ── The ticket saves ONLY when someone activates Save ────────────────────
+  // v1.9.9 guarded Enter inside the scan fields, and it was still possible to
+  // save by scanning: a USB scanner's terminator is configurable, and a Tab
+  // suffix walks focus forward until it lands on #btn-save-ticket, where the
+  // scanner's own Enter (or the next scan's terminator) activates it — a real
+  // click, which no key handler can distinguish from a deliberate one.
+  //
+  // So the key handling below is now only about WHERE FOCUS GOES. Whether the
+  // ticket is allowed to save is decided here, structurally: implicit
+  // submission is refused outright, and only a genuine activation of the Save
+  // button sets the intent flag. This holds for every scanner configuration,
+  // every key, and every field — present and future.
+  let _saveIntent = false;
+  const _saveBtn = document.getElementById('btn-save-ticket');
+  if (_saveBtn) {
+    // 'click' covers mouse, touch, and keyboard activation of the button, and
+    // always fires before 'submit'.
+    _saveBtn.addEventListener('click', () => { _saveIntent = true; });
+  }
+  _ticketForm.addEventListener('submit', (e) => {
+    if (!_saveIntent) {
+      // Implicit submission — a stray Enter somewhere in the form. Never save.
+      e.preventDefault();
+      return;
+    }
+    _saveIntent = false;
+    return handleTicketFormSubmit(e);
+  });
 
   // ── Barcode scanners must not save the ticket ────────────────────────────
   // A scanner is a keyboard: it types the serial, then sends Enter. Enter inside
@@ -5488,24 +5517,60 @@ function setupEventListeners() {
   // button. <button> and <textarea> are untouched, so the button still submits
   // when clicked or activated by keyboard.
   _ticketForm.addEventListener('keydown', (e) => {
-    if (e.key !== 'Enter') return;
     if (e.isComposing || e.keyCode === 229) return;   // IME confirming a candidate
     const el = e.target;
     if (!el || !el.tagName) return;
     const tag = el.tagName.toUpperCase();
     if (tag !== 'INPUT' && tag !== 'SELECT') return;
-    e.preventDefault();
 
-    // A scanner's Enter means "that one's done". Step to the next scan box so a
-    // technician can work down the parts without reaching for the mouse.
-    if (!el.matches || !el.matches(SCAN_FIELD_SEL)) return;
+    const inScanField = el.matches && el.matches(SCAN_FIELD_SEL);
+
+    // A scanner's terminator is configurable and the shop's units are not all
+    // set the same way. Enter and Tab are the two in use, so BOTH mean "that
+    // one's done" inside a scan box. Shift+Tab is left alone — a technician
+    // stepping back through the form by hand must still be able to.
+    const isEnter = e.key === 'Enter';
+    const isScanTab = e.key === 'Tab' && !e.shiftKey && inScanField;
+
+    if (isEnter) {
+      // Enter never submits, from any field in this form.
+      e.preventDefault();
+      if (!inScanField) return;
+    } else if (!isScanTab) {
+      return;
+    }
 
     // Many wedge scanners terminate with CR+LF, i.e. TWO Enter keydowns a few ms
     // apart. Without this, the second one advances again and every remaining scan
     // lands in the wrong component — silently, and one part out of step.
+    // Many wedge scanners terminate with CR+LF — TWO keydowns a few ms apart.
+    // Unguarded, the second advances again and every remaining scan lands in the
+    // wrong component: silently, and one part out of step.
+    //
+    // Neither a clock nor the element identity can tell the two apart. Focus
+    // moves synchronously inside the first keydown, so the second is delivered
+    // to the NEW box, which defeats element-keying; and a fast operator's real
+    // second scan can fall inside any time window generous enough to catch a
+    // CR+LF pair, which defeats a pure debounce.
+    //
+    // What does separate them is content. A real scan always types characters
+    // before its terminator, so the box it fires from is non-empty. The second
+    // half of a CR+LF pair fires from the box we just moved to, which is empty
+    // by construction — the advance below only ever lands on an empty box.
+    // Pressing Enter on an empty scan box therefore does nothing, which is also
+    // the right behaviour for a technician tabbing through by hand.
+    if (!String(el.value || '').trim()) {
+      if (isScanTab) e.preventDefault();
+      return;
+    }
+    // Belt and braces for a scanner that double-fires on the SAME box.
     const now = Date.now();
-    if (now - _lastScanAdvance < 250) return;
+    if (el === _lastScanEl && now - _lastScanAdvance < 400) {
+      if (isScanTab) e.preventDefault();
+      return;
+    }
     _lastScanAdvance = now;
+    _lastScanEl = el;
 
     // Advance ONLY within the section being worked. Procurement (goods-in) and
     // component verification (build time) are deliberately independent captures —
@@ -5525,8 +5590,17 @@ function setupEventListeners() {
     // anyone wants, and a re-scan is still one click away.
     const i = fields.indexOf(el);
     const next = i === -1 ? null : fields.slice(i + 1).find(f => !f.value.trim());
-    if (next) { next.focus(); next.select(); }
-    else el.blur();   // nothing left to scan here — stop, don't wrap round
+    if (next) {
+      if (isScanTab) e.preventDefault();   // we are taking over the move
+      next.focus();
+      next.select();
+    } else if (isEnter) {
+      el.blur();   // nothing left to scan here — stop, don't wrap round
+    }
+    // Tab with nothing left to scan falls through to native behaviour, so the
+    // next control in the row (the box-condition select) is still reachable by
+    // keyboard. It cannot reach Save from here in one press, and even if it did,
+    // the submit gate above refuses anything that is not a real Save activation.
   });
 
   // Staff Modal System Auto-Detect Local Specs click handler.
