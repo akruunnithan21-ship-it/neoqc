@@ -5714,3 +5714,154 @@ body.dark-mode .portcert-summary.all-good { color: #34d399; }
 .cat-editor-row .cat-e-save, .cat-editor-row .cat-e-del { border: 1px solid var(--glass-border); background: var(--glass-bg); border-radius: 7px; padding: 5px 8px; cursor: pointer; font-size: 0.85rem; }
 .cat-editor-row .cat-e-save:hover { border-color: var(--status-completed); }
 .cat-editor-row .cat-e-del:hover { border-color: var(--status-urgent); }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   SERVICE TICKETING
+   The colour system IS the information: each board column is a "who are we
+   waiting on" state, and nothing else on this screen is saturated. Intake
+   borrows the urgent red on purpose — that column is supposed to be empty.
+   ══════════════════════════════════════════════════════════════════════════ */
+.sv-stat {
+  margin-left: 12px; font-family: 'JetBrains Mono', monospace; font-size: 0.72rem;
+  color: var(--text-muted); padding: 3px 9px; border-radius: 999px;
+  border: 1px solid var(--glass-border);
+}
+.sv-stat.has-breach { color: var(--status-urgent); border-color: rgba(239,68,68,0.45); }
+.sv-mine { display: inline-flex; align-items: center; gap: 7px; font-size: 0.8rem; color: var(--text-muted); cursor: pointer; white-space: nowrap; }
+.sv-mine input { accent-color: var(--primary-pink); cursor: pointer; width: 18px; height: 18px; }
+.sv-search {
+  padding: 9px 12px; border-radius: 8px; min-width: 230px;
+  border: 1px solid var(--glass-border); background: var(--glass-bg);
+  color: var(--text-dark); font-family: inherit; font-size: 0.85rem;
+}
+.sv-lead { font-size: 0.85rem; color: var(--text-muted); max-width: 78ch; margin-bottom: 16px; line-height: 1.6; }
+.sv-lead strong { color: var(--text-dark); }
+
+.sv-board { display: flex; gap: 12px; align-items: flex-start; overflow-x: auto; padding-bottom: 16px; }
+.sv-col { flex: 0 0 272px; min-width: 272px; }
+.sv-col-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 9px 12px; border-radius: 10px 10px 0 0;
+  background: var(--glass-bg); border: 1px solid var(--glass-border);
+  border-bottom: none; border-top: 3px solid var(--sv-c, var(--text-muted));
+}
+.sv-col-name { font-size: 0.74rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; }
+.sv-col-count {
+  font-family: 'JetBrains Mono', monospace; font-size: 0.74rem; color: var(--text-muted);
+  background: rgba(127,127,160,0.14); padding: 1px 8px; border-radius: 999px;
+}
+.sv-col-count.has-breach { color: #fff; background: var(--status-urgent); }
+.sv-col-hint {
+  font-size: 0.68rem; color: var(--text-muted); opacity: 0.75; padding: 5px 12px 8px;
+  background: var(--glass-bg); border: 1px solid var(--glass-border); border-top: none; border-bottom: none;
+}
+.sv-cards {
+  display: flex; flex-direction: column; gap: 8px; padding: 8px;
+  background: rgba(127,127,160,0.05); border: 1px solid var(--glass-border);
+  border-top: none; border-radius: 0 0 10px 10px; min-height: 64px;
+}
+/* Each column's accent. The four ball states plus intake. */
+.sv-col-intake   { --sv-c: var(--status-urgent); }
+.sv-col-shop     { --sv-c: #14b8a6; }
+.sv-col-customer { --sv-c: var(--status-awaiting); }
+.sv-col-third    { --sv-c: #8b7cf6; }
+.sv-col-closed   { --sv-c: var(--text-muted); }
+
+.sv-card {
+  padding: 11px 12px; border-radius: 9px; cursor: pointer;
+  background: var(--glass-bg); border: 1px solid var(--glass-border);
+  border-left: 3px solid transparent;
+  transition: border-color var(--dur-fast) var(--ease), transform var(--dur-tap) var(--ease);
+}
+.sv-card:hover { border-color: var(--primary-pink); transform: translateY(-1px); }
+.sv-card:active { transform: translateY(1px); }
+.sv-card.risk-soon     { border-left-color: var(--status-awaiting); }
+.sv-card.risk-breached { border-left-color: var(--status-urgent); background: rgba(239,68,68,0.06); }
+
+.sv-card-top { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.sv-cust { font-size: 0.88rem; font-weight: 700; overflow-wrap: anywhere; }
+/* Days-in-stage is the largest thing on the card by design: it is the number
+   that tells you whether anything is actually happening. */
+.sv-idle { font-family: 'JetBrains Mono', monospace; font-size: 1.05rem; font-weight: 700; color: var(--text-muted); }
+.sv-card.risk-soon .sv-idle     { color: var(--status-awaiting); }
+.sv-card.risk-breached .sv-idle { color: var(--status-urgent); }
+.sv-card-dev { font-size: 0.76rem; color: var(--text-muted); margin-top: 2px; overflow-wrap: anywhere; }
+.sv-card-line { margin-top: 5px; font-size: 0.74rem; color: var(--text-muted); }
+.sv-k { opacity: 0.6; }
+.sv-card-foot {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  margin-top: 9px; padding-top: 7px; border-top: 1px solid var(--glass-border);
+  font-size: 0.69rem;
+}
+.sv-code { font-family: 'JetBrains Mono', monospace; color: var(--text-muted); }
+.sv-promise { color: var(--text-muted); }
+.sv-nopromise { opacity: 0.55; font-style: italic; }
+.sv-empty {
+  padding: 14px 10px; text-align: center; font-size: 0.72rem; color: var(--text-muted);
+  opacity: 0.7; border: 1px dashed var(--glass-border); border-radius: 8px;
+}
+
+/* ── modals ── */
+.sv-modal { max-width: 760px; }
+.sv-job-sub { font-size: 0.76rem; color: var(--text-muted); margin-top: 3px; font-family: 'JetBrains Mono', monospace; }
+.sv-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.sv-span2 { grid-column: 1 / -1; }
+.sv-field { display: flex; flex-direction: column; gap: 5px; font-size: 0.78rem; color: var(--text-muted); }
+.sv-field input, .sv-field textarea, .sv-field select {
+  padding: 10px 12px; border-radius: 8px; font-family: inherit; font-size: 0.9rem;
+  border: 1px solid var(--glass-border); background: var(--glass-bg); color: var(--text-dark);
+}
+.sv-field textarea { resize: vertical; }
+.sv-sub { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--glass-border); }
+.sv-sub.hidden { display: none; }
+.sv-sub-title { font-size: 0.8rem; font-weight: 700; margin-bottom: 6px; }
+.sv-hint { font-size: 0.75rem; color: var(--text-muted); margin-bottom: 10px; line-height: 1.55; }
+.sv-check {
+  display: flex; align-items: center; gap: 11px; margin-top: 12px;
+  padding: 10px 12px; border-radius: 10px; cursor: pointer; font-size: 0.85rem;
+  border: 1px solid transparent; min-height: 40px;
+  transition: background var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
+}
+.sv-check:hover { background: rgba(var(--primary-pink-rgb), 0.06); border-color: rgba(var(--primary-pink-rgb), 0.2); }
+.sv-check:has(input:checked) { background: rgba(16,185,129,0.09); border-color: rgba(16,185,129,0.3); }
+.sv-check input { width: 22px; height: 22px; accent-color: var(--primary-pink); flex-shrink: 0; }
+.sv-status { margin-top: 12px; font-size: 0.8rem; line-height: 1.5; }
+.sv-status.ok  { color: var(--status-completed); font-weight: 600; }
+.sv-status.err { color: var(--status-urgent); }
+
+.sv-job-ball { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+.sv-ball { font-size: 0.95rem; font-weight: 700; padding: 8px 14px; border-radius: 999px; border: 1px solid; }
+.sv-ball-shop        { color: #14b8a6; background: rgba(20,184,166,0.1); border-color: rgba(20,184,166,0.4); }
+.sv-ball-customer    { color: var(--status-awaiting); background: rgba(245,158,11,0.12); border-color: rgba(245,158,11,0.45); }
+.sv-ball-third_party { color: #8b7cf6; background: rgba(139,124,246,0.12); border-color: rgba(139,124,246,0.45); }
+.sv-ball-nobody      { color: var(--text-muted); background: rgba(127,127,160,0.1); border-color: var(--glass-border); }
+.sv-job-idle { font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; color: var(--text-muted); }
+.sv-job-idle.soon   { color: var(--status-awaiting); font-weight: 700; }
+.sv-job-idle.breach { color: var(--status-urgent); font-weight: 700; }
+
+.sv-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 9px 18px; margin-bottom: 16px; }
+.sv-f { display: flex; flex-direction: column; gap: 2px; font-size: 0.82rem; }
+.sv-f-k { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); }
+.sv-f-v { overflow-wrap: anywhere; }
+
+.sv-moves { margin: 4px 0 18px; padding-top: 14px; border-top: 1px solid var(--glass-border); }
+.sv-moves-label { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.07em; color: var(--text-muted); margin-bottom: 8px; }
+.sv-move {
+  font-family: inherit; font-size: 0.78rem; font-weight: 600; cursor: pointer;
+  padding: 8px 13px; margin: 0 6px 6px 0; border-radius: 999px;
+  border: 1px solid var(--glass-border); background: var(--glass-bg); color: var(--text-dark);
+  transition: border-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+.sv-move:hover { border-color: var(--primary-pink); color: var(--primary-pink); }
+
+.sv-timeline { display: flex; flex-direction: column; gap: 8px; max-height: 300px; overflow-y: auto; }
+.sv-ev { padding: 9px 11px; border-radius: 8px; background: var(--glass-bg); border: 1px solid var(--glass-border); }
+.sv-ev.shown { border-left: 3px solid var(--status-completed); }
+.sv-ev-top { display: flex; justify-content: space-between; gap: 10px; font-size: 0.68rem; color: var(--text-muted); }
+.sv-ev-body { margin-top: 4px; font-size: 0.82rem; overflow-wrap: anywhere; }
+.sv-ev-tag { margin-top: 5px; font-size: 0.65rem; color: var(--status-completed); }
+
+@media (max-width: 720px) {
+  .sv-grid, .sv-fields { grid-template-columns: 1fr; }
+  .sv-col { flex-basis: 84vw; min-width: 84vw; }
+}

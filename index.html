@@ -255,6 +255,7 @@
           </div>
         </div>
         <button id="btn-toggle-theme" class="icon-btn" title="Toggle Dark/Light Mode">🌓</button>
+        <button id="btn-open-service" class="secondary-btn" title="Repairs, warranty and upgrades">🔧 Service</button>
         <button id="btn-new-ticket" class="primary-pink-btn">+ New Ticket</button>
       </div>
     </header>
@@ -342,6 +343,105 @@
   </div>
 
   <!-- TESTING CLIENT SCREEN -->
+  <!-- ══════════════════════════════════════════════════════════════════════
+       SERVICE TICKETING — repairs, warranty/RMA and upgrades.
+       A sibling of the build dashboard, not a ticket type: every consumer of
+       `tickets` is build-shaped, and three of them would destroy a service row.
+       ══════════════════════════════════════════════════════════════════════ -->
+  <div id="service-screen" class="screen">
+    <header class="glass-slab navbar">
+      <div class="nav-brand">
+        <svg class="brand-logo-svg" viewBox="0 0 100 100" style="width:22px;height:22px;vertical-align:middle;margin-right:6px;color:var(--primary-pink);"><circle cx="50" cy="50" r="40" stroke="currentColor" stroke-width="10" fill="none" stroke-dasharray="78.776 5" stroke-dashoffset="60.332" /><path d="M 50,23 L 72,70 C 58,58 50,56 50,56 C 50,56 42,58 28,70 Z" fill="currentColor" /></svg>
+        <span class="nav-title">NEO TOKYO // SERVICE</span>
+        <span id="sv-stat" class="sv-stat">0 open</span>
+      </div>
+      <div class="nav-controls">
+        <label class="sv-mine"><input type="checkbox" id="sv-mine"> Mine only</label>
+        <input type="text" id="sv-search" class="sv-search" placeholder="Customer, device, code or phone…" autocomplete="off">
+        <button id="sv-exit" class="secondary-btn">← Builds</button>
+        <button id="sv-new" class="primary-pink-btn">+ New Service Job</button>
+      </div>
+    </header>
+
+    <main class="dashboard-container">
+      <p class="sv-lead">Columns are <strong>who we are waiting on</strong>, not what stage the work is at — a service job loops, and most of its life is spent waiting on somebody who isn't us. The big number on each card is how long it has sat where it is.</p>
+      <div id="sv-board" class="sv-board"></div>
+    </main>
+  </div>
+
+  <!-- ── Intake ───────────────────────────────────────────────────────────── -->
+  <div id="sv-intake-modal" class="modal-overlay">
+    <div class="glass-slab modal-card sv-modal">
+      <div class="modal-header">
+        <h2>Take in a job</h2>
+        <button type="button" id="sv-in-close" class="close-btn">&times;</button>
+      </div>
+      <div class="modal-body" id="sv-intake-form">
+        <div class="sv-grid">
+          <label class="sv-field sv-span2"><span>Job type</span>
+            <select id="sv-in-kind" class="settings-select"></select></label>
+          <label class="sv-field"><span>Customer name *</span>
+            <input type="text" id="sv-in-name" autocomplete="off"></label>
+          <label class="sv-field"><span>Phone *</span>
+            <input type="text" id="sv-in-phone" autocomplete="off" placeholder="10-digit mobile"></label>
+          <label class="sv-field"><span>Email</span>
+            <input type="text" id="sv-in-email" autocomplete="off"></label>
+          <label class="sv-field"><span>Device</span>
+            <input type="text" id="sv-in-device" autocomplete="off" placeholder="e.g. Gaming PC, ASUS TUF A15"></label>
+          <label class="sv-field"><span>Serial / service tag</span>
+            <input type="text" id="sv-in-serial" autocomplete="off" spellcheck="false" placeholder="Scan or type"></label>
+          <label class="sv-field sv-span2"><span>Reported fault *</span>
+            <textarea id="sv-in-fault" rows="2" placeholder="In the customer's own words"></textarea></label>
+        </div>
+
+        <div id="sv-in-buildrow" class="sv-sub hidden">
+          <label class="sv-field sv-span2"><span>Original build ticket ID</span>
+            <input type="text" id="sv-in-build" autocomplete="off" placeholder="t_… (leave blank if you'll link it later)"></label>
+          <p class="sv-hint">Linking brings across the serials, specs and QC baseline we already hold, so “is this under warranty, and is this the card we sold you” is answerable at a glance.</p>
+        </div>
+
+        <div id="sv-in-outside" class="sv-sub">
+          <h4 class="sv-sub-title">Intake record</h4>
+          <p class="sv-hint">This is the shop's protection against “it wasn't scratched when I brought it in”. Fill it in with the customer standing there.</p>
+          <div class="sv-grid">
+            <label class="sv-field sv-span2"><span>Came in with</span>
+              <input type="text" id="sv-in-accessories" autocomplete="off" placeholder="Charger, bag, drive, keys…"></label>
+            <label class="sv-field sv-span2"><span>Condition on arrival</span>
+              <textarea id="sv-in-condition" rows="2" placeholder="Existing scratches, dents, missing screws, cracked panel…"></textarea></label>
+          </div>
+          <label class="sv-check"><input type="checkbox" id="sv-in-powers"> Powers on at the counter</label>
+        </div>
+
+        <label class="sv-check"><input type="checkbox" id="sv-in-hasdata"> Customer data on board — back up before working</label>
+        <div id="sv-in-status" class="sv-status"></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" id="sv-in-cancel" class="secondary-btn">Cancel</button>
+        <button type="button" id="sv-in-create" class="primary-pink-btn">Create job</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Job panel ────────────────────────────────────────────────────────── -->
+  <div id="sv-job-modal" class="modal-overlay">
+    <div class="glass-slab modal-card sv-modal">
+      <div class="modal-header">
+        <div>
+          <h2 id="sv-job-title">—</h2>
+          <div id="sv-job-sub" class="sv-job-sub"></div>
+        </div>
+        <button type="button" id="sv-job-close" class="close-btn">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div id="sv-job-ball" class="sv-job-ball"></div>
+        <div id="sv-job-fields" class="sv-fields"></div>
+        <div id="sv-job-moves" class="sv-moves"></div>
+        <h4 class="sv-sub-title">History</h4>
+        <div id="sv-job-timeline" class="sv-timeline"></div>
+      </div>
+    </div>
+  </div>
+
   <div id="client-screen" class="screen">
     <!-- Navbar -->
     <header class="glass-slab navbar">
@@ -2513,6 +2613,8 @@
   <script src="invoice-ocr.js"></script>
   <script src="compat-check.js"></script>
   <script src="tech-assign.js"></script>
+  <script src="shared/service-status.js"></script>
   <script src="app.js"></script>
+  <script src="service.js"></script>
 </body>
 </html>

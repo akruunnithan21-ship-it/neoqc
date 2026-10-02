@@ -2093,8 +2093,13 @@ function switchScreen(mode, selectedId = null) {
   // selector → Admin). routeByTier() only ever sends tier 3+ here, so a known
   // sub-T3 profile reaching 'staff' is always an escalation attempt → redirect
   // them to their own screen. (currentProfile null = offline/boot: left alone.)
-  if (mode === 'staff' && currentProfile && Number(currentProfile.tier) < 3) {
-    showToast('The admin dashboard is restricted to service leads. Opening your Testing Client.', 'warning');
+  // 'service' is gated with 'staff': it shows every customer's phone number,
+  // address-of-sorts and fault history across the whole shop, so it is at least
+  // as sensitive as the build dashboard. Adding it here rather than to a
+  // separate check means a future screen cannot be added to the office side
+  // without someone noticing this list.
+  if ((mode === 'staff' || mode === 'service') && currentProfile && Number(currentProfile.tier) < 3) {
+    showToast('The office dashboards are restricted to service leads. Opening your Testing Client.', 'warning');
     routeByTier();
     return;
   }
@@ -2127,6 +2132,15 @@ function switchScreen(mode, selectedId = null) {
       } else {
         staffExitBtn.classList.remove('hidden');
       }
+    }
+  } else if (mode === 'service') {
+    // Service ticketing. Same audience as the admin dashboard (the tier-3 guard
+    // at the top of this function has already run), and it owns its own tables,
+    // so nothing here touches the build sync paths.
+    document.getElementById('service-screen').classList.add('active');
+    if (window.NeoQcServiceUI) {
+      window.NeoQcServiceUI.ensureServiceLoaded()
+        .catch(e => console.warn('service load failed:', e && e.message));
     }
   } else if (mode === 'client') {
     document.getElementById('client-welcome-screen').classList.add('active');
@@ -5470,6 +5484,9 @@ function setupEventListeners() {
       renderDashboard();
     }
   });
+
+  var _svcBtn = document.getElementById("btn-open-service");
+  if (_svcBtn) _svcBtn.addEventListener("click", function () { switchScreen("service"); });
 
   const _ticketForm = document.getElementById('ticket-form');
 
