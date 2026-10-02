@@ -1272,3 +1272,67 @@ body::before {
 @media (max-width: 640px) {
   .board-col { flex-basis: 84vw; min-width: 84vw; }
 }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   SERVICE STATUS (public) — "Where is my PC?"
+   The page answers one question, so one sentence carries it and everything
+   else is supporting detail. The sentence is coloured by WHO WE ARE WAITING
+   ON, which is the only thing a worried customer actually wants to know.
+   ══════════════════════════════════════════════════════════════════════════ */
+.svc-form .lookup-row { align-items: stretch; }
+.svc-code-in  { flex: 2 1 220px; letter-spacing: 0.12em; font-size: 1.1rem; }
+.svc-phone-in { flex: 0 1 110px; min-width: 90px; letter-spacing: 0.18em; font-size: 1.1rem; text-align: center; }
+
+.svc-card { padding: 26px 28px; margin-bottom: 16px; }
+
+/* The whole page in one line. Sized to be read at a glance on a phone. */
+.svc-sentence {
+  font-size: clamp(1.15rem, 3.6vw, 1.6rem);
+  font-weight: 700; line-height: 1.35; text-wrap: balance;
+  padding-left: 16px; border-left: 4px solid var(--text-dim);
+}
+.svc-ball-shop        { border-left-color: #22d3ee; color: #a5f3fc; }
+.svc-ball-customer    { border-left-color: var(--amber); color: #fcd9a0; }
+.svc-ball-third_party { border-left-color: #a78bfa; color: #ddd0ff; }
+.svc-ball-nobody      { border-left-color: var(--green); color: #a7f3d0; }
+
+.svc-since   { margin: 8px 0 0 20px; font-size: 0.88rem; color: var(--text-muted); }
+.svc-promise { margin: 16px 0 0; font-size: 0.95rem; color: var(--text); }
+.svc-promise.svc-muted { color: var(--text-muted); font-size: 0.88rem; }
+.svc-handler { margin-top: 6px; font-size: 0.88rem; color: var(--text-muted); }
+.svc-handler.hidden { display: none; }
+
+.svc-meta {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 14px; margin-top: 22px; padding-top: 18px;
+  border-top: 1px solid var(--glass-border);
+}
+.svc-meta-item .label {
+  font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.08em;
+  color: var(--text-muted); margin-bottom: 4px;
+}
+.svc-meta-item .value { font-weight: 600; overflow-wrap: anywhere; }
+.svc-meta-item .value.mono { font-family: 'JetBrains Mono', monospace; font-size: 0.86rem; }
+
+/* A list, never a stepper. A service job loops — diagnose, quote, bench, wait
+   for a part, bench again — and a stepper that jumps backwards reads as a bug
+   and costs the customer's confidence. */
+.svc-tl-title { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); margin-bottom: 14px; }
+.svc-timeline { display: flex; flex-direction: column; gap: 0; }
+.svc-tl-item {
+  display: grid; grid-template-columns: 112px 1fr; gap: 14px;
+  padding: 11px 0; border-bottom: 1px solid var(--glass-border);
+}
+.svc-tl-item:last-child { border-bottom: none; }
+.svc-tl-when { font-size: 0.76rem; color: var(--text-muted); white-space: nowrap; }
+.svc-tl-body { font-size: 0.9rem; line-height: 1.55; overflow-wrap: anywhere; }
+.svc-tl-empty { font-size: 0.88rem; color: var(--text-muted); }
+
+.svc-foot { font-size: 0.78rem; color: var(--text-dim); text-align: center; margin-top: 4px; }
+
+@media (max-width: 520px) {
+  .svc-tl-item { grid-template-columns: 1fr; gap: 3px; }
+  .svc-code-in, .svc-phone-in { flex-basis: 100%; }
+}
+
+.svc-promise.svc-late { color: #fca5a5; font-weight: 600; }

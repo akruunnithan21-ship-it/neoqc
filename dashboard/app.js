@@ -58,7 +58,7 @@ function getView() {
 let currentProfile = null;
 // activateView() iterates this array to hide/show — a view missing from it is
 // never un-hidden and renders as a blank page with no error. Always add here.
-const VIEWS = ['customer', 'login', 'dashboard', 'profile', 'ticket-status', 'new-build', 'board'];
+const VIEWS = ['customer', 'login', 'dashboard', 'profile', 'ticket-status', 'new-build', 'board', 'service'];
 
 // Match a ticket's short technician name ("Athul") to a profile's full name
 // ("Athul Sudheer") — same logic as the app's My Bench so a technician's web
@@ -86,6 +86,8 @@ function activateView(name) {
   if (name === 'new-build' && currentProfile && Number(currentProfile.tier) === 2) name = 'ticket-status';
   // The sales pipeline is a sales/lead board — a technician (T2) gets My Builds.
   if (name === 'board' && currentProfile && Number(currentProfile.tier) === 2) name = 'ticket-status';
+  // The service status page polls every 30s; navigating away must stop it.
+  if (name !== 'service' && window.NeoQcServiceStatus) window.NeoQcServiceStatus.stopPolling();
   VIEWS.forEach(v => {
     const el = document.getElementById('view-' + v);
     if (el) el.classList.toggle('hidden', v !== name);
@@ -95,6 +97,7 @@ function activateView(name) {
   else if (name === 'ticket-status') ensureTicketStatusLoaded();
   else if (name === 'new-build') ensureQuoteBuilderLoaded();
   else if (name === 'board') ensureBoardLoaded();
+  else if (name === 'service') { if (window.NeoQcServiceStatus) window.NeoQcServiceStatus.init(); }
   else if (name === 'profile') renderProfile();
   else if (name === 'login') setTimeout(() => { const e = document.getElementById('web-login-email'); if (e) e.focus(); }, 120);
 }
@@ -743,7 +746,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (['dashboard', 'profile', 'ticket-status', 'new-build', 'board'].includes(requested)) activateView(requested);
     else routeAfterWebLogin();
   } else {
-    activateView(requested === 'login' ? 'login' : 'customer');
+    activateView((requested === 'login' || requested === 'service') ? requested : 'customer');
   }
 });
 
