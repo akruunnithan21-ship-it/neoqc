@@ -6005,3 +6005,86 @@ body.dark-mode .app-rail { background: rgba(255, 255, 255, 0.025); }
   .ov-row { grid-template-columns: 4px 72px minmax(0,1fr) 64px; }
   .ov-row .ov-stage-cell, .ov-row .ov-tech { display: none; }
 }
+
+/* ── Service job panel: tabs, editor, notes, photos ── */
+.sv-tabs {
+  display: flex; gap: 4px; margin: 4px 0 16px;
+  border-bottom: 1px solid var(--glass-border);
+}
+.sv-tab {
+  font-family: inherit; font-size: 0.8rem; font-weight: 700; cursor: pointer;
+  padding: 9px 15px; border: none; background: transparent; color: var(--text-muted);
+  border-bottom: 2px solid transparent; margin-bottom: -1px; border-radius: 8px 8px 0 0;
+  transition: color var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
+}
+.sv-tab:hover { color: var(--text-dark); background: rgba(var(--primary-pink-rgb), 0.05); }
+.sv-tab.active { color: var(--primary-pink); border-bottom-color: var(--primary-pink); }
+.sv-job-body { min-height: 220px; }
+
+.sv-linked {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 9px 13px; margin-bottom: 14px; border-radius: 9px;
+  background: rgba(59,130,246,0.08); border: 1px solid rgba(59,130,246,0.25);
+  font-size: 0.82rem;
+}
+.sv-linkbtn {
+  font-family: inherit; font-size: 0.75rem; font-weight: 700; cursor: pointer;
+  padding: 5px 11px; border-radius: 999px; color: #60a5fa;
+  border: 1px solid rgba(59,130,246,0.4); background: transparent;
+}
+.sv-linkbtn:hover { background: rgba(59,130,246,0.14); }
+
+.sv-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 14px; }
+.sv-actions .sv-status { margin-top: 0; }
+
+/* The move box is visually separated: everything above it is a correction,
+   everything in it changes where the job IS. */
+.sv-movebox {
+  margin-top: 20px; padding: 15px 16px; border-radius: 11px;
+  background: rgba(127,127,160,0.05); border: 1px solid var(--glass-border);
+}
+.sv-move-row { display: flex; gap: 9px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; }
+.sv-move-row select { flex: 1 1 220px; }
+.sv-m-extra:not(:empty) { margin-bottom: 10px; }
+.sv-movebox textarea {
+  width: 100%; padding: 10px 12px; border-radius: 8px; font-family: inherit; font-size: 0.88rem;
+  border: 1px solid var(--glass-border); background: var(--glass-bg); color: var(--text-dark); resize: vertical;
+}
+
+.sv-noteadd { margin-bottom: 18px; }
+.sv-noteadd textarea {
+  width: 100%; padding: 11px 13px; border-radius: 9px; font-family: inherit; font-size: 0.9rem;
+  border: 1px solid var(--glass-border); background: var(--glass-bg); color: var(--text-dark); resize: vertical;
+}
+
+.sv-ev-move {
+  font-family: 'JetBrains Mono', monospace; font-size: 0.68rem; color: var(--text-muted);
+  margin-top: 3px; opacity: 0.8;
+}
+
+/* Photos. A green edge marks the ones the customer is allowed to see, matching
+   the same signal on notes. */
+.sv-photoadd { margin-bottom: 16px; }
+.sv-pgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(138px, 1fr)); gap: 10px; }
+.sv-ph {
+  margin: 0; border-radius: 9px; overflow: hidden;
+  border: 1px solid var(--glass-border); background: var(--glass-bg);
+}
+.sv-ph.shown { border-color: rgba(16,185,129,0.5); }
+.sv-ph img { display: block; width: 100%; height: 104px; object-fit: cover; background: rgba(127,127,160,0.12); }
+.sv-ph-miss {
+  height: 104px; display: flex; align-items: center; justify-content: center;
+  font-size: 0.7rem; color: var(--text-muted);
+}
+.sv-ph figcaption {
+  display: flex; align-items: center; gap: 6px; padding: 6px 8px;
+  font-size: 0.66rem; color: var(--text-muted); flex-wrap: wrap;
+}
+.sv-ph-phase { text-transform: uppercase; letter-spacing: 0.05em; font-weight: 700; }
+.sv-ph-vis { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
+.sv-ph-vis input { width: 14px; height: 14px; accent-color: var(--status-completed); cursor: pointer; }
+.sv-ph-del {
+  margin-left: auto; cursor: pointer; border: none; background: transparent;
+  color: var(--text-muted); font-size: 0.8rem; padding: 2px 4px; border-radius: 4px;
+}
+.sv-ph-del:hover { color: var(--status-urgent); }
