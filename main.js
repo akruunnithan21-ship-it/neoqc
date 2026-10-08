@@ -223,7 +223,7 @@ function createWindow() {
     try {
       mainWindow.webContents.openDevTools({ mode: 'detach' });
       const watched = ['index.html', 'app.js', 'style.css', 'print-report.css',
-        'print-render.js', 'web-lookup.js', 'ppi.js', 'ppi-sync.js',
+        'print-render.js', 'web-lookup.js',
         'ssd-grading.js', 'shared', 'assets/component-data'];
       let pending = null;
       const scheduleReload = (label) => {
@@ -2155,8 +2155,55 @@ ipcMain.handle('sys:component-passport', async () => {
       `
       try {
         $cpu = Get-CimInstance Win32_Processor | Select-Object -First 1
+        # Win32_VideoController.AdapterRAM is a UInt32, so it CANNOT report more than
+        # 4 GiB: every card of 4 GB or larger comes back as ~4095 MB. That is why an
+        # 8 GB RX 9050 was recorded as a 4 GB card, and it reproduces on the shop's
+        # own RTX 3060 12GB (AdapterRAM 4095 MB, true size 12288 MB). The display
+        # driver writes the real size as a 64-bit QWORD in its registry class key,
+        # so read that first and keep AdapterRAM only as a last resort.
+        #
+        # This also fixes adapter SELECTION: the old code sorted on AdapterRAM, which
+        # is the same clamped 4095 for every card >= 4 GB, so with two GPUs present it
+        # was effectively picking at random.
+        #
+        # Enumeration uses SilentlyContinue deliberately — the class key has sibling
+        # subkeys the app cannot read, and -ErrorAction Stop turned that access-denied
+        # into a terminating error that silently emptied the whole list.
+        $gpuClass = 'HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Class\\{4d36e968-e325-11ce-bfc1-08002be10318}'
+        $gpuKeys = @()
+        try { $gpuKeys = @(Get-ChildItem $gpuClass -ErrorAction SilentlyContinue | Where-Object { $_.PSChildName -match '^[0-9]{4}$' }) } catch { $gpuKeys = @() }
+        function Get-VramBytes($pnpId) {
+          if (-not $pnpId) { return $null }
+          $needle = $pnpId.ToLower()
+          foreach ($k in $gpuKeys) {
+            $p = Get-ItemProperty $k.PSPath -ErrorAction SilentlyContinue
+            if (-not $p -or -not $p.MatchingDeviceId) { continue }
+            # MatchingDeviceId is 'pci\\ven_10de&dev_2504'; PNPDeviceID is that plus
+            # the subsys/rev/instance tail, so a prefix test pairs them correctly.
+            if (-not $needle.StartsWith(([string]$p.MatchingDeviceId).ToLower())) { continue }
+            $qw = $p.'HardwareInformation.qwMemorySize'
+            if ($qw) { return [int64]$qw }
+            $ms = $p.'HardwareInformation.MemorySize'
+            if ($null -ne $ms) {
+              if ($ms -is [byte[]] -and $ms.Length -ge 4) { return [int64][System.BitConverter]::ToUInt32($ms, 0) }
+              try { return [int64]$ms } catch { }
+            }
+          }
+          return $null
+        }
         $gpus = Get-CimInstance Win32_VideoController | Where-Object { $_.Name -notmatch 'Microsoft Basic Display' }
-        $gpu = $gpus | Sort-Object AdapterRAM -Descending | Select-Object -First 1
+        $gpuInfo = @()
+        foreach ($g in $gpus) {
+          $bytes = Get-VramBytes $g.PNPDeviceID
+          $src = 'registry'
+          if (-not $bytes) {
+            if ($g.AdapterRAM) { $bytes = [int64]$g.AdapterRAM; $src = 'wmi-adapterram' }
+            else { $bytes = $null; $src = 'unknown' }
+          }
+          $gpuInfo += [PSCustomObject]@{ dev = $g; bytes = $bytes; src = $src }
+        }
+        $pick = $gpuInfo | Sort-Object -Property @{Expression={ if ($_.bytes) { $_.bytes } else { 0 } }} -Descending | Select-Object -First 1
+        $gpu = if ($pick) { $pick.dev } else { $null }
         $ramModules = Get-CimInstance Win32_PhysicalMemory | ForEach-Object {
           [PSCustomObject]@{
             manufacturer = ($_.Manufacturer   | ForEach-Object { $_.Trim() })
@@ -2178,7 +2225,11 @@ ipcMain.handle('sys:component-passport', async () => {
           }
           gpu = [PSCustomObject]@{
             model         = if ($gpu) { $gpu.Name.Trim() } else { $null }
-            vramMB        = if ($gpu -and $gpu.AdapterRAM) { [math]::Round($gpu.AdapterRAM / 1MB, 0) } else { $null }
+            vramMB        = if ($pick -and $pick.bytes) { [math]::Round($pick.bytes / 1MB, 0) } else { $null }
+            # Where the figure came from, so a wrong VRAM reading is diagnosable from
+            # the report instead of guessed at: 'registry' is the true size,
+            # 'wmi-adapterram' is the clamped legacy value and is suspect at ~4095 MB.
+            vramSource    = if ($pick) { $pick.src } else { $null }
             driverVersion = if ($gpu) { $gpu.DriverVersion } else { $null }
           }
           ram = [PSCustomObject]@{

@@ -973,3 +973,366 @@ body::before {
 @media (max-width: 600px) {
   .pf-grid { grid-template-columns: 1fr; }
 }
+
+/* ═══════════════════════════════════════════════════════════
+   QUOTE BUILDER — "New Build" (v1.9.9, Phase 1)
+   Two-column workspace: components on the left, live quotation on the right.
+   Collapses to a single column on tablets/phones.
+   ═══════════════════════════════════════════════════════════ */
+.qb-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  gap: 18px;
+  align-items: start;
+}
+.qb-main { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.qb-side { position: sticky; top: 18px; }
+
+.qb-card { padding: 18px 20px; }
+.qb-card-title {
+  font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.08em;
+  color: var(--pink); margin: 0 0 12px; font-weight: 700;
+}
+.qb-hint { font-size: 0.78rem; color: var(--text-muted); margin: -4px 0 14px; line-height: 1.55; }
+.qb-draft-note { font-size: 0.72rem; color: var(--green); margin-right: 10px; }
+
+/* Customer block */
+.qb-cust-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
+.qb-field { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.qb-field > span {
+  font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted);
+}
+.qb-field .filter-input, .qb-field .filter-select { width: 100%; }
+
+/* Component rows */
+.qb-row {
+  display: grid; grid-template-columns: 190px minmax(0, 1fr);
+  gap: 12px; align-items: start;
+  padding: 10px 0; border-bottom: 1px solid var(--glass-border);
+}
+.qb-row:last-child { border-bottom: none; }
+.qb-cat { display: flex; align-items: center; gap: 8px; font-size: 0.84rem; font-weight: 600; padding-top: 8px; }
+.qb-cat-ic { font-size: 1rem; }
+.qb-pick { position: relative; min-width: 0; }
+.qb-pick .qb-search { width: 100%; }
+
+/* Search results */
+.qb-results {
+  position: absolute; z-index: 40; left: 0; right: 0; top: calc(100% + 4px);
+  background: var(--bg3); border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm); box-shadow: var(--card-shadow);
+  max-height: 300px; overflow-y: auto;
+}
+.qb-res {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  width: 100%; text-align: left; padding: 9px 12px; cursor: pointer;
+  background: transparent; border: none; border-bottom: 1px solid var(--glass-border);
+  color: var(--text); font-family: inherit; font-size: 0.8rem;
+}
+.qb-res:last-of-type { border-bottom: none; }
+.qb-res:hover { background: var(--pink-dim); }
+.qb-res-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.qb-res-price { flex: none; color: var(--text-muted); font-size: 0.78rem; }
+.qb-res-empty { padding: 10px 12px; font-size: 0.78rem; color: var(--text-muted); }
+.qb-res-foot { padding: 8px 12px; border-top: 1px solid var(--glass-border); }
+.qb-manual-btn {
+  background: transparent; border: 1px dashed var(--glass-border); border-radius: 6px;
+  color: var(--pink); font-size: 0.72rem; font-weight: 700; padding: 4px 10px; cursor: pointer;
+  font-family: inherit;
+}
+.qb-manual-btn:hover { border-color: var(--pink); background: var(--pink-dim); }
+
+/* Selected component card */
+.qb-sel-card {
+  display: grid; grid-template-columns: 44px minmax(0, 1fr) auto auto;
+  gap: 10px; align-items: center;
+  background: var(--glass); border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm); padding: 8px 10px;
+}
+.qb-thumb {
+  width: 44px; height: 44px; border-radius: 8px; overflow: hidden;
+  background: var(--bg3); border: 1px solid var(--glass-border);
+  display: flex; align-items: center; justify-content: center;
+}
+.qb-thumb-img { width: 100%; height: 100%; object-fit: contain; }
+.qb-thumb-ph { font-size: 1.1rem; opacity: 0.7; }
+.qb-sel-main { min-width: 0; }
+.qb-sel-name {
+  font-size: 0.82rem; font-weight: 600; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap;
+}
+.qb-sel-meta { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 3px; align-items: center; }
+.qb-link { font-size: 0.72rem; color: var(--pink); text-decoration: none; }
+.qb-link:hover { text-decoration: underline; }
+.qb-link-none { color: var(--text-dim); }
+.qb-cat-price { font-size: 0.72rem; color: var(--text-muted); }
+.qb-sel-price { display: flex; flex-direction: column; gap: 2px; }
+.qb-qprice-label {
+  font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted);
+}
+.qb-qprice {
+  width: 96px; padding: 5px 8px; border-radius: 6px;
+  border: 1px solid var(--glass-border); background: var(--bg2); color: var(--text);
+  font-family: 'JetBrains Mono', monospace; font-size: 0.78rem; outline: none;
+}
+.qb-qprice:focus { border-color: var(--pink); }
+.qb-remove {
+  width: 26px; height: 26px; border-radius: 6px; cursor: pointer;
+  background: transparent; border: 1px solid var(--glass-border);
+  color: var(--text-muted); font-size: 0.7rem;
+}
+.qb-remove:hover { color: var(--red); border-color: var(--red); }
+
+/* Quotation summary */
+.qb-summary { position: relative; }
+.qb-lines { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
+.qb-lines-empty { font-size: 0.78rem; color: var(--text-muted); padding: 6px 0; }
+.qb-line { display: grid; grid-template-columns: 1fr auto; gap: 4px 10px; align-items: baseline; }
+.qb-line-cat { font-size: 0.68rem; color: var(--text-muted); grid-column: 1 / -1; }
+.qb-line-name {
+  font-size: 0.78rem; min-width: 0; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap;
+}
+.qb-line-price { font-size: 0.78rem; color: var(--text); }
+.qb-total-row {
+  display: flex; justify-content: space-between; align-items: baseline;
+  padding-top: 10px; border-top: 1px solid var(--glass-border);
+  font-size: 0.78rem; color: var(--text-muted);
+}
+.qb-total-main { font-size: 1rem; color: var(--text); font-weight: 700; }
+.qb-total-main .mono { color: var(--pink); }
+.qb-note { font-size: 0.7rem; color: var(--text-dim); margin: 12px 0 0; line-height: 1.5; }
+
+@media (max-width: 1024px) {
+  .qb-grid { grid-template-columns: minmax(0, 1fr); }
+  .qb-side { position: static; }
+}
+@media (max-width: 640px) {
+  .qb-row { grid-template-columns: minmax(0, 1fr); }
+  .qb-cat { padding-top: 0; }
+  .qb-sel-card { grid-template-columns: 40px minmax(0, 1fr) auto; }
+  .qb-sel-price { grid-column: 2 / -1; flex-direction: row; align-items: center; gap: 8px; }
+}
+
+/* ── Quote builder layout corrections (measured, not guessed) ──────────────
+   Every .view is capped at 880px site-wide. That is right for the customer
+   lookup and the ticket tables, but a two-column build workspace needs more:
+   at 880px the main column was 482px, the pick area 238px, and the selected
+   card's fixed columns (44 thumb + 96 price + 26 remove + gaps) starved the
+   product-name column down to 20px — names rendered as "A…". Widen this one
+   view, slim the category column, and make the card FLEX so the name always
+   keeps a usable minimum and the price/remove wrap beneath it when tight. */
+#view-new-build, #view-board { max-width: min(1240px, 100%); }
+
+.qb-row { grid-template-columns: 150px minmax(0, 1fr); }
+
+.qb-sel-card {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+.qb-thumb { flex: none; }
+.qb-sel-main { flex: 1 1 200px; min-width: 0; }
+.qb-sel-price { flex: none; flex-direction: row; align-items: center; gap: 6px; }
+.qb-qprice { width: 84px; }
+.qb-remove { flex: none; }
+
+@media (max-width: 1120px) {
+  .qb-grid { grid-template-columns: minmax(0, 1fr); }
+  .qb-side { position: static; }
+}
+@media (max-width: 560px) {
+  .qb-row { grid-template-columns: minmax(0, 1fr); }
+  .qb-cat { padding-top: 0; }
+}
+
+/* ── Invoice PDF import ── */
+.qb-card-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; flex-wrap: wrap; margin-bottom: 12px;
+}
+.qb-card-head .qb-card-title { margin: 0; }
+.qb-import-status {
+  border: 1px solid var(--glass-border); border-radius: var(--radius-sm);
+  padding: 10px 12px; margin-bottom: 12px; font-size: 0.78rem; line-height: 1.55;
+  background: var(--glass); color: var(--text);
+}
+.qb-import-status.ok   { border-color: rgba(34,197,94,0.45);  background: var(--green-dim); }
+.qb-import-status.warn { border-color: rgba(245,158,11,0.45); background: var(--amber-dim); }
+.qb-import-status.err  { border-color: rgba(239,68,68,0.45);  background: var(--red-dim); }
+.qb-review-flag { color: var(--amber); font-weight: 600; }
+.qb-unmatched {
+  margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--glass-border);
+  font-size: 0.75rem; color: var(--text-muted);
+}
+.qb-unmatched div { margin-top: 3px; }
+.qb-unmatched-note { margin-top: 6px; font-size: 0.72rem; color: var(--text-dim); }
+
+/* ── Live price-to-performance panel ── */
+.qb-ppi-empty {
+  font-size: 0.78rem; color: var(--text-muted);
+  padding: 14px; text-align: center;
+  border: 1px dashed var(--glass-border); border-radius: var(--radius-sm);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   PIPELINE BOARD (Phase 3)
+   A horizontally scrolling flex ROW of fixed-width columns, deliberately not a
+   7-track grid: seven tracks inside the site's existing 720/600px breakpoints
+   would need per-breakpoint gymnastics, whereas a scrolling row just works and
+   keeps a card readable on a phone. Every colour below is an existing token or
+   an existing .status-badge value — no new hexes are introduced here.
+   ══════════════════════════════════════════════════════════════════════════ */
+.board-mine {
+  display: inline-flex; align-items: center; gap: 7px;
+  font-size: 0.78rem; color: var(--text-muted); white-space: nowrap; cursor: pointer;
+}
+.board-mine input { accent-color: var(--pink); cursor: pointer; }
+
+.board-cols {
+  display: flex; gap: 12px; align-items: flex-start;
+  overflow-x: auto; padding: 4px 2px 14px;
+  scrollbar-width: thin;
+}
+.board-col { flex: 0 0 262px; min-width: 262px; }
+
+.board-col-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 8px 11px; margin-bottom: 9px;
+  border: 1px solid var(--glass-border); border-radius: var(--radius-sm);
+  background: var(--glass);
+  border-left: 3px solid var(--col-accent, var(--text-dim));
+}
+.board-col-name {
+  font-size: 0.72rem; font-weight: 700; letter-spacing: 0.06em;
+  text-transform: uppercase; color: var(--text);
+}
+.board-col-count {
+  font-family: 'JetBrains Mono', monospace; font-size: 0.72rem;
+  color: var(--text-muted); background: var(--glass); padding: 1px 7px;
+  border-radius: 999px; border: 1px solid var(--glass-border);
+}
+/* Accents reuse the status-badge palette so a column reads the same colour the
+   staff table already uses for that stage. */
+.board-col.col-quote       { --col-accent: var(--violet); }
+.board-col.col-procurement { --col-accent: #94a3b8; }
+.board-col.col-assembly    { --col-accent: #a5b4fc; }
+.board-col.col-qc          { --col-accent: #fcd34d; }
+.board-col.col-stress      { --col-accent: var(--pink); }
+.board-col.col-ready       { --col-accent: var(--green); }
+.board-col.col-handed      { --col-accent: var(--text-dim); }
+
+.board-cards { display: flex; flex-direction: column; gap: 9px; }
+
+.board-card {
+  padding: 11px 12px; border-radius: var(--radius-sm);
+  border: 1px solid var(--glass-border); background: var(--glass);
+  transition: border-color 0.16s ease, transform 0.16s ease;
+}
+.board-card:hover { border-color: var(--pink-glow); transform: translateY(-1px); }
+.board-card.risk-urgent { border-left: 3px solid var(--amber); }
+.board-card.risk-past   { border-left: 3px solid var(--red); }
+.board-card.is-handed   { opacity: 0.72; }
+
+.bc-top { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.bc-cust { font-size: 0.86rem; font-weight: 600; color: var(--text); overflow-wrap: anywhere; }
+.bc-code { font-family: 'JetBrains Mono', monospace; font-size: 0.68rem; color: var(--text-dim); white-space: nowrap; }
+.bc-line { margin-top: 5px; font-size: 0.72rem; color: var(--text-muted); overflow-wrap: anywhere; }
+.bc-line .bc-k { color: var(--text-dim); }
+.bc-deadline { margin-top: 6px; font-size: 0.72rem; color: var(--text-muted); }
+.bc-deadline.urgent { color: var(--amber); font-weight: 600; }
+.bc-deadline.past   { color: var(--red);   font-weight: 600; }
+
+.bc-actions { margin-top: 9px; display: flex; gap: 7px; flex-wrap: wrap; }
+.bc-btn {
+  font-family: inherit; font-size: 0.71rem; font-weight: 600; cursor: pointer;
+  padding: 5px 10px; border-radius: 999px;
+  border: 1px solid var(--glass-border); background: var(--glass); color: var(--text);
+  transition: border-color 0.16s ease, color 0.16s ease;
+}
+.bc-btn:hover:not(:disabled) { border-color: var(--pink); color: var(--pink); }
+.bc-btn:disabled { opacity: 0.5; cursor: default; }
+.bc-btn.bc-handover { border-color: rgba(34,197,94,0.45); color: #86efac; }
+.bc-btn.bc-handover:hover:not(:disabled) { border-color: var(--green); color: var(--green); }
+
+.board-empty {
+  padding: 14px 11px; text-align: center;
+  font-size: 0.72rem; color: var(--text-dim);
+  border: 1px dashed var(--glass-border); border-radius: var(--radius-sm);
+}
+
+/* Create-ticket action in the quotation aside */
+.qb-create { width: 100%; margin-top: 12px; }
+.qb-create:disabled { opacity: 0.55; cursor: default; }
+#qb-create-status { margin-top: 9px; font-size: 0.75rem; line-height: 1.5; }
+#qb-create-status.ok  { color: #86efac; }
+#qb-create-status.err { color: var(--red); }
+
+@media (max-width: 640px) {
+  .board-col { flex-basis: 84vw; min-width: 84vw; }
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   SERVICE STATUS (public) — "Where is my PC?"
+   The page answers one question, so one sentence carries it and everything
+   else is supporting detail. The sentence is coloured by WHO WE ARE WAITING
+   ON, which is the only thing a worried customer actually wants to know.
+   ══════════════════════════════════════════════════════════════════════════ */
+.svc-form .lookup-row { align-items: stretch; }
+.svc-code-in  { flex: 2 1 220px; letter-spacing: 0.12em; font-size: 1.1rem; }
+.svc-phone-in { flex: 0 1 110px; min-width: 90px; letter-spacing: 0.18em; font-size: 1.1rem; text-align: center; }
+
+.svc-card { padding: 26px 28px; margin-bottom: 16px; }
+
+/* The whole page in one line. Sized to be read at a glance on a phone. */
+.svc-sentence {
+  font-size: clamp(1.15rem, 3.6vw, 1.6rem);
+  font-weight: 700; line-height: 1.35; text-wrap: balance;
+  padding-left: 16px; border-left: 4px solid var(--text-dim);
+}
+.svc-ball-shop        { border-left-color: #22d3ee; color: #a5f3fc; }
+.svc-ball-customer    { border-left-color: var(--amber); color: #fcd9a0; }
+.svc-ball-third_party { border-left-color: #a78bfa; color: #ddd0ff; }
+.svc-ball-nobody      { border-left-color: var(--green); color: #a7f3d0; }
+
+.svc-since   { margin: 8px 0 0 20px; font-size: 0.88rem; color: var(--text-muted); }
+.svc-promise { margin: 16px 0 0; font-size: 0.95rem; color: var(--text); }
+.svc-promise.svc-muted { color: var(--text-muted); font-size: 0.88rem; }
+.svc-handler { margin-top: 6px; font-size: 0.88rem; color: var(--text-muted); }
+.svc-handler.hidden { display: none; }
+
+.svc-meta {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 14px; margin-top: 22px; padding-top: 18px;
+  border-top: 1px solid var(--glass-border);
+}
+.svc-meta-item .label {
+  font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.08em;
+  color: var(--text-muted); margin-bottom: 4px;
+}
+.svc-meta-item .value { font-weight: 600; overflow-wrap: anywhere; }
+.svc-meta-item .value.mono { font-family: 'JetBrains Mono', monospace; font-size: 0.86rem; }
+
+/* A list, never a stepper. A service job loops — diagnose, quote, bench, wait
+   for a part, bench again — and a stepper that jumps backwards reads as a bug
+   and costs the customer's confidence. */
+.svc-tl-title { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); margin-bottom: 14px; }
+.svc-timeline { display: flex; flex-direction: column; gap: 0; }
+.svc-tl-item {
+  display: grid; grid-template-columns: 112px 1fr; gap: 14px;
+  padding: 11px 0; border-bottom: 1px solid var(--glass-border);
+}
+.svc-tl-item:last-child { border-bottom: none; }
+.svc-tl-when { font-size: 0.76rem; color: var(--text-muted); white-space: nowrap; }
+.svc-tl-body { font-size: 0.9rem; line-height: 1.55; overflow-wrap: anywhere; }
+.svc-tl-empty { font-size: 0.88rem; color: var(--text-muted); }
+
+.svc-foot { font-size: 0.78rem; color: var(--text-dim); text-align: center; margin-top: 4px; }
+
+@media (max-width: 520px) {
+  .svc-tl-item { grid-template-columns: 1fr; gap: 3px; }
+  .svc-code-in, .svc-phone-in { flex-basis: 100%; }
+}
+
+.svc-promise.svc-late { color: #fca5a5; font-weight: 600; }

@@ -184,6 +184,36 @@ const CV_COMPONENTS = [
   { key: 'case',        label: 'Cabinet',     specField: 'form-spec-case',         legacy: 'serial-cabinet' }
 ];
 
+// Every field a barcode scanner is ever pointed at, in document order:
+// procurement (goods-in) first, then component verification (build time). Used by
+// the ticket form's Enter guard to step from one scan box to the next. Keep this
+// in sync if a new scan field is added, or Enter will simply stop advancing there.
+const SCAN_FIELD_SEL = '.proc-partno, .proc-serial, .cv-scan, .cv-scan-extra';
+let _lastScanAdvance = 0;   // debounces CR+LF scanners that send two Enters
+let _lastScanEl = null;     // paired with the clock so CR+LF is told apart from a fast rescan
+
+// The eleven QC checkboxes, in form order. This was a local array inside the
+// "Check All" handler; the lock state and the new counter need the same list,
+// and two copies would drift the moment a check is added.
+const QC_CHECK_IDS = [
+  'qc-phys-cabinet', 'qc-phys-motherboard', 'qc-phys-ram', 'qc-phys-screws',
+  'qc-soft-windows', 'qc-soft-drivers', 'qc-soft-bios',
+  'qc-port-usb', 'qc-port-video', 'qc-port-audio', 'qc-port-wifi'
+];
+
+// Live "N / 11" beside the QC heading. Assembly, Procurement and Component
+// Verification all carried a count; QC — the longest list — carried none.
+function refreshQcBadge() {
+  const badge = document.getElementById('qc-status-badge');
+  if (!badge) return;
+  const done = QC_CHECK_IDS.filter(id => {
+    const el = document.getElementById(id);
+    return el && el.checked;
+  }).length;
+  badge.textContent = `${done} / ${QC_CHECK_IDS.length}`;
+  badge.classList.toggle('green', done === QC_CHECK_IDS.length);
+}
+
 // Box condition on arrival — short labels, honest meanings.
 const BOX_STATUSES = [
   { v: '',            t: '— Box condition —' },
@@ -2063,8 +2093,13 @@ function switchScreen(mode, selectedId = null) {
   // selector → Admin). routeByTier() only ever sends tier 3+ here, so a known
   // sub-T3 profile reaching 'staff' is always an escalation attempt → redirect
   // them to their own screen. (currentProfile null = offline/boot: left alone.)
-  if (mode === 'staff' && currentProfile && Number(currentProfile.tier) < 3) {
-    showToast('The admin dashboard is restricted to service leads. Opening your Testing Client.', 'warning');
+  // 'service' is gated with 'staff': it shows every customer's phone number,
+  // address-of-sorts and fault history across the whole shop, so it is at least
+  // as sensitive as the build dashboard. Adding it here rather than to a
+  // separate check means a future screen cannot be added to the office side
+  // without someone noticing this list.
+  if ((mode === 'staff' || mode === 'service' || mode === 'overview') && currentProfile && Number(currentProfile.tier) < 3) {
+    showToast('The office dashboards are restricted to service leads. Opening your Testing Client.', 'warning');
     routeByTier();
     return;
   }
@@ -2078,6 +2113,10 @@ function switchScreen(mode, selectedId = null) {
   document.querySelectorAll('.screen').forEach(screen => {
     screen.classList.remove('active');
   });
+
+  // Keep the rail reflecting reality however this screen was reached — a deep
+  // link, a tier redirect, or the mode selector — not only a rail click.
+  if (window.NeoQcShell) { try { window.NeoQcShell.syncRail(mode); } catch (e) {} }
 
   if (mode === 'staff') {
     document.getElementById('staff-screen').classList.add('active');
@@ -2097,6 +2136,22 @@ function switchScreen(mode, selectedId = null) {
       } else {
         staffExitBtn.classList.remove('hidden');
       }
+    }
+  } else if (mode === 'overview') {
+    // Builds and service in one list. Reads both caches; owns neither.
+    document.getElementById('overview-screen').classList.add('active');
+    if (window.NeoQcShell) {
+      window.NeoQcShell.ensureOverviewLoaded()
+        .catch(e => console.warn('overview load failed:', e && e.message));
+    }
+  } else if (mode === 'service') {
+    // Service ticketing. Same audience as the admin dashboard (the tier-3 guard
+    // at the top of this function has already run), and it owns its own tables,
+    // so nothing here touches the build sync paths.
+    document.getElementById('service-screen').classList.add('active');
+    if (window.NeoQcServiceUI) {
+      window.NeoQcServiceUI.ensureServiceLoaded()
+        .catch(e => console.warn('service load failed:', e && e.message));
     }
   } else if (mode === 'client') {
     document.getElementById('client-welcome-screen').classList.add('active');
@@ -2221,7 +2276,10 @@ function routeByTier() {
   renderUserChip();
   const tier = currentProfile ? Number(currentProfile.tier) : 0;
   if (tier >= 3) {
-    switchScreen('staff');
+    // Overview, not Builds: the first question anyone in the office has is
+    // "what needs me today", across both kinds of work. Builds is one click
+    // away on the rail.
+    switchScreen('overview');
   } else if (tier === 2) {
     switchScreen('client');
   } else {
@@ -2618,7 +2676,7 @@ function renderDashboard() {
       const damagedCount = damaged ? (t.damagedComponents || (t.specs && t.specs.__damaged) || []).length : 0;
 
       const card = document.createElement('div');
-      card.className = `glass-slab ticket-card ${t.status} ${isUrgent ? 'urgent' : ''} ${damaged ? 'has-damage' : ''}`;
+      card.className = `glass-slab ticket-card ${t.status} ${isUrgent ? "urgent" : ""} ${dRisk ? "risk-" + dRisk : ""} ${damaged ? "has-damage" : ""}`;
       card.innerHTML = `
         <div class="ticket-card-header">
           <span class="card-id">#${t.id.slice(-6)}</span>
@@ -2737,7 +2795,7 @@ function renderDashboard() {
 
   // Update premium stats pills
   const inQc = activeTickets.filter(t => t.status === 'qc_testing' || t.status === 'waiting_qc').length;
-  const urgentCount = activeTickets.filter(t => checkIsUrgent(t.deadline)).length;
+  const urgentCount = activeTickets.filter(t => isAtRisk(t.deadline)).length;   // includes overdue — see isAtRisk
   const el = (id) => document.getElementById(id);
   if (el('stat-active')) el('stat-active').textContent = activeTickets.length;
   if (el('stat-completed')) el('stat-completed').textContent = completedTickets.length;
@@ -2878,6 +2936,17 @@ function deadlineRisk(deadlineStr) {
   if (diffMs <= 0) return 'overdue';
   if (diffMs < 24 * 60 * 60 * 1000) return 'soon';
   return '';
+}
+
+// "At risk" = due soon OR already blown. checkIsUrgent() above deliberately
+// returns false for an overdue build (diffMs > 0), which is correct for its own
+// callers but made the dashboard lie: a card's red tint switched OFF at the
+// exact moment the deadline passed, and the Urgent pill counted DOWN as builds
+// slipped — a floor with five overdue machines and nothing due in 24 hours read
+// "Urgent: 0". Left checkIsUrgent alone; other call sites depend on its meaning.
+function isAtRisk(deadlineStr) {
+  const r = deadlineRisk(deadlineStr);
+  return r === 'soon' || r === 'overdue';
 }
 
 function getStatusLabelText(status) {
@@ -3281,7 +3350,18 @@ function openTicketModal(ticketId = null) {
   // it reflects the values they just loaded).
   updateTicketModalChrome(ticketId);
 
+  // AFTER the QC checkboxes have been populated. updateFormLockStates runs twice
+  // during open (once at reset, once with the real build %), but both fire BEFORE
+  // the boxes are filled in, and setting .checked in code raises no change event —
+  // so the counter read 0 / 11 on every existing ticket until someone touched a box.
+  refreshQcBadge();
+
   modal.classList.add('active');
+
+  // Land on the stage the build is actually at, rather than the top of a
+  // ~3,800px form. Runs after .active so the modal has layout to scroll.
+  initJourneyNav();
+  scrollModalToCurrentStage();
 }
 
 /*
@@ -3352,6 +3432,43 @@ function updateTicketModalChrome(ticketId) {
     el.classList.toggle('current', !!t && i === reachedIdx);
     el.classList.toggle('idle', !t);
   });
+  _tmjReachedIdx = reachedIdx;
+}
+
+// The journey rail sits in the modal's non-scrolling header, so it is the one
+// thing always in view — and it was five inert divs. The modal is ten panels
+// totalling ~3,800px against an ~845px viewport, with no other navigation of any
+// kind, so the technician scrolled the whole thing by hand every time.
+let _tmjReachedIdx = 0;
+function initJourneyNav() {
+  const rail = document.getElementById('tmh-journey');
+  if (!rail || rail.dataset.navBound) return;
+  rail.dataset.navBound = '1';
+  rail.addEventListener('click', (e) => {
+    const step = e.target.closest('.tmj-step');
+    if (!step || !step.dataset.target) return;
+    const target = document.querySelector(step.dataset.target);
+    if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  });
+}
+
+// On open, land on the stage the build is ACTUALLY at. The header already
+// computes and displays "you are at Assembly" and then dropped the technician at
+// Basic Details, ~1,900px away, on every open of every ticket. Skipped for a new
+// ticket, where the top of the form is genuinely the right place to start.
+function scrollModalToCurrentStage() {
+  const modal = document.getElementById('ticket-modal');
+  const body = modal && modal.querySelector('.modal-body');
+  if (!body || modal.classList.contains('is-new-ticket')) return;
+  const steps = document.querySelectorAll('#tmh-journey .tmj-step');
+  const step = steps[_tmjReachedIdx];
+  if (!step || !step.dataset.target) return;
+  const target = document.querySelector(step.dataset.target);
+  if (!target || target.offsetParent === null) return;
+  // After paint, or the modal has no layout yet and scrollIntoView is a no-op.
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => target.scrollIntoView({ behavior: 'auto', block: 'start' }));
+  });
 }
 
 function updateFormLockStates(buildPct) {
@@ -3363,16 +3480,22 @@ function updateFormLockStates(buildPct) {
   const serialsSect = document.getElementById('serials-section');
 
   const lockStrict = !appState.settings.disableQcLock;
+  const isLocked = buildPct < 100 && lockStrict;
 
-  if (buildPct < 100 && lockStrict) {
-    qcSect.classList.add('locked');
-    diagSect.classList.add('locked');
-    serialsSect.classList.add('locked');
-  } else {
-    qcSect.classList.remove('locked');
-    diagSect.classList.remove('locked');
-    serialsSect.classList.remove('locked');
-  }
+  // `pointer-events: none` (the CSS lock) stops the MOUSE and nothing else, so
+  // all eleven QC checkboxes stayed in the tab order behind an 85%-opaque
+  // overlay. A technician — or a barcode scanner emitting Tab and Enter — could
+  // tick "BIOS Updated" before assembly reached 100% and never see what they
+  // had ticked, silently defeating the exact gate this product exists to
+  // enforce. `inert` removes the subtree from the tab order AND from hit
+  // testing in one step, so the gate now holds against the keyboard too.
+  [qcSect, diagSect, serialsSect].forEach(sect => {
+    if (!sect) return;
+    sect.classList.toggle('locked', isLocked);
+    sect.toggleAttribute('inert', isLocked);
+  });
+
+  refreshQcBadge();
 }
 
 function validateDiagnosticsThresholds() {
@@ -5376,7 +5499,140 @@ function setupEventListeners() {
     }
   });
 
-  document.getElementById('ticket-form').addEventListener('submit', handleTicketFormSubmit);
+  var _svcBtn = document.getElementById("btn-open-service");
+  if (_svcBtn) _svcBtn.addEventListener("click", function () { switchScreen("service"); });
+
+  const _ticketForm = document.getElementById('ticket-form');
+
+  // ── The ticket saves ONLY when someone activates Save ────────────────────
+  // v1.9.9 guarded Enter inside the scan fields, and it was still possible to
+  // save by scanning: a USB scanner's terminator is configurable, and a Tab
+  // suffix walks focus forward until it lands on #btn-save-ticket, where the
+  // scanner's own Enter (or the next scan's terminator) activates it — a real
+  // click, which no key handler can distinguish from a deliberate one.
+  //
+  // So the key handling below is now only about WHERE FOCUS GOES. Whether the
+  // ticket is allowed to save is decided here, structurally: implicit
+  // submission is refused outright, and only a genuine activation of the Save
+  // button sets the intent flag. This holds for every scanner configuration,
+  // every key, and every field — present and future.
+  let _saveIntent = false;
+  const _saveBtn = document.getElementById('btn-save-ticket');
+  if (_saveBtn) {
+    // 'click' covers mouse, touch, and keyboard activation of the button, and
+    // always fires before 'submit'.
+    _saveBtn.addEventListener('click', () => { _saveIntent = true; });
+  }
+  _ticketForm.addEventListener('submit', (e) => {
+    if (!_saveIntent) {
+      // Implicit submission — a stray Enter somewhere in the form. Never save.
+      e.preventDefault();
+      return;
+    }
+    _saveIntent = false;
+    return handleTicketFormSubmit(e);
+  });
+
+  // ── Barcode scanners must not save the ticket ────────────────────────────
+  // A scanner is a keyboard: it types the serial, then sends Enter. Enter inside
+  // a field of a form that HAS a submit button (#btn-save-ticket, index.html:1478)
+  // fires the browser's implicit submission — so every single scan was running
+  // handleTicketFormSubmit, saving the ticket and closing the modal, throwing the
+  // technician back to the dashboard mid-scan.
+  //
+  // Nothing in this form needs Enter: every field commits on 'input' (see the
+  // .cv-scan handler and setupProcurement), and the two fields that DO use Enter
+  // — the awaiting-parts note and the damage note — handle it on the element
+  // itself, which runs before this delegated listener and already calls
+  // preventDefault. Saving is the Save Ticket button, and only the Save Ticket
+  // button. <button> and <textarea> are untouched, so the button still submits
+  // when clicked or activated by keyboard.
+  _ticketForm.addEventListener('keydown', (e) => {
+    if (e.isComposing || e.keyCode === 229) return;   // IME confirming a candidate
+    const el = e.target;
+    if (!el || !el.tagName) return;
+    const tag = el.tagName.toUpperCase();
+    if (tag !== 'INPUT' && tag !== 'SELECT') return;
+
+    const inScanField = el.matches && el.matches(SCAN_FIELD_SEL);
+
+    // A scanner's terminator is configurable and the shop's units are not all
+    // set the same way. Enter and Tab are the two in use, so BOTH mean "that
+    // one's done" inside a scan box. Shift+Tab is left alone — a technician
+    // stepping back through the form by hand must still be able to.
+    const isEnter = e.key === 'Enter';
+    const isScanTab = e.key === 'Tab' && !e.shiftKey && inScanField;
+
+    if (isEnter) {
+      // Enter never submits, from any field in this form.
+      e.preventDefault();
+      if (!inScanField) return;
+    } else if (!isScanTab) {
+      return;
+    }
+
+    // Many wedge scanners terminate with CR+LF, i.e. TWO Enter keydowns a few ms
+    // apart. Without this, the second one advances again and every remaining scan
+    // lands in the wrong component — silently, and one part out of step.
+    // Many wedge scanners terminate with CR+LF — TWO keydowns a few ms apart.
+    // Unguarded, the second advances again and every remaining scan lands in the
+    // wrong component: silently, and one part out of step.
+    //
+    // Neither a clock nor the element identity can tell the two apart. Focus
+    // moves synchronously inside the first keydown, so the second is delivered
+    // to the NEW box, which defeats element-keying; and a fast operator's real
+    // second scan can fall inside any time window generous enough to catch a
+    // CR+LF pair, which defeats a pure debounce.
+    //
+    // What does separate them is content. A real scan always types characters
+    // before its terminator, so the box it fires from is non-empty. The second
+    // half of a CR+LF pair fires from the box we just moved to, which is empty
+    // by construction — the advance below only ever lands on an empty box.
+    // Pressing Enter on an empty scan box therefore does nothing, which is also
+    // the right behaviour for a technician tabbing through by hand.
+    if (!String(el.value || '').trim()) {
+      if (isScanTab) e.preventDefault();
+      return;
+    }
+    // Belt and braces for a scanner that double-fires on the SAME box.
+    const now = Date.now();
+    if (el === _lastScanEl && now - _lastScanAdvance < 400) {
+      if (isScanTab) e.preventDefault();
+      return;
+    }
+    _lastScanAdvance = now;
+    _lastScanEl = el;
+
+    // Advance ONLY within the section being worked. Procurement (goods-in) and
+    // component verification (build time) are deliberately independent captures —
+    // "kept SEPARATE from the technician's cvState scan so that later scan is a
+    // second verification" (see setupProcurement). Letting focus cross that
+    // boundary would put a goods-in operator's scan into the technician's
+    // verification field, forge a "matches invoice" tick, and collapse a
+    // two-person double-check into one person scanning twice.
+    const section = el.closest('#procurement-rows, #cv-rows') || _ticketForm;
+    const fields = Array.from(section.querySelectorAll(SCAN_FIELD_SEL))
+      // getClientRects() rather than offsetParent: the modal is positioned, which
+      // makes offsetParent null for visible children and would filter out everything.
+      .filter(f => !f.disabled && f.getClientRects().length > 0);
+
+    // Skip boxes that already hold a serial. Focusing a filled box would either
+    // overwrite a good value on the next scan or append to it; neither is what
+    // anyone wants, and a re-scan is still one click away.
+    const i = fields.indexOf(el);
+    const next = i === -1 ? null : fields.slice(i + 1).find(f => !f.value.trim());
+    if (next) {
+      if (isScanTab) e.preventDefault();   // we are taking over the move
+      next.focus();
+      next.select();
+    } else if (isEnter) {
+      el.blur();   // nothing left to scan here — stop, don't wrap round
+    }
+    // Tab with nothing left to scan falls through to native behaviour, so the
+    // next control in the row (the box-condition select) is still reachable by
+    // keyboard. It cannot reach Save from here in one press, and even if it did,
+    // the submit gate above refuses anything that is not a real Save activation.
+  });
 
   // Staff Modal System Auto-Detect Local Specs click handler.
   // v1.9.7 — the button was removed from the admin ticket view (detection belongs to
@@ -5645,14 +5901,17 @@ function setupEventListeners() {
 
   // Autocomplete standard checks button
   document.getElementById('btn-qc-check-all').addEventListener('click', () => {
-    const qcIds = [
-      'qc-phys-cabinet', 'qc-phys-motherboard', 'qc-phys-ram', 'qc-phys-screws',
-      'qc-soft-windows', 'qc-soft-drivers', 'qc-soft-bios',
-      'qc-port-usb', 'qc-port-video', 'qc-port-audio', 'qc-port-wifi'
-    ];
-    qcIds.forEach(id => {
-      document.getElementById(id).checked = true;
+    QC_CHECK_IDS.forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.checked = true;
     });
+    refreshQcBadge();
+  });
+
+  // Keep the counter honest when boxes are ticked one at a time.
+  QC_CHECK_IDS.forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener('change', refreshQcBadge);
   });
 
   // Client exit (takes client back to selector screen)
@@ -7181,7 +7440,14 @@ function buildComponentPassport(hwId, res, ssdHealth) {
   const ddrGen = smbiosTypes.length ? (SMBIOS_DDR_GEN[smbiosTypes[0]] || `SMBIOS type ${smbiosTypes[0]}`) : null;
 
   const vramMB = hwId.gpu && hwId.gpu.vramMB;
-  const vram = vramMB != null ? (vramMB >= 1024 ? `${Math.round(vramMB / 1024)} GB` : `${vramMB} MB`) : null;
+  // A figure that still came from Win32_VideoController.AdapterRAM is clamped to a
+  // UInt32, so anything landing at ~4 GB from that source is very likely a larger
+  // card being under-reported. Say so on the report rather than printing a number
+  // we don't trust — an 8 GB card was signed off as 4 GB this way.
+  const vramCapped = (hwId.gpu && hwId.gpu.vramSource === 'wmi-adapterram') && vramMB != null && vramMB >= 4000 && vramMB <= 4096;
+  const vram = vramMB != null
+    ? (vramMB >= 1024 ? `${Math.round(vramMB / 1024)} GB` : `${vramMB} MB`) + (vramCapped ? ' (driver did not report — verify)' : '')
+    : null;
 
   return {
     cpu: {
@@ -7659,10 +7925,10 @@ function renderTicketQueries(rows) {
     const when = fmtQueryTime(q.created_at);
     const answerArea = q.answer
       ? `<div class="tq-answer"><span class="tq-ans-label">🔧 Your reply</span><div class="tq-ans-text">${escapeHtmlLite(q.answer)}</div>
-           <button class="tq-link" data-edit="${q.id}">Edit reply</button></div>`
+           <button type="button" class="tq-link" data-edit="${q.id}">Edit reply</button></div>`
       : `<div class="tq-reply-box" data-box="${q.id}">
            <textarea class="tq-reply-input" data-input="${q.id}" rows="2" placeholder="Type your reply to sales…"></textarea>
-           <button class="tq-send-btn" data-send="${q.id}">Send reply →</button>
+           <button type="button" class="tq-send-btn" data-send="${q.id}">Send reply →</button>
          </div>`;
     return `<div class="tq-item ${resolved ? 'resolved' : ''} ${!q.answer && !resolved ? 'open' : ''}">
       <div class="tq-q">
@@ -7673,8 +7939,8 @@ function renderTicketQueries(rows) {
       ${answerArea}
       <div class="tq-foot">
         ${resolved ? '<span class="tq-resolved">✓ Resolved</span>'
-                   : `<button class="tq-link tq-resolve" data-resolve="${q.id}">Mark resolved</button>`}
-        ${resolved ? `<button class="tq-link" data-reopen="${q.id}">Reopen</button>` : ''}
+                   : `<button type="button" class="tq-link tq-resolve" data-resolve="${q.id}">Mark resolved</button>`}
+        ${resolved ? `<button type="button" class="tq-link" data-reopen="${q.id}">Reopen</button>` : ''}
       </div>
     </div>`;
   }).join('');
@@ -7733,7 +7999,7 @@ function beginEditReply(id) {
   const current = wrap.querySelector('.tq-ans-text')?.textContent || '';
   answerDiv.outerHTML = `<div class="tq-reply-box" data-box="${id}">
       <textarea class="tq-reply-input" data-input="${id}" rows="2">${escapeHtmlLite(current)}</textarea>
-      <button class="tq-send-btn" data-send="${id}">Update reply →</button>
+      <button type="button" class="tq-send-btn" data-send="${id}">Update reply →</button>
     </div>`;
   const box = wrap.querySelector(`[data-send="${id}"]`);
   if (box) box.addEventListener('click', () => submitTechAnswer(id));

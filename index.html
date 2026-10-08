@@ -11,7 +11,7 @@
        needed for it; pdfjs uses a local worker (worker-src blob:). To roll back a
        suspected breakage, delete this one <meta> tag. -->
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: blob: https:; font-src 'self' https://fonts.gstatic.com data:; connect-src 'self' https: wss: data: blob: file:; worker-src 'self' blob:; child-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'">
-  <title>Neo QC - PC Quality Control Portal</title>
+  <title>Neo Tokyo Operations</title>
   <!-- Google Fonts: Space Grotesk, Hanken Grotesk, JetBrains Mono -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -26,7 +26,7 @@
   <div class="custom-titlebar">
     <div class="titlebar-drag-area">
       <svg class="titlebar-logo-svg" viewBox="0 0 100 100"><circle cx="50" cy="50" r="40" stroke="currentColor" stroke-width="10" fill="none" stroke-dasharray="78.776 5" stroke-dashoffset="60.332" /><path d="M 50,23 L 72,70 C 58,58 50,56 50,56 C 50,56 42,58 28,70 Z" fill="currentColor" /></svg>
-      <span class="titlebar-text">NEO TOKYO // QC & Diagnostics Lab Portal</span>
+      <span class="titlebar-text">NEO TOKYO // OPERATIONS</span>
       <span id="update-status-pill" class="update-status-pill" style="display:none;"></span>
     </div>
     <button id="titlebar-user" class="titlebar-user hidden" title="Sign out">
@@ -229,7 +229,7 @@
   </div>
 
   <!-- STAFF SYSTEM SCREEN -->
-  <div id="staff-screen" class="screen">
+  <div id="staff-screen" class="screen has-rail">
     <!-- Navbar -->
     <header class="glass-slab navbar">
       <div class="nav-brand">
@@ -255,6 +255,7 @@
           </div>
         </div>
         <button id="btn-toggle-theme" class="icon-btn" title="Toggle Dark/Light Mode">🌓</button>
+        <button id="btn-open-service" class="secondary-btn" title="Repairs, warranty and upgrades">🔧 Service</button>
         <button id="btn-new-ticket" class="primary-pink-btn">+ New Ticket</button>
       </div>
     </header>
@@ -295,7 +296,7 @@
           </div>
           <div class="stat-pill">
             <div class="stat-pill-value" id="stat-urgent">0</div>
-            <div class="stat-pill-label">⚠️ Urgent</div>
+            <div class="stat-pill-label">⚠️ At Risk</div>
           </div>
         </div>
 
@@ -342,6 +343,159 @@
   </div>
 
   <!-- TESTING CLIENT SCREEN -->
+  <!-- ══════════════════════════════════════════════════════════════════════
+       SERVICE TICKETING — repairs, warranty/RMA and upgrades.
+       A sibling of the build dashboard, not a ticket type: every consumer of
+       `tickets` is build-shaped, and three of them would destroy a service row.
+       ══════════════════════════════════════════════════════════════════════ -->
+  <!-- ══════════════════════════════════════════════════════════════════════
+       APP RAIL — the persistent shell.
+       Deliberately a FIXED sibling of the screens rather than a wrapper around
+       them: every screen is already `height: calc(100vh - 32px)` with its own
+       flex column, so re-parenting them into a layout container would have
+       meant re-testing all seven. Screens that belong to the office get
+       `.has-rail`, which is nothing but a left inset. Nothing else moved.
+       ══════════════════════════════════════════════════════════════════════ -->
+  <nav id="app-rail" class="app-rail hidden" aria-label="Sections">
+    <button class="rail-item" data-section="overview" title="Overview">
+      <span class="rail-ic">◎</span><span class="rail-label">Overview</span>
+    </button>
+    <button class="rail-item" data-section="builds" title="Builds">
+      <span class="rail-ic">🖥</span><span class="rail-label">Builds</span>
+    </button>
+    <button class="rail-item" data-section="service" title="Service">
+      <span class="rail-ic">🔧</span><span class="rail-label">Service</span>
+    </button>
+    <div class="rail-spacer"></div>
+    <button class="rail-item" data-section="bench" title="Open the Testing Client">
+      <span class="rail-ic">⚗</span><span class="rail-label">Bench</span>
+    </button>
+    <button class="rail-item" data-section="settings" title="Settings">
+      <span class="rail-ic">⚙</span><span class="rail-label">Settings</span>
+    </button>
+  </nav>
+
+  <!-- ─────────────────────────────── OVERVIEW (builds + service together) ─── -->
+  <div id="overview-screen" class="screen has-rail">
+    <header class="glass-slab navbar">
+      <div class="nav-brand">
+        <span class="nav-title">OVERVIEW</span>
+        <span id="ov-stat" class="sv-stat">—</span>
+      </div>
+      <div class="nav-controls">
+        <input type="text" id="ov-search" class="sv-search" placeholder="Customer, device, code, technician…" autocomplete="off">
+        <select id="ov-filter" class="filter-select">
+          <option value="attention">Needs attention</option>
+          <option value="open" selected>Everything open</option>
+          <option value="builds">Builds only</option>
+          <option value="service">Service only</option>
+          <option value="all">Including finished</option>
+        </select>
+      </div>
+    </header>
+    <main class="dashboard-container">
+      <div id="ov-tiles" class="ov-tiles"></div>
+      <p class="sv-lead">Everything the shop has open, newest first. A <strong>Build</strong> is a machine we are making; a <strong>Service</strong> job is one we are fixing. The number on the right is how long it has sat in its current state.</p>
+      <div id="ov-list" class="ov-list"></div>
+    </main>
+  </div>
+
+  <div id="service-screen" class="screen has-rail">
+    <header class="glass-slab navbar">
+      <div class="nav-brand">
+        <svg class="brand-logo-svg" viewBox="0 0 100 100" style="width:22px;height:22px;vertical-align:middle;margin-right:6px;color:var(--primary-pink);"><circle cx="50" cy="50" r="40" stroke="currentColor" stroke-width="10" fill="none" stroke-dasharray="78.776 5" stroke-dashoffset="60.332" /><path d="M 50,23 L 72,70 C 58,58 50,56 50,56 C 50,56 42,58 28,70 Z" fill="currentColor" /></svg>
+        <span class="nav-title">NEO TOKYO // SERVICE</span>
+        <span id="sv-stat" class="sv-stat">0 open</span>
+      </div>
+      <div class="nav-controls">
+        <label class="sv-mine"><input type="checkbox" id="sv-mine"> Mine only</label>
+        <input type="text" id="sv-search" class="sv-search" placeholder="Customer, device, code or phone…" autocomplete="off">
+        <button id="sv-new" class="primary-pink-btn">+ New Service Job</button>
+      </div>
+    </header>
+
+    <main class="dashboard-container">
+      <p class="sv-lead">Columns are <strong>who we are waiting on</strong>, not what stage the work is at — a service job loops, and most of its life is spent waiting on somebody who isn't us. The big number on each card is how long it has sat where it is.</p>
+      <div id="sv-board" class="sv-board"></div>
+    </main>
+  </div>
+
+  <!-- ── Intake ───────────────────────────────────────────────────────────── -->
+  <div id="sv-intake-modal" class="modal-overlay">
+    <div class="glass-slab modal-card sv-modal">
+      <div class="modal-header">
+        <h2>Take in a job</h2>
+        <button type="button" id="sv-in-close" class="close-btn">&times;</button>
+      </div>
+      <div class="modal-body" id="sv-intake-form">
+        <div class="sv-grid">
+          <label class="sv-field sv-span2"><span>Job type</span>
+            <select id="sv-in-kind" class="settings-select"></select></label>
+          <label class="sv-field"><span>Customer name *</span>
+            <input type="text" id="sv-in-name" autocomplete="off"></label>
+          <label class="sv-field"><span>Phone *</span>
+            <input type="text" id="sv-in-phone" autocomplete="off" placeholder="10-digit mobile"></label>
+          <label class="sv-field"><span>Email</span>
+            <input type="text" id="sv-in-email" autocomplete="off"></label>
+          <label class="sv-field"><span>Device</span>
+            <input type="text" id="sv-in-device" autocomplete="off" placeholder="e.g. Gaming PC, ASUS TUF A15"></label>
+          <label class="sv-field"><span>Serial / service tag</span>
+            <input type="text" id="sv-in-serial" autocomplete="off" spellcheck="false" placeholder="Scan or type"></label>
+          <label class="sv-field sv-span2"><span>Reported fault *</span>
+            <textarea id="sv-in-fault" rows="2" placeholder="In the customer's own words"></textarea></label>
+        </div>
+
+        <div id="sv-in-buildrow" class="sv-sub hidden">
+          <label class="sv-field sv-span2"><span>Original build ticket ID</span>
+            <input type="text" id="sv-in-build" autocomplete="off" placeholder="t_… (leave blank if you'll link it later)"></label>
+          <p class="sv-hint">Linking brings across the serials, specs and QC baseline we already hold, so “is this under warranty, and is this the card we sold you” is answerable at a glance.</p>
+        </div>
+
+        <div id="sv-in-outside" class="sv-sub">
+          <h4 class="sv-sub-title">Intake record</h4>
+          <p class="sv-hint">This is the shop's protection against “it wasn't scratched when I brought it in”. Fill it in with the customer standing there.</p>
+          <div class="sv-grid">
+            <label class="sv-field sv-span2"><span>Came in with</span>
+              <input type="text" id="sv-in-accessories" autocomplete="off" placeholder="Charger, bag, drive, keys…"></label>
+            <label class="sv-field sv-span2"><span>Condition on arrival</span>
+              <textarea id="sv-in-condition" rows="2" placeholder="Existing scratches, dents, missing screws, cracked panel…"></textarea></label>
+          </div>
+          <label class="sv-check"><input type="checkbox" id="sv-in-powers"> Powers on at the counter</label>
+        </div>
+
+        <label class="sv-check"><input type="checkbox" id="sv-in-hasdata"> Customer data on board — back up before working</label>
+        <div id="sv-in-status" class="sv-status"></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" id="sv-in-cancel" class="secondary-btn">Cancel</button>
+        <button type="button" id="sv-in-create" class="primary-pink-btn">Create job</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Job panel ────────────────────────────────────────────────────────── -->
+  <div id="sv-job-modal" class="modal-overlay">
+    <div class="glass-slab modal-card sv-modal">
+      <div class="modal-header">
+        <div>
+          <h2 id="sv-job-title">—</h2>
+          <div id="sv-job-sub" class="sv-job-sub"></div>
+        </div>
+        <button type="button" id="sv-job-close" class="close-btn">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div id="sv-job-ball" class="sv-job-ball"></div>
+        <div id="sv-job-tabs" class="sv-tabs">
+          <button type="button" class="sv-tab active" data-tab="details">Details</button>
+          <button type="button" class="sv-tab" data-tab="notes">Notes</button>
+          <button type="button" class="sv-tab" data-tab="photos">Photos</button>
+          <button type="button" class="sv-tab" data-tab="history">History</button>
+        </div>
+        <div id="sv-job-body" class="sv-job-body"></div>
+      </div>
+    </div>
+  </div>
+
   <div id="client-screen" class="screen">
     <!-- Navbar -->
     <header class="glass-slab navbar">
@@ -362,7 +516,7 @@
         <p class="card-subtitle">Connect this PC to an active ticket to run automated benchmarks and thermal analysis.</p>
         
         <!-- Ticket Association Redesigned -->
-        <div class="ticket-association-panel" style="background: rgba(231,1,78,0.04); border: 1px solid rgba(231,1,78,0.15); padding: 14px; border-radius: 12px; margin-bottom: 20px;">
+        <div class="ticket-association-panel" style="background: rgba(var(--primary-pink-rgb),0.04); border: 1px solid rgba(var(--primary-pink-rgb),0.15); padding: 14px; border-radius: 12px; margin-bottom: 20px;">
           <label style="font-weight: 700; color: var(--primary-pink); display: block; margin-bottom: 8px; font-size: 0.82rem; text-transform: uppercase; letter-spacing: 0.05em;">🔗 Connect to Active Ticket</label>
           <div style="display: flex; gap: 12px; align-items: center;">
             <input type="text" id="client-ticket-input" placeholder="Type Ticket ID (e.g. #AB12CD)" class="large-select" style="flex-grow: 1; padding: 8px 12px; background: rgba(0,0,0,0.25); border: 1px solid var(--glass-border); color: white; border-radius: 6px; font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; outline: none; transition: border-color 0.2s;" onfocus="this.style.borderColor='var(--primary-pink)'" onblur="this.style.borderColor='var(--glass-border)'">
@@ -812,11 +966,11 @@
         </div>
         <!-- The build journey, always in view while you scroll the ticket. -->
         <div id="tmh-journey" class="tmh-journey" aria-label="Build journey">
-          <div class="tmj-step" data-stage="awaiting"><i></i><span>Parts</span></div>
-          <div class="tmj-step" data-stage="procurement"><i></i><span>Procurement</span></div>
-          <div class="tmj-step" data-stage="building"><i></i><span>Assembly</span></div>
-          <div class="tmj-step" data-stage="qc"><i></i><span>QC</span></div>
-          <div class="tmj-step" data-stage="completed"><i></i><span>Ready</span></div>
+          <button type="button" class="tmj-step" data-stage="awaiting" data-target="#procurement-section" title="Jump to Procurement"><i></i><span>Parts</span></button>
+          <button type="button" class="tmj-step" data-stage="procurement" data-target="#procurement-section" title="Jump to Procurement"><i></i><span>Procurement</span></button>
+          <button type="button" class="tmj-step" data-stage="building" data-target="#assembly-section" title="Jump to Assembly"><i></i><span>Assembly</span></button>
+          <button type="button" class="tmj-step" data-stage="qc" data-target="#qc-testing-section" title="Jump to QC"><i></i><span>QC</span></button>
+          <button type="button" class="tmj-step" data-stage="completed" data-target="#diagnostics-section" title="Jump to Diagnostics"><i></i><span>Ready</span></button>
         </div>
         <button id="btn-close-ticket-modal" class="close-btn">&times;</button>
       </div>
@@ -1171,6 +1325,7 @@
             <div class="section-header-row">
               <h3>🧪 Step 2: Quality Control Checklist</h3>
               <div style="display:flex;align-items:center;gap:8px;">
+                <span id="qc-status-badge" class="badge">0 / 11</span>
                 <button type="button" class="flag-btn" data-flag-segment="qc" title="Flag a QC issue">⚑ Flag</button>
                 <button type="button" id="btn-qc-check-all" class="text-btn">Check All Standard Items</button>
               </div>
@@ -1199,7 +1354,7 @@
                 <div id="modal-windows-activation-info" style="margin-top: 12px; padding: 10px; background: rgba(255,255,255,0.02); border: 1px solid var(--glass-border); border-radius: 8px; font-size: 0.8rem;">
                   <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
                     <span style="font-weight: 700; color: var(--primary-pink); text-transform: uppercase; letter-spacing: 0.05em; font-size: 0.7rem;">🛡️ Windows License Tracker</span>
-                    <button type="button" id="btn-admin-detect-license" style="background: rgba(231,1,78,0.1); border: 1px solid var(--primary-pink); color: var(--primary-pink); font-size: 0.7rem; padding: 2px 6px; border-radius: 4px; cursor: pointer; font-weight: 600; transition: all 0.2s;" onmouseover="this.style.background='var(--primary-pink)'; this.style.color='white';" onmouseout="this.style.background='rgba(231,1,78,0.1)'; this.style.color='var(--primary-pink)';">Auto-Detect</button>
+                    <button type="button" id="btn-admin-detect-license" style="background: rgba(var(--primary-pink-rgb),0.1); border: 1px solid var(--primary-pink); color: var(--primary-pink); font-size: 0.7rem; padding: 2px 6px; border-radius: 4px; cursor: pointer; font-weight: 600; transition: all 0.2s;" onmouseover="this.style.background='var(--primary-pink)'; this.style.color='white';" onmouseout="this.style.background='rgba(var(--primary-pink-rgb),0.1)'; this.style.color='var(--primary-pink)';">Auto-Detect</button>
                   </div>
                   <div style="display: flex; flex-direction: column; gap: 4px;">
                     <span id="modal-activation-os" style="display: none;">Windows</span>
@@ -1214,7 +1369,11 @@
           </div>
 
           <div id="diagnostics-section" class="form-section margin-top locked">
-            <div class="locked-overlay"></div>
+            <!-- This overlay was empty, and the panel behind it is the tallest in
+                 the modal (~1,200px), so while locked the technician scrolled
+                 through a screen and a half of unexplained frost. The QC panel
+                 above already explains itself; this one now does too. -->
+            <div class="locked-overlay"><div class="locked-message">🔒 Thermal &amp; benchmark results appear once the Testing Client has run this build.</div></div>
             <h3><span class="dr-inline-icon" data-icon="thermometer"></span> System Thermal &amp; Benchmark Results</h3>
             
             <!-- v1.8.2 — the admin side no longer RUNS benchmarks. Testing is
@@ -1462,7 +1621,7 @@
         <div class="form-section margin-top event-log-section collapsed">
           <div class="section-header-row" id="event-log-header">
             <h3 id="event-log-heading">📋 Activity Log &amp; Event History</h3>
-            <span class="badge" style="background: rgba(231,1,78,0.15); color: var(--primary-pink); border: 1px solid rgba(231,1,78,0.3);">Chronological</span>
+            <span class="badge" style="background: rgba(var(--primary-pink-rgb),0.15); color: var(--primary-pink); border: 1px solid rgba(var(--primary-pink-rgb),0.3);">Chronological</span>
           </div>
           <div id="modal-event-log-timeline" class="event-log-timeline">
             <div class="event-log-empty">Open an existing ticket to view its activity history.</div>
@@ -1980,6 +2139,7 @@
           <tr><td><strong>Operating System</strong></td><td>Windows</td></tr>
           <tr><td><strong>Activation Status</strong></td><td id="print-win-status">--</td></tr>
           <tr><td><strong>Product Key</strong></td><td id="print-win-key" style="font-family:monospace;font-size:7.5pt;word-break:break-all;">--</td></tr>
+          <tr id="print-win-key-note" style="display:none;"><td colspan="2" style="font-size:7pt;color:#666;padding-top:2px;">Masked for your protection. The full key is registered to this machine and held on file at Neo Tokyo Kochi.</td></tr>
         </table>
       </div>
     </div>
@@ -2049,8 +2209,8 @@
     </div>
 
     <div class="print-page-footline">
-      <span>NEO TOKYO — Quality Control Certificate · retain this document; verify with the Integrity Code on page 4</span>
-      <span>Page 1 of 4</span>
+      <span>NEO TOKYO — Quality Control Certificate · retain this document; verify with the Integrity Code inside</span>
+      
     </div>
     </div><!-- /print-page-1 -->
 
@@ -2189,7 +2349,7 @@
 
     <div class="print-page-footline">
       <span>NEO TOKYO — Stress &amp; Diagnostics Lab Data</span>
-      <span>Page 2 of 4</span>
+      
     </div>
     </div><!-- /print-page-2 -->
 
@@ -2310,7 +2470,7 @@
 
     <div class="print-page-footline">
       <span>NEO TOKYO — Hardware Health &amp; Connectivity</span>
-      <span>Page 3 of 4</span>
+      
     </div>
     </div><!-- /print-page-2b -->
 
@@ -2375,7 +2535,7 @@
     <div id="print-event-log-section" class="print-section hidden">
       <h3>Build &amp; Service Activity Log</h3>
       <table class="print-event-table">
-        <thead><tr><th>Timestamp (UTC)</th><th>Event</th><th>By</th></tr></thead>
+        <thead><tr><th>Timestamp (IST)</th><th>Event</th><th>By</th></tr></thead>
         <tbody id="print-event-log-body"></tbody>
       </table>
     </div>
@@ -2412,7 +2572,7 @@
 
     <div class="print-page-footline">
       <span>NEO TOKYO — Value Analysis &amp; Report Provenance</span>
-      <span>Page 4 of 4</span>
+      
     </div>
     </div><!-- /print-page-3 -->
 
@@ -2471,20 +2631,30 @@
     <div class="glass-slab modal-card" style="max-width: 650px; width: 100%; padding: 30px; border-radius: 20px;">
       <div class="modal-header" style="border-bottom: 1px solid var(--glass-border); padding-bottom: 15px; margin-bottom: 20px;">
         <h2 style="font-family: 'Syncopate', sans-serif; font-size: 1.3rem; color: var(--primary-pink); letter-spacing: 0.05em; margin: 0;">NEO QC UPDATED</h2>
-        <span data-app-version style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; font-weight: 700; background: rgba(231, 1, 78, 0.1); color: var(--primary-pink); padding: 4px 8px; border-radius: 4px;">v1.8.4</span>
+        <span data-app-version style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; font-weight: 700; background: rgba(var(--primary-pink-rgb), 0.1); color: var(--primary-pink); padding: 4px 8px; border-radius: 4px;">v1.8.4</span>
       </div>
       <div class="modal-body" style="font-size: 0.92rem; line-height: 1.6; color: var(--text-dark); max-height: 420px; overflow-y: auto; padding-right: 5px;">
         <p style="margin-top: 0;">A major update has been installed. Here's what's new in NeoQC <strong data-app-version>v1.9.3</strong>:</p>
         <ul style="padding-left: 20px; display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px;">
-          <li><strong>Invoice auto-fill fixed.</strong> Attaching a customer invoice now reads <em>every</em> component correctly — the graphics card and power supply that used to go missing are imported properly, with the right per-part prices and totals.</li>
-          <li><strong>Ticket sections reordered</strong> to follow the real build flow: Basic Details → Sales Queries → Target Specs → Customer-Supplied Parts → Component Verification → Condition Report → Detected Hardware → Assembly → QC.</li>
-          <li><strong>Deadline cues.</strong> Countdowns now turn <strong>amber</strong> under 24 hours and <strong>red</strong> when overdue — on the dashboard, on My Bench, and in the ticket header.</li>
-          <li><strong>Save confirmation + unsaved-changes warning</strong>, so a ticket is never closed with work lost by accident.</li>
-          <li><strong>Search your bench</strong> by customer, ticket number or spec.</li>
-          <li><strong>Duplicate-serial guard.</strong> If a serial you scan is already recorded on another build, the row is flagged so you can catch a double-entry.</li>
-          <li><strong>A warm line on the QC certificate</strong> telling the customer how long their PC took to hand-build.</li>
-          <li><strong>Security.</strong> The Testing Client no longer lets a technician switch across into the admin dashboard — access now follows each person's role.</li>
-          <li><strong>RGB control removed.</strong> Lighting is now set with each motherboard's own software. This also cleared the antivirus false-positive that was blocking installs on some machines.</li>
+                    <li><strong>One app instead of several portals.</strong> A bar down the left — Overview, Builds, Service — so moving between them is a click, and each remembers where you were. The app is <strong>Neo Tokyo Operations</strong> now; it outgrew “QC &amp; Diagnostics Lab Portal” a while ago.</li>
+          <li><strong>Overview: builds and repairs in one list.</strong> Late work first, with five counts across the top — late, waiting on a customer, waiting on a supplier, ready to collect, open altogether. Signing in lands you here, because that is the question you actually have.</li>
+          <li><strong>You can now take in more than one service job per session.</strong> The create button stayed disabled after the first job and nothing re-enabled it, so the second customer of the day could not be logged without restarting. Fixed.</li>
+          <li><strong>Service jobs are properly editable.</strong> Assign a technician, correct a phone number, record the diagnosis and the work done, set a promised date. Moving a job on now asks only what that step needs — which vendor, when it is expected back, what the outcome was.</li>
+          <li><strong>Notes and photos on a job.</strong> Notes are internal unless you tick the box to share one with the customer. Photos are stored privately — never public — and tagged intake, during or after. Intake photos are what settle “it wasn’t scratched when I brought it in”.</li>
+          <li><strong>A job can no longer be closed without saying what happened</strong>, and the outcome no longer defaults to “repaired” — an unrepaired machine used to be reported as repaired.</li>
+          <li><strong>Customers can track a repair on the website</strong>, the same way they track a build: their code plus the last four digits of their phone. They see whose turn it is, how long it has been, and a plain-language history of only what you chose to share.</li>
+          <li><strong>Fixes found before release.</strong> Photos could land on the wrong customer’s job if you switched jobs mid-upload, and a stage change could be filed on the wrong customer’s tracking page. A note could be lost while reporting that it saved. Editing one field could silently revert a colleague’s change. All corrected.</li>
+<li><strong>Scanning a serial really cannot save the ticket now — whatever your scanner is set to.</strong> The last update guarded the Enter key, and scanners set to send <em>Tab</em> still slipped through: Tab walked the cursor along until it was sitting on Save, and the next scan pressed it. The ticket now saves only when somebody actually clicks Save, and scanning steps you from one serial box to the next. It still will not jump between Procurement and Component Verification, so a goods-in scan can never land in the technician's own check.</li>
+          <li><strong>New: a Service section</strong> — the 🔧 button on the dashboard. Take in repairs, warranty claims and upgrades, and see every open job grouped by <em>who we are waiting on</em>: us, the customer, or a supplier. The big number on each card is how long it has sat where it is, so a machine quietly rotting on a shelf is the loudest thing on the screen. An outside machine gets a condition record at the counter — what came in with it, and what was already scratched.</li>
+          <li><strong>Graphics card memory is read correctly.</strong> Windows caps the value it reports at 4 GB, which is why an 8 GB card was recorded as a 4 GB one. The real size now comes from the driver — verified against a 12 GB card that used to read as 4 GB.</li>
+          <li><strong>No more fake serial numbers.</strong> Most motherboards ship without their serial set and report placeholder text like “System Serial Number” or “MB-1234567890”. Those were being recorded as if they were real. They now show as not set, so you know to read the sticker.</li>
+          <li><strong>Overdue builds stay red.</strong> A late build used to lose its red tint and drop out of the Urgent count at the exact moment it went late. The pill is now <strong>At Risk</strong> and counts overdue builds too.</li>
+          <li><strong>The QC checklist can no longer be ticked early.</strong> The lock blocked the mouse but not the Tab key, so the checks could be completed before assembly was finished.</li>
+          <li><strong>QC now shows a live count</strong> (“7 / 11”), and every checkbox is a full-width row that fills green when ticked — you can read progress across the room instead of counting boxes.</li>
+          <li><strong>The stage rail at the top of a ticket is clickable</strong>, and opening a ticket now takes you straight to the stage the build is actually at instead of the top of the form.</li>
+          <li><strong>Bigger targets at the bench.</strong> Serial boxes, temperature fields, the timer and the flag button are all larger, and there is now a visible outline showing which field your scanner will fill.</li>
+          <li><strong>The customer's certificate no longer prints the full Windows product key</strong> — it is masked, with the full key kept on file at the shop.</li>
+          <li><strong>Theme accent colour actually works.</strong> Choosing a colour other than pink used to leave half the app pink.</li>
         </ul>
       </div>
       <div class="modal-footer" style="border-top: 1px solid var(--glass-border); padding-top: 15px; display: flex; justify-content: flex-end; margin-top: 20px;">
@@ -2499,13 +2669,16 @@
   <script src="shared/matcher.js"></script>
   <script src="ssd-grading.js"></script>
   <script src="web-lookup.js"></script>
-  <script src="ppi.js"></script>
-  <script src="ppi-sync.js"></script>
+  <script src="shared/ppi.js"></script>
+  <script src="shared/ppi-sync.js"></script>
   <script src="print-render.js"></script>
-  <script src="invoice-import.js"></script>
+  <script src="shared/invoice-import.js"></script>
   <script src="invoice-ocr.js"></script>
   <script src="compat-check.js"></script>
   <script src="tech-assign.js"></script>
+  <script src="shared/service-status.js"></script>
   <script src="app.js"></script>
+  <script src="service.js"></script>
+  <script src="shell.js"></script>
 </body>
 </html>

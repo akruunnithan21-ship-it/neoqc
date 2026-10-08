@@ -15,7 +15,49 @@
 $ErrorActionPreference = 'SilentlyContinue'
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
-function S($v) { if ($null -eq $v) { return $null }; $t = "$v".Trim(); if ($t -eq '' -or $t -eq 'To Be Filled By O.E.M.' -or $t -eq 'Default string' -or $t -eq 'None' -or $t -eq 'Not Specified' -or $t -eq 'Not Applicable') { return $null }; return $t }
+# Consumer motherboards ship with the DMI/SMBIOS identity fields UNSET, and the
+# board then reports the field's own name back as its value: an ASUS ROG STRIX
+# returns "System Product Name" as the model, "System Serial Number" as the BIOS
+# serial and the literal "MB-1234567890" as the baseboard serial. Those are not
+# serials. Reporting them as if they were is what made serial detection look
+# broken — the technician reads "MB-1234567890" on the ticket, checks the sticker
+# on the board, and finds two different numbers.
+#
+# Returning $null here is the honest answer, and it tells the renderer to say
+# "not set by the manufacturer" so the technician knows to scan the physical
+# sticker instead of trusting the machine.
+$PLACEHOLDER_EXACT = @(
+  'to be filled by o.e.m.', 'to be filled by oem', 'filled by o.e.m.', 'filled by oem',
+  'default string', 'default', 'none', 'not specified', 'not applicable', 'n/a', 'na',
+  'null', 'invalid', 'o.e.m.', 'no enclosure', 'not available',
+  # NOTE: 'unknown' is deliberately NOT here. Get-PhysicalDisk.HealthStatus returns
+  # Healthy / Warning / Unhealthy / Unknown, and Unknown is a real state that the
+  # report must be able to show. 'oem' is likewise omitted — it is a real
+  # manufacturer string on some OEM-branded parts.
+  'system product name', 'system serial number', 'system manufacturer', 'system version',
+  'system name', 'system sku', 'system sku number', 'system model',
+  'base board product name', 'base board serial number', 'base board version',
+  'baseboard product name', 'baseboard serial number', 'baseboard version',
+  'chassis serial number', 'chassis version', 'chassis manufacturer',
+  'mb-1234567890', 'product name', 'serial number', 'manufacturer', 'version',
+  'asset-1234567890', 'empty'
+)
+
+function S($v) {
+  if ($null -eq $v) { return $null }
+  $t = "$v".Trim()
+  if ($t -eq '') { return $null }
+  $l = $t.ToLower()
+  if ($PLACEHOLDER_EXACT -contains $l) { return $null }
+  # Repeated-character and counting dummies: 0000…, XXXX…, 1234567890, ....
+  # The counting run is an explicit set, not a prefix pattern: an earlier
+  # '^0?123456789\d*$' would have nulled a genuine serial that merely STARTS
+  # 123456789, while still missing most real dummies.
+  if ($l -match '^(.)\1{3,}$') { return $null }
+  if ($l -match '^0+$' -or $l -match '^\.+$') { return $null }
+  if ($l -eq '0123456789' -or $l -eq '1234567890' -or $l -eq '123456789' -or $l -eq '012345678901234567890') { return $null }
+  return $t
+}
 
 # Win32_DiskDrive often hands back the NVMe serial as hex-encoded ASCII in
 # 4-char groups ("3931_3430_3539_3633..."), which is unreadable on a report.
@@ -28,16 +70,41 @@ function DecodeDiskSerial($raw) {
     $hex = ($s -replace '[^0-9A-Fa-f]', '')
     if ($hex.Length -lt 8 -or ($hex.Length % 2) -ne 0) { return $s }
     try {
+        # ALL-OR-NOTHING on purpose. A partial decode cannot be validated: on a
+        # BIWIN AP823 the identify blob is 3931_3430_3539_3633_50C6_8E07_3235_3136,
+        # whose leading printable run decodes to "91405963" — but the drive's real
+        # serial is 2516191405963, and "2516" lives in the DISCARDED tail. A
+        # leading-run decode there is not truncated, it is reordered, and it
+        # produces a plausible-looking serial that silently mismatches the sticker
+        # during component verification. Raw hex is ugly but self-evidently not a
+        # serial, which correctly sends the technician to the label.
         $sb = New-Object System.Text.StringBuilder
         for ($i = 0; $i -lt $hex.Length; $i += 2) {
             $b = [Convert]::ToInt32($hex.Substring($i, 2), 16)
-            if ($b -lt 32 -or $b -gt 126) { return $s }   # not printable → keep raw
+            if ($b -lt 32 -or $b -gt 126) { return $s }   # any binary byte -> keep raw
             [void]$sb.Append([char]$b)
         }
         $out = $sb.ToString().Trim()
         if ($out.Length -ge 4) { return $out }
         return $s
     } catch { return $s }
+}
+
+# The authoritative serial. Windows puts the controller's own serial into the
+# device instance path as &SN_<serial>, and it is the number printed on the
+# label — verified against all five drives on the shop workstation:
+#   Samsung 980 PRO  -> S5GXNS0X203576K   (identify blob was a WWN)
+#   BIWIN AP823      -> 2516191405963     (identify blob decodes wrongly)
+#   WDC SN550        -> 202547801983
+#   XPG S70 BLADE x2 -> 7O4422195JWC / 2O042L1HN4DX
+# Win32_DiskDrive.SerialNumber and Get-PhysicalDisk both return the raw identify
+# blob for NVMe, so this is tried FIRST and the blob only as a fallback.
+function DiskSerialFor($drive) {
+    if ($drive.PNPDeviceID -and $drive.PNPDeviceID -match '&SN_([^&\\]+)') {
+        $sn = S $matches[1]
+        if ($sn) { return $sn }
+    }
+    return DecodeDiskSerial $drive.SerialNumber
 }
 
 # ── System / chassis ───────────────────────────────────────────────────────
@@ -115,22 +182,40 @@ foreach ($m in (Get-CimInstance Win32_PhysicalMemory)) {
 $gpus = @()
 foreach ($g in (Get-CimInstance Win32_VideoController)) {
     $vram = $null
-    # AdapterRAM is unreliable/negative >4GB; prefer the registry qword.
+    $vramSource = $null
+    # AdapterRAM is a UInt32 and cannot exceed 4 GiB, so every card >= 4 GB reads as
+    # ~4 GB. The driver writes the true size as a QWORD in its registry class key.
+    #
+    # Pair the registry key to the adapter by MatchingDeviceId, NOT by comparing
+    # DriverDesc to the WMI Name: those two strings routinely differ (AMD ships
+    # "... Series" in one and not the other), and an exact-equality match silently
+    # fell through to the capped AdapterRAM — which is how an 8 GB RX 9050 was
+    # recorded as a 4 GB card. MatchingDeviceId is 'pci\ven_xxxx&dev_yyyy' and
+    # PNPDeviceID is that plus the subsys/rev tail, so a prefix test always pairs.
     try {
         $key = "HKLM:\SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}"
+        $needle = if ($g.PNPDeviceID) { ([string]$g.PNPDeviceID).ToLower() } else { $null }
         foreach ($sub in (Get-ChildItem $key -ErrorAction SilentlyContinue)) {
-            $desc = (Get-ItemProperty $sub.PSPath -Name 'DriverDesc' -ErrorAction SilentlyContinue).DriverDesc
-            if ($desc -and $desc -eq $g.Name) {
-                $qw = (Get-ItemProperty $sub.PSPath -Name 'HardwareInformation.qwMemorySize' -ErrorAction SilentlyContinue).'HardwareInformation.qwMemorySize'
-                if ($qw) { $vram = [math]::Round($qw / 1GB, 0) }
-            }
+            if ($sub.PSChildName -notmatch '^[0-9]{4}$') { continue }
+            $p = Get-ItemProperty $sub.PSPath -ErrorAction SilentlyContinue
+            if (-not $p) { continue }
+            $mid  = if ($p.MatchingDeviceId) { ([string]$p.MatchingDeviceId).ToLower() } else { $null }
+            $desc = $p.DriverDesc
+            $hit = ($needle -and $mid -and $needle.StartsWith($mid)) -or ($desc -and $desc -eq $g.Name)
+            if (-not $hit) { continue }
+            $qw = $p.'HardwareInformation.qwMemorySize'
+            if ($qw) { $vram = [math]::Round([int64]$qw / 1GB, 0); $vramSource = 'registry'; break }
         }
     } catch {}
-    if (-not $vram -and $g.AdapterRAM -gt 0) { $vram = [math]::Round($g.AdapterRAM / 1GB, 0) }
+    if (-not $vram -and $g.AdapterRAM -gt 0) {
+        $vram = [math]::Round($g.AdapterRAM / 1GB, 0)
+        $vramSource = 'wmi-adapterram'   # suspect at ~4 GB: may be a larger card
+    }
     $gpus += [ordered]@{
         name           = S $g.Name
         manufacturer   = S $g.AdapterCompatibility
         vramGB         = if ($vram) { $vram } else { $null }   # 0 = integrated/shared → null, not "0 GB"
+        vramSource     = $vramSource
         driverVersion  = S $g.DriverVersion
         driverDate     = if ($g.DriverDate) { $g.DriverDate.ToString('yyyy-MM-dd') } else { $null }
         videoProcessor = S $g.VideoProcessor
@@ -147,7 +232,7 @@ foreach ($d in (Get-CimInstance Win32_DiskDrive)) {
     $pd = $physMap[[string]$d.Index]
     $disks += [ordered]@{
         model         = S $d.Model
-        serial        = DecodeDiskSerial $d.SerialNumber
+        serial        = DiskSerialFor $d
         serialRaw     = S $d.SerialNumber
         firmware      = S $d.FirmwareRevision
         sizeGB        = if ($d.Size) { [math]::Round($d.Size / 1GB, 0) } else { $null }

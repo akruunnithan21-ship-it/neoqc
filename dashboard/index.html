@@ -41,6 +41,7 @@
     <!-- Signed-out: only Track + Log in are public -->
     <nav id="menu-public" class="menu-list">
       <button class="menu-item" data-nav="customer"><span class="mi-ic">🔍</span> Track your build</button>
+      <button class="menu-item" data-nav="service"><span class="mi-ic">🔧</span> Track a repair</button>
       <button class="menu-item" data-nav="login"><span class="mi-ic">🔑</span> Log in</button>
     </nav>
 
@@ -55,6 +56,8 @@
       </div>
       <button class="menu-item" id="menu-dashboard" data-nav="dashboard"><span class="mi-ic">📊</span> Dashboard</button>
       <button class="menu-item hidden" id="menu-ticketstatus" data-nav="ticket-status"><span class="mi-ic">🎫</span> <span id="menu-ts-label">Ticket Status</span></button>
+      <button class="menu-item hidden" id="menu-newbuild" data-nav="new-build"><span class="mi-ic">➕</span> New Build</button>
+      <button class="menu-item hidden" id="menu-board" data-nav="board"><span class="mi-ic">🗂</span> Pipeline</button>
       <button class="menu-item" data-nav="profile"><span class="mi-ic">👤</span> Edit Profile</button>
       <button class="menu-item" data-nav="customer"><span class="mi-ic">🔍</span> Track a build</button>
       <button class="menu-item menu-signout" id="menu-signout"><span class="mi-ic">⎋</span> Sign out</button>
@@ -82,6 +85,51 @@
     </div>
 
     <div id="status-card" class="status-card glass hidden"></div>
+  </main>
+
+  <!-- ──────────────────────────── SERVICE STATUS (public) ─── -->
+  <main id="view-service" class="view hidden">
+    <div class="hero">
+      <h1 class="hero-title">Where is my <span>PC</span>?</h1>
+      <p class="hero-sub">Repairs, warranty claims and upgrades. Enter the tracking code we gave you and the last 4 digits of your phone number.</p>
+    </div>
+
+    <div id="svc-form-wrap" class="lookup-card glass">
+      <form id="svc-form" class="svc-form" autocomplete="off">
+        <div class="lookup-row">
+          <input id="svc-code-input" class="lookup-input svc-code-in" maxlength="11"
+                 placeholder="NT-XXXXXXXX" autocomplete="off" spellcheck="false">
+          <input id="svc-phone-input" class="lookup-input svc-phone-in" maxlength="4"
+                 inputmode="numeric" placeholder="Last 4" autocomplete="off" spellcheck="false">
+          <button id="svc-lookup-btn" type="submit" class="btn-primary">Check status</button>
+        </div>
+      </form>
+      <p class="lookup-hint">Both are on the receipt we gave you when you dropped the item off. We ask for the phone digits so that only you can see your job.</p>
+    </div>
+
+    <div id="svc-error" class="error-box hidden"></div>
+
+    <div id="svc-result" class="hidden">
+      <div class="svc-card glass">
+        <div id="svc-sentence" class="svc-sentence">—</div>
+        <div id="svc-since" class="svc-since"></div>
+        <div id="svc-promise" class="svc-promise"></div>
+        <div id="svc-handler" class="svc-handler hidden"></div>
+
+        <div class="svc-meta">
+          <div class="svc-meta-item"><div class="label">Item</div><div class="value" id="svc-device">—</div></div>
+          <div class="svc-meta-item"><div class="label">In the name of</div><div class="value" id="svc-name">—</div></div>
+          <div class="svc-meta-item"><div class="label">Reference</div><div class="value mono" id="svc-code">—</div></div>
+        </div>
+      </div>
+
+      <div class="svc-card glass">
+        <h3 class="svc-tl-title">What's happened so far</h3>
+        <div id="svc-timeline" class="svc-timeline"></div>
+      </div>
+
+      <p class="svc-foot">This page updates itself. If something looks wrong, call the shop and quote your reference.</p>
+    </div>
   </main>
 
   <!-- ───────────────────────────────── LOGIN WALL (staff) ─── -->
@@ -165,6 +213,114 @@
     <p id="ts-empty" class="no-tickets hidden">No builds to show.</p>
   </main>
 
+  <!-- ───────────────────────────────── NEW BUILD / QUOTE BUILDER (sales) ─── -->
+  <!-- Phase 1 (v1.9.9): sales executives build a quote from the live catalogue.
+       Ticket creation + the interactive PPI comparison land in the next phases. -->
+  <!-- ───────────────────────────────── PIPELINE BOARD (sales) ─── -->
+  <main id="view-board" class="view hidden">
+    <div class="sales-toolbar">
+      <div class="toolbar-left">
+        <h2 class="sales-title">Pipeline</h2>
+        <span id="board-live" class="live-indicator"><span class="live-dot"></span>LIVE</span>
+      </div>
+      <div class="toolbar-right">
+        <label class="board-mine"><input type="checkbox" id="board-mine"> Mine only</label>
+        <input id="board-search" class="filter-input" type="search" placeholder="Customer, technician or #code" autocomplete="off">
+      </div>
+    </div>
+    <p class="qb-hint">Every build in the shop, left to right. Columns are worked out from what the technicians have actually ticked off — nothing here is a separate status anyone has to keep up to date.</p>
+    <div id="board-cols" class="board-cols"></div>
+  </main>
+
+  <main id="view-new-build" class="view hidden">
+    <div class="sales-toolbar">
+      <div class="toolbar-left"><h2 class="sales-title">New Build</h2></div>
+      <div class="toolbar-right">
+        <span id="qb-draft-note" class="qb-draft-note"></span>
+        <button id="qb-clear" class="btn-ghost" type="button">Clear</button>
+      </div>
+    </div>
+
+    <div class="qb-grid">
+      <!-- LEFT: customer + components -->
+      <div class="qb-main">
+        <section class="glass qb-card">
+          <h3 class="qb-card-title">Customer</h3>
+          <div class="qb-cust-grid">
+            <label class="qb-field">
+              <span>Customer name</span>
+              <input id="qb-cust-name" class="filter-input" placeholder="e.g. Arjun R Kumar" autocomplete="off">
+            </label>
+            <label class="qb-field">
+              <span>Phone</span>
+              <input id="qb-cust-phone" class="filter-input" placeholder="10-digit mobile" autocomplete="off">
+            </label>
+            <label class="qb-field">
+              <span>Target deadline</span>
+              <input id="qb-deadline" class="filter-input" type="datetime-local">
+            </label>
+            <label class="qb-field">
+              <span>Build type</span>
+              <select id="qb-type" class="filter-select">
+                <option value="build">New PC Build</option>
+                <option value="repair">Service / Repair</option>
+              </select>
+            </label>
+            <label class="qb-field">
+              <span>Intended use</span>
+              <select id="qb-usecase" class="filter-select">
+                <option value="gaming-1080p">Gaming — 1080p</option>
+                <option value="gaming-1440p" selected>Gaming — 1440p</option>
+                <option value="gaming-4k">Gaming — 4K</option>
+                <option value="streaming">Streaming</option>
+                <option value="video-editing">Video Editing</option>
+                <option value="cad-3d">CAD / 3D</option>
+                <option value="content-creation">Content Creation</option>
+                <option value="ai-ml">AI / ML</option>
+                <option value="office">Office / General</option>
+              </select>
+            </label>
+          </div>
+        </section>
+
+        <section class="glass qb-card">
+          <div class="qb-card-head">
+            <h3 class="qb-card-title">Components</h3>
+            <div class="qb-import">
+              <input type="file" id="qb-pdf-input" accept="application/pdf,.pdf" hidden>
+              <button type="button" id="qb-pdf-btn" class="btn-ghost">Import from invoice PDF</button>
+            </div>
+          </div>
+          <p class="qb-hint">Search the live price catalogue, or enter a part by hand if it isn't listed. Every picked part links to its product page so you can verify it with the customer.</p>
+          <div id="qb-import-status" class="qb-import-status hidden"></div>
+          <div id="qb-rows"></div>
+        </section>
+
+        <section class="glass qb-card">
+          <h3 class="qb-card-title">Price-to-Performance</h3>
+          <p class="qb-hint">Live score for this quotation, judged against other parts in the same price band for the chosen use case. Updates as you change components or prices.</p>
+          <div id="qb-ppi"></div>
+        </section>
+      </div>
+
+      <!-- RIGHT: running quote -->
+      <aside class="qb-side">
+        <section class="glass qb-card qb-summary">
+          <h3 class="qb-card-title">Quotation</h3>
+          <div id="qb-lines" class="qb-lines"></div>
+          <div class="qb-total-row">
+            <span>Components</span><span id="qb-count" class="mono">0</span>
+          </div>
+          <div class="qb-total-row qb-total-main">
+            <span>Subtotal</span><span id="qb-subtotal" class="mono">₹0</span>
+          </div>
+          <button id="qb-create" class="btn-primary qb-create" type="button">Create build ticket →</button>
+          <div id="qb-create-status" class="qb-note"></div>
+        </section>
+      </aside>
+    </div>
+  </main>
+
   <!-- ───────────────────────────────── EDIT PROFILE (staff) ─── -->
   <main id="view-profile" class="view hidden">
     <div class="profile-card glass">
@@ -237,6 +393,13 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="shared/icons.js"></script>
   <script src="shared/diagnostics-render.js"></script>
+  <script src="shared/matcher.js"></script>
+  <script src="shared/ppi.js"></script>
+  <script src="shared/ppi-sync.js"></script>
+  <script src="shared/invoice-import.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
+  <script src="shared/service-status.js"></script>
   <script src="app.js"></script>
+  <script src="service.js"></script>
 </body>
 </html>

@@ -191,7 +191,30 @@
 
     // ── Windows ──
     setText('print-win-status', ticket.windowsActivation || d.windowsActivation || '--');
-    setText('print-win-key', ticket.windowsKey || d.windowsKey || '--');
+    // The customer's copy gets a MASKED key. A Windows licence key is
+    // transferable, this sheet is handed over and routinely photographed at
+    // handover, and the Activation Status line directly above already carries
+    // the whole meaning for the customer. The full key stays on the ticket in
+    // the app for the shop's own records.
+    // The key is stored at specs.windowsKey (app.js:4162). This line previously
+    // read ticket.windowsKey and d.windowsKey, neither of which exists, so the
+    // certificate has always printed "--" here regardless of what was recorded.
+    // Reading the right field makes the row meaningful; masking keeps it safe.
+    var _rawKey = String((specs && specs.windowsKey) || '').trim();
+    var _hasKey = _rawKey && _rawKey !== '--';
+    // Show only the last group, and only when there is enough key that the shown
+    // part is a genuine fragment rather than the whole thing behind a fake mask.
+    var _maskedKey = '--';
+    if (_hasKey) {
+      _maskedKey = _rawKey.length > 8
+        ? '•••••-•••••-•••••-•••••-' + _rawKey.slice(-5)
+        : '••••• (on file)';
+    }
+    setText('print-win-key', _maskedKey);
+    // The reassurance line is meaningless — and untrue — when no key was recorded,
+    // and repair tickets often have none at all.
+    var _keyNote = document.getElementById('print-win-key-note');
+    if (_keyNote) _keyNote.style.display = _hasKey ? '' : 'none';
 
     // ── Hardware Specs ──
     // Strip manufacturer part codes ("(100-100001277WOF)") for display —
