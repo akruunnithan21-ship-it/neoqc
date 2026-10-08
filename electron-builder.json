@@ -35,7 +35,8 @@
     "!**/*.md",
     "!.claude/**",
     "!.github/**",
-    "!*.log"
+    "!*.log",
+    "!*.pdf"
   ],
   "asarUnpack": [
     "assets/diagnostics/**",
