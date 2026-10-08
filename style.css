@@ -5865,3 +5865,143 @@ body.dark-mode .portcert-summary.all-good { color: #34d399; }
   .sv-grid, .sv-fields { grid-template-columns: 1fr; }
   .sv-col { flex-basis: 84vw; min-width: 84vw; }
 }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   THE APP SHELL
+   A fixed rail down the left, and office screens inset to clear it. The rail
+   is a sibling of the screens, not a wrapper, so no screen's own layout had to
+   change — each is still a full-height flex column, exactly as before.
+   ══════════════════════════════════════════════════════════════════════════ */
+:root { --rail-w: 76px; }
+
+.app-rail {
+  position: fixed;
+  top: 32px;                 /* clears the custom titlebar */
+  left: 0; bottom: 0;
+  width: var(--rail-w);
+  z-index: 60;               /* under modals (1000), over screen content */
+  display: flex; flex-direction: column; align-items: stretch;
+  gap: 2px; padding: 10px 7px;
+  background: rgba(15, 23, 42, 0.045);
+  border-right: 1px solid var(--glass-border);
+  backdrop-filter: blur(12px);
+}
+body.dark-mode .app-rail { background: rgba(255, 255, 255, 0.025); }
+.app-rail.hidden { display: none; }
+
+.rail-item {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 3px; padding: 9px 2px; min-height: 56px;
+  border: 1px solid transparent; border-radius: 11px;
+  background: transparent; color: var(--text-muted);
+  font-family: inherit; cursor: pointer;
+  transition: background var(--dur-fast) var(--ease),
+              color var(--dur-fast) var(--ease),
+              border-color var(--dur-fast) var(--ease);
+}
+.rail-item:hover { background: rgba(var(--primary-pink-rgb), 0.07); color: var(--text-dark); }
+.rail-item:active { transform: translateY(1px); }
+.rail-ic { font-size: 1.15rem; line-height: 1; }
+.rail-label { font-size: 0.58rem; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; }
+.rail-item.active {
+  background: rgba(var(--primary-pink-rgb), 0.12);
+  border-color: rgba(var(--primary-pink-rgb), 0.3);
+  color: var(--primary-pink);
+}
+/* A dot rather than a count: the rail says "look here", the section says why. */
+.rail-item.has-alert { position: relative; }
+.rail-item.has-alert::after {
+  content: ''; position: absolute; top: 7px; right: 11px;
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--status-urgent);
+}
+.rail-spacer { flex: 1 1 auto; }
+
+/* The only thing a screen needs to join the shell. */
+.screen.has-rail { padding-left: var(--rail-w); }
+
+@media (max-width: 860px) {
+  :root { --rail-w: 54px; }
+  .rail-label { display: none; }
+  .rail-item { min-height: 46px; }
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   OVERVIEW — builds and service in ONE list
+   The two kinds of work are genuinely different, so the card does not pretend
+   otherwise: a coloured spine and a type chip say which is which at a glance,
+   and the stage wording comes from each side's own vocabulary.
+   ══════════════════════════════════════════════════════════════════════════ */
+.ov-tiles {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px; margin-bottom: 18px;
+}
+.ov-tile {
+  padding: 13px 15px; border-radius: 12px;
+  background: var(--glass-bg); border: 1px solid var(--glass-border);
+  border-left: 3px solid var(--t-c, var(--text-muted));
+  cursor: pointer;
+  transition: border-color var(--dur-fast) var(--ease), transform var(--dur-tap) var(--ease);
+}
+.ov-tile:hover { transform: translateY(-1px); }
+.ov-tile:active { transform: translateY(1px); }
+.ov-tile.sel { border-color: var(--primary-pink); }
+.ov-tile-n { font-family: 'JetBrains Mono', monospace; font-size: 1.5rem; font-weight: 700; line-height: 1.1; }
+.ov-tile-l { font-size: 0.7rem; color: var(--text-muted); margin-top: 3px; line-height: 1.35; }
+.ov-tile.t-late   { --t-c: var(--status-urgent); }
+.ov-tile.t-cust   { --t-c: var(--status-awaiting); }
+.ov-tile.t-vendor { --t-c: #8b7cf6; }
+.ov-tile.t-ready  { --t-c: var(--status-completed); }
+.ov-tile.t-open   { --t-c: #14b8a6; }
+.ov-tile.t-late .ov-tile-n   { color: var(--status-urgent); }
+.ov-tile.t-ready .ov-tile-n  { color: var(--status-completed); }
+
+.ov-list { display: flex; flex-direction: column; gap: 7px; }
+.ov-row {
+  display: grid;
+  grid-template-columns: 4px 86px minmax(0, 1.5fr) minmax(0, 1.6fr) minmax(0, 1fr) 76px;
+  align-items: center; gap: 14px;
+  padding: 11px 14px 11px 0; border-radius: 10px; cursor: pointer;
+  background: var(--glass-bg); border: 1px solid var(--glass-border);
+  transition: border-color var(--dur-fast) var(--ease), transform var(--dur-tap) var(--ease);
+}
+.ov-row:hover { border-color: var(--primary-pink); transform: translateX(2px); }
+.ov-row:active { transform: translateY(1px); }
+.ov-spine { align-self: stretch; border-radius: 10px 0 0 10px; background: var(--row-c, var(--text-muted)); }
+.ov-row.k-build   { --row-c: #3b82f6; }
+.ov-row.k-service { --row-c: #14b8a6; }
+.ov-row.is-late   { --row-c: var(--status-urgent); background: rgba(239,68,68,0.05); }
+
+.ov-chip {
+  font-size: 0.6rem; font-weight: 800; letter-spacing: 0.07em; text-transform: uppercase;
+  padding: 3px 8px; border-radius: 999px; text-align: center; white-space: nowrap;
+}
+.k-build .ov-chip   { color: #60a5fa; background: rgba(59,130,246,0.13); }
+.k-service .ov-chip { color: #2dd4bf; background: rgba(20,184,166,0.13); }
+
+.ov-who { font-weight: 700; font-size: 0.88rem; overflow-wrap: anywhere; }
+.ov-sub { font-size: 0.72rem; color: var(--text-muted); margin-top: 1px; overflow-wrap: anywhere; }
+.ov-stage { font-size: 0.78rem; color: var(--text-muted); overflow-wrap: anywhere; }
+.ov-ball {
+  display: inline-block; font-size: 0.65rem; font-weight: 700; letter-spacing: 0.04em;
+  padding: 2px 8px; border-radius: 999px; margin-top: 3px; white-space: nowrap;
+}
+.ov-ball-shop        { color: #2dd4bf; background: rgba(20,184,166,0.12); }
+.ov-ball-customer    { color: var(--status-awaiting); background: rgba(245,158,11,0.13); }
+.ov-ball-third_party { color: #a78bfa; background: rgba(139,124,246,0.13); }
+.ov-ball-nobody      { color: var(--text-muted); background: rgba(127,127,160,0.1); }
+
+.ov-tech { font-size: 0.76rem; color: var(--text-muted); overflow-wrap: anywhere; }
+.ov-age { text-align: right; font-family: 'JetBrains Mono', monospace; font-weight: 700; font-size: 1rem; color: var(--text-muted); }
+.ov-row.is-late .ov-age { color: var(--status-urgent); }
+.ov-age-l { display: block; font-family: inherit; font-size: 0.58rem; font-weight: 400; text-transform: uppercase; letter-spacing: 0.05em; opacity: 0.65; }
+
+.ov-empty {
+  padding: 36px 18px; text-align: center; color: var(--text-muted); font-size: 0.86rem;
+  border: 1px dashed var(--glass-border); border-radius: 12px;
+}
+
+@media (max-width: 900px) {
+  .ov-row { grid-template-columns: 4px 72px minmax(0,1fr) 64px; }
+  .ov-row .ov-stage-cell, .ov-row .ov-tech { display: none; }
+}

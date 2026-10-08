@@ -2098,7 +2098,7 @@ function switchScreen(mode, selectedId = null) {
   // as sensitive as the build dashboard. Adding it here rather than to a
   // separate check means a future screen cannot be added to the office side
   // without someone noticing this list.
-  if ((mode === 'staff' || mode === 'service') && currentProfile && Number(currentProfile.tier) < 3) {
+  if ((mode === 'staff' || mode === 'service' || mode === 'overview') && currentProfile && Number(currentProfile.tier) < 3) {
     showToast('The office dashboards are restricted to service leads. Opening your Testing Client.', 'warning');
     routeByTier();
     return;
@@ -2113,6 +2113,10 @@ function switchScreen(mode, selectedId = null) {
   document.querySelectorAll('.screen').forEach(screen => {
     screen.classList.remove('active');
   });
+
+  // Keep the rail reflecting reality however this screen was reached — a deep
+  // link, a tier redirect, or the mode selector — not only a rail click.
+  if (window.NeoQcShell) { try { window.NeoQcShell.syncRail(mode); } catch (e) {} }
 
   if (mode === 'staff') {
     document.getElementById('staff-screen').classList.add('active');
@@ -2132,6 +2136,13 @@ function switchScreen(mode, selectedId = null) {
       } else {
         staffExitBtn.classList.remove('hidden');
       }
+    }
+  } else if (mode === 'overview') {
+    // Builds and service in one list. Reads both caches; owns neither.
+    document.getElementById('overview-screen').classList.add('active');
+    if (window.NeoQcShell) {
+      window.NeoQcShell.ensureOverviewLoaded()
+        .catch(e => console.warn('overview load failed:', e && e.message));
     }
   } else if (mode === 'service') {
     // Service ticketing. Same audience as the admin dashboard (the tier-3 guard
@@ -2265,7 +2276,10 @@ function routeByTier() {
   renderUserChip();
   const tier = currentProfile ? Number(currentProfile.tier) : 0;
   if (tier >= 3) {
-    switchScreen('staff');
+    // Overview, not Builds: the first question anyone in the office has is
+    // "what needs me today", across both kinds of work. Builds is one click
+    // away on the rail.
+    switchScreen('overview');
   } else if (tier === 2) {
     switchScreen('client');
   } else {

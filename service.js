@@ -526,8 +526,9 @@
     }
   }
 
-  async function ensureServiceLoaded() {
-    initServiceUI();
+  async function ensureServiceLoaded(opts) {
+    var silent = opts && opts.silent;
+    if (!silent) initServiceUI();
     if (!serviceLoaded) {
       serviceLoaded = true;
       await loadServiceJobs();
@@ -542,11 +543,15 @@
     } else {
       await loadServiceJobs();
     }
-    renderServiceBoard();
+    if (!silent) renderServiceBoard();
   }
 
   window.NeoQcServiceUI = {
     ensureServiceLoaded: ensureServiceLoaded,
+    // The Overview reads the same cache rather than querying again, so the two
+    // screens can never disagree about what is open.
+    jobs: function () { return serviceJobs; },
+    openJob: openJob,
     renderServiceBoard: renderServiceBoard,
     openIntake: openIntake,
     // exposed for tests

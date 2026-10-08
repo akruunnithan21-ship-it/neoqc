@@ -11,7 +11,7 @@
        needed for it; pdfjs uses a local worker (worker-src blob:). To roll back a
        suspected breakage, delete this one <meta> tag. -->
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: blob: https:; font-src 'self' https://fonts.gstatic.com data:; connect-src 'self' https: wss: data: blob: file:; worker-src 'self' blob:; child-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'">
-  <title>Neo QC - PC Quality Control Portal</title>
+  <title>Neo Tokyo Operations</title>
   <!-- Google Fonts: Space Grotesk, Hanken Grotesk, JetBrains Mono -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -26,7 +26,7 @@
   <div class="custom-titlebar">
     <div class="titlebar-drag-area">
       <svg class="titlebar-logo-svg" viewBox="0 0 100 100"><circle cx="50" cy="50" r="40" stroke="currentColor" stroke-width="10" fill="none" stroke-dasharray="78.776 5" stroke-dashoffset="60.332" /><path d="M 50,23 L 72,70 C 58,58 50,56 50,56 C 50,56 42,58 28,70 Z" fill="currentColor" /></svg>
-      <span class="titlebar-text">NEO TOKYO // QC & Diagnostics Lab Portal</span>
+      <span class="titlebar-text">NEO TOKYO // OPERATIONS</span>
       <span id="update-status-pill" class="update-status-pill" style="display:none;"></span>
     </div>
     <button id="titlebar-user" class="titlebar-user hidden" title="Sign out">
@@ -229,7 +229,7 @@
   </div>
 
   <!-- STAFF SYSTEM SCREEN -->
-  <div id="staff-screen" class="screen">
+  <div id="staff-screen" class="screen has-rail">
     <!-- Navbar -->
     <header class="glass-slab navbar">
       <div class="nav-brand">
@@ -348,7 +348,59 @@
        A sibling of the build dashboard, not a ticket type: every consumer of
        `tickets` is build-shaped, and three of them would destroy a service row.
        ══════════════════════════════════════════════════════════════════════ -->
-  <div id="service-screen" class="screen">
+  <!-- ══════════════════════════════════════════════════════════════════════
+       APP RAIL — the persistent shell.
+       Deliberately a FIXED sibling of the screens rather than a wrapper around
+       them: every screen is already `height: calc(100vh - 32px)` with its own
+       flex column, so re-parenting them into a layout container would have
+       meant re-testing all seven. Screens that belong to the office get
+       `.has-rail`, which is nothing but a left inset. Nothing else moved.
+       ══════════════════════════════════════════════════════════════════════ -->
+  <nav id="app-rail" class="app-rail hidden" aria-label="Sections">
+    <button class="rail-item" data-section="overview" title="Overview">
+      <span class="rail-ic">◎</span><span class="rail-label">Overview</span>
+    </button>
+    <button class="rail-item" data-section="builds" title="Builds">
+      <span class="rail-ic">🖥</span><span class="rail-label">Builds</span>
+    </button>
+    <button class="rail-item" data-section="service" title="Service">
+      <span class="rail-ic">🔧</span><span class="rail-label">Service</span>
+    </button>
+    <div class="rail-spacer"></div>
+    <button class="rail-item" data-section="bench" title="Open the Testing Client">
+      <span class="rail-ic">⚗</span><span class="rail-label">Bench</span>
+    </button>
+    <button class="rail-item" data-section="settings" title="Settings">
+      <span class="rail-ic">⚙</span><span class="rail-label">Settings</span>
+    </button>
+  </nav>
+
+  <!-- ─────────────────────────────── OVERVIEW (builds + service together) ─── -->
+  <div id="overview-screen" class="screen has-rail">
+    <header class="glass-slab navbar">
+      <div class="nav-brand">
+        <span class="nav-title">OVERVIEW</span>
+        <span id="ov-stat" class="sv-stat">—</span>
+      </div>
+      <div class="nav-controls">
+        <input type="text" id="ov-search" class="sv-search" placeholder="Customer, device, code, technician…" autocomplete="off">
+        <select id="ov-filter" class="filter-select">
+          <option value="attention">Needs attention</option>
+          <option value="open" selected>Everything open</option>
+          <option value="builds">Builds only</option>
+          <option value="service">Service only</option>
+          <option value="all">Including finished</option>
+        </select>
+      </div>
+    </header>
+    <main class="dashboard-container">
+      <div id="ov-tiles" class="ov-tiles"></div>
+      <p class="sv-lead">Everything the shop has open, newest first. A <strong>Build</strong> is a machine we are making; a <strong>Service</strong> job is one we are fixing. The number on the right is how long it has sat in its current state.</p>
+      <div id="ov-list" class="ov-list"></div>
+    </main>
+  </div>
+
+  <div id="service-screen" class="screen has-rail">
     <header class="glass-slab navbar">
       <div class="nav-brand">
         <svg class="brand-logo-svg" viewBox="0 0 100 100" style="width:22px;height:22px;vertical-align:middle;margin-right:6px;color:var(--primary-pink);"><circle cx="50" cy="50" r="40" stroke="currentColor" stroke-width="10" fill="none" stroke-dasharray="78.776 5" stroke-dashoffset="60.332" /><path d="M 50,23 L 72,70 C 58,58 50,56 50,56 C 50,56 42,58 28,70 Z" fill="currentColor" /></svg>
@@ -358,7 +410,6 @@
       <div class="nav-controls">
         <label class="sv-mine"><input type="checkbox" id="sv-mine"> Mine only</label>
         <input type="text" id="sv-search" class="sv-search" placeholder="Customer, device, code or phone…" autocomplete="off">
-        <button id="sv-exit" class="secondary-btn">← Builds</button>
         <button id="sv-new" class="primary-pink-btn">+ New Service Job</button>
       </div>
     </header>
@@ -2617,5 +2668,6 @@
   <script src="shared/service-status.js"></script>
   <script src="app.js"></script>
   <script src="service.js"></script>
+  <script src="shell.js"></script>
 </body>
 </html>
