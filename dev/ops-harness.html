@@ -13,6 +13,11 @@
 
     NeoHR (v1.11) reads STUBBED work logs, field activity and a stub NeoHR
     release (never GitHub, never a database), with the Queue's stub team.
+    The HR module (v1.12) reads a stub live board, register, day, requests,
+    roster, route, travel allowance report and settings; its writes are
+    refused (demo mode), and the Routes map asks tile.openstreetmap.org for
+    tiles (the only network request the harness makes; offline it draws the
+    route on a blank map).
 
     The Queue (v1.11) reads a STUBBED work_queue feed built below from the
     demo service tickets plus a few harness builds (an offer to you, an open
@@ -46,7 +51,7 @@
       node -e "const c=require('crypto'),h=require('fs').readFileSync('dev/ops-harness.html','utf8').replace(/\r\n/g,'\n');for(const m of h.matchAll(/<(script)>([\s\S]*?)<\/\1>/g))console.log('sha256-'+c.createHash('sha256').update(m[2]).digest('base64'))"
     This folder is excluded from the packaged app (electron-builder.json).
   -->
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-KTH5/X/U+YoH8lDHCKjWulZF8V8I2B3jUHDdrMmbmWM=' 'sha256-fDwCPhiUYOww7OHnfqyQmfClvygIrOUiu9Qol3ejz5w=' 'sha256-ZYJyftR9Qit73jEYvj+NtWjk0Pcup3Gk4ZlBDCTSHvg='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: blob: https:; font-src 'self' https://fonts.gstatic.com data:; connect-src 'self' https: wss: data: blob:; worker-src 'self' blob:; child-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-KTH5/X/U+YoH8lDHCKjWulZF8V8I2B3jUHDdrMmbmWM=' 'sha256-c2tQrp6Kyg+TRsI8n2C1Km337z3sVkqzeIHzqiQM3R8=' 'sha256-ZYJyftR9Qit73jEYvj+NtWjk0Pcup3Gk4ZlBDCTSHvg='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: blob: https:; font-src 'self' https://fonts.gstatic.com data:; connect-src 'self' https: wss: data: blob:; worker-src 'self' blob:; child-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'">
   <link rel="icon" href="data:,">
   <title>Ops harness — Overview, Service and RMA (demo data)</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -61,6 +66,7 @@
   <link rel="stylesheet" href="../intake.css">
   <link rel="stylesheet" href="../rma.css">
   <link rel="stylesheet" href="../queue.css">
+  <link rel="stylesheet" href="../vendor/leaflet/leaflet.css">
   <link rel="stylesheet" href="../neohr.css">
   <style>
     /* Harness chrome only. The bar sits where the app's titlebar sits (32 px),
@@ -336,6 +342,7 @@
   <script src="../shared/service-catalog.js"></script>
   <script src="../shared/service-demo.js"></script>
   <script src="../shared/work-queue.js"></script>
+  <script src="../shared/hr-format.js"></script>
   <script>
 // ── Stubs for what app.js provides in the real app ──────────────────────────
 // Kept deliberately small: just enough of each for the ops scripts to run.
@@ -765,6 +772,186 @@ function switchScreen(mode) {
       pageUrl: 'https://github.com/akruunnithan21-ship-it/neoqc/releases/tag/neohr-v2.1.0',
       apk: { name: 'NeoHR-2.1.0.apk', size: 9876543, url: 'https://github.com/akruunnithan21-ship-it/neoqc/releases/download/neohr-v2.1.0/NeoHR-2.1.0.apk' } } });
   };
+
+  // HR (v1.12): a stub live board, register, day, requests, roster, route,
+  // travel allowance report and settings for the stub team (and whoever is
+  // "signed in"), in the shapes sql/neohr-hr.sql answers with. Reads only —
+  // every HR write goes to the data layer, which refuses it here (demo mode
+  // is forced on), exactly as in the app.
+  var HX_STAFF = HX_HR.concat([{ email: 'demo.field@harness.invalid', name: 'Demo Field' }]);
+  function hxAt(day, hm) { return new Date(Date.parse(day + 'T' + hm + ':00+05:30')).toISOString(); }
+  function hxAddDay(day, n) { return new Date(Date.parse(day + 'T00:00:00Z') + n * 86400000).toISOString().slice(0, 10); }
+  function hxMe() { return low(currentProfile && currentProfile.email); }
+  function hxStaffAll() {
+    var me = currentProfile || {};
+    var list = HX_STAFF.map(function (p) { return { email: p.email, name: p.name, tier: 2 }; });
+    if (me.email && !list.some(function (p) { return p.email === low(me.email); })) list.push({ email: low(me.email), name: me.full_name || me.email, tier: me.tier });
+    return list;
+  }
+  function hxBoard() {
+    var now = Date.now(), t = hxDay(now);
+    var st = [
+      { status: 'on_site', state: 'on_duty', since: hxAt(t, '11:05'), first_in: hxAt(t, '09:24'), worked_min: 190, clock_marks: 1,
+        on_site: { job_id: 'demo_s_vishnu', code: 'NT-0412', title: 'Laptop hinge at the customer', since: hxAt(t, '11:05') }, last_point_at: new Date(now - 3 * 60000).toISOString() },
+      { status: 'on_duty', state: 'on_duty', since: hxAt(t, '09:41'), first_in: hxAt(t, '09:41'), worked_min: 170, stale: true, clock_marks: 2, last_point_at: new Date(now - 26 * 60000).toISOString() },
+      { status: 'not_in_yet', state: 'off_duty', since: null },
+      { status: 'on_break', state: 'on_break', since: hxAt(t, '13:10'), first_in: hxAt(t, '09:30'), worked_min: 200, pending_requests: 1, last_point_at: new Date(now - 40 * 60000).toISOString() }
+    ];
+    var people = hxStaffAll().map(function (p, i) {
+      var s = st[i] || { status: 'off_duty', state: 'off_duty', since: hxAt(t, '17:00'), first_in: hxAt(t, '09:28'), worked_min: 400 };
+      return Object.assign({ email: p.email, name: p.name, designation: i === 3 ? 'Field Engineer' : 'Technician', duty: i === 3 ? 'field' : 'shop', holiday: null,
+        shift: { start: '09:30', end: '18:30' }, pending_requests: 0, stale: false, self: p.email === hxMe(), worked_min: 0, break_min: 0, missed_out: false,
+        flex: i === 3, late_min: 0, km: 0, last_point_at: null, tracking: true, attendance_required: true, clock_marks: 0 }, s);
+    });
+    return { now: new Date(now).toISOString(), people: people, counts: {} };
+  }
+  function hxRec(i, d, today) {
+    var base = { day: d, holiday: null, shift: { start: '09:30', end: '18:30' }, flex: false, first_in: null, last_out: null, worked_min: 0, break_min: 0,
+      late_min: 0, early_min: 0, missed_out: false, irregular: false, worked_on_duty: null, half_day_leave: false, open: false, km: 0, km_gaps: 0,
+      leave_units: 0, absent_units: 0, duty_source: 'default', roster_note: null, clock_marks: 0 };
+    if (new Date(Date.parse(d + 'T00:00:00Z')).getUTCDay() === 0) return Object.assign(base, { duty: 'off', status: 'off', duty_source: 'weekly_off' });
+    var k = (i * 3 + Number(d.slice(8))) % 9;
+    if (d === today) return Object.assign(base, { duty: 'shop', status: i === 2 ? 'not_in_yet' : 'open', open: i !== 2, first_in: i === 2 ? null : hxAt(d, '09:3' + i), worked_min: i === 2 ? 0 : 180, break_min: 20, km: 4.2 * i });
+    if (k === 0) return Object.assign(base, { duty: 'shop', status: 'absent', absent_units: 1 });
+    if (k === 1) return Object.assign(base, { duty: 'leave', status: 'leave', leave_units: 1, duty_source: 'roster' });
+    var late = k === 2 ? 22 : 0;
+    var rec = Object.assign(base, { duty: k === 3 ? 'field' : 'shop', status: late ? 'late' : (k === 4 ? 'half_day' : 'present'),
+      first_in: hxAt(d, late ? '10:02' : '09:2' + i), last_out: hxAt(d, k === 4 ? '13:10' : '18:4' + i), worked_min: k === 4 ? 210 : 520 - late, break_min: 35,
+      late_min: late, flex: k === 3, km: Math.round((12.5 + i * 7.3 + k) * 100) / 100, clock_marks: k === 5 ? 1 : 0 });
+    if (k === 6) { rec.missed_out = true; rec.last_out = null; }
+    return rec;
+  }
+  function hxRegister(from, to, email) {
+    var t = hxDay(Date.now());
+    var people = [];
+    hxStaffAll().forEach(function (p, i) {
+      if (email && email !== p.email) return;
+      var days = [];
+      for (var d = from; d <= to && d <= t; d = hxAddDay(d, 1)) days.push(hxRec(i, d, t));
+      people.push({ email: p.email, name: p.name, designation: 'Technician', self: p.email === hxMe(), days: days });
+    });
+    return { now: new Date().toISOString(), from: from, to: to, people: people };
+  }
+  function hxMyDay(day, email) {
+    var e = low(email || hxMe());
+    var own = e === hxMe();
+    var at = function (hm) { return hxAt(day, hm); };
+    var mark = function (s) { return own ? null : s; };
+    return { now: new Date().toISOString(), email: e, day: day, duty: 'shop', status: 'late', first_in: at('09:52'), last_out: at('18:40'), worked_min: 478, break_min: 40,
+      late_min: 12, early_min: 0, flex: false, missed_out: false, irregular: false, holiday: null, shift: { start: '09:30', end: '18:30' }, km: 18.4, km_gaps: 1,
+      events: [
+        { id: '6f1c5a3e-0000-4000-8000-000000000001', kind: 'punch_in', at: at('09:52'), device_at: at('09:44'), time_source: 'server', source: 'phone', note: null, clock_mark: mark('⏱ phone clock off by 8 min') },
+        { id: '6f1c5a3e-0000-4000-8000-000000000002', kind: 'break_start', at: at('13:05'), device_at: at('13:05'), time_source: 'device', source: 'phone', note: null, clock_mark: mark('⏱ time not verified') },
+        { id: '6f1c5a3e-0000-4000-8000-000000000003', kind: 'break_end', at: at('13:45'), device_at: at('13:45'), time_source: 'server', source: 'phone', note: null, clock_mark: null },
+        { id: '6f1c5a3e-0000-4000-8000-000000000004', kind: 'punch_out', at: at('17:10'), device_at: null, time_source: 'server', source: 'phone', note: null, voided_at: at('19:00'), void_reason: 'Punched out by mistake', clock_mark: null },
+        { id: '6f1c5a3e-0000-4000-8000-000000000005', kind: 'punch_out', at: at('18:40'), device_at: null, time_source: 'hr', source: 'hr', note: 'Left at 18:40 — told the manager', clock_mark: null }
+      ],
+      visits: [{ job_id: 'demo_s_vishnu', code: 'NT-0412', title: 'Laptop hinge', arrived: at('11:05'), departed: at('12:20'), minutes: 75, travel_min: 28, outcome: 'done', assumed_arrival: false, open: false }],
+      requests: [] };
+  }
+  var HX_ROUTE_BASE = [10.0159, 76.3419];
+  function hxRoute(email, day) {
+    var pts = [], at0 = Date.parse(day + 'T09:30:00+05:30');
+    for (var i = 0; i < 60; i++) {
+      var a = i / 59 * Math.PI * 1.6;
+      pts.push({ at: new Date(at0 + i * 6 * 60000).toISOString(), lat: HX_ROUTE_BASE[0] + Math.sin(a) * 0.03, lng: HX_ROUTE_BASE[1] + (1 - Math.cos(a)) * 0.025 });
+    }
+    var P = function (i) { return pts[i]; };
+    return { now: new Date().toISOString(), email: low(email), day: day, points: pts,
+      stops: [{ lat: P(0).lat, lng: P(0).lng, arrived: P(0).at, left: P(5).at, minutes: 30, place_hint: 'Shop' },
+              { lat: P(30).lat, lng: P(30).lng, arrived: P(28).at, left: P(36).at, minutes: 48, place_hint: 'Kakkanad' }],
+      segments: [{ from: P(5).at, to: P(28).at, km: 6.42, minutes: 138, mode: 'moving' }, { from: P(36).at, to: P(44).at, km: 3.1, minutes: 48, mode: 'gap' },
+                 { from: P(44).at, to: P(59).at, km: 4.05, minutes: 90, mode: 'moving' }],
+      km: 13.57, km_gaps: 1, moving_min: 276,
+      visits: [{ job_id: 'demo_s_vishnu', code: 'NT-0412', title: 'Laptop hinge', arrived: P(28).at, departed: P(36).at, minutes: 48, travel_min: 35, outcome: 'done', assumed_arrival: false, open: false }] };
+  }
+  function hxRequests(scope) {
+    var t = hxDay(Date.now()), s = hxStaffAll(), now = Date.now(), me = hxMe();
+    var mk = function (n, p, o) {
+      var r = Object.assign({ id: '0b7e2c1a-0000-4000-8000-00000000000' + n, email: p.email, name: p.name, status: 'pending', created_at: new Date(now - n * 3600000).toISOString(),
+        half_day: false, leave_type: null, ref_code: null, missed_at: null, missed_kind: null, decided_by_name: null, decided_at: null, decision_note: null,
+        cancelled_by_name: null, cancelled_at: null, cancel_note: null }, o);
+      r.can_decide = r.status === 'pending' && r.email !== me;
+      r.can_cancel = r.email !== me && (r.status === 'pending' || (r.status === 'approved' && r.kind !== 'missed_punch'));
+      return r;
+    };
+    var pend = [
+      mk(1, s[1], { kind: 'leave', leave_type: 'casual', date_from: hxAddDay(t, 3), date_to: hxAddDay(t, 4), reason: 'Sister’s wedding <b>not bold</b>' }),
+      mk(2, s[3], { kind: 'missed_punch', missed_kind: 'punch_out', missed_at: hxAt(hxAddDay(t, -1), '18:52'), date_from: hxAddDay(t, -1), date_to: hxAddDay(t, -1), reason: 'Phone died at the site.' }),
+      mk(3, s[s.length - 1], { kind: 'late_start', date_from: hxAddDay(t, 1), date_to: hxAddDay(t, 1), reason: 'Bank visit in the morning.' })
+    ];
+    if (scope === 'pending') return pend;
+    return pend.concat([
+      mk(4, s[0], { kind: 'field_day', status: 'approved', date_from: hxAddDay(t, 2), date_to: hxAddDay(t, 2), reason: 'RMA run to the distributor.', ref_code: 'RM-0031', decided_by_name: 'Harness Owner', decided_at: new Date(now - 50 * 3600000).toISOString() }),
+      mk(5, s[1], { kind: 'early_leave', status: 'rejected', date_from: hxAddDay(t, -3), date_to: hxAddDay(t, -3), reason: 'Personal work.', decided_by_name: 'Harness Owner', decided_at: new Date(now - 70 * 3600000).toISOString(), decision_note: 'Two builds due that evening.' }),
+      mk(6, s[2], { kind: 'leave', leave_type: 'sick', status: 'cancelled', date_from: hxAddDay(t, -5), date_to: hxAddDay(t, -5), reason: 'Fever.', cancelled_by_name: 'Demo Desk', cancelled_at: new Date(now - 110 * 3600000).toISOString() })
+    ]);
+  }
+  function hxRoster(from, to) {
+    var s = hxStaffAll(), hol = hxAddDay(from, 4);
+    var set = {};
+    set[s[3].email + '|' + hxAddDay(from, 2)] = { duty: 'field', note: 'Two site visits' };
+    set[s[3].email + '|' + hxAddDay(from, 3)] = { duty: 'field', note: null };
+    set[s[1].email + '|' + hxAddDay(from, 1)] = { duty: 'leave', note: 'Leave', request_id: '0b7e2c1a-0000-4000-8000-000000000009' };
+    set[s[0].email + '|' + hxAddDay(from, 5)] = { duty: 'wfh', note: null };
+    return { now: new Date().toISOString(), from: from, to: to, holidays: [{ day: hol, name: 'Harness holiday' }],
+      people: s.map(function (p) {
+        var days = [];
+        for (var n = 0; n < 7; n++) {
+          var d = hxAddDay(from, n), x = set[p.email + '|' + d];
+          if (x) days.push({ day: d, duty: x.duty, source: 'roster', note: x.note, request_id: x.request_id || null, holiday: d === hol ? 'Harness holiday' : null });
+          else if (d === hol) days.push({ day: d, duty: 'off', source: 'holiday', note: null, request_id: null, holiday: 'Harness holiday' });
+          else if (new Date(Date.parse(d + 'T00:00:00Z')).getUTCDay() === 0) days.push({ day: d, duty: 'off', source: 'weekly_off', note: null, request_id: null, holiday: null });
+          else days.push({ day: d, duty: 'shop', source: 'default', note: null, request_id: null, holiday: null });
+        }
+        return { email: p.email, name: p.name, designation: 'Technician', self: p.email === hxMe(), days: days };
+      }) };
+  }
+  function hxTa(month) {
+    var s = hxStaffAll(), rate = 3.5, t = hxDay(Date.now());
+    var closed = month < t.slice(0, 8) + '01';
+    return { now: new Date().toISOString(), month: month, closed: closed, rate: rate, people: s.map(function (p, i) {
+      var km = Math.round((180 + i * 97.35) * 100) / 100, elig = i !== 2;
+      var r = { email: p.email, name: p.name, self: p.email === hxMe(), eligible: elig, km: km, rate: elig ? rate : 0, amount: Math.round(km * (elig ? rate : 0) * 100) / 100,
+        live_km: km, changed: false, approved: null, days: [{ day: month, km: 12.4 }, { day: month.slice(0, 8) + '02', km: 18.05 }] };
+      if (i === 0) { r.approved = { by: 'Harness Owner', at: new Date(Date.now() - 5 * 86400000).toISOString(), note: null }; r.live_km = km + 2.5; r.changed = true; }
+      r.can_approve = !r.self && closed && elig && !r.approved;
+      return r;
+    }) };
+  }
+  function hxSettings() {
+    var me = currentProfile || {};
+    // As sql/neohr-hr.sql answers: `history` = the default shift rows, newest
+    // first, and the top-level shift fields a copy of the NEWEST row, here a
+    // change planned for next week (the screen must show today's hours).
+    var next = hxAddDay(hxDay(Date.now()), 7);
+    var history = [
+      { effective_from: next, shift_start: '10:00', shift_end: '19:00', grace_min: 15, weekly_off: [0], half_day_min: 240, set_by_email: 'owner@harness.invalid' },
+      { effective_from: '2020-01-01', shift_start: '09:30', shift_end: '18:30', grace_min: 10, weekly_off: [0], half_day_min: 240, set_by_email: null }
+    ];
+    var out = { shift_start: '10:00', shift_end: '19:00', grace_min: 15, weekly_off: [0], half_day_min: 240, track_interval_s: 120,
+      track_distance_m: 100, retention_days: 90, ta_rate_per_km: 3.5, office_lat: 10.0159, office_lng: 76.3419, office_radius_m: 150, max_session_h: 16, history: history,
+      me: { shift: { start: '09:30', end: '18:30', grace_min: 10, weekly_off: [0], half_day_min: 240 }, attendance_required: true, ta_eligible: true, tracking: { enabled: false, reason: 'off_duty' } } };
+    if ((Number(me.tier) || 0) >= 4) {
+      out.people = hxStaffAll().map(function (p, i) {
+        var self = p.email === hxMe();
+        return { email: p.email, name: p.name, tier: p.tier, designation: 'Technician', self: self,
+          can_edit: (self && me.tier >= 5) || (!self && (me.tier >= 5 || p.tier <= 3)),
+          ta_eligible: i !== 2, track_location: true, attendance_required: true,
+          shift: i === 3 ? { effective_from: '2026-01-01', shift_start: '08:30', shift_end: '17:30', grace_min: null, weekly_off: [0, 6], half_day_min: null } : null,
+          upcoming: [] };
+      });
+    }
+    return out;
+  }
+  D.hrBoard = function () { return Promise.resolve(hxBoard()); };
+  D.hrRegister = function (f, t, e) { return Promise.resolve(hxRegister(f, t, e ? low(e) : null)); };
+  D.hrMyDay = function (d, e) { return Promise.resolve(hxMyDay(d, e)); };
+  D.hrRoute = function (e, d) { return Promise.resolve(hxRoute(e, d)); };
+  D.hrRequestsList = function (scope) { return Promise.resolve(hxRequests(scope)); };
+  D.hrRosterGet = function (f, t) { return Promise.resolve(hxRoster(f, t)); };
+  D.hrSettingsGet = function () { return Promise.resolve(hxSettings()); };
+  D.hrTaReport = function (m) { return Promise.resolve(hxTa(m)); };
 })();
   </script>
   <script src="../photo-tray.js"></script>
@@ -772,6 +959,7 @@ function switchScreen(mode) {
   <script src="../service.js"></script>
   <script src="../rma.js"></script>
   <script src="../queue.js"></script>
+  <script src="../vendor/leaflet/leaflet.js"></script>
   <script src="../neohr.js"></script>
   <script src="../shell.js"></script>
   <script>

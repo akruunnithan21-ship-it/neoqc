@@ -27,6 +27,9 @@
   <link rel="stylesheet" href="rma.css">
   <!-- v1.11 the work queue (q- prefix), after the v1.10 sheets for the same reason. -->
   <link rel="stylesheet" href="queue.css">
+  <!-- v1.12 Leaflet 1.9.4, vendored (vendor/leaflet/, with its LICENSE): the
+       CSP allows no third-party stylesheet. Before neohr.css, which themes it. -->
+  <link rel="stylesheet" href="vendor/leaflet/leaflet.css">
   <!-- v1.11 NeoHR (hr- prefix). -->
   <link rel="stylesheet" href="neohr.css">
 </head>
@@ -450,10 +453,11 @@
   </div>
 
   <!-- ══════════════════════════════════════════════════════════════════════
-       NEOHR (v1.11) — the people side of Neo OS, for heads (tier 3+) and
-       NeoHR leads: Team today, Work logs, Field activity and the NeoHR phone
-       app. neohr.js renders the toolbar and every tab; it is read-only and
-       opens no modal of its own.
+       NEOHR (v1.11; the HR module in v1.12) — the people side of Neo OS, for
+       heads (tier 3+) and NeoHR leads: Live, Attendance, Requests, Roster,
+       Routes (an OpenStreetMap map), Travel allowance, Logs, the NeoHR phone
+       app and (tier 4+) Settings. neohr.js renders the toolbar and every tab;
+       its dialogs are ops dialogs (#ops-dialog-modal), so it adds no modal.
        ══════════════════════════════════════════════════════════════════════ -->
   <div id="neohr-screen" class="screen has-rail">
     <header class="glass-slab navbar">
@@ -2608,21 +2612,19 @@
     <div class="glass-slab modal-card" style="max-width: 650px; width: 100%; padding: 30px; border-radius: 20px;">
       <div class="modal-header" style="border-bottom: 1px solid var(--glass-border); padding-bottom: 15px; margin-bottom: 20px;">
         <h2 style="font-family: 'Syncopate', sans-serif; font-size: 1.3rem; color: var(--primary-pink); letter-spacing: 0.05em; margin: 0;">NEO OS UPDATED</h2>
-        <span data-app-version style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; font-weight: 700; background: rgba(var(--primary-pink-rgb), 0.1); color: var(--primary-pink); padding: 4px 8px; border-radius: 4px;">v1.11.0</span>
+        <span data-app-version style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; font-weight: 700; background: rgba(var(--primary-pink-rgb), 0.1); color: var(--primary-pink); padding: 4px 8px; border-radius: 4px;">v1.12.0</span>
       </div>
       <div class="modal-body" style="font-size: 0.92rem; line-height: 1.6; color: var(--text-dark); max-height: 420px; overflow-y: auto; padding-right: 5px;">
-        <p style="margin-top: 0;"><strong>One queue for builds and service.</strong> Here's what's new in <strong data-app-version>v1.11.0</strong>:</p>
+        <p style="margin-top: 0;"><strong>Attendance, routes and the HR module.</strong> Here's what's new in <strong data-app-version>v1.12.0</strong>:</p>
         <ul style="padding-left: 20px; display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px;">
-          <li><strong>One work queue.</strong> New PC builds and service tickets now wait together on the new Queue screen. Technicians claim what suits them — on the way in, between jobs, or at the bench — and every item has 4 hours to be claimed.</li>
-          <li><strong>Offers, with 30 minutes to answer.</strong> If nobody claims an item in 4 hours, Neo OS offers it to the technician with the most room. Leads can offer work too. Accept or decline within 30 minutes; a decline or no answer moves it to the next person, and leads are told when nobody can take it.</li>
-          <li><strong>Builds go through the queue.</strong> Builds are no longer assigned automatically: a build made here goes straight to the queue, and a website quote waits under “Not sent to the floor” until someone sends it. High-value builds can only be taken by senior builders.</li>
-          <li><strong>People, roles and presets.</strong> Settings → Operations → People (tier 4 and above) holds each person's designation, roles (Service, RMA, Builds, NeoHR), work pools, build level and capacity. A designation gives the standard access for that job, and you can still adjust anyone. New logins show up as “New — not staff yet”.</li>
-          <li><strong>NeoHR is part of Neo OS.</strong> The phone app signs in with the same email and PIN. Technicians can claim and accept work, move their service jobs on, add notes and photos, and check in and out on site from the phone; heads get a simple dashboard. In Neo OS, the new NeoHR screen shows the team today, work logs, field activity and the app's download link.</li>
-          <li><strong>Your own home screen.</strong> Technicians now open on the Queue, desk staff on Service, and heads on Overview.</li>
+          <li><strong>The HR module.</strong> The NeoHR screen now has Live (who is on duty, on a break, on site, on leave or absent), Attendance (day and month register with late, flexible and half-day marks, corrections and CSV export), Requests, Roster, Routes, Travel allowance and Settings.</li>
+          <li><strong>Attendance from the phone.</strong> NeoHR 2.2 adds punch in and out and breaks, on-site visits with the time taken per ticket, and requests to HR — late start, early leave, a flexible or field day for on-site and RMA work, a missed punch, and leave. Heads approve them here or on the phone.</li>
+          <li><strong>Routes and travel allowance.</strong> While someone is punched in and not on a break, NeoHR records their route. See it on a map with the stops and the kilometres for the day, and approve the month's travel allowance from those kilometres.</li>
+          <li><strong>Office hours and the roster.</strong> Office hours are 09:30–18:30 with a 10-minute grace. Change them, the weekly off and the travel-allowance rate in HR Settings, and set each person's duty for the week: shop, field, off, leave or work from home.</li>
         </ul>
       </div>
       <div class="modal-footer" style="border-top: 1px solid var(--glass-border); padding-top: 15px; display: flex; justify-content: flex-end; margin-top: 20px;">
-        <button id="btn-close-changelog" data-app-version-label class="primary-pink-btn" style="padding: 10px 24px; font-weight: 700; font-size: 0.95rem;">Launch Neo OS v1.11.0</button>
+        <button id="btn-close-changelog" data-app-version-label class="primary-pink-btn" style="padding: 10px 24px; font-weight: 700; font-size: 0.95rem;">Launch Neo OS v1.12.0</button>
       </div>
     </div>
   </div>
@@ -2656,6 +2658,7 @@
   <script src="shared/service-catalog.js"></script>
   <script src="shared/service-demo.js"></script>
   <script src="shared/work-queue.js"></script>
+  <script src="shared/hr-format.js"></script>
   <script src="app.js"></script>
   <script src="modules.js"></script>
   <script src="ops-ui.js"></script>
@@ -2665,6 +2668,7 @@
   <script src="service.js"></script>
   <script src="rma.js"></script>
   <script src="queue.js"></script>
+  <script src="vendor/leaflet/leaflet.js"></script>
   <script src="neohr.js"></script>
   <script src="shell.js"></script>
 </body>

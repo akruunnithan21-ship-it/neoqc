@@ -327,6 +327,25 @@ app.whenReady().then(() => {
     process.exit(0);
   }
 
+  // v1.12 — NeoHR's route map (neohr.js) draws OpenStreetMap tiles, and the
+  // OSM tile policy asks every app to say who it is. This is the ONE header
+  // hook: requests to tile.openstreetmap.org only, and only User-Agent —
+  // the app's name and version, never a person, an email or a machine name.
+  try {
+    const { session } = require('electron');
+    const osmUserAgent = `NeoOS/${app.getVersion()} (Neo Tokyo internal)`;
+    session.defaultSession.webRequest.onBeforeSendHeaders({ urls: ['https://tile.openstreetmap.org/*'] }, (details, callback) => {
+      const requestHeaders = {};
+      Object.keys(details.requestHeaders || {}).forEach((k) => {
+        if (k.toLowerCase() !== 'user-agent') requestHeaders[k] = details.requestHeaders[k];
+      });
+      requestHeaders['User-Agent'] = osmUserAgent;
+      callback({ requestHeaders });
+    });
+  } catch (e) {
+    log.warn('[osm] could not set the map tile User-Agent:', e && e.message);
+  }
+
   initDb();
   createWindow();
 

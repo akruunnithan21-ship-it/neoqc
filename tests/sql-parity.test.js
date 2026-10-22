@@ -42,6 +42,16 @@
   (tests/sql-eval.js); the row-level composition (_svc_state ↔
   ticketWithUnits) runs on PGlite in the scratchpad's pgtest/dash22.mjs.
 
+  v2.3 (sql/neohr-hr.sql — attendance, routes, the HR module): the shared
+  distance fixture tests/fixtures/hr-km.json is checked three ways — its
+  SHA-256 is the one contract §14 publishes (the phone keeps a byte-identical
+  copy), sql/neohr-hr.tests.sql inlines it byte for byte and runs every case
+  through _hr_track_points on PGlite, and a JS copy of §9.5.3 written here
+  reproduces every expectation with no value near a threshold. Plus: every
+  NEO_ sentence of the file is asserted by its tests, grants and RLS of every
+  new table and function, record_field_activity is v2's body plus only the
+  punch branch, India time everywhere, neo_dashboard untouched.
+
   Pass paths to check other copies: node tests/sql-parity.test.js v2.sql v2.1.sql
   (those files, in that order, nothing else appended).
 */
@@ -56,9 +66,10 @@ var Demo = require(path.join(__dirname, '..', 'shared', 'service-demo.js'));
 
 var SQL_PATH = process.argv[2] ? path.resolve(process.argv[2]) : path.join(__dirname, '..', 'sql', 'service-v2.sql');
 // The follow-ups, oldest first: service-v2.1.sql, work-queue.sql (which is
-// v2.2), service-v2.3.sql, … (never a .tests.sql or the optional
-// work-queue-cron.sql). Versions sort as numbers, so 2.10 comes after 2.9.
-var NAMED_FOLLOW_UPS = { 'work-queue.sql': 2 };
+// v2.2), neohr-hr.sql (v2.3), … (never a .tests.sql or the optional
+// work-queue-cron.sql / neohr-hr-cron.sql). Versions sort as numbers, so 2.10
+// comes after 2.9.
+var NAMED_FOLLOW_UPS = { 'work-queue.sql': 2, 'neohr-hr.sql': 3 };
 function followUps() {
   if (process.argv[2]) return [];
   var dir = path.dirname(SQL_PATH);
@@ -1108,6 +1119,246 @@ test('the demo only uses values the SQL accepts', function () {
   d.rma_events.forEach(function (e) {
     if (e.from_stage && e.to_stage) assert.ok((tr[e.from_stage] || []).indexOf(e.to_stage) !== -1, e.id + ' ' + e.from_stage + '>' + e.to_stage);
   });
+});
+
+// ═══ v2.3 — attendance, routes and the HR module (sql/neohr-hr.sql) ═══════
+
+var HR_PATH = SQL_PATHS.filter(function (p) { return path.basename(p) === 'neohr-hr.sql'; })[0] || null;
+var HR_RAW = HR_PATH ? fs.readFileSync(HR_PATH, 'utf8').replace(/\r\n/g, '\n') : null;
+var HR = HR_RAW ? stripComments(HR_RAW) : null;
+var HR_TESTS_PATH = HR_PATH ? path.join(path.dirname(HR_PATH), 'neohr-hr.tests.sql') : null;
+var HR_TESTS = HR_TESTS_PATH && fs.existsSync(HR_TESTS_PATH) ? fs.readFileSync(HR_TESTS_PATH, 'utf8').replace(/\r\n/g, '\n') : null;
+var CONTRACT_PATH = path.join(__dirname, '..', 'docs', 'NEOHR-CONTRACT.md');
+var FIXTURES = path.join(__dirname, 'fixtures');
+var crypto = require('crypto');
+function sha256(buf) { return crypto.createHash('sha256').update(buf).digest('hex'); }
+function hrTest(name, fn) {
+  test(name, function () {
+    if (!HR) { warn('sql/neohr-hr.sql is not among the files read; "' + name + '" skipped'); return; }
+    fn();
+  });
+}
+// The body of the LAST definition of a function in a given text.
+function hrBody(name) { return fnBody(name, HR); }
+
+// HR-SPEC §9.5.3 written once more, in JS, from the spec text (the phone's
+// Kotlin HrDistance and shared/hr-day.js, if it exists, are other copies). It
+// is the reference the fixture expectations were computed with; the SQL runs
+// the same file in sql/neohr-hr.tests.sql (byte-identical, checked below).
+var HR_R = 6371008.8;
+function hrHav(a, b) {
+  var k = Math.PI / 180;
+  var p1 = a.lat * k, p2 = b.lat * k, dp = (b.lat - a.lat) * k, dl = (b.lng - a.lng) * k;
+  var h = Math.pow(Math.sin(dp / 2), 2) + Math.cos(p1) * Math.cos(p2) * Math.pow(Math.sin(dl / 2), 2);
+  return 2 * HR_R * Math.asin(Math.min(1, Math.sqrt(h)));
+}
+function hrTrack(runs) {
+  var total = 0, gaps = 0, kept = [], stops = [], near = [];
+  function margin(what, v, thr, eps) { near.push({ what: what, v: v, thr: thr, eps: eps }); }
+  runs.forEach(function (run) {
+    var pts = run.map(function (p) {
+      return { id: p.id, t: Date.parse(p.at), at: p.at, lat: p.lat, lng: p.lng, acc: p.accuracy_m == null ? 50 : p.accuracy_m };
+    }).filter(function (p) { return p.acc <= 50; });                                         // a)
+    pts.sort(function (x, y) { return x.t - y.t || x.acc - y.acc || (x.id < y.id ? -1 : x.id > y.id ? 1 : 0); });
+    var b = [];
+    pts.forEach(function (p) { if (!b.length || b[b.length - 1].t !== p.t) b.push(p); });    // b)
+    if (!b.length) return;
+    var K = [Object.assign({ jump: false }, b[0])], ref = b[0], queue = b.slice(1), rej = [];
+    while (queue.length) {                                                                    // c)
+      var p = queue.shift(), dt = (p.t - ref.t) / 1000, d0 = hrHav(ref, p);
+      margin('speed', d0, 45 * dt, 0.01);
+      if (d0 / dt <= 45) { K.push(Object.assign({ jump: false }, p)); ref = p; rej = []; }
+      else {
+        rej.push(p);
+        if (rej.length === 3) { K.push(Object.assign({ jump: true }, rej[0])); ref = rej[0]; queue = rej.slice(1).concat(queue); rej = []; }
+      }
+    }
+    var inStop = K.map(function () { return false; }), i = 0;
+    while (i < K.length) {                                                                    // d)
+      var j = i;
+      while (j + 1 < K.length) { var d75 = hrHav(K[i], K[j + 1]); margin('stop radius', d75, 75, 0.01); if (d75 <= 75) j++; else break; }
+      var span = (K[j].t - K[i].t) / 1000;
+      if (j > i) margin('stop span', span, 300, 0.5);
+      if (span >= 300) {
+        var sl = 0, sg = 0;
+        for (var q = i; q <= j; q++) { sl += K[q].lat; sg += K[q].lng; if (q > i) inStop[q] = true; }
+        stops.push({ arrived: K[i].at, left: K[j].at, lat: sl / (j - i + 1), lng: sg / (j - i + 1) });
+        i = j + 1;
+      } else i++;
+    }
+    var anchor = K[0];
+    for (var n = 1; n < K.length; n++) {                                                      // e)
+      if (inStop[n]) continue;
+      if (K[n].jump) { anchor = K[n]; continue; }
+      var d = hrHav(anchor, K[n]), thr = Math.max(15, (anchor.acc + K[n].acc) / 2);
+      margin('step', d, thr, 0.01);
+      if (d >= thr) {
+        var gdt = (K[n].t - anchor.t) / 1000;
+        margin('gap time', gdt, 600, 0.5); margin('gap distance', d, 1000, 0.01);
+        if (gdt > 600 && d > 1000) gaps++;
+        total += d;
+        anchor = K[n];
+      }
+    }
+    K.forEach(function (x) { kept.push(x.id); });
+  });
+  margin('rounding', total - Math.floor(total), 0.5, 0.01);
+  return { total_m: total, km: Math.round(Math.round(total) / 10) / 100, km_gaps: gaps, kept: kept, stops: stops, near: near };   // g)
+}
+
+hrTest('v2.3: tests/fixtures/hr-km.json and hr-day.json are one line each, and hr-km.json has the SHA-256 published in contract §14', function () {
+  var km = fs.readFileSync(path.join(FIXTURES, 'hr-km.json'));
+  var day = fs.readFileSync(path.join(FIXTURES, 'hr-day.json'));
+  assert.ok(km.indexOf(10) === -1 && km.indexOf(13) === -1 && day.indexOf(10) === -1 && day.indexOf(13) === -1,
+            'a fixture must have no newline (git CRLF conversion would change its bytes and its SHA-256)');
+  var contract = fs.readFileSync(CONTRACT_PATH, 'utf8');
+  var m = /hr-km\.json[^\n]*?SHA-256[^\n]*?`([0-9a-f]{64})`/i.exec(contract);
+  assert.ok(m, 'contract §14 must publish the SHA-256 of tests/fixtures/hr-km.json as `<64 hex digits>`');
+  assert.strictEqual(sha256(km), m[1], 'tests/fixtures/hr-km.json changed: its SHA-256 no longer matches contract §14 (the phone copy would disagree)');
+  var md = /hr-day\.json[^\n]*?SHA-256[^\n]*?`([0-9a-f]{64})`/i.exec(contract);
+  assert.ok(md && md[1] === sha256(day), 'contract §14 publishes the SHA-256 of tests/fixtures/hr-day.json');
+  var fx = JSON.parse(km.toString('utf8'));
+  assert.strictEqual(fx.version, 1, 'hr-km.json version');
+  var names = fx.cases.map(function (c) { return c.name; });
+  ['dt0_pair', 'bad_first_fix', 'teleport_mid', 'stationary_jitter', 'slow_walk', 'break_two_runs', 'tunnel_gap', 'null_accuracy',
+   'all_bad_accuracy', 'drive'].forEach(function (n) { assert.ok(names.indexOf(n) !== -1, '§9.5.4: the fixture covers ' + n); });
+});
+
+hrTest('v2.3: sql/neohr-hr.tests.sql runs exactly these fixtures (inlined byte for byte)', function () {
+  assert.ok(HR_TESTS, 'sql/neohr-hr.tests.sql not found');
+  ['hr-km', 'hr-day'].forEach(function (name) {
+    var m = new RegExp("values \\('" + name + "', \\$fx\\$([^$]*)\\$fx\\$::jsonb\\)").exec(HR_TESTS);
+    assert.ok(m, 'the tests inline ' + name + '.json');
+    assert.strictEqual(m[1], fs.readFileSync(path.join(FIXTURES, name + '.json'), 'utf8'), name + '.json and its copy in the SQL tests differ');
+  });
+  assert.ok(/public\._hr_track_points\(c -> 'runs'\)/.test(HR_TESTS) && /public\._hr_day_calc\(c -> 'input'\)/.test(HR_TESTS),
+            'the SQL tests run every case through _hr_track_points and _hr_day_calc');
+});
+
+hrTest('v2.3: the §9.5.3 reference reproduces every hr-km.json expectation, with no value within 0.01 m of a threshold', function () {
+  var fx = JSON.parse(fs.readFileSync(path.join(FIXTURES, 'hr-km.json'), 'utf8'));
+  fx.cases.forEach(function (c) {
+    var r = hrTrack(c.runs), e = c.expect;
+    assert.ok(Math.abs(r.total_m - e.total_m) <= 0.001, c.name + ': total_m ' + r.total_m + ' vs ' + e.total_m);
+    assert.strictEqual(r.km, e.km, c.name + ': km');
+    assert.strictEqual(r.km_gaps, e.km_gaps, c.name + ': km_gaps');
+    assert.deepStrictEqual(r.kept, e.kept, c.name + ': kept');
+    assert.strictEqual(r.stops.length, e.stops.length, c.name + ': stops');
+    r.stops.forEach(function (s, i) {
+      var x = e.stops[i];
+      assert.ok(Date.parse(s.arrived) === Date.parse(x.arrived) && Date.parse(s.left) === Date.parse(x.left)
+                && Math.abs(s.lat - x.lat) <= 1e-7 && Math.abs(s.lng - x.lng) <= 1e-7, c.name + ': stop ' + i);
+    });
+    r.near.forEach(function (n) {
+      assert.ok(Math.abs(n.v - n.thr) > n.eps, c.name + ': ' + n.what + ' ' + n.v + ' is within ' + n.eps + ' of its threshold ' + n.thr);
+    });
+  });
+  // the check notices a wrong rule (a reference that does not re-anchor disagrees)
+  var bad = fx.cases.filter(function (c) { return c.name === 'bad_first_fix'; })[0];
+  var r2 = hrTrack(bad.runs.map(function (run) { return run.slice(1); }));
+  assert.notStrictEqual(r2.kept.join(','), bad.expect.kept.join(','), 'self-check: a different input gives a different answer');
+});
+
+hrTest('v2.3: the SQL distance code carries §9.5.3\'s constants', function () {
+  var hav = hrBody('_hr_hav'), tp = hrBody('_hr_track_points');
+  assert.ok(hav && /2\s*\*\s*6371008\.8\s*\*\s*asin/.test(hav), '_hr_hav: R = 6371008.8');
+  assert.ok(tp, '_hr_track_points not found');
+  [[/where z\.acc <= 50/, 'a) accuracy <= 50'], [/'accuracy_m'\)::float8,\s*50\)/, 'a) null accuracy = 50'],
+   [/order by z\.at, z\.acc, z\.id collate "C"/, 'b) one fix per instant: smallest accuracy, then id'],
+   [/if v <= 45 then/, 'c) 45 m/s'], [/cardinality\(rej\) = 3/, 'c) three rejects'], [/\) > 75;/, 'd) 75 m'], [/>= 300 then/, 'd) 300 s'],
+   [/greatest\(15, \(ac\[k\[a\]\] \+ ac\[k\[p\]\]\) \/ 2\)/, 'e) max(15, (acc1 + acc2) / 2)'], [/dt > 600 and d > 1000/, 'e) gap: 600 s and 1000 m'],
+   [/round\(round\(v_total\)::bigint \/ 1000\.0, 2\)/, 'g) km rounding']].forEach(function (x) {
+    assert.ok(x[0].test(tp), '_hr_track_points: ' + x[1]);
+  });
+});
+
+hrTest('v2.3: every NEO_ sentence of sql/neohr-hr.sql is asserted in sql/neohr-hr.tests.sql', function () {
+  assert.ok(HR_TESTS, 'sql/neohr-hr.tests.sql not found');
+  // record_field_activity and tech_activity are v2 bodies (their sentences are v2's, tested there)
+  var own = HR_RAW;
+  ['record_field_activity', 'tech_activity'].forEach(function (f) {
+    var i = own.indexOf('create or replace function public.' + f + '(');
+    if (i !== -1) own = own.slice(0, i) + own.slice(own.indexOf('end $$;', i) + 7);
+  });
+  var re = /'(NEO_(?:GATE|DENIED): (?:[^']|'')*)'/g, m, sentences = [];
+  while ((m = re.exec(own)) !== null) if (sentences.indexOf(m[1]) === -1) sentences.push(m[1]);
+  // the sequence sentences _hr_seq_sentence returns and _hr_check_add / _hr_check_ops raise as NEO_GATE: <sentence>
+  var ss = hrBody('_hr_seq_sentence');
+  assert.ok(ss && /select case p_kind/.test(ss), '_hr_seq_sentence: the sentence table');
+  (ss.match(/'(?:[^']|'')+\.'/g) || []).forEach(function (s) { sentences.push('NEO_GATE: ' + s.slice(1, -1)); });
+  assert.ok(/return 'That doesn''t fit the day''s punches\.';/.test(hrBody('_hr_check_add') || ''), '_hr_check_add: the two-sided sentence');
+  sentences.push("NEO_GATE: That doesn''t fit the day''s punches.");
+  var co = hrBody('_hr_check_ops') || '';
+  var cs = co.match(/'(?:[^']|'')+\.'/g) || [];
+  assert.ok(cs.length === 2, '_hr_check_ops: its two sentences (void only / with an add) — found ' + cs.length);
+  cs.forEach(function (s) { sentences.push('NEO_GATE: ' + s.slice(1, -1)); });
+  var missing = sentences.filter(function (s) {
+    if (/^NEO_(GATE|DENIED): %$/.test(s)) return false;
+    var rx = new RegExp(s.split('%').map(function (p) { return p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }).join('.+?'));
+    return !rx.test(HR_TESTS);
+  });
+  assert.ok(sentences.length > 60, 'found ' + sentences.length + ' sentences');
+  assert.ok(!missing.length, 'sentences no test asserts:\n    ' + missing.join('\n    '));
+});
+
+hrTest('v2.3: grants — internals for service_role only, the API for authenticated, nothing for anon', function () {
+  var lock = hrBody('_hr_lockdown');
+  var api = arrayVar(lock.replace(/constant\s+/i, ''), 'v_api');
+  assert.ok(api && api.length >= 24, '_hr_lockdown lists the API');
+  createdFunctions(HR).forEach(function (f) {
+    assert.ok(/^_hr_/.test(f) || api.indexOf(f) !== -1, f + ' is neither an _hr_ internal nor in the API list (its grants would be wrong)');
+  });
+  api.forEach(function (f) { assert.ok(createdFunctions(HR).indexOf(f) !== -1, f + ' is in the API list but not created'); });
+  assert.ok(!/\bto\s+anon\b/i.test(HR.replace(/from\s+(?:public,\s*)?anon/gi, '')), 'neohr-hr.sql grants nothing to anon');
+  assert.ok(/'\^_hr_'/.test(lock) && /revoke all on function %s from public, anon, authenticated/.test(lock), '_hr_lockdown revokes every _hr_ function');
+  assert.ok((HR.match(/perform public\._hr_lockdown\(\);/g) || []).length >= 8, 'every DO block ends by locking down what it defined');
+});
+
+hrTest('v2.3: every new table has RLS, no client write, select only (location_points: none)', function () {
+  var tables = [], re = /create\s+table\s+if\s+not\s+exists\s+public\.([a-z_]+)/gi, m;
+  while ((m = re.exec(HR)) !== null) tables.push(m[1]);
+  sameSet(tables, ['hr_settings', 'hr_person', 'hr_shift_history', 'attendance_events', 'location_points', 'hr_requests', 'hr_roster',
+                   'hr_ta_approvals', 'hr_day_km', 'hr_holidays', 'hr_route_views'], 'v2.3 tables');
+  tables.forEach(function (t) {
+    assert.ok(new RegExp('alter table public\\.' + t + ' enable row level security;').test(HR), t + ': RLS on');
+    assert.ok(new RegExp('revoke all on table public\\.' + t + ' from anon, authenticated;').test(HR), t + ': revoked from clients');
+    var g = new RegExp('grant ([a-z, ]+) on table public\\.' + t + ' to ([a-z_, ]+);', 'g'), x, grants = [];
+    while ((x = g.exec(HR)) !== null) grants.push(x[1] + ' → ' + x[2]);
+    if (t === 'location_points') assert.deepStrictEqual(grants, [], 'location_points: no client grant at all');
+    else assert.deepStrictEqual(grants, ['select → authenticated'], t + ': select only, to authenticated');
+  });
+  assert.ok(!/alter publication supabase_realtime add table public\.(hr_|attendance|location)/i.test(HR), 'nothing of v2.3 is in realtime');
+});
+
+hrTest('v2.3: record_field_activity is v2\'s body plus only the punch branch; tech_activity keeps its signature and keys', function () {
+  var v2rfa = fnBody('record_field_activity', V2), hrrfa = hrBody('record_field_activity');
+  assert.ok(v2rfa && hrrfa, 'record_field_activity in both files');
+  var start = hrrfa.indexOf("  if v_kind in ('punch_in', 'punch_out') then");
+  var end = hrrfa.indexOf('\n  end if;\n', start);
+  assert.ok(start !== -1 && end !== -1, 'the punch branch');
+  var rest = hrrfa.slice(0, start) + hrrfa.slice(end + '\n  end if;\n'.length);
+  var norm = function (s) { return s.replace(/\s+/g, ' ').replace(/\s*v_hr jsonb;/, '').trim(); };
+  assert.strictEqual(norm(rest), norm(v2rfa), 'outside the punch branch (and one variable), record_field_activity must be v2\'s, verbatim');
+  assert.ok(/public\._hr_punch_apply\(v_me\.email, v_crid, v_kind/.test(hrrfa), 'the punch branch acts for the caller through _hr_punch_apply');
+  ['record_field_activity', 'tech_activity'].forEach(function (f) {
+    assert.strictEqual(fnParams(f, HR).params, fnParams(f, V2).params, f + ': the v2 signature');
+  });
+  var v2ta = fnBody('tech_activity', V2), hrta = hrBody('tech_activity');
+  ['claims', 'releases', 'released_by_lead', 'manager_assigns', 'visits_left', 'visits_arrived', 'visits_done', 'revisits', 'parts_needed',
+   'customer_absent', 'punch_ins', 'punch_outs', 'first_at', 'last_at'].forEach(function (k) {
+    assert.ok(new RegExp('\\bas ' + k + '\\b').test(hrta) && new RegExp('\\bas ' + k + '\\b').test(v2ta), 'tech_activity keeps ' + k);
+  });
+  assert.ok(/from public\.attendance_events ae/.test(hrta) && /fa\.kind not in \('punch_in', 'punch_out'\)/.test(hrta),
+            'tech_activity: punches from attendance_events only');
+});
+
+hrTest('v2.3: India time everywhere (no current_date), neo_dashboard untouched', function () {
+  assert.ok(!/\bcurrent_date\b/i.test(HR), 'neohr-hr.sql never uses current_date');
+  assert.ok(/\(coalesce\(p_now, now\(\)\) at time zone 'Asia\/Kolkata'\)::date/.test(hrBody('_hr_today')), '_hr_today is the India date');
+  assert.ok(/\(p_day \+ p_t\) at time zone 'Asia\/Kolkata'/.test(hrBody('_hr_at')), '_hr_at is a shop clock time on a shop day');
+  assert.ok(createdFunctions(HR).indexOf('neo_dashboard') === -1, '§9.9.2: neo_dashboard is not redefined (2.1.1 phones)');
+  var castRe = /\b(?:at|p_at|v_at|s_start|e\.at|lp\.at|fa\.at)\s*::\s*(?:date|time)\b/gi;
+  assert.ok(!castRe.test(HR), 'no timestamp is cast to a date or time without at time zone \'Asia/Kolkata\'');
 });
 
 warnings.forEach(function (w) { console.warn('WARN ' + w); });

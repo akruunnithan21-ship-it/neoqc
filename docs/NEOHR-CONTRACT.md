@@ -1,6 +1,6 @@
 # NeoHR data contract
 
-**Contract version:** 3.1. It comes from the database migrations `service_v2_rma` (`sql/service-v2.sql`), `service_v2_1_secrets` (`sql/service-v2.1.sql`) and `work_queue_v2_2` (`sql/work-queue.sql`). Version 3.1 (NeoHR 2.1, additive) adds the simplified dashboard, the technician's job detail, moves, photos and RMA parts from the phone, and the NeoHR update manifest (§10). Version 3 adds the work queue for builds and service (§8), synced work logs (§9) and sign-in over plain REST (§8.1); version 2 replaced the `v_tech_activity` view with the `tech_activity` RPC and changed phone normalisation, check-out handling, claim retries and re-timed claims. See §13 for the lists.
+**Contract version:** 4. It comes from the database migrations `service_v2_rma` (`sql/service-v2.sql`), `service_v2_1_secrets` (`sql/service-v2.1.sql`), `work_queue_v2_2` (`sql/work-queue.sql`) and `neohr_hr_v2_3` (`sql/neohr-hr.sql`). Version 4 (NeoHR 2.2, additive) adds attendance with breaks, route recording and travel allowance, telling HR (requests), the duty roster and the HR side (§14). Version 3.1 (NeoHR 2.1, additive) adds the simplified dashboard, the technician's job detail, moves, photos and RMA parts from the phone, and the NeoHR update manifest (§10). Version 3 adds the work queue for builds and service (§8), synced work logs (§9) and sign-in over plain REST (§8.1); version 2 replaced the `v_tech_activity` view with the `tech_activity` RPC and changed phone normalisation, check-out handling, claim retries and re-timed claims. See §13 for the lists.
 **Audience:** the Android (Kotlin) developer turning *Daily Logger* (today a local-only Room/SQLite app) into **NeoHR**. NeoHR talks to the same Supabase project as the Neo Tokyo desktop app and website.
 
 This file is the only promise the server makes to NeoHR. Everything listed here exists in the database once `service_v2_rma` is applied. Anything not listed (tables, columns, other RPCs) may change without notice, so NeoHR must not read or write it.
@@ -20,7 +20,11 @@ This file is the only promise the server makes to NeoHR. Everything listed here 
 | Hand a job back | RPC `service_release` |
 | "My day" (claimed jobs with address and phone) | view `v_tech_day` |
 | Left shop / Checked in / Checked out | RPC `record_field_activity` (kinds `left_base`, `arrived`, `departed`) |
-| Attendance punch in / out | RPC `record_field_activity` (kinds `punch_in`, `punch_out`) |
+| Attendance punch in / out, breaks | RPC `hr_punch` (§14.2); version 2's `record_field_activity` punch is forwarded to it |
+| Route recording while on duty, the day's timeline and km | RPCs `location_push`, `hr_route`, `hr_my_day` (§14.3–§14.5) |
+| Tell HR: late start, early leave, flexible / field day, missed punch, leave | RPCs `hr_request_create`, `hr_request_cancel`, `hr_requests_list` (§14.6) |
+| My month; the Dashboard's Me and Team tiles | RPCs `hr_my_month`, `hr_dashboard`, `hr_settings_get` (§14.5) |
+| Heads: live board, approvals, register, corrections, roster, travel allowance | RPCs `hr_board`, `hr_request_decide`, `hr_register`, `hr_correct`, `hr_roster_get` / `hr_roster_set`, `hr_holiday_set`, `hr_ta_report` / `hr_ta_approve` (§14.7–§14.10) |
 | Daily work-log entries (the Daily Logger feature) | RPCs `work_log_push`, `work_log_pull`; tier 3+ `work_log_team` (§9). (Version 2's `record_field_activity` with `ref_type` `work_log` still records, but is no longer how logs sync.) |
 | Notes on a job | RPC `service_add_note` |
 | Photos on a job | Storage bucket `service-media` + table `service_media` |
@@ -236,7 +240,7 @@ GET {URL}/rest/v1/v_tech_day?select=*&order=visit_start.asc.nullslast
 `remote_session_ref` is a session id, never a password. The one password the server keeps is a device's password or PIN that the customer gave at the counter (§6.10). It is in no table or view NeoHR can read, only behind its own RPC, and it is deleted when the job closes.
 
 ### 5.3 `tech_activity(p_from, p_to)` — per person per day (HR and managers)
-An RPC (it replaced the version-1 view `v_tech_activity`). A `service` lead, a `neohr` lead, or anyone tier 3+ gets everyone's rows; anyone else gets only their own.
+An RPC (it replaced the version-1 view `v_tech_activity`). A `service` lead, a `neohr` lead, or anyone tier 3+ gets everyone's rows; anyone else gets only their own. Since contract version 4 its punches come from `attendance_events` (§14), the only attendance record.
 
 ```
 POST {URL}/rest/v1/rpc/tech_activity
@@ -264,7 +268,7 @@ POST {URL}/rest/v1/rpc/tech_activity
 | `manager_assigns` | jobs a lead assigned to them |
 | `visits_left`, `visits_arrived`, `visits_done` | field check-ins (`left_base`, `arrived`, `departed` + `done`) |
 | `revisits`, `parts_needed`, `customer_absent` | the other `departed` outcomes |
-| `punch_ins`, `punch_outs` | attendance |
+| `punch_ins`, `punch_outs` | attendance punches (`attendance_events`, voided ones left out; contract 4) |
 | `first_at`, `last_at` | first and last recorded event that day |
 
 ```kotlin
@@ -359,7 +363,7 @@ Any other combination is still **recorded**, with `applied: false` and an `appli
 
 The technician's `note` is **never** shown to the customer. When a move is customer-visible, the customer reads the fixed wording above and the note goes into the job as an internal note.
 
-**Attendance:**
+**Attendance** (legacy — forwarded to hr_punch (§14)). Since contract version 4 a `punch_in` / `punch_out` sent here goes through `hr_punch`'s lock, time rules and sequence check (§14.2), always for the caller (`employee_email` is ignored), and writes no `field_activity` row; a refused punch answers `{"applied": false, "applied_note": "You're already punched in.", "duplicate": false}`. NeoHR 2.2 calls `hr_punch` directly:
 ```json
 {"p": {"client_request_id": "…", "kind": "punch_in", "ref_type": "attendance", "module": "neohr",
        "at": "2026-10-23T09:02:00+05:30", "lat": 10.0159, "lng": 76.3419, "source": "neohr"}}
@@ -1048,7 +1052,7 @@ NeoHR updates itself from GitHub Releases of the public repository `akruunnithan
 ## 11. Privacy
 
 - The queue (`v_service_queue`) never exposes phone, surname or address, and its location is rounded to about 1 km. Full contact details arrive only after a claim, via `v_tech_day`.
-- Location is recorded only on the explicit events a technician posts (check-in, check-out, punch). There is no continuous tracking, and NeoHR must not add any.
+- Route points are recorded only between punch-in and punch-out, never during a break or on a work-from-home day, and always with a visible notification. They are kept for `hr_settings.retention_days` days (90 by default) and then deleted; each day's km is kept. They can be read only through `hr_route` / `hr_my_day`, by the person, `neohr` leads and tier 3+. Every view of someone else's route is recorded in `hr_route_views`, and the person can see those views.
 - Technicians' home addresses belong in NeoHR's own storage, never in these tables.
 - What the database allows is wider than what NeoHR should show. Row-level security lets any `service` desk+ member read every ticket, because the desktop board needs that. NeoHR should still read only the views above, so a phone app never holds more customer data than the person's own day needs.
 - Who can read the activity log and everyone's work logs: the person, any `neohr` lead, and tier 3+ (owner, founders, department heads); a `service` lead also reads the activity log. HR staff below tier 3 need a `neohr` lead role, which tier 4+ grant in Settings → General → People (the NeoHR role column) — see §3.
@@ -1108,6 +1112,16 @@ RMA parts (`rma_cases.stage`, returned by `rma_create`): a field pull starts at 
 
 Additive changes (a new column, a new optional field, a new RPC) can ship at any time, so NeoHR must ignore unknown JSON keys. Removing or renaming anything here means a new contract version and a note in this file first.
 
+### Version 4 (additive, `sql/neohr-hr.sql`, Neo OS 1.12.0 / NeoHR 2.2)
+- New: attendance as its own record, `attendance_events`, written by `hr_punch` — punch in / out and breaks, idempotent and safe offline, a sequence check, server-anchored time, sessions closed by the server after 16 hours (§14.1–§14.2).
+- New: route recording only while on duty — `location_push`, `hr_route`, the `tracking` object; one distance rule shared with the phone through `tests/fixtures/hr-km.json` (§14.3, §14.4, §14.11).
+- New: day records, my month and the dashboard's Me / Team tiles — `hr_my_day`, `hr_my_month`, `hr_dashboard`, `hr_settings_get` (§14.5).
+- New: telling HR — `hr_request_create`, `hr_request_cancel`, `hr_requests_list`; and the heads' side — `hr_request_decide`, `hr_board`, `hr_register`, `hr_correct`, `hr_roster_get`, `hr_roster_set`, `hr_holiday_set`, `hr_settings_set`, `hr_person_set`, `hr_ta_report`, `hr_ta_approve`, `hr_ta_unapprove` (§14.6–§14.10).
+- Changed: `record_field_activity` `punch_in` / `punch_out` are forwarded to `hr_punch` (§6.1); the punches it stored before moved to `attendance_events` with the same ids, so their replays are still answered once.
+- Changed: `tech_activity` counts punches from `attendance_events` (§5.3).
+- Changed: §11 — route points are recorded while on duty (this replaces "no continuous tracking").
+- Unchanged: `neo_dashboard` and every version 3.1 shape (NeoHR 2.1.1 keeps working).
+
 ### Version 3.1 (additive, `sql/work-queue.sql`, Neo OS 1.11.0 / NeoHR 2.1)
 - New: `neo_dashboard()` — the phone's simplified dashboard; each section only for the people who may read it (§10.1). Its "late" and whose-turn counts are the desktop's own rule.
 - New in the contract (the server already allowed it): the technician's job detail reads (`service_items`, `service_events`, `rma_cases` for "My RMA parts", a build's named columns), `service_move` from the phone, and the photo upload exactly as Neo OS does it, online only (§10.2–§10.4).
@@ -1142,3 +1156,367 @@ Additive changes (a new column, a new optional field, a new RPC) can ship at any
 - `service_claim`: a claim of a job that is already yours answers `{"ok": true, "already": true, …}`; the reason is never required (§6.2).
 - New: field pulls through `rma_create` with `source: "field"`, starting at the RMA stage `with_tech` (§6.8).
 - `rma_dispatch` takes `p_mode` and `p_carried_by` (§6.9; desktop only).
+
+---
+
+## 14. Attendance, routes and HR (contract version 4, `sql/neohr-hr.sql`)
+
+NeoHR 2.2 (and Neo OS 1.12.0's HR screen) use everything here. Same session, headers and error rules as §8.1 / §4: every call is `POST {URL}/rest/v1/rpc/<name>` with named arguments, a function taking one `jsonb` argument named `p` is called as `{"p": {…}}`, errors are `NEO_GATE:` / `NEO_DENIED:` sentences (show the text after the colon). Below, each RPC is written as "`p = {…}; returns {…}`" (or with its named arguments); the answers are real answers of the database (PGlite, `pgtest/shapes23.mjs`), shortened only where it says `…`.
+
+- **India time.** "Today" and "this month" are India dates (`Asia/Kolkata`); a day runs from 00:00 to 24:00 India time. Send times as ISO-8601 **with an offset**; answers come back in UTC (`…+00:00`) — show them in local time. Send `p_day` / `p_month` as India dates (`ZoneId.of("Asia/Kolkata")`).
+- **Minutes** are whole minutes, rounded down. **km** are numbers with two decimals (`1.00`). Unknown keys may appear later: ignore them.
+- **Approver** = a `neohr` lead (tier 3 and above are leads automatically; `my_work_profile.team_view` is `true` for them). Nobody approves or changes their own attendance, duty or travel allowance: `NEO_DENIED: Someone else has to approve or change your own attendance, duty or travel allowance.` (a tier 5 may still change their own settings row, §14.9). Show that sentence on the viewer's own row instead of the buttons.
+- **The tables** below are readable directly (`GET /rest/v1/<table>`, select only, row-level security): `attendance_events`, `hr_requests`, `hr_roster`, `hr_person`, `hr_ta_approvals`, `hr_day_km` — your own rows, everyone's for an approver; `hr_settings`, `hr_holidays`, the default rows of `hr_shift_history` — any active staff member; `hr_route_views` — the views of your own route, everyone's for tier 4+. **`location_points` is readable by nobody**: route points come only through `hr_route` / `hr_my_day`. NeoHR should use the RPCs.
+
+### 14.1 Words: state, session, day record, duty, live status
+- **State** at a moment: `off_duty` → `punch_in` → `on_duty` ⇄ (`break_start` / `break_end`) `on_break` → `punch_out` → `off_duty`. A `punch_out` during a break also ends the break. Punches are ordered by `(at, received_at, id)`.
+- **Session** = a `punch_in` to its `punch_out`. With no `punch_out` by **`cap_at` = punch_in + `max_session_h` hours** (16 by default) the server closes it: off duty from `cap_at` on; the day gets `missed_out: true`; worked time ends at the open break's start, else at the latest punch or route point of the session. **A session belongs to the India day of its `punch_in`**, even past midnight (a 20:00 → 02:00 night is the first day's).
+- **Duty** of a day: the roster row (`shop | field | off | leave | wfh`), else `off` on a holiday or a weekly off of the person's shift, else `shop`.
+- **Shift** of a day: the person's shift row in effect that day (`hr_shift_history`, newest `effective_from` ≤ the day); a field it leaves empty comes from the default row. Default 09:30–18:30, grace 10 min, half day under 240 min, weekly off Sunday (`weekly_off` 0 = Sunday … 6 = Saturday).
+- **Day record** (computed, never stored):
+  ```json
+  {"day": "2026-10-21", "duty": "shop", "duty_source": "default", "roster_note": null, "holiday": null,
+   "shift": {"start": "09:30", "end": "18:30", "grace_min": 10, "half_day_min": 240, "weekly_off": [0]},
+   "status": "late", "flex": false, "first_in": "2026-10-21T04:22:00+00:00", "last_out": "2026-10-21T13:10:00+00:00",
+   "worked_min": 493, "break_min": 35, "late_min": 12, "early_min": 0, "missed_out": false, "irregular": false,
+   "worked_on_duty": null, "half_day_leave": false, "open": false,
+   "sessions": [{"in": "2026-10-21T04:22:00+00:00", "out": "2026-10-21T13:10:00+00:00", "cap_at": "2026-10-21T20:22:00+00:00",
+                 "breaks": [{"from": "2026-10-21T07:40:00+00:00", "to": "2026-10-21T08:15:00+00:00"}],
+                 "worked_min": 493, "break_min": 35, "open": false, "missed_out": false}],
+   "km": 1.00, "km_gaps": 0, "leave_units": 0, "absent_units": 0}
+  ```
+  | Key | Meaning |
+  |---|---|
+  | `status` | punched: `open` (still on duty) · `half_day` (worked < `half_day_min`, or a half-day leave) · `late` (`late_min` > 0) · `present`. Not punched, the first that applies: `leave` (duty leave, or a half-day leave) · `off` · `not_tracked` (attendance not required for the person; or a day before `attendance_from` / before the person's account existed — only where the day would otherwise be `not_in_yet` or `absent`: a leave or an off day before it still counts, and a half-day leave there is 0.5 leave, 0 absent) · `not_in_yet` (today before shift start + grace — before shift end on a flex day — or a later day) · `absent` |
+  | `late_min` / `early_min` | first punch_in − (shift start + grace) / shift end − last punch_out, when positive; always 0 on a `flex` day, on duty `field` / `leave` / `off`, or when attendance is not required |
+  | `flex` | duty `field`, or an approved late start / early leave / flexible day / field day covers the day, or a half-day leave |
+  | `missed_out` | the day's last session was closed by the server; `last_out` is then `null` |
+  | `irregular` | a punch the state did not allow was ignored (e.g. a second punch_in) |
+  | `worked_on_duty` | `"off"` or `"leave"` when someone punched on such a day |
+  | `leave_units` / `absent_units` | for month totals: a half-day leave not punched is 0.5 + 0.5, punched 0.5 leave |
+  | `duty_source` | `roster` · `holiday` · `weekly_off` · `default`; `roster_note` = the roster row's note (`"Leave"` / `"Field day"` for a request's rows — never the reason or leave type) |
+  | `clock_marks` | approvers only (register, board, corrections): the number of the day's punches with a clock mark (§14.12) |
+- **Live status** (board and dashboard), the first that matches: open session on a break → `on_break`; open session at an on-site job (assignee of a job at stage `on_site`, arrived since this punch_in, not departed) → `on_site`; open session → `on_duty`; duty off (holiday, weekly off) → `off`; duty leave → `on_leave`; a session today that has closed → `off_duty`; attendance not required, or today is before `attendance_from` / before the person's account existed → `not_tracked` (the same rule as the day record, so the board, the register and the Team tiles agree); before shift start + grace (before shift end on a flex or field day) → `not_in_yet`; otherwise `absent`.
+
+### 14.2 `hr_punch(p)` — punch in / out, start / end a break (idempotent, safe to queue offline)
+`p = {"id": "a1a1a1a1-0000-4000-8000-000000000002", "kind": "punch_in", "at": "2026-10-22T18:53:48+05:30", "age_ms": 7200000, "lat": 10.0159, "lng": 76.3419, "accuracy_m": 9, "note": null}; returns`
+```json
+{"ok": true, "duplicate": false, "now": "2026-10-22T15:23:48.996+00:00", "id": "a1a1a1a1-0000-4000-8000-000000000002",
+ "state": "on_duty", "since": "2026-10-22T13:23:48.996+00:00",
+ "day": {"day": "2026-10-22", "status": "open", "open": true, "first_in": "2026-10-22T13:23:48.996+00:00", "worked_min": 120, "…": "…"},
+ "tracking": {"enabled": true, "reason": null, "interval_s": 120, "distance_m": 100, "session_start": "2026-10-22T13:23:48.996+00:00",
+              "cap_at": "2026-10-23T05:23:48.996+00:00", "remind_out_at": "2026-10-22T13:30:00+00:00", "pause_at": "2026-10-22T17:23:48.996+00:00"}}
+```
+- `id` (required): one UUID per tap, kept with the queued punch, reused on every retry. A replay answers with the **current** state and `"duplicate": true`; a replay of a punch HR voided answers `{"ok": false, "duplicate": true, "voided": true, …}` (show "HR removed this punch"). An id someone else used: `NEO_GATE: That punch id is already used.`
+- `kind`: `punch_in`, `punch_out`, `break_start`, `break_end`. `at`: the device time of the tap. `age_ms` (optional, §14.12): milliseconds since the tap by the phone's elapsed clock — then the server dates the punch itself. `lat` / `lng` / `accuracy_m` optional (an out-of-range or partial fix is dropped, the punch kept). `note` ≤ 500. Any `source` is ignored (`phone`).
+- `state` / `since`: the state now and when it began (the cap after a server close). `day`: the day record of the session the punch belongs to. `tracking`: §14.3.
+- Refusals (permanent for that payload; the phone shows "Not recorded: <sentence>" with [Tell HR] → a missed punch request): `NEO_GATE: You're already punched in.` · `NEO_GATE: Punch in first.` · `NEO_GATE: You're already on a break.` · `NEO_GATE: You're not on a break.` · `NEO_GATE: You're not punched in.` · `NEO_GATE: That shift was closed automatically — ask HR to add your punch-out.` (a punch_out after the server closed that session) · `NEO_GATE: That doesn't fit the day's punches.` (an offline punch that fits where it lands but breaks the punch after it) · `NEO_GATE: The phone's clock is wrong — turn on automatic date and time, then punch again.` · `NEO_GATE: Say what you're punching: punch_in, punch_out, break_start or break_end.` · `NEO_GATE: id is required — make one UUID per punch and reuse it on every retry.` · `NEO_GATE: The request is empty.`
+- The legacy `record_field_activity` punch (§6.1) is forwarded here and answers in the old shape: `{"id": "…", "applied": true, "applied_note": "Recorded.", "duplicate": false, "stage": null}`, or `{"applied": false, "applied_note": "You're already punched in.", …}`.
+
+### 14.3 The `tracking` object
+Returned by `hr_punch`, `hr_my_day` (your own day), `hr_settings_get` (`me.tracking`) and `hr_dashboard` (`me.tracking`):
+```json
+{"enabled": true, "reason": null, "interval_s": 120, "distance_m": 100, "session_start": "2026-10-22T13:23:48.996+00:00",
+ "cap_at": "2026-10-23T05:23:48.996+00:00", "remind_out_at": "2026-10-22T13:30:00+00:00", "pause_at": "2026-10-22T17:23:48.996+00:00"}
+```
+| Key | Rule |
+|---|---|
+| `enabled` | route recording is on for the person (`hr_person.track_location`) AND the state is `on_duty` AND the session day's duty is not `wfh` |
+| `reason` | `null` when enabled, else the first that applies: `disabled` ("Route recording is off for you.") · `wfh` ("Working from home — no route is recorded.") · `on_break` · `off_duty` |
+| `interval_s`, `distance_m` | `hr_settings.track_interval_s` / `track_distance_m` (new values take effect at the next recording start) |
+| `session_start`, `cap_at` | the open session's punch_in and its server close; `null` when off duty |
+| `remind_out_at` | the session day's shift end + 30 min, only when the punch_in came before it; else `null` |
+| `pause_at` | `least(cap_at, greatest(shift end, punch_in) + 4 h)` — recording pauses there until "Keep recording" |
+
+Every time field is `null` off duty.
+
+### 14.4 `location_push(p_points)` — route points (≤ 500 per call)
+`p_points = [{"id": "c1c1c1c1-0000-4000-8000-000000000001", "at": "2026-10-22T20:23:49+05:30", "age_ms": 3600000, "lat": 10.0161, "lng": 76.3422, "accuracy_m": 8, "speed_mps": 0.4, "bearing": 91}, …]; returns`
+```json
+{"accepted": 1, "rejected": [{"id": "c1c1c1c1-0000-4000-8000-000000000002", "reason": "off_duty"}, {"id": "not-a-uuid", "reason": "invalid"}]}
+```
+Each point gets the first reason that applies:
+
+| `reason` | When | The phone |
+|---|---|---|
+| `invalid` | a bad UUID, `at`, latitude / longitude out of range, accuracy below 0, not an object | delete the point |
+| `clock` | no usable `age_ms` and `at` outside 2020-01-01 … now + 10 min | delete |
+| `not_yours` | the id belongs to someone else's point | delete |
+| *(accepted)* | the id is already one of yours: counted in `accepted`, not listed | mark sent |
+| `disabled` | route recording is off for the person | delete |
+| `wfh` | the session day's duty is work from home | delete |
+| `on_break` / `off_duty` | the person was not on duty at `at` (run rules below) | delete when no punch of yours is pending, else keep |
+
+A point counts only inside a **run** — on duty and not on a break: `[punch_in | break_end, break_start | punch_out | cap_at)`. A point up to 60 s **before** a punch_in or break_end is stored at that punch's time; at or after a break_start, punch_out or `cap_at` there is no tolerance. Send points only while no punch of yours is still queued (so the server knows the state), oldest first by (boot count, elapsed time). `NEO_GATE: Send a list of points.` · `NEO_GATE: Send at most 500 points at a time.` · `[]` → `{"accepted": 0, "rejected": []}`.
+
+What `invalid` accepts: `at` is ISO-8601 (`YYYY-MM-DDTHH:MM[:SS[.fraction]]`, then `Z` or an offset up to ±15:59 — Postgres's limit); `lat`, `lng`, `accuracy_m`, `speed_mps`, `bearing` are JSON numbers (or numeric strings) with up to 12 digits before the point, up to **40 after it** and an optional exponent of up to 2 digits — every `Double` kotlinx writes fits, e.g. a `Float` accuracy widened to `Double` (`3.9000000953674316`). A bad `speed_mps` / `bearing` is stored as null, never a rejection. A bad item is `invalid` on its own: it never fails the rest of the batch. (Sending the float's own shortest form, `loc.accuracy.toString().toDouble()`, keeps the payload short; the server does not need it.)
+
+### 14.5 Reads for the person
+**`hr_my_day(p_day, p_email)`** — `p_day` default today; `p_email` someone else's (approvers only: `NEO_DENIED: Only a head or a NeoHR lead can see someone else's day.`, `NEO_GATE: There is no staff account with that email.`). `{"p_day": "2026-10-21"}; returns` the day record (§14.1) plus:
+```json
+{"now": "2026-10-22T15:23:49.087+00:00", "email": "athul.s@neotokyo.test", "name": "Athul Sudheer",
+ "events": [{"id": "a1a1a1a1-0000-4000-8000-000000000001", "kind": "punch_in", "at": "2026-10-21T04:22:00+00:00",
+             "device_at": "2026-10-21T04:22:00+00:00", "time_source": "device", "source": "phone", "note": null,
+             "voided_at": null, "void_reason": null, "clock_mark": null}, "…"],
+ "visits": [{"job_id": "s_shape_j1", "code": "NT-7KQ2ACDE", "title": "Office router", "site_area": "Kakkanad",
+             "arrived": "2026-10-21T05:54:00+00:00", "departed": "2026-10-21T06:40:00+00:00", "minutes": 46, "travel_min": 24,
+             "outcome": "done", "assumed_arrival": false, "open": false}],
+ "requests": [{"id": "50353a75-e502-42cb-89af-79c9070c2992", "kind": "missed_punch", "status": "pending", "…": "…"}],
+ "tracking": {"enabled": true, "reason": null, "…": "…"},
+ "viewed_by": [{"name": "Jophy Joseph", "at": "2026-10-22T15:23:49.120+00:00"}]}
+```
+`events`: the punches of the day's sessions (voided ones included, with `voided_at` / `void_reason`); `clock_mark` is filled only on someone else's day (approvers, §14.12). `visits`: the on-site jobs of the day (applied `arrived` → next `departed` of the same job; `travel_min` from the latest `left_base`; a departed with no arrival → `minutes: null, assumed_arrival: true`; an arrival with no departure → `open: true`, minutes up to now / the punch-out / the cap). `tracking` and `viewed_by` (who opened your route that day) only on your own day.
+
+**`hr_route(p_email, p_day)`** — your own route, or (approvers) someone else's, which is **recorded in `hr_route_views`** and shown to the person. `{"p_email": "athul.s@neotokyo.test", "p_day": "2026-10-21"}; returns`
+```json
+{"now": "2026-10-22T15:23:49.12+00:00", "email": "athul.s@neotokyo.test", "name": "Athul Sudheer", "day": "2026-10-21",
+ "points": [{"at": "2026-10-21T09:30:00+00:00", "lat": 10.0159, "lng": 76.3419}, "…"],
+ "stops": [{"arrived": "2026-10-21T09:30:00+00:00", "left": "2026-10-21T09:36:00+00:00", "minutes": 6,
+            "lat": 10.015909, "lng": 76.34190914999999, "place_hint": "Shop"}, "…"],
+ "segments": [{"from": "2026-10-21T09:36:00+00:00", "to": "2026-10-21T09:37:00+00:00", "km": 0.30, "minutes": 1, "mode": "moving"},
+              {"from": "2026-10-21T09:43:00+00:00", "to": "2026-10-21T09:49:20+00:00", "km": 0.70, "minutes": 6, "mode": "moving"}],
+ "km": 1.00, "km_gaps": 0, "moving_min": 7, "visits": ["…as in hr_my_day…"]}
+```
+`points` (display only, at most 2000, evenly thinned) are the fixes the distance rules kept; `stops` / `segments` as §14.11 (`mode` `moving` or `gap`); `place_hint` = the area of an on-site job visited during the stop, else `"Shop"` within `office_radius_m` of the office point, else `null`. After `retention_days` the points are gone: `points`, `stops`, `segments` are empty and `km` stays. Errors: `NEO_DENIED: Only a head or a NeoHR lead can see someone else's route.`, `NEO_GATE: There is no staff account with that email.`
+
+**`hr_my_month(p_month)`** — any day of the month (default this month). `{"p_month": "2026-10-01"}; returns`
+```json
+{"now": "2026-10-22T15:23:49.129+00:00", "email": "athul.s@neotokyo.test", "month": "2026-10-01",
+ "days": ["…one day record per day from the 1st to today (or the month's end)…"],
+ "totals": {"present": 0, "late": 1, "half_day": 0, "absent": 0, "leave": 0, "off": 0, "worked_hours": 10.22, "km": 1.00,
+            "ta": {"eligible": true, "rate": null, "amount": null, "approved": null}}}
+```
+`absent` / `leave` count halves; `km` is the sum of the day km values; `ta.approved` is `{"by", "at", "km"}` once approved (then `rate` / `amount` are the approved snapshot).
+
+**`hr_dashboard()`** — any active staff member (the Dashboard's Me tile; Team tiles for approvers). `{}; returns`
+```json
+{"now": "2026-10-22T15:23:49.146+00:00",
+ "me": {"state": "on_duty", "since": "2026-10-22T13:23:48.996+00:00", "worked_min": 120, "break_min": 0, "km": 0.00,
+        "flex": false, "late_min": 553, "missed_out": false, "tracking": {"enabled": true, "…": "…"}},
+ "hr": {"on_duty": 1, "on_break": 0, "on_site": 0, "absent": 20, "not_in_yet": 0, "pending_requests": 1}}
+```
+`me` is the day of the open session (else today). `hr` only for approvers (`pending_requests` leaves out your own). `neo_dashboard()` (§10.1) is unchanged; call both.
+
+**`hr_settings_get()`** — any active staff member. `{}; returns`
+```json
+{"shift_start": "09:30", "shift_end": "18:30", "grace_min": 10, "weekly_off": [0], "half_day_min": 240,
+ "track_interval_s": 120, "track_distance_m": 100, "retention_days": 90, "ta_rate_per_km": null,
+ "office_lat": null, "office_lng": null, "office_radius_m": 150, "max_session_h": 16, "attendance_from": "2026-10-22",
+ "last_purge_at": "2026-10-22T15:23:48.928+00:00", "updated_by": null, "updated_at": "2026-10-22T15:23:48.756+00:00",
+ "history": [{"effective_from": "2020-01-01", "shift_start": "09:30", "shift_end": "18:30", "grace_min": 10, "weekly_off": [0],
+              "half_day_min": 240, "set_by_email": "migration", "set_at": "2026-10-22T15:23:48.756+00:00"}],
+ "me": {"shift": {"start": "09:30", "end": "18:30", "grace_min": 10, "weekly_off": [0], "half_day_min": 240},
+        "attendance_required": true, "ta_eligible": true, "tracking": {"enabled": false, "reason": "off_duty", "…": "…"}}}
+```
+The top-level shift fields are a display copy of the default row that was in force (India) when the shift was last changed — never a row that only starts later (a change planned for tomorrow shows only in `history`). For the office shift of a day, take the `history` row with the greatest `effective_from` ≤ that day; `me.shift` is your own shift today. Tier 4+ also get `people` (§14.9).
+
+### 14.6 Telling HR — requests
+**`hr_request_create(p)`** `p = {"kind": "flexible_day", "date_from": "2026-10-22", "date_to": null, "reason": "RMA pickup at the distributor", "ref_code": "RM-7KQ2PX4D", "id": null}; returns`
+```json
+{"ok": true, "duplicate": false,
+ "request": {"id": "81268e70-d5ac-48f2-9568-2bbeb67e0415", "email": "athul.s@neotokyo.test", "name": "Athul Sudheer",
+             "kind": "flexible_day", "date_from": "2026-10-22", "date_to": "2026-10-22", "half_day": false, "leave_type": null,
+             "reason": "RMA pickup at the distributor", "ref_code": "RM-7KQ2PX4D", "missed_at": null, "missed_kind": null,
+             "status": "pending", "decided_by_name": null, "decided_at": null, "decision_note": null,
+             "cancelled_by_name": null, "cancelled_at": null, "cancel_note": null, "created_at": "2026-10-22T15:23:49.053+00:00"}}
+```
+| `kind` | Extra keys | Effect when approved |
+|---|---|---|
+| `late_start`, `early_leave`, `flexible_day` | — | the days are flex (no late / early marks) |
+| `field_day` | — | flex, and the roster says `field` on each working day |
+| `leave` | `leave_type` `casual` / `sick` / `other` (required), `half_day` (one day only) | the roster says `leave` on each working day (weekly offs, holidays and roster `off` days are skipped); a half-day leave writes no roster row |
+| `missed_punch` | `missed_kind` (`punch_in` / `punch_out` / `break_start` / `break_end`), `missed_at` (≤ now) — the dates come from it | the punch is added (source `hr`) if it still fits the day (§14.7: it is taken, and no punch taken before is skipped); when it needs another punch voided too, an approver approves it with that change through `hr_correct` (`request_id`) |
+
+`date_to` defaults to `date_from`; ≤ 31 days; `date_from` at most 7 days back; `date_to` at most 90 days ahead (leave) / 31 (others). `reason` 3–500 characters; `ref_code` optional `NT-…` / `RM-…`. An optional client `id` makes a retry safe (`duplicate: true`). Errors: `NEO_GATE: Say what you're telling HR: late start, early leave, flexible day, field day, missed punch or leave.` · `NEO_GATE: Say why — at least 3 characters.` · `NEO_GATE: A job code looks like NT-7KQ2ACDE or RM-7KQ2PX4D.` · `NEO_GATE: Say which punch you missed: punch in, punch out, break start or break end.` · `NEO_GATE: Say when the missed punch was.` · `NEO_GATE: The missed punch can't be in the future.` · `NEO_GATE: Say which day.` · `NEO_GATE: The end date is before the start date.` · `NEO_GATE: Ask for at most 31 days at a time.` · `NEO_GATE: Say what kind of leave: casual, sick or other.` · `NEO_GATE: A half-day leave is for one day.` · `NEO_GATE: Tell HR within 7 days of the day.` · `NEO_GATE: That's too far ahead — ask closer to the date.` · `NEO_GATE: You already asked for leave on one of those days.` · `NEO_GATE: That request id is already used.`
+
+**`hr_request_cancel(p_id, p_note)`** — the owner: a pending request any time, an approved one before its first day; an approver (never their own): pending or approved, with `p_note`. Cancelling removes the roster rows the request made. `{"p_id": "81268e70-…", "p_note": null}; returns {"ok": true, "request": {…"status": "cancelled", "cancelled_by_name": "Athul Sudheer", "cancelled_at": "…"}}`. Already decided: `{"ok": false, "reason": "decided", "status": "cancelled", "by": "Athul Sudheer", "at": "…"}` — `by` / `at` are whoever cancelled it and when for a cancelled request, else whoever approved or rejected it (the same in `hr_request_decide` and `hr_correct`). Errors: `NEO_GATE: That request no longer exists.` · `NEO_DENIED: You can only cancel your own requests.` · `NEO_GATE: Say why you're cancelling it.` · `NEO_GATE: Fix an added punch with Correct… instead.` · `NEO_GATE: It has already started — ask a head or a NeoHR lead to cancel it.` · `NEO_GATE: The note is too long — keep it under 300 characters.`
+
+**`hr_requests_list(p_scope, p_from, p_to)`** — `mine` (default; optional date overlap filter), `pending` (approvers: everyone's), `all` (approvers: overlapping `p_from`…`p_to`, default the last 31 days to 90 ahead). At most 500, pending first. `{"p_scope": "pending"}; returns {"now": "…", "scope": "pending", "requests": [{…request…, "can_decide": true, "can_cancel": true}]}`. Errors: `NEO_DENIED: Only a head or a NeoHR lead can see everyone's requests.` · `NEO_GATE: The scope is mine, pending or all.`
+
+### 14.7 Heads: the board, decisions, the register, corrections
+**`hr_request_decide(p_id, p_approve, p_note)`** — approvers, never on their own request. `{"p_id": "afd29cbb-…", "p_approve": true, "p_note": "Enjoy"}; returns {"ok": true, "request": {…"status": "approved", "decided_by_name": "Anagha K C", "decided_at": "…", "decision_note": "Enjoy"}}`. A request no longer pending: `{"ok": false, "reason": "decided", "status": "approved", "by": "Anagha K C", "at": "…"}` (for a cancelled request `by` / `at` are the canceller's, even when it was approved before). Errors: `NEO_DENIED: Only a head or a NeoHR lead can approve requests.` · `NEO_GATE: Say approve or reject.` · `NEO_GATE: That request no longer exists.` · `NEO_GATE: That punch no longer fits the day — use Correct….` (a missed punch whose punch is not taken, or would make a later punch irregular; it stays pending — Correct… approves it with the change it needs, `hr_correct` with `request_id`) · `NEO_GATE: The note is too long — keep it under 300 characters.`
+
+**`hr_board()`** — approvers. `{}; returns`
+```json
+{"now": "2026-10-22T15:23:49.234+00:00", "counts": {"on_duty": 1, "absent": 20},
+ "people": [{"email": "athul.s@neotokyo.test", "name": "Athul Sudheer", "designation": "Service Engineer", "self": false,
+             "status": "on_duty", "since": "2026-10-22T13:23:48.996+00:00", "state": "on_duty", "duty": "shop", "holiday": null,
+             "shift": {"start": "09:30", "end": "18:30"}, "first_in": "2026-10-22T13:23:48.996+00:00", "worked_min": 120,
+             "break_min": 0, "missed_out": false, "flex": false, "late_min": 553, "km": 0.00, "on_site": null,
+             "last_point_at": "2026-10-22T14:23:49.016+00:00", "stale": true, "tracking": true, "attendance_required": true,
+             "clock_marks": 1, "pending_requests": 1}, "…"]}
+```
+Every active staff member. `on_site` is `{"job_id", "code", "title", "since"}` while on site. `stale: true` = on duty with recording on and no point for 15 minutes (amber). No coordinates.
+
+**`hr_register(p_from, p_to, p_email)`** — approvers; ≤ 62 days; days after today are left out. `{"p_from": "2026-10-21", "p_to": "2026-10-22", "p_email": null}; returns {"now": "…", "from": "2026-10-21", "to": "2026-10-22", "people": [{"email", "name", "designation", "self", "days": [day record + "clock_marks"]}]}`. Errors: `NEO_DENIED: Only a head or a NeoHR lead can see the team's attendance.` (also `hr_board`) · `NEO_GATE: The end date is before the start date.` · `NEO_GATE: Ask for at most 62 days at a time.` · `NEO_GATE: There is no staff account with that email.`
+
+**`hr_correct(p_email, p)`** — approvers, never their own. One change — add: `p = {"action": "add", "kind": "punch_in", "at": "2026-10-19T09:41:00+05:30", "note": "Was at the counter, phone off", "id": null}`; void: `p = {"action": "void", "id": "<event id>", "note": "Wrong day"}`. Several changes, applied and checked **together** (one correction): `p = {"ops": [{"action": "void", "id": "<event id>"}, {"action": "add", "kind": "punch_in", "at": "…", "id": null}, …], "note": "…", "request_id": null}` — 1 to 10 changes, one note for all. Returns
+```json
+{"ok": true,
+ "event": {"id": "a06905d4-7445-445b-af22-2c2b9e1c5fc1", "kind": "punch_in", "at": "2026-10-19T04:11:00+00:00", "source": "hr",
+           "time_source": "hr", "note": "Was at the counter, phone off", "voided_at": null, "void_reason": null,
+           "created_by_email": "anagha.hr@neotokyo.test"},
+ "events": [{"…every change, in the order sent; a request's punch last…": "…"}],
+ "day": {"day": "2026-10-19", "status": "half_day", "missed_out": true, "clock_marks": 0, "…": "…"},
+ "days": [{"…the day record of every session day the changes touched, oldest first…": "…"}]}
+```
+`event` = `events[0]`; `day` = the session day of the first change (a voided punch's day as it was before the void). **When the changes fit:** the fold of the punches after them takes every added punch, and skips no punch it took before them — nothing new becomes irregular (a punch that was already irregular may stay so). So the common mistakes are one correction each:
+
+| Mistake | `ops` |
+|---|---|
+| an accidental punch-out and punch-in (09:30 in, 11:00 out, 11:05 in, 18:30 out) | void the 11:00 out, void the 11:05 in |
+| a punch at the wrong time | void it, add the right one |
+| a forgotten punch-out, then the next morning a punch-out and punch-in (19:00 in; 09:00 out, 09:01 in) | add the real punch-out (23:00), void the 09:00 out |
+
+`request_id` (optional): a **pending missed punch** of the same person — its punch (kind, `missed_at`, the request's reason as its note) is one more add, checked with the others, and the request is approved by the caller (`decision_note` = `note`) in the same correction; `{"ops": [], "request_id": "…", "note": "…"}` approves it with no other change. The answer then also carries `request`. A request no longer pending: `{"ok": false, "reason": "decided", "status", "by", "at"}`, nothing changed. Errors: `NEO_DENIED: Only a head or a NeoHR lead can correct attendance.` · `NEO_GATE: Send from 1 to 10 changes.` · `NEO_GATE: Say add or void.` · `NEO_GATE: Say why — HR corrections need a note.` · `NEO_GATE: Say when it happened.` · `NEO_GATE: That time can't be right — check the date.` · `NEO_GATE: That punch id is already used.` · `NEO_GATE: Say which punch to void.` · `NEO_GATE: That punch was not found.` · `NEO_GATE: That punch is already voided.` (also: the same id twice) · an added punch that is not taken: the `hr_punch` sentences (§14.2) · `NEO_GATE: Voiding that breaks the order of the day's punches — fix the matching punch too.` (only voids, and a punch after them would become irregular) · `NEO_GATE: That doesn't fit the day's punches.` (with an add) · `NEO_GATE: That request no longer exists.` · `NEO_GATE: That request is someone else's.` · `NEO_GATE: Only a missed punch is approved with a correction.`
+
+### 14.8 The roster and holidays
+**`hr_roster_get(p_from, p_to, p_email)`** — your own roster, or everyone's / one person's for an approver; ≤ 62 days, default this week (Monday–Sunday). `{"p_from": "2026-10-22", "p_to": "2026-10-28"}; returns`
+```json
+{"now": "2026-10-22T15:23:49.082+00:00", "from": "2026-10-22", "to": "2026-10-28",
+ "people": [{"email": "athul.s@neotokyo.test", "name": "Athul Sudheer", "designation": "Service Engineer", "self": true,
+             "days": [{"day": "2026-10-23", "duty": "field", "source": "roster", "note": "Site visits", "request_id": null, "holiday": null},
+                      {"day": "2026-10-25", "duty": "leave", "source": "roster", "note": "Leave", "request_id": "afd29cbb-04f1-46bb-a20f-ede182042ae8", "holiday": null},
+                      {"day": "2026-10-27", "duty": "off", "source": "holiday", "note": null, "request_id": null, "holiday": "Diwali"}, "…"]}],
+ "holidays": [{"day": "2026-10-27", "name": "Diwali"}]}
+```
+Errors: `NEO_DENIED: Only a head or a NeoHR lead can see someone else's roster.` · `NEO_GATE: The end date is before the start date.` · `NEO_GATE: Ask for at most 62 days at a time.` · `NEO_GATE: There is no staff account with that email.`
+
+**`hr_roster_set(p_email, p_day, p_duty, p_note)`** — approvers, never their own; `p_duty` `shop` / `field` / `off` / `leave` / `wfh`, or `null` to clear; the last 62 days to a year ahead. `{"p_email": "athul.s@neotokyo.test", "p_day": "2026-10-23", "p_duty": "field", "p_note": "Site visits"}; returns {"ok": true, "email": "athul.s@neotokyo.test", "day": "2026-10-23", "duty": "field", "source": "roster", "note": "Site visits"}` (after a clear: the duty that now applies). Errors: `NEO_DENIED: Only a head or a NeoHR lead can change the roster.` · `NEO_GATE: There is no active staff account with that email.` · `NEO_GATE: Say which day.` · `NEO_GATE: Pick a day within the last 62 days or the next year.` · `NEO_GATE: A duty is shop, field, off, leave or wfh (work from home).` · `NEO_GATE: The note is too long — keep it under 200 characters.`
+
+**`hr_holiday_set(p_day, p_name)`** — approvers; a null or empty name deletes it. `{"p_day": "2026-10-27", "p_name": "Diwali"}; returns {"ok": true, "day": "2026-10-27", "name": "Diwali"}`. Errors: `NEO_DENIED: Only a head or a NeoHR lead can change the roster.` · `NEO_GATE: Say which day.` · `NEO_GATE: A holiday's name is 2 to 80 characters.`
+
+### 14.9 Settings (desktop, tier 4+)
+**`hr_settings_set(p)`** — keys: `shift_start`, `shift_end` (`"HH:MM"`), `grace_min`, `weekly_off` (`[0, 6]`), `half_day_min` — these take `effective_from` (default tomorrow, never before today) and write the default shift row; `track_interval_s`, `track_distance_m`, `retention_days`, `ta_rate_per_km` (null clears it), `office_lat` + `office_lng` (both or neither), `office_radius_m`, `max_session_h`, `attendance_from` (a date) apply at once. A new `max_session_h` re-folds every past session the server closed (its runs and worked time end at the new cap), so it drops every cached day km (`hr_day_km` rows with `final = false`; the final rows of purged days stay). A shift must end after it starts on every day, also for a person whose own row sets only a start or only an end and takes the other from the default row of that day: a default change that would break that for someone is refused, naming them. Returns `hr_settings_get()` plus `{"ok": true, "effective_from": "2026-10-23"}` (`null` when no shift key was sent). Errors: `NEO_DENIED: Only tier 4 and above can change attendance settings.` · `NEO_GATE: "<key>" is not a setting you can change here.` · `NEO_GATE: Grace must be between 0 and 120.` · `NEO_GATE: Half-day threshold must be between 60 and 600.` · `NEO_GATE: Tracking interval must be between 30 and 600.` · `NEO_GATE: Tracking distance must be between 25 and 1000.` · `NEO_GATE: Retention must be between 30 and 365.` · `NEO_GATE: Office radius must be between 50 and 2000.` · `NEO_GATE: Longest shift must be between 4 and 24.` · `NEO_GATE: The shift must end after it starts.` · `NEO_GATE: The shift must end after it starts — with <name>'s own start or end time it would not. Change theirs first.` · `NEO_GATE: Weekly off days are 0 (Sunday) to 6 (Saturday), each at most once.` · `NEO_GATE: Shift start must be a time like 09:30.` · `NEO_GATE: Changes apply from today onwards.` · `NEO_GATE: Travel allowance rate must be between 0 and 1000.` · `NEO_GATE: The office point needs both a latitude and a longitude.` · `NEO_GATE: That office point is not on the map.` · `NEO_GATE: Say from which day attendance counts.`
+
+**`hr_person_set(p_email, p)`** — tier 4+; a tier 4 changes only tier 1–3 accounts (`NEO_DENIED: Only the owner can change a tier 4 or 5 account.`); your own row only as tier 5. Keys: the shift keys (+ `effective_from`; `null` = use the default) and `ta_eligible`, `track_location`, `attendance_required` (at once). `{"p_email": "athul.s@neotokyo.test", "p": {"shift_start": "10:00", "shift_end": "19:00", "track_location": true}}; returns`
+```json
+{"ok": true, "email": "athul.s@neotokyo.test", "effective_from": "2026-10-23",
+ "person": {"ta_eligible": true, "track_location": true, "attendance_required": true, "shift_start": null, "shift_end": null, "weekly_off": null}}
+```
+`person`'s `shift_start`, `shift_end`, `weekly_off` are the display copy of the person's own row in force **today** (India) — `null` when none is yet (today follows the default). The change above starts tomorrow, so it is not in them; it is in `hr_settings_get().people[].upcoming` until its day.
+`hr_settings_get().people` (tier 4+): `[{"email", "name", "tier", "designation", "self", "can_edit", "ta_eligible", "track_location", "attendance_required", "shift": {"effective_from", "shift_start", "shift_end", "grace_min", "weekly_off", "half_day_min"} | null, "upcoming": [same, later rows]}]`. A person's shift (with its empty fields from the default row) must end after it starts on every day the row is in effect — against the default row of `effective_from` and every later one until the person's next row. Errors also: `NEO_GATE: The shift must end after it starts.` · `NEO_GATE: The shift must end after it starts — from <date> (the default shift changes then) it would not.` · `NEO_GATE: Travel allowance must be yes or no.` · `NEO_GATE: Route recording must be yes or no.` · `NEO_GATE: Attendance required must be yes or no.`
+
+### 14.10 Travel allowance (approvers)
+**`hr_ta_report(p_month)`** — `{"p_month": "2026-09-01"}; returns`
+```json
+{"now": "2026-10-22T15:23:49.356+00:00", "month": "2026-09-01", "closed": true, "rate": 8.50,
+ "people": [{"email": "athul.s@neotokyo.test", "name": "Athul Sudheer", "self": false, "eligible": true,
+             "days": [{"day": "2026-09-28", "km": 1.00}], "km": 1.00, "rate": 8.50, "amount": 8.50, "live_km": 1.00, "changed": false,
+             "approved": null, "can_approve": true}, "…"]}
+```
+Every active staff member (and anyone approved that month). `rate` = the settings rate for an eligible person (0 if not eligible). An approved month shows its snapshot (`km`, `rate`, `amount`) with `approved: {"by", "at", "note"}`, plus `live_km` and `changed` (`live_km` ≠ `km`).
+
+**`hr_ta_approve(p_email, p_month, p_note, p_expected_km)`** — send the km you showed. `{"p_email": "athul.s@neotokyo.test", "p_month": "2026-09-01", "p_note": "September visits", "p_expected_km": 1.00}; returns {"ok": true, "km": 1.00, "rate": 8.50, "amount": 8.50}`. The km changed since: `{"ok": false, "reason": "changed", "km": 1.00}` (refresh, "The km changed since you opened this — check and approve again."); already approved: `{"ok": false, "reason": "approved", "by": "Anagha K C", "at": "…"}`. Errors, in this order: the own-row sentence · `NEO_GATE: Approve a month after it ends.` · `NEO_GATE: Set the travel allowance rate first.` · `NEO_GATE: <name> isn't eligible for travel allowance.` — and `NEO_DENIED: Only a head or a NeoHR lead can approve travel allowance.` · `NEO_GATE: Say which month.` · `NEO_GATE: There is no staff account with that email.` · `NEO_GATE: The note is too long — keep it under 300 characters.`
+
+**`hr_ta_unapprove(p_email, p_month, p_note)`** — tier 4+, never your own, with a note. `{"p_email": "athul.s@neotokyo.test", "p_month": "2026-09-01", "p_note": "Recount"}; returns {"ok": true, "removed": true}`. Errors: `NEO_DENIED: Only tier 4 and above can take a travel allowance approval back.` · `NEO_GATE: Say why you're taking the approval back.` · `NEO_GATE: Say which month.` · `NEO_DENIED: Only a head or a NeoHR lead can see travel allowance.` (the report)
+
+### 14.11 Distance, stops and km (HR-SPEC §9.5, verbatim)
+The shared fixtures (one line of JSON each, so their bytes never change with line endings):
+- `tests/fixtures/hr-km.json` — SHA-256 `5d01796ca41cc34df62bc70669b08d0cd23420ef05e580f1c2a87e589f7ac759`
+- `tests/fixtures/hr-day.json` — SHA-256 `42a65844e66d902217123cff71fcc8a62907dc9f144044549e2419a9715f4135` (day records, run through `_hr_day_calc`)
+
+`tests/sql-parity.test.js` checks the first hash against this line; the phone keeps a byte-identical copy at `app/src/test/resources/hr-km.json` and `HrDistanceTest` checks the same hash. SQL rounding note: `round(total_m)` on float8 rounds an exact .5 to even, Kotlin's `Math.round` up; no fixture total lies within 0.01 m of a .5 (checked), and real sums never land on one.
+
+> ### 9.5 Distance, stops, km (HR4 + HR-A6 as settled in S8; HR10/HR-A10 as settled in S25)
+> **9.5.1 One algorithm, implemented three times.**
+> - SQL: `_hr_track_points(p_runs jsonb) returns jsonb` (immutable, internal).
+> - Kotlin: `HrDistance` (pure).
+> - JS: `shared/hr-day.js`, only if the desktop needs it.
+>
+> `_hr_track(p_email text, p_day date) returns jsonb` builds the runs from the tables and calls `_hr_track_points`.
+> `_hr_km(p_email, p_day) returns numeric` returns its km. Every km in every RPC comes from these functions or from
+> hr_day_km.
+>
+> **9.5.2 Runs.**
+> - Each interval of the day's sessions that is on duty and not on break is one run: `[punch_in | break_end, break_start |
+>   punch_out | cap_at)`.
+> - A run holds its points (stored `at`, after the S4 clamp), ordered by `(at, client_point_id::text)`.
+> - Each run is measured on its own, and the results are summed. Nothing is counted between runs.
+>
+> **9.5.3 Per run.**
+> - **a) Accuracy.** Drop every point with accuracy_m > 50. Treat a null accuracy as 50 in every step below.
+> - **b) Equal `at`.** Keep only the point with the smallest accuracy, then the smallest id text. After this step every Δt
+>   is > 0.
+> - **c) Speed filter.**
+>   - Start with ref = the first point, which is kept.
+>   - For each next point p, compute v = hav(ref, p) / (the seconds between them).
+>     - If v ≤ 45: keep p, set ref = p, and empty the reject list.
+>     - If v > 45: add p to the reject list.
+>   - When the reject list reaches 3 points:
+>     - Keep its earliest point r1, flag it `jump:true`, and set ref = r1.
+>     - Re-test the other two points in order against r1 with the same rule.
+> - **d) Stops (on the kept points).**
+>   - Starting from point i, take the longest run of consecutive points that all lie within 75 m of p_i.
+>   - If that run spans ≥ 300 s, it is a stop: `{arrived: p_i.at, left: p_last.at, minutes, lat, lng}`. Its lat and lng
+>     are the mean of its points and are for display only. Scanning continues after p_last.
+>   - Otherwise scanning restarts at i+1.
+> - **e) Distance.**
+>   - Start with anchor = the first kept point.
+>   - For each next kept point q, in order:
+>     - If q is a stop point other than the stop's first point, skip q.
+>     - If q has `jump`, set anchor = q and add 0.
+>     - Otherwise compute d = hav(anchor, q).
+>       - If d ≥ max(15, (acc_anchor + acc_q) / 2): add d to total_m and set anchor = q.
+>       - Otherwise skip q. The anchor STAYS.
+>   - An added step with Δt > 600 s and d > 1000 m becomes its own segment with `mode:'gap'` and adds 1 to km_gaps. It
+>     still counts toward total_m.
+> - **f) Haversine.** Use `hav = 2R·asin(sqrt(sin²(Δφ/2) + cos φ1·cos φ2·sin²(Δλ/2)))` in radians, with R = 6371008.8,
+>   computed in float8 / Double.
+> - **g) Rounding.**
+>   - The day's `total_m` is the sum over its runs.
+>   - SQL: `km = round(round(total_m)::bigint / 1000.0, 2)` (numeric, half-up).
+>   - Kotlin: `BigDecimal(Math.round(totalM)).divide(BigDecimal(1000), 2, RoundingMode.HALF_UP)`.
+>   - Month km is the sum of the day km values.
+>
+> **9.5.4 Fixtures.**
+> - **The canonical file** is `tests/fixtures/hr-km.json`:
+>   ```
+>   {version:1, cases:[{name, runs:[[{id, at, lat, lng, accuracy_m}]],
+>     expect:{total_m, km, km_gaps, kept:[id], stops:[{arrived, left, lat, lng}]}}]}
+>   ```
+> - **The cases must cover at least:**
+>   - a pair with dt = 0
+>   - a bad first fix
+>   - a teleport in the middle of a run (the three-reject re-anchor)
+>   - stationary jitter
+>   - a slow walk (the anchor stays)
+>   - a break that splits the day into 2 runs
+>   - a tunnel gap (`gap`)
+>   - a null accuracy
+>   - a run where every point is > 50 m
+> - **No distance in any case may fall within 0.01 m of a threshold.**
+> - **Comparisons:** total_m within 0.001 m, km exactly, stop lat/lng within 1e-7.
+> - **Copies and checks.**
+>   - The phone keeps a byte-identical copy at `app/src/test/resources/hr-km.json`.
+>   - These tests all check the file's SHA-256 against the constant the SQL engineer publishes in contract §14:
+>     - `tests/sql-parity.test.js`, through `_hr_track_points`
+>     - the shared/hr-day.js test, if that module exists
+>     - Kotlin `HrDistanceTest`
+>
+> **9.5.5 Live km on the phone.** The phone runs HrDistance over the session's route_points, both sent and unsent. This
+> figure is for display only. TA uses the server's figure.
+>
+> **9.5.6 hr_day_km.**
+> - **Live days.** Today, and any day that has an open session, is always computed live.
+> - **Past days.** A past day uses its hr_day_km row. If there is no row, compute the day with `_hr_track` and upsert a
+>   row.
+> - **Invalidation.** A non-final row is deleted when its day changes:
+>   - location_push stores a point for that session day
+>   - hr_correct changes that day
+>   - a missed_punch for that day is approved
+> - **Final rows.** `_hr_purge` writes rows with `final = true`. A final row is never deleted or recomputed.
+
+SQL note on §9.5.6: a non-final `hr_day_km` row also stores a fingerprint of its inputs (`fp`: the longest shift, and how many route points, punches and voided punches lie in the window the day is folded from), taken before the inputs are read; a row whose fingerprint no longer matches is recomputed on the next read. So a row a reader wrote while a push or a correction was committing is never trusted, even when the invalidation above missed it.
+
+### 14.12 Clock rules
+- **What the phone sends.** Every queued punch and point carries the device `at` (ISO with an offset) and, only when the boot count at capture equals the boot count at send, `age_ms = SystemClock.elapsedRealtime() − elapsedMs` (elapsedMs = `elapsedRealtime()` at the tap; for a point `location.elapsedRealtimeNanos / 1_000_000`; boot count `Settings.Global.getInt(cr, Settings.Global.BOOT_COUNT)`).
+- **Server-anchored.** When `age_ms` is a number with 0 ≤ `age_ms` ≤ 604800000: `at = now() − age_ms`, `device_at` = the phone's `at`, `time_source = "server"`.
+- **Device time.** Otherwise `at` = the phone's `at`, which must lie in 2020-01-01 … now + 10 min (a punch: `NEO_GATE: The phone's clock is wrong — …`; a point: `clock`), `device_at = at`, `time_source = "device"`. No `at` and no `age_ms` on a punch: server time (`time_source "server"`, `device_at` null).
+- **HR.** `hr_correct` and an approved missed punch: `time_source = "hr"`, `device_at` null.
+- **Clock marks** (approvers only — register, board, Correct…, the phone's Team → person view): `time_source "device"` → "⏱ time not verified"; `"server"` with |`device_at` − `at`| > 300 s → "⏱ phone clock off by N min". `hr_my_day` on someone else's day fills `clock_mark` per punch; the person's own screens never show them.
+
+### 14.13 Privacy and retention
+- Route points exist only while on duty and not on a break or a work-from-home day (§14.4); the phone shows a notification the whole time it records. Nobody reads `location_points` directly; `hr_route` / `hr_my_day` serve them to the person, `neohr` leads and tier 3+, and every view of someone else's route is written to `hr_route_views` and shown to the person (`viewed_by`).
+- After `hr_settings.retention_days` (90 by default) the points are deleted — each past day with a punch_in first gets its final km row (`hr_day_km.final`), which is the record from then on — and punch coordinates that old are cleared: in `attendance_events` and in the pre-version-4 punch rows `field_activity` still holds (`punch_in` / `punch_out`; other field activity keeps its point). `sql/neohr-hr-cron.sql` runs it daily at 03:30 India time; without it `location_push` runs it at most every 6 hours, a bounded share per call (the oldest 5000 expired points, at most 20 of their days made final), so a backlog — say after Retention is lowered — drains over several pushes and never slows one down.
+- The board shows the time of the last point, never coordinates. CSV exports (Neo OS) never carry coordinates, notes, reasons or leave types.

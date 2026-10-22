@@ -2690,6 +2690,253 @@
     return p;
   }
 
+  // ── HR: attendance, requests, roster, routes, travel allowance (v1.12) ────
+  // sql/neohr-hr.sql (v2.3, HR-SPEC §9). Thin wrappers: the server decides
+  // who may read or change what (approvers = tier 3+ or a NeoHR lead; tier
+  // 4+ for settings; nobody acts on their own records). Attendance is real
+  // people's data, never demo data, so the reads go to the server in demo
+  // mode too; every write goes through writable() (DEMO_READONLY in demo).
+  // Each write emits 'hr'. Answers that carry `now` set the server clock
+  // offset (workOffsetMs) like the work queue's do.
+  var HR_DUTIES = ['shop', 'field', 'off', 'leave', 'wfh'];
+  var HR_EVENT_KINDS = ['punch_in', 'punch_out', 'break_start', 'break_end'];
+  var HR_SCOPES = ['mine', 'pending', 'all'];
+  var HR_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  var HR_NOTE_MAX = 300;
+
+  function hrParse(res) {
+    if (typeof res === 'string') { try { res = JSON.parse(res); } catch (e) { res = null; } }
+    return res;
+  }
+  function hrObj(res) { res = hrParse(res); return (res && typeof res === 'object' && !Array.isArray(res)) ? res : {}; }
+  function hrRead(name, params) {
+    readable();
+    if (!profile()) return Promise.reject(new Error('NEO_DENIED: Sign in first.'));
+    return rpc(name, params || {}, READ_MS).then(function (res) {
+      res = hrParse(res);
+      noteOffset(res, Date.now());
+      return res;
+    });
+  }
+  function hrEmail(v, msg) { return lowerS(need(v, msg || 'Choose a person.')); }
+  function hrOptEmail(v) { return clean(v) ? lowerS(v) : null; }
+  function hrRange(from, to, max) {
+    var f = hrDay(from, 'start'), t = hrDay(to, 'end');
+    if (t < f) throw new Error('NEO_GATE: The end date is before the start date.');
+    if (hrSpanDays(f, t) > (max || 62) - 1) throw new Error('NEO_GATE: Ask for at most ' + (max || 62) + ' days at a time.');
+    return { from: f, to: t };
+  }
+  function hrMonth(v) { return hrDay(v, 'month').slice(0, 8) + '01'; }
+  function hrNote(v, required, msg) {
+    var n = required ? need(v, msg || 'Add a note.') : clean(v);
+    if (n && n.length > HR_NOTE_MAX) throw new Error('NEO_GATE: The note is too long — keep it under ' + HR_NOTE_MAX + ' characters.');
+    return n;
+  }
+  function hrUuid(v, what) {
+    var s = clean(v);
+    if (!s || !HR_UUID.test(s)) throw new Error('NEO_GATE: That ' + (what || 'record') + ' is not valid. Refresh and try again.');
+    return s.toLowerCase();
+  }
+  function hrRows(res, key) {
+    res = hrParse(res);
+    if (Array.isArray(res)) return res;
+    return (res && Array.isArray(res[key || 'rows'])) ? res[key || 'rows'] : [];
+  }
+  function afterHr(res) { emit('hr'); return res; }
+
+  // The live board: every active staff member's status now.
+  // → { now, people: [...] }
+  async function hrBoard() {
+    var res = await hrRead('hr_board');
+    var out = Array.isArray(res) ? { people: res } : hrObj(res);
+    if (!Array.isArray(out.people)) out.people = hrRows(res, 'rows');
+    return out;
+  }
+  // { now, me, hr } — hr only for approvers.
+  async function hrDashboard() { return hrObj(await hrRead('hr_dashboard')); }
+
+  // Day records per person, from..to (≤ 62 days). → { from, to, rows | people }
+  async function hrRegister(from, to, email) {
+    var r = hrRange(from, to, 62);
+    var res = await hrRead('hr_register', { p_from: r.from, p_to: r.to, p_email: hrOptEmail(email) });
+    var out = Array.isArray(res) ? { rows: res } : hrObj(res);
+    out.from = out.from || r.from; out.to = out.to || r.to;
+    return out;
+  }
+  // One person's day: the record, every event (voided ones too), visits, km.
+  async function hrMyDay(day, email) {
+    return hrObj(await hrRead('hr_my_day', { p_day: day ? hrDay(day, 'day') : null, p_email: hrOptEmail(email) }));
+  }
+  // A person's route for a day. VOLATILE on the server: a view of someone
+  // else's route is written to hr_route_views (they can see who looked).
+  async function hrRoute(email, day) {
+    return hrObj(await hrRead('hr_route', { p_email: hrOptEmail(email), p_day: day ? hrDay(day, 'day') : null }));
+  }
+
+  // → the list of requests ({…, can_decide, can_cancel}), waiting ones first.
+  async function hrRequestsList(scope, from, to) {
+    var s = HR_SCOPES.indexOf(scope) !== -1 ? scope : 'pending';
+    var f = from ? hrDay(from, 'start') : null, t = to ? hrDay(to, 'end') : null;
+    if (f && t && t < f) throw new Error('NEO_GATE: The end date is before the start date.');
+    var res = await hrRead('hr_requests_list', { p_scope: s, p_from: f, p_to: t });
+    var list = hrRows(res, 'requests');
+    return list.length ? list : hrRows(res, 'rows');
+  }
+  // Approve / reject (approvers, never their own). → the request, or
+  // {ok:false, reason:'decided', status, by, at} when someone was first.
+  async function hrRequestDecide(id, approve, note) {
+    writable();
+    var i = hrUuid(id, 'request');
+    var yes = approve === true;
+    var n = hrNote(note, !yes, 'Say why you are rejecting it.');
+    return afterHr(hrParse(await rpc('hr_request_decide', { p_id: i, p_approve: yes, p_note: n })));
+  }
+  // The owner cancels a pending (or not-yet-started approved) request; an
+  // approver cancels anyone else's with a note.
+  async function hrRequestCancel(id, note) {
+    writable();
+    var i = hrUuid(id, 'request');
+    return afterHr(hrParse(await rpc('hr_request_cancel', { p_id: i, p_note: hrNote(note, false) })));
+  }
+
+  // { from, to, people: [{email, name, self, days: [{day, duty, source
+  // ('roster'|'holiday'|'weekly_off'|'default'), note, request_id, holiday}]}],
+  // holidays: [{day, name}] }
+  async function hrRosterGet(from, to, email) {
+    var r = hrRange(from, to, 62);
+    var res = await hrRead('hr_roster_get', { p_from: r.from, p_to: r.to, p_email: hrOptEmail(email) });
+    var out = Array.isArray(res) ? { rows: res } : hrObj(res);
+    if (!Array.isArray(out.people)) out.people = [];
+    if (!Array.isArray(out.holidays)) out.holidays = [];
+    return out;
+  }
+  // duty null / '' clears the day back to the default.
+  async function hrRosterSet(email, day, duty, note) {
+    writable();
+    var e = hrEmail(email);
+    var d = hrDay(day, 'roster');
+    var k = clean(duty);
+    if (k && HR_DUTIES.indexOf(k) === -1) throw new Error('NEO_GATE: Choose shop, field, off, leave or work from home.');
+    var n = clean(note);
+    if (n && n.length > 200) throw new Error('NEO_GATE: The note is too long — keep it under 200 characters.');
+    return afterHr(hrParse(await rpc('hr_roster_set', { p_email: e, p_day: d, p_duty: k, p_note: n })));
+  }
+  // name null / '' removes the holiday.
+  async function hrHolidaySet(day, name) {
+    writable();
+    var d = hrDay(day, 'holiday');
+    var n = clean(name);
+    if (n && (n.length < 2 || n.length > 80)) throw new Error('NEO_GATE: Name the holiday in 2 to 80 characters.');
+    return afterHr(hrParse(await rpc('hr_holiday_set', { p_day: d, p_name: n })));
+  }
+
+  // An HR correction (approvers, never their own day). One change:
+  //   { op: 'add', kind, at, note }   → p = {action:'add', id, kind, at, note}:
+  //                                      a source 'hr' punch at `at` (a fresh
+  //                                      id, so a retry cannot add it twice)
+  //   { op: 'void', id, note }         → p = {action:'void', id, note}
+  // Several changes, applied and checked TOGETHER as one correction:
+  //   { ops: [{op:'void', id} | {op:'add', kind, at}, …], note, request_id }
+  //     → p = {ops: [{action:'void', id} | {action:'add', id, kind, at}, …],
+  //            note, request_id}
+  //   1 to 10 changes, one note for all: "replace this punch" = [void, add],
+  //   "remove this out–in pair" = [void, void]. request_id (optional): a
+  //   pending missed punch of the same person — its punch is one more add,
+  //   and the request is approved with the changes ({ops: []} approves it
+  //   with no other change). A single {op…} with a request_id is sent in
+  //   this form too.
+  // The note is required (at least 3 characters on the server).
+  // → {ok, event, events, day, days, request?}; with a request no longer
+  //   pending, {ok:false, reason:'decided', status, by, at} (nothing changed).
+  var HR_CORRECT_MAX = 10;
+  function hrCorrectOp(o) {
+    var a = o && typeof o === 'object' ? (o.op || o.action) : null;
+    if (a === 'void') return { action: 'void', id: hrUuid(o.id, 'punch') };
+    if (a === 'add') {
+      if (HR_EVENT_KINDS.indexOf(o.kind) === -1) throw new Error('NEO_GATE: Choose punch in, punch out, break start or break end.');
+      var at = normTs('at', o.at);
+      if (!at) throw new Error('NEO_GATE: Choose the time of the punch.');
+      return { action: 'add', id: uuid(), kind: o.kind, at: at };
+    }
+    throw new Error('NEO_GATE: Say add or void.');
+  }
+  async function hrCorrect(email, p) {
+    writable();
+    var e = hrEmail(email);
+    if (!p || typeof p !== 'object') throw new Error('NEO_GATE: Nothing to change.');
+    var note = hrNote(p.note, true, 'Say why you are correcting it.');
+    if (note.length < 3) throw new Error('NEO_GATE: Say why — HR corrections need a note.');
+    var rid = clean(p.request_id) ? hrUuid(p.request_id, 'request') : null;
+    var body;
+    if (Array.isArray(p.ops) || rid) {
+      var list = Array.isArray(p.ops) ? p.ops : [p];
+      if (list.length > HR_CORRECT_MAX || (!list.length && !rid)) throw new Error('NEO_GATE: Send from 1 to ' + HR_CORRECT_MAX + ' changes.');
+      var ops = [], voided = {};
+      for (var i = 0; i < list.length; i++) {
+        var o = hrCorrectOp(list[i]);
+        if (o.action === 'void') {
+          if (voided[o.id]) throw new Error('NEO_GATE: That punch is already voided.');
+          voided[o.id] = true;
+        }
+        ops.push(o);
+      }
+      body = { ops: ops, note: note, request_id: rid };
+    } else if (p.op === 'void') {
+      body = { action: 'void', id: hrUuid(p.id, 'punch'), note: note };
+    } else if (p.op === 'add') {
+      var one = hrCorrectOp(p);
+      body = { action: 'add', id: one.id, kind: one.kind, at: one.at, note: note };
+    } else {
+      throw new Error('NEO_GATE: Nothing to change.');
+    }
+    return afterHr(hrParse(await rpc('hr_correct', { p_email: e, p: body })));
+  }
+
+  // Settings (any staff reads; tier 4+ writes). Tier 4+ also get `people`:
+  // each active staff member's overrides, current shift row and can_edit.
+  async function hrSettingsGet() { return hrObj(await hrRead('hr_settings_get')); }
+  async function hrSettingsSet(p) {
+    writable();
+    if (!p || typeof p !== 'object' || Array.isArray(p) || !Object.keys(p).length) throw new Error('NEO_GATE: Nothing to save.');
+    return afterHr(hrParse(await rpc('hr_settings_set', { p: p })));
+  }
+  // One person's overrides (tier 4+; the staff hierarchy; a key sent as
+  // null falls back to the default).
+  async function hrPersonSet(email, p) {
+    writable();
+    var e = hrEmail(email);
+    if (!p || typeof p !== 'object' || Array.isArray(p) || !Object.keys(p).length) throw new Error('NEO_GATE: Nothing to save.');
+    return afterHr(hrParse(await rpc('hr_person_set', { p_email: e, p: p })));
+  }
+
+  // Travel allowance for one month (approvers). → { month, closed, rate,
+  // people: [{email, name, self, eligible, days, km, rate, amount, live_km,
+  // changed, approved: {by, at, note} | null, can_approve}] }
+  async function hrTaReport(month) {
+    var m = hrMonth(month);
+    var res = await hrRead('hr_ta_report', { p_month: m });
+    var out = Array.isArray(res) ? { rows: res } : hrObj(res);
+    out.month = out.month || m;
+    return out;
+  }
+  // expectedKm = the km on screen. → {ok:true, km, rate, amount} |
+  // {ok:false, reason:'changed', km} | {ok:false, reason:'approved', by, at}
+  async function hrTaApprove(email, month, note, expectedKm) {
+    writable();
+    var e = hrEmail(email);
+    var m = hrMonth(month);
+    var km = toNum(expectedKm);
+    if (km == null || km < 0) throw new Error('NEO_GATE: Refresh the report and try again.');
+    return afterHr(hrParse(await rpc('hr_ta_approve', { p_email: e, p_month: m, p_note: hrNote(note, false), p_expected_km: km })));
+  }
+  async function hrTaUnapprove(email, month, note) {
+    writable();
+    var e = hrEmail(email);
+    var m = hrMonth(month);
+    var n = hrNote(note, true, "Say why you're taking the approval back.");
+    return afterHr(hrParse(await rpc('hr_ta_unapprove', { p_email: e, p_month: m, p_note: n })));
+  }
+
   // ── people and designation presets (tier 4+, Settings → People) ──────────
   // Reads work in demo mode (the people are real); writes do not.
   function listOf(res, key) {
@@ -2943,6 +3190,26 @@
     workLogTeam: workLogTeam,
     techActivity: techActivity,
     latestNeoHrRelease: latestNeoHrRelease,
+
+    // HR (sql/neohr-hr.sql, v1.12)
+    hrBoard: hrBoard,
+    hrDashboard: hrDashboard,
+    hrRegister: hrRegister,
+    hrMyDay: hrMyDay,
+    hrRoute: hrRoute,
+    hrRequestsList: hrRequestsList,
+    hrRequestDecide: hrRequestDecide,
+    hrRequestCancel: hrRequestCancel,
+    hrRosterGet: hrRosterGet,
+    hrRosterSet: hrRosterSet,
+    hrHolidaySet: hrHolidaySet,
+    hrCorrect: hrCorrect,
+    hrSettingsGet: hrSettingsGet,
+    hrSettingsSet: hrSettingsSet,
+    hrPersonSet: hrPersonSet,
+    hrTaReport: hrTaReport,
+    hrTaApprove: hrTaApprove,
+    hrTaUnapprove: hrTaUnapprove,
 
     // people and designation presets (tier 4+)
     staffList: staffListRpc,
