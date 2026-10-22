@@ -687,7 +687,7 @@ async function drainAssignmentQueue() {
     t.technician = next.technician;
     t.queued = false;
     t.updatedAt = new Date().toISOString();
-    addEventLog(t, `Released from the waiting queue — assigned to ${next.technician}.`, 'NeoQC');
+    addEventLog(t, `Released from the waiting queue — assigned to ${next.technician}.`, 'Neo OS');
     try { await syncTicketToCloud(t); } catch (e) { console.warn('queue sync failed:', e && e.message); }
     moved++;
   }
@@ -1010,6 +1010,9 @@ function showToast(message, type = 'info', duration = 5000) {
 // false on cancel / Escape / backdrop click. ALWAYS `await` this — an un-awaited
 // call returns a Promise, which is truthy, so a missed await would silently
 // auto-confirm a destructive action. Message/labels set via textContent.
+// Each confirm still waiting for an answer is held in pendingConfirms (as its
+// close function), so sign-out can answer it (dismissAllConfirms).
+const pendingConfirms = new Set();
 function showConfirm(message, opts = {}) {
   const { title = 'Please confirm', okText = 'Confirm', cancelText = 'Cancel', danger = false } = opts;
   return new Promise((resolve) => {
@@ -1038,13 +1041,20 @@ function showConfirm(message, opts = {}) {
     overlay.appendChild(box);
 
     const onKey = (e) => { if (e.key === 'Escape') close(false); };
-    const close = (val) => {
+    // now = remove the overlay at once, without the fade (sign-out).
+    const close = (val, now) => {
+      pendingConfirms.delete(close);
       document.removeEventListener('keydown', onKey);
-      overlay.classList.remove('neo-confirm-in');
-      overlay.classList.add('neo-confirm-out');
-      setTimeout(() => { if (overlay.parentNode) overlay.parentNode.removeChild(overlay); }, 220);
+      if (now) {
+        if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+      } else {
+        overlay.classList.remove('neo-confirm-in');
+        overlay.classList.add('neo-confirm-out');
+        setTimeout(() => { if (overlay.parentNode) overlay.parentNode.removeChild(overlay); }, 220);
+      }
       resolve(val);
     };
+    pendingConfirms.add(close);
     cancelBtn.addEventListener('click', () => close(false));
     okBtn.addEventListener('click', () => close(true));
     overlay.addEventListener('click', (e) => { if (e.target === overlay) close(false); });
@@ -1052,6 +1062,23 @@ function showConfirm(message, opts = {}) {
     document.body.appendChild(overlay);
     requestAnimationFrame(() => overlay.classList.add('neo-confirm-in'));
     okBtn.focus();
+  });
+}
+
+// Answers every open confirm "Cancel" and takes it off the screen now. Used
+// at sign-out: a question one person was asked (an ops form's "Accept without
+// photos?") must not survive onto the login screen for the next person to
+// answer, since the form that asked would then go on to save. Every caller
+// already treats false as "do nothing", as it does for Escape. Overlays still
+// fading out from an answered confirm go too, so none sits over the login form.
+function dismissAllConfirms() {
+  Array.from(pendingConfirms).forEach((close) => {
+    try { close(false, true); }
+    catch (e) { console.warn('A confirm did not close cleanly at sign-out:', e && e.message); }
+  });
+  pendingConfirms.clear();
+  document.querySelectorAll('.neo-confirm-overlay').forEach((o) => {
+    if (o.parentNode) o.parentNode.removeChild(o);
   });
 }
 
@@ -1832,7 +1859,7 @@ let appState = {
   }
 };
 
-let currentMode = "selector"; // "selector", "staff", "client"
+let currentMode = null; // "overview", "staff", "service", "rma", "client", "client-console" — set by switchScreen
 let editingTicketId = null;
 // Raw result of the LAST in-modal 🔍 Auto-Detect run (admin side). The save
 // path merges this per-field with the ticket's stored detectedSpecs — the
@@ -1853,14 +1880,8 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   await loadDatabase();
   initPpiTuning(); // seed + apply saved PPI engine tuning before any PPI compute
-  // Restore remembered dark/light choice (admin app only — persisted in settings).
-  if (appState.settings && appState.settings.darkMode === true) {
-    document.body.classList.add('dark-mode');
-    document.body.classList.remove('light-mode');
-  } else if (appState.settings && appState.settings.darkMode === false) {
-    document.body.classList.add('light-mode');
-    document.body.classList.remove('dark-mode');
-  }
+  // Restore this PC's theme (Settings → Appearance; v1.10 adds "Match Windows").
+  applyThemeChoice(themeChoiceFromSettings(appState.settings));
   setSplashStatus('Preparing workspace…');
   setupEventListeners();
   setupAuthListeners();
@@ -1870,33 +1891,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   setupSpecsAutocomplete();
   updateTimeDisplay();
   setInterval(updateTimeDisplay, 60000);
-
-  // Navigate to initial screen based on app-config.json or settings
-  let bootMode = 'selector';
-
-  if (appState.settings) {
-    if (appState.settings.lockAdminMode === true) {
-      bootMode = 'staff';
-    } else if (appState.settings.isMaster === false) {
-      bootMode = 'client';
-    }
-  }
-
-  try {
-    const configPath = path.join(__dirname, 'app-config.json');
-    if (fs.existsSync(configPath)) {
-      const cfg = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-      if (cfg.mode === 'admin') {
-        bootMode = 'staff';
-      } else if (cfg.mode === 'client') {
-        bootMode = 'client';
-      } else if (cfg.mode === 'selector') {
-        bootMode = 'selector';
-      }
-    }
-  } catch (e) {
-    console.error("Error reading app-config.json:", e);
-  }
 
   // Hold splash for at least 4200ms so the staged entrance animation plays
   // out fully. If boot took longer than that already, we switch immediately.
@@ -1915,8 +1909,9 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // v2.0.0 P1 — the exe now requires a staff sign-in. If a Supabase Auth session
   // is already stored (persisted across launches), we route straight in by tier;
-  // otherwise the login screen is shown. bootMode is kept only as a legacy hint.
-  await routeAfterAuth(bootMode);
+  // otherwise the login screen is shown. (v1.10: the old app-config.json /
+  // "Master mode" boot hints are gone — sign-in alone decides the first screen.)
+  await routeAfterAuth();
 });
 
 // Load DB from local Electron AppData Storage
@@ -2052,8 +2047,8 @@ async function loadDatabase() {
 
 // Stamp the running version into any element marked with data-app-version /
 // data-app-version-label, from package.json. This is the single source of truth
-// for the changelog badge, the "improvements in NeoQC vX" sentence, and the
-// "Launch NeoQC vX" button — the three spots the code review flagged as
+// for the changelog badge, the "what's new in vX" sentence, and the
+// "Launch Neo OS vX" button — the three spots the code review flagged as
 // hand-maintained (and the exact fragility behind the v1.8.3 version-bump
 // mojibake). The changelog bullet text stays a manual, per-release edit.
 function stampAppVersion(version) {
@@ -2061,7 +2056,7 @@ function stampAppVersion(version) {
   if (!v) { try { v = require('./package.json').version; } catch (e) {} }
   if (!v) return;
   document.querySelectorAll('[data-app-version]').forEach(el => { el.textContent = 'v' + v; });
-  document.querySelectorAll('[data-app-version-label]').forEach(el => { el.textContent = 'Launch NeoQC v' + v; });
+  document.querySelectorAll('[data-app-version-label]').forEach(el => { el.textContent = 'Launch Neo OS v' + v; });
 }
 
 // Save DB back to local storage. db:write is atomic and returns
@@ -2085,21 +2080,54 @@ async function saveDatabase() {
   }
 }
 
+// The only screens that are NOT office screens. Everything else switchScreen is
+// asked to open must pass the module registry gate below.
+const NON_OFFICE_MODES = ['client', 'client-console', 'selector'];
+
+// Can the signed-in person open this office screen? Asks the module registry
+// (modules.js), which decides from their tier AND their module roles. If the
+// registry failed to load, fall back to the v1.9.6 rule (Overview, Builds and
+// Service are tier 3+, nothing else opens) — never wider than before.
+// SPEC-GAP: the spec assumes modules.js is always present; this is the
+// conservative answer for when it is not.
+function canOpenOfficeMode(mode) {
+  if (!currentProfile) return false;
+  const M = window.NeoQcModules;
+  if (!M || typeof M.canOpen !== 'function') {
+    return (mode === 'staff' || mode === 'service' || mode === 'overview') && Number(currentProfile.tier) >= 3;
+  }
+  try { return !!M.canOpen(mode, currentProfile); } catch (e) { console.warn('module gate failed:', e && e.message); return false; }
+}
+
 // Switch between screens
 function switchScreen(mode, selectedId = null) {
-  // SECURITY (v1.9.6) — the admin dashboard is tier 3+ only. Block ANY path
-  // that tries to open it for a lower-tier account (the mode-selector's "Admin"
-  // button had no check, so a technician could bounce through "Switch Mode" →
-  // selector → Admin). routeByTier() only ever sends tier 3+ here, so a known
-  // sub-T3 profile reaching 'staff' is always an escalation attempt → redirect
-  // them to their own screen. (currentProfile null = offline/boot: left alone.)
-  // 'service' is gated with 'staff': it shows every customer's phone number,
-  // address-of-sorts and fault history across the whole shop, so it is at least
-  // as sensitive as the build dashboard. Adding it here rather than to a
-  // separate check means a future screen cannot be added to the office side
-  // without someone noticing this list.
-  if ((mode === 'staff' || mode === 'service' || mode === 'overview') && currentProfile && Number(currentProfile.tier) < 3) {
-    showToast('The office dashboards are restricted to service leads. Opening your Testing Client.', 'warning');
+  // SECURITY (v1.10) — every office screen (Overview, Builds, Service, RMA) is
+  // gated by the module registry (modules.js): NeoQcModules.canOpen() decides
+  // from the signed-in profile's tier and their module roles (my_modules()).
+  // This replaced the v1.9.6 "tier 3+ only" check, and keeps its reason: the
+  // mode selector's "Admin" button has no check of its own, so a technician
+  // could bounce through "Switch Mode" → selector → Admin. Any such path still
+  // lands here and is refused → redirected to their own screen.
+  // Builds stays tier 3+. Service and RMA open for anyone holding a role in
+  // that module (desk, tech or lead; tier 3+ are leads everywhere), because a
+  // tier-1 counter clerk now takes service tickets in — but they show customer
+  // phone numbers and fault histories, so nobody without a role gets them.
+  // DEFAULT-DENY: any mode that is not one of the three known non-office
+  // screens must be in the registry AND openable, so a future screen cannot
+  // join the office side without someone registering who may open it.
+  // The server enforces the same rules (RLS: svc_reader / rma_reader); this
+  // gate is what keeps the UI honest. (currentProfile null = offline/boot:
+  // left alone, as before.)
+  // v1.10 — no mode selector any more: 'selector' means "go home".
+  if (mode === 'selector') { goHome(); return; }
+  if (currentProfile && NON_OFFICE_MODES.indexOf(mode) === -1 && !canOpenOfficeMode(mode)) {
+    let label = 'that screen';
+    try {
+      const M = window.NeoQcModules;
+      const entry = M && typeof M.byMode === 'function' ? M.byMode(mode) : null;
+      if (entry && entry.label) label = entry.label;
+    } catch (e) {}
+    showToast(`You don't have access to ${label}.`, 'warning');
     routeByTier();
     return;
   }
@@ -2128,15 +2156,6 @@ function switchScreen(mode, selectedId = null) {
     // (Closes loophole #2: the queue previously drained on ticket-save only.)
     drainAssignmentQueue().catch(e => console.warn('queue drain failed:', e && e.message));
 
-    // Hide or show exit button depending on lockAdminMode
-    const staffExitBtn = document.getElementById('btn-staff-exit');
-    if (staffExitBtn) {
-      if (appState.settings.lockAdminMode) {
-        staffExitBtn.classList.add('hidden');
-      } else {
-        staffExitBtn.classList.remove('hidden');
-      }
-    }
   } else if (mode === 'overview') {
     // Builds and service in one list. Reads both caches; owns neither.
     document.getElementById('overview-screen').classList.add('active');
@@ -2145,44 +2164,100 @@ function switchScreen(mode, selectedId = null) {
         .catch(e => console.warn('overview load failed:', e && e.message));
     }
   } else if (mode === 'service') {
-    // Service ticketing. Same audience as the admin dashboard (the tier-3 guard
-    // at the top of this function has already run), and it owns its own tables,
-    // so nothing here touches the build sync paths.
+    // Service ticketing. Anyone with a service role (the registry gate at the
+    // top of this function has already run), and it owns its own tables, so
+    // nothing here touches the build sync paths.
     document.getElementById('service-screen').classList.add('active');
     if (window.NeoQcServiceUI) {
       window.NeoQcServiceUI.ensureServiceLoaded()
         .catch(e => console.warn('service load failed:', e && e.message));
     }
+  } else if (mode === 'rma') {
+    // RMA — parts on warranty claims. Anyone with an RMA role (the registry
+    // gate above has run). Its own tables, its own module; no build sync path.
+    document.getElementById('rma-screen').classList.add('active');
+    if (window.NeoQcRmaUI) {
+      Promise.resolve()
+        .then(() => window.NeoQcRmaUI.ensureLoaded())
+        .catch(e => {
+          console.warn('rma load failed:', e && e.message);
+          const msg = (window.NeoQcUI && typeof window.NeoQcUI.errText === 'function')
+            ? window.NeoQcUI.errText(e) : ((e && e.message) || String(e));
+          showToast('Could not load the RMA screen: ' + msg, 'error');
+        });
+    }
   } else if (mode === 'client') {
     document.getElementById('client-welcome-screen').classList.add('active');
     populateWelcomeTicketSelect();
     renderBenchBoard();
-    
-    // SECURITY (v1.9.6) — "Switch Mode" reaches the mode selector, the OWNER's
-    // tool only. Gate on the signed-in user's tier (5), not the per-machine
-    // isMaster flag, so a technician can never bounce out to the admin portal.
-    const welcomeExitBtn = document.getElementById('btn-welcome-exit');
-    if (welcomeExitBtn) {
-      welcomeExitBtn.classList.toggle('hidden', !(currentProfile && Number(currentProfile.tier) >= 5));
+
+    // v1.10 — a bench technician who also works service tickets gets a door to
+    // the queue from the bench (the rail then shows "Bench" to come back).
+    // Shown for a service role of tech or lead only: claiming is what a
+    // technician does there, and desk-only people never land on the bench.
+    const welcomeServiceBtn = document.getElementById('btn-welcome-service');
+    if (welcomeServiceBtn) {
+      let svcRole = null;
+      try { svcRole = window.NeoQcModules && typeof window.NeoQcModules.roleFor === 'function' ? window.NeoQcModules.roleFor('service') : null; } catch (e) { svcRole = null; }
+      welcomeServiceBtn.classList.toggle('hidden', !((svcRole === 'tech' || svcRole === 'lead') && canOpenOfficeMode('service')));
     }
+
+    // v1.10 — the old owner-only "Switch Mode" button is now "← <home>" (see
+    // renderBenchBackButton). Where it leads is still decided by switchScreen's
+    // module gate, so it can never open a screen the person may not see.
+    renderBenchBackButton();
   } else if (mode === 'client-console') {
     document.getElementById('client-screen').classList.add('active');
     populateClientTicketSelect(selectedId);
     handleClientTicketSelect();
-    
-    // SECURITY (v1.9.6) — testing-client "Switch Mode" is owner-only (tier 5).
-    // Technicians (T2) sign out via the titlebar chip instead; they never get
-    // the mode selector, which closes the bypass into the admin portal.
-    const clientExitBtn = document.getElementById('btn-client-exit');
-    if (clientExitBtn) {
-      clientExitBtn.classList.toggle('hidden', !(currentProfile && Number(currentProfile.tier) >= 5));
-    }
+    // v1.10 — #btn-client-exit was the owner-only "Switch Mode"; it is now
+    // "← My Bench" for everyone (back to the bench board, never past it).
   } else {
-    document.getElementById('mode-selector-screen').classList.add('active');
-    // Landing back on the mode selector is a natural pause point — re-check
-    // for OTA updates (main process rate-limits to once per 10 min).
-    ipcRenderer.send('update:check');
+    // An unknown mode lands on the person's home screen — unless it IS their
+    // home (a module with no screen yet), which would loop: show the notice.
+    let home = null;
+    try { home = currentProfile ? firstHomeMode(currentProfile) : null; } catch (e) { home = null; }
+    if (home && home !== mode) goHome();
+    else if (currentProfile) showTierNotice();
+    else showLoginScreen();
   }
+}
+
+// v1.10 — the "Select Application Mode" page is gone. Anything that used to
+// land on it (an old caller, the bench's back button) goes to the signed-in
+// person's home screen instead — the same place sign-in sends them — and
+// nobody signed in means the sign-in screen.
+function goHome() {
+  if (!currentProfile) { showLoginScreen(); return; }
+  const home = firstHomeMode(currentProfile);
+  if (!home || home === 'selector' || (NON_OFFICE_MODES.indexOf(home) === -1 && !canOpenOfficeMode(home))) {
+    showTierNotice();
+    return;
+  }
+  switchScreen(home);
+  // Landing on your home screen is a natural pause point — re-check for OTA
+  // updates (the main process rate-limits this to once per 10 minutes).
+  try { ipcRenderer.send('update:check'); } catch (e) {}
+}
+
+// The bench's "← <home>" button: shown to people whose home is an office
+// screen (they reached the bench from the rail), hidden for bench technicians
+// — this board IS their home; they sign out from the name chip as before.
+function renderBenchBackButton() {
+  const btn = document.getElementById('btn-welcome-exit');
+  if (!btn) return;
+  let home = null;
+  try { home = currentProfile ? firstHomeMode(currentProfile) : null; } catch (e) { home = null; }
+  const show = !!home && NON_OFFICE_MODES.indexOf(home) === -1 && canOpenOfficeMode(home);
+  btn.classList.toggle('hidden', !show);
+  if (!show) return;
+  let label = 'Home';
+  try {
+    const M = window.NeoQcModules;
+    const entry = M && typeof M.byMode === 'function' ? M.byMode(home) : null;
+    if (entry && entry.label) label = entry.label;
+  } catch (e) {}
+  btn.textContent = '← ' + label;
 }
 
 function updateTimeDisplay() {
@@ -2258,6 +2333,9 @@ function loadCachedProfile(expectId) {
 }
 
 function showLoginScreen() {
+  // Whatever brings the login screen up, nothing of the last session may stay
+  // on top of it (closeSessionOverlays; a no-op when nothing is open).
+  closeSessionOverlays();
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
   const ls = document.getElementById('login-screen');
   if (ls) ls.classList.add('active');
@@ -2270,20 +2348,104 @@ function showLoginScreen() {
   if (emailEl) setTimeout(() => { try { emailEl.focus(); } catch (e) {} }, 120);
 }
 
-// Route by tier: T3+ get the full staff dashboard, T2 the Testing Client, and
-// T1 (sales, web-only) a friendly "use the web portal" notice.
-function routeByTier() {
+// Route by tier AND module role (v1.10). Where you land comes from the module
+// registry, NeoQcModules.firstHome():
+//   tier 3+                      → Overview (the first question anyone in the
+//                                  office has is "what needs me today", across
+//                                  every kind of work; the rest is on the rail)
+//   tier 2 bench tech            → the Testing Client, as before — even with a
+//                                  service tech role (the "Service queue"
+//                                  button there is one click away)
+//   a service / RMA role         → that module (a tier-1 counter clerk with a
+//                                  desk role gets the app, not the notice)
+//   tier 1 with no role          → the friendly "use the web portal" notice.
+// Module roles are asked for fresh at every sign-in (a grant takes effect at
+// the next sign-in or restart), but that can never strand someone on the
+// splash or login screen: after 4 s, or offline, the last answer this PC
+// remembers is used, and the server's RLS still decides what they can read.
+let routeSeq = 0;
+
+function legacyHomeMode(profile) {
+  const tier = profile ? Number(profile.tier) || 0 : 0;
+  return tier >= 3 ? 'overview' : tier === 2 ? 'client' : null;
+}
+
+function firstHomeMode(profile) {
+  const M = window.NeoQcModules;
+  if (M && typeof M.firstHome === 'function') {
+    try { return M.firstHome(profile) || null; }
+    catch (e) { console.warn('firstHome failed, routing by tier:', e && e.message); }
+  }
+  // SPEC-GAP: no registry → the v1.9.6 routing (tier only), never wider.
+  return legacyHomeMode(profile);
+}
+
+// Resolves when my_modules() has answered, failed, or taken longer than `ms`.
+// Never rejects. A late answer still lands in the registry's cache, and the
+// rail is rebuilt when it does, so the next screen change uses it.
+function refreshModuleAccess(ms) {
+  const M = window.NeoQcModules;
+  if (!M || typeof M.refreshAccess !== 'function') return Promise.resolve(true);
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (ok) => { if (!settled) { settled = true; clearTimeout(timer); resolve(ok); } };
+    const timer = setTimeout(() => {
+      console.warn(`my_modules() took longer than ${ms} ms — using the module access this PC remembers.`);
+      finish(false);
+    }, ms);
+    Promise.resolve()
+      .then(() => M.refreshAccess())
+      .then(() => {
+        if (settled && window.NeoQcShell && typeof window.NeoQcShell.refreshRail === 'function') {
+          try { window.NeoQcShell.refreshRail(); } catch (e) {}
+        }
+        finish(true);
+      }, (e) => {
+        console.warn('my_modules() failed — using the module access this PC remembers:', e && e.message);
+        finish(false);
+      });
+  });
+}
+
+async function routeByTier() {
   renderUserChip();
-  const tier = currentProfile ? Number(currentProfile.tier) : 0;
-  if (tier >= 3) {
-    // Overview, not Builds: the first question anyone in the office has is
-    // "what needs me today", across both kinds of work. Builds is one click
-    // away on the rail.
-    switchScreen('overview');
-  } else if (tier === 2) {
-    switchScreen('client');
-  } else {
-    showTierNotice();
+  const seq = ++routeSeq;
+  const profile = currentProfile;
+  try {
+    if (profile) {
+      let fresh = await refreshModuleAccess(4000);
+      // Signed out, or a newer route started, while we waited: that one wins.
+      if (seq !== routeSeq || currentProfile !== profile) return;
+      // refreshAccess() never rejects — it falls back to this PC's cache by
+      // itself — so ask it where the answer came from.
+      try {
+        const M = window.NeoQcModules;
+        if (fresh && M && typeof M.accessSource === 'function' && M.accessSource() !== 'server') fresh = false;
+      } catch (e) {}
+      // Tier 3+ are leads everywhere whatever the server says, so only a
+      // module-role user needs to know their roles may be out of date.
+      if (!fresh && Number(profile.tier) < 3) {
+        showToast('Couldn’t confirm your module access just now — using what this PC remembers.', 'warning', 7000);
+      }
+    }
+    const home = firstHomeMode(profile);
+    // A home the gate would refuse would bounce straight back here; the tier
+    // notice is the safe end of that road.
+    if (!home || (NON_OFFICE_MODES.indexOf(home) === -1 && !canOpenOfficeMode(home))) {
+      showTierNotice();
+      return;
+    }
+    switchScreen(home);
+    // Landing on your home screen is a natural pause point — re-check for OTA
+    // updates (main rate-limits to once per 10 min). Until v1.10 this ran when
+    // the mode selector was shown.
+    try { ipcRenderer.send('update:check'); } catch (e) {}
+  } catch (e) {
+    console.error('routeByTier failed, routing by tier:', e);
+    if (seq !== routeSeq || currentProfile !== profile) return;
+    const home = legacyHomeMode(profile);
+    if (home && (NON_OFFICE_MODES.indexOf(home) !== -1 || canOpenOfficeMode(home))) switchScreen(home);
+    else showTierNotice();
   }
 }
 
@@ -2319,11 +2481,111 @@ function renderUserChip() {
 }
 
 async function neoLogout() {
+  // First, not after signOut(): that can take seconds on a slow line, and an
+  // open ticket (or a webcam) must not wait for it.
+  closeSessionOverlays();
   try { if (supabaseClient && supabaseClient.auth) await supabaseClient.auth.signOut(); }
   catch (e) { console.error('signOut failed:', e); }
   currentUser = null;
   currentProfile = null;
   showLoginScreen();
+}
+
+// ── Sign-out closes the session's overlays (v1.10) ────────────────────────────
+// Swapping .screen elements is not enough. The titlebar chip sits above every
+// overlay, so it can be pressed with a service ticket, an RMA part, an intake
+// form, an ops dialog or the photo viewer open, each showing a customer's
+// phone, address and photos. The counter PC is shared, and the next person to
+// sit down may have no service role at all. So every overlay that holds one
+// person's work is shut, without asking: the sign-out confirm has already said
+// that unsaved work goes.
+// Each ops module closes its own, which drops its state and destroys its photo
+// trays, so a webcam goes off with them. An overlay a module could not close
+// is hidden here anyway. A tray inside a hidden overlay turns its own camera
+// off within a second (photo-tray.js), so the light never stays on.
+// The build-side modals are closed too: the ticket form, God Mode and the flag
+// form show a build, and Settings shows the staff list (Module access).
+const BUILD_SESSION_MODAL_IDS = ['ticket-modal', 'godmode-modal', 'flag-modal', 'settings-modal'];
+
+// Built when called: OPS_MODAL_IDS is declared further down this file.
+function sessionOverlayIds() {
+  return OPS_MODAL_IDS.concat(['ops-lightbox'], BUILD_SESSION_MODAL_IDS);
+}
+
+function sessionOverlayOpen() {
+  const UI = window.NeoQcUI;
+  if (UI && typeof UI.isOverlayOpen === 'function') {
+    try { if (UI.isOverlayOpen()) return true; } catch (e) {}
+  }
+  return sessionOverlayIds().some(id => {
+    const m = document.getElementById(id);
+    return !!(m && m.classList.contains('active'));
+  });
+}
+
+function closeSessionOverlays() {
+  // One module failing to close must never stop the rest, or the sign-out.
+  const run = (what, fn) => {
+    try {
+      const r = fn();
+      if (r && typeof r.then === 'function') {
+        r.then(null, (e) => console.warn(what + ' did not close cleanly at sign-out:', e && e.message));
+      }
+    } catch (e) { console.warn(what + ' did not close cleanly at sign-out:', e && e.message); }
+  };
+
+  // Top-most of all: a confirm still waiting for an answer is answered
+  // "Cancel" (dismissAllConfirms), so the form that asked does not save.
+  run('A confirm', () => dismissAllConfirms());
+
+  // Then the ops dialogs and the photo viewer. closeAll() shuts
+  // every dialog, parked ones and busy ones included, without asking.
+  const UI = window.NeoQcUI;
+  if (UI && typeof UI.closeAll === 'function') run('The ops dialog', () => UI.closeAll());
+  // An ops-ui.js without closeAll(), or one whose closeAll() failed: the
+  // dialog's own × closes it the way Cancel does. A nested dialog uncovers the
+  // one under it, hence the loop; a busy one (× disabled) stops it. Without
+  // this, ops-ui would go on trapping Tab inside a dialog nobody can see, on
+  // the login form.
+  const dialogOpen = () => {
+    try { return !!(UI && typeof UI.isDialogOpen === 'function' && UI.isDialogOpen()); }
+    catch (e) { return false; }
+  };
+  for (let i = 0; i < 10 && dialogOpen(); i++) {
+    const x = document.querySelector('#ops-dialog-root .ops-dialog-x');
+    if (!x || x.disabled) break;
+    try { x.click(); }
+    catch (e) { console.warn('The ops dialog did not close cleanly at sign-out:', e && e.message); break; }
+  }
+  if (UI && typeof UI.closeLightbox === 'function') run('The photo viewer', () => UI.closeLightbox());
+
+  // The panels and forms underneath. With force, none of these asks anything,
+  // and each is a no-op when it is not open.
+  const SI = window.NeoQcServiceIntake;
+  if (SI && typeof SI.close === 'function') run('The service intake form', () => SI.close({ force: true }));
+  const SV = window.NeoQcServiceUI;
+  if (SV && typeof SV.closePanelNow === 'function') run('The service ticket', () => SV.closePanelNow());
+  const R = window.NeoQcRmaUI;
+  if (R && typeof R.closeIntake === 'function') run('The RMA form', () => R.closeIntake(true));
+  if (R && typeof R.closeUnit === 'function') run('The RMA part', () => R.closeUnit(true));
+
+  // The build ticket form, closed the way requestCloseTicketModal does after
+  // "Discard".
+  const tModal = document.getElementById('ticket-modal');
+  if (tModal && tModal.classList.contains('active')) {
+    editingTicketId = null;
+    ticketFormDirty = false;
+    try { hideConflictBanner(); } catch (e) {}
+  }
+  try { closeTicketPeek(); } catch (e) {}
+  // A staff list still loading must not land in the closed Settings.
+  opsSettingsSeq++;
+
+  // Then hide whatever is still showing.
+  sessionOverlayIds().forEach(id => {
+    const m = document.getElementById(id);
+    if (m) m.classList.remove('active');
+  });
 }
 
 function setupAuthListeners() {
@@ -2368,7 +2630,13 @@ function setupAuthListeners() {
   }
   const chip = document.getElementById('titlebar-user');
   if (chip) chip.addEventListener('click', async () => {
-    if (await showConfirm('Sign out of Neo QC?', { title: 'Sign out', okText: 'Sign out' })) neoLogout();
+    // Sign-out closes whatever is open without saving it (closeSessionOverlays),
+    // so when something is open, this is the one place that says so.
+    const open = sessionOverlayOpen();
+    const msg = open
+      ? 'Sign out of Neo OS? The open ticket or form will be closed, and anything not saved in it will be lost.'
+      : 'Sign out of Neo OS?';
+    if (await showConfirm(msg, { title: 'Sign out', okText: 'Sign out', danger: open })) neoLogout();
   });
   const tierLogout = document.getElementById('btn-tier-logout');
   if (tierLogout) tierLogout.addEventListener('click', neoLogout);
@@ -4376,13 +4644,15 @@ async function handleTicketFormSubmit(e) {
   }
 
   // Record how this build got its technician (or that it queued) — the
-  // coordinator can always see why the app chose who it chose.
+  // coordinator can always see why the app chose who it chose. The author is
+  // the app's display name (Neo OS since 1.10); entries written before the
+  // rename still say 'NeoQC', and nothing reads this field back but the log.
   if (!_existingForAssign) {
     addEventLog(updatedTicket, isQueued
       ? 'Waiting queue — all technicians at capacity.'
-      : (_assign.reason || ('Assigned to ' + technician + '.')), 'NeoQC');
+      : (_assign.reason || ('Assigned to ' + technician + '.')), 'Neo OS');
   } else if (_existingForAssign.technician !== technician && technician) {
-    addEventLog(updatedTicket, `Technician changed to ${technician}.`, 'NeoQC');
+    addEventLog(updatedTicket, `Technician changed to ${technician}.`, 'Neo OS');
   }
 
   // v1.9.8 DATA-LOSS FIX — carry stress-test state across an admin save. This
@@ -4787,11 +5057,8 @@ async function setupClientMode() {
       if (syncStatus) { syncStatus.textContent = '✓ All data synced to cloud successfully. Safe to close or uninstall.'; syncStatus.className = 'client-sync-status success'; }
       if (submitBtn) { submitBtn.textContent = '✓ Synced'; }
       setTimeout(() => {
-        if (appState.settings.isMaster) {
-          switchScreen('selector');
-        } else {
-          switchScreen('client');
-        }
+        // Back to the bench board (v1.10: there is no mode selector to return to).
+        switchScreen('client');
       }, 1800);
     } else {
       if (syncStatus) { syncStatus.textContent = '✕ Cloud sync failed — data saved locally. Retry or check your network connection.'; syncStatus.className = 'client-sync-status error'; }
@@ -5034,9 +5301,7 @@ function resetAdminLockState() {
     'settings-supabase-url',
     'settings-supabase-key',
     'btn-toggle-key-visibility',
-    'btn-test-db-connection',
-    'settings-is-master',
-    'settings-lock-admin'
+    'btn-test-db-connection'
   ];
   inputsToDisable.forEach(id => {
     const el = document.getElementById(id);
@@ -5071,9 +5336,7 @@ function unlockAdminSettings() {
       'settings-supabase-url',
       'settings-supabase-key',
       'btn-toggle-key-visibility',
-      'btn-test-db-connection',
-      'settings-is-master',
-      'settings-lock-admin'
+      'btn-test-db-connection'
     ];
     inputsToEnable.forEach(id => {
       const el = document.getElementById(id);
@@ -5114,14 +5377,12 @@ function openSettingsModal() {
   document.getElementById('settings-path-furmark').value = appState.settings.pathFurmark || '';
   document.getElementById('settings-path-prime95').value = appState.settings.pathPrime95 || '';
   document.getElementById('settings-path-ssd-utility').value = appState.settings.pathSsdUtility || '';
-  document.getElementById('settings-is-master').checked = !!appState.settings.isMaster;
   document.getElementById('settings-auto-detect-hw').checked = !!appState.settings.autoDetectHw;
-  document.getElementById('settings-lock-admin').checked = !!appState.settings.lockAdminMode;
 
   // Populate new general settings
   document.getElementById('settings-shop-name').value = appState.settings.shopName || '';
   document.getElementById('settings-contact-info').value = appState.settings.contactInfo || '';
-  document.getElementById('settings-accent-color').value = appState.settings.accentColor || 'pink';
+  renderAppearanceSettings();
   document.getElementById('settings-sound-enabled').checked = !!appState.settings.soundEnabled;
   document.getElementById('settings-disable-qc-lock').checked = !!appState.settings.disableQcLock;
 
@@ -5180,7 +5441,276 @@ function openSettingsModal() {
   document.querySelectorAll('.settings-tab-content').forEach(c => c.classList.add('hidden'));
   document.getElementById('tab-general').classList.remove('hidden');
 
+  // v1.10 — Operations (demo data + module access). Its own function so a
+  // failure there can never stop the rest of Settings from opening.
+  try { renderOpsSettings(); } catch (e) { console.error('Operations settings failed to render:', e); }
+
   modal.classList.add('active');
+}
+
+// ── Settings → Operations (v1.10) ─────────────────────────────────────────────
+// Two things live here, and both act straight away (not on Save):
+//   (a) "Show demo service and RMA data" — a training aid for anyone who can
+//       open Service or RMA. Demo data is read-only and never written to
+//       Supabase (NeoQcData enforces that); this only flips the switch.
+//   (b) "Module access" — tier 4+ only: who holds which Service / RMA role.
+//       Writes go through NeoQcData → RPC module_access_set, which checks
+//       tier 4 on the server too. A change reaches that person at their next
+//       sign-in or app restart, because roles are read once, at sign-in.
+// Every name below is staff-typed text, so the table is built with
+// textContent — never innerHTML with a value in it.
+let opsSettingsSeq = 0;
+const OPS_ROLE_OPTIONS = [['', '—'], ['desk', 'Desk'], ['tech', 'Tech'], ['lead', 'Lead']];
+const OPS_MODULE_LABELS = { service: 'Service', rma: 'RMA' };
+const OPS_MODAL_IDS = ['sv-job-modal', 'sv-intake-modal', 'rma-unit-modal', 'rma-intake-modal', 'ops-dialog-modal'];
+
+function opsErrText(e) {
+  if (e && e.message === 'DEMO_READONLY') return 'Demo data is on. Turn it off above to change this.';
+  if (window.NeoQcUI && typeof window.NeoQcUI.errText === 'function') {
+    try { return window.NeoQcUI.errText(e); } catch (x) {}
+  }
+  return (e && e.message) ? e.message : String(e);
+}
+
+function opsCanOpen(mode) {
+  return canOpenOfficeMode(mode);
+}
+
+function renderOpsSettings() {
+  const host = document.getElementById('settings-ops');
+  if (!host) return;
+  const seq = ++opsSettingsSeq;
+  const D = window.NeoQcData;
+  const tier = currentProfile ? Number(currentProfile.tier) || 0 : 0;
+  const canDemo = !!(currentProfile && D && typeof D.setDemo === 'function' && typeof D.isDemo === 'function' &&
+    (opsCanOpen('service') || opsCanOpen('rma')));
+  const canAdmin = !!(currentProfile && D && tier >= 4 &&
+    typeof D.moduleAccessList === 'function' && typeof D.moduleAccessSet === 'function');
+
+  host.textContent = '';
+  if (!canDemo && !canAdmin) { host.classList.add('hidden'); return; }
+  host.classList.remove('hidden');
+
+  // Static markup only; the staff rows are added with DOM calls below.
+  host.innerHTML =
+    '<div class="settings-section-title">Operations</div>' +
+    '<p class="settings-section-desc">Service and RMA. These take effect straight away — no need to press Save.</p>' +
+    (canDemo
+      ? '<label class="settings-toggle-row">' +
+          '<div class="settings-toggle-info">' +
+            '<span class="settings-toggle-label">Show demo service and RMA data</span>' +
+            '<span class="settings-toggle-desc">Fills the Service and RMA screens with practice tickets for training. Demo data is read-only, and your real tickets come back when you turn this off.</span>' +
+          '</div>' +
+          '<div class="toggle-switch">' +
+            '<input type="checkbox" id="settings-ops-demo">' +
+            '<span class="toggle-track"><span class="toggle-thumb"></span></span>' +
+          '</div>' +
+        '</label>'
+      : '') +
+    (canAdmin
+      ? '<div class="settings-field" id="settings-ops-access" style="margin-top:14px;">' +
+          '<div class="settings-label">Module access</div>' +
+          '<p class="settings-field-note" style="margin:0 0 8px;">Who can open Service and RMA, and at what level. <strong>Desk</strong> takes tickets in and moves them on; <strong>Tech</strong> can also claim work; <strong>Lead</strong> can also assign, set priority and waive fees. Everyone at tier 3 and above is a lead in every module automatically. A change takes effect for that person at their next sign-in or app restart.</p>' +
+          '<input type="text" id="settings-ops-access-search" class="settings-input" placeholder="Search staff by name or email…" autocomplete="off" spellcheck="false" style="margin-bottom:8px;">' +
+          '<div class="table-container" style="max-height:340px;overflow-y:auto;">' +
+            '<table class="settings-table">' +
+              '<thead><tr><th style="text-align:left;">Person</th><th style="width:130px;">Service</th><th style="width:130px;">RMA</th></tr></thead>' +
+              '<tbody id="settings-ops-access-body"></tbody>' +
+            '</table>' +
+          '</div>' +
+          '<div id="settings-ops-access-status" class="settings-field-note" role="status" aria-live="polite"></div>' +
+        '</div>'
+      : '');
+
+  // Scanner rule: Enter in an input here must never do anything. The host
+  // outlives each render, so the guard is bound once.
+  if (!host.dataset.enterGuard) {
+    host.dataset.enterGuard = '1';
+    host.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter') return;
+      const tag = e.target && e.target.tagName ? e.target.tagName.toUpperCase() : '';
+      if (tag === 'TEXTAREA' || tag === 'BUTTON') return;
+      e.preventDefault();
+    });
+  }
+
+  if (canDemo) bindOpsDemoToggle(D);
+  if (canAdmin) loadOpsModuleAccess(seq, D);
+}
+
+function bindOpsDemoToggle(D) {
+  const demoEl = document.getElementById('settings-ops-demo');
+  if (!demoEl) return;
+  try { demoEl.checked = !!D.isDemo(); } catch (e) { demoEl.checked = false; }
+  demoEl.addEventListener('change', async () => {
+    const on = demoEl.checked;
+    // Swapping every cache under an open ticket would leave that panel
+    // editing a row that no longer exists in what it is showing.
+    const openModal = OPS_MODAL_IDS.some(id => {
+      const m = document.getElementById(id);
+      return !!(m && m.classList.contains('active'));
+    });
+    if (openModal) {
+      demoEl.checked = !on;
+      showToast('Close the open ticket or form first, then switch demo data.', 'warning');
+      return;
+    }
+    demoEl.disabled = true;
+    try {
+      await Promise.resolve(D.setDemo(on));
+      rerenderOpsScreen();
+      if (window.NeoQcShell && typeof window.NeoQcShell.refreshRail === 'function') window.NeoQcShell.refreshRail();
+      showToast(on
+        ? 'Showing demo service and RMA data. It is read-only.'
+        : 'Demo data is off. You are working on real tickets.', on ? 'warning' : 'success');
+    } catch (e) {
+      try { demoEl.checked = !!D.isDemo(); } catch (x) { demoEl.checked = !on; }
+      showToast('Could not switch demo data: ' + opsErrText(e), 'error');
+    } finally {
+      demoEl.disabled = false;
+    }
+  });
+}
+
+// Repaint whichever ops screen is behind the Settings modal, from the caches
+// the demo switch just replaced.
+function rerenderOpsScreen() {
+  const warn = (what) => (e) => {
+    console.warn(what + ' reload failed:', e && e.message);
+    showToast('Could not refresh the ' + what + ' screen: ' + opsErrText(e), 'error');
+  };
+  if (currentMode === 'service' && window.NeoQcServiceUI && window.NeoQcServiceUI.ensureServiceLoaded) {
+    Promise.resolve().then(() => window.NeoQcServiceUI.ensureServiceLoaded()).catch(warn('Service'));
+  } else if (currentMode === 'rma' && window.NeoQcRmaUI && window.NeoQcRmaUI.ensureLoaded) {
+    Promise.resolve().then(() => window.NeoQcRmaUI.ensureLoaded()).catch(warn('RMA'));
+  } else if (currentMode === 'overview' && window.NeoQcShell && window.NeoQcShell.ensureOverviewLoaded) {
+    Promise.resolve().then(() => window.NeoQcShell.ensureOverviewLoaded()).catch(warn('Overview'));
+  }
+}
+
+async function loadOpsModuleAccess(seq, D) {
+  const body = document.getElementById('settings-ops-access-body');
+  if (!body) return;
+  const message = (text) => {
+    body.textContent = '';
+    const tr = document.createElement('tr');
+    const td = document.createElement('td');
+    td.colSpan = 3;
+    td.textContent = text;
+    tr.appendChild(td);
+    body.appendChild(tr);
+  };
+  message('Loading staff…');
+  let res;
+  try {
+    res = await D.moduleAccessList();
+  } catch (e) {
+    if (seq !== opsSettingsSeq) return;
+    message('Could not load staff: ' + opsErrText(e));
+    return;
+  }
+  if (seq !== opsSettingsSeq) return;   // Settings was reopened meanwhile
+  const rows = (Array.isArray(res) ? res : (res && Array.isArray(res.data) ? res.data : []))
+    .filter(r => r && r.email)
+    .map(r => Object.assign({}, r));
+  // Active people first, then by name — the list is for granting, and nobody
+  // grants a role to someone who has left.
+  rows.sort((a, b) => {
+    const ia = a.active === false ? 1 : 0, ib = b.active === false ? 1 : 0;
+    if (ia !== ib) return ia - ib;
+    return String(a.full_name || a.email).localeCompare(String(b.full_name || b.email));
+  });
+  if (!rows.length) { message('No staff found.'); return; }
+
+  body.textContent = '';
+  rows.forEach(r => body.appendChild(buildOpsAccessRow(r, D)));
+
+  const search = document.getElementById('settings-ops-access-search');
+  if (search) {
+    search.addEventListener('input', () => {
+      const q = search.value.trim().toLowerCase();
+      body.querySelectorAll('tr[data-hay]').forEach(tr => {
+        tr.classList.toggle('hidden', !!q && tr.dataset.hay.indexOf(q) === -1);
+      });
+    });
+  }
+}
+
+function buildOpsAccessRow(r, D) {
+  const tr = document.createElement('tr');
+  tr.dataset.hay = [r.full_name, r.email, r.designation].filter(Boolean).join(' ').toLowerCase();
+  if (r.active === false) tr.style.opacity = '0.6';
+
+  const who = document.createElement('td');
+  who.style.textAlign = 'left';
+  const name = document.createElement('div');
+  name.style.fontWeight = '600';
+  name.textContent = r.full_name || r.email;
+  const sub = document.createElement('div');
+  sub.style.fontSize = '0.72rem';
+  sub.style.color = 'var(--text-muted)';
+  sub.textContent = [r.designation, r.email, r.active === false ? 'Inactive' : ''].filter(Boolean).join(' · ');
+  who.append(name, sub);
+  tr.appendChild(who);
+
+  const autoLead = Number(r.tier) >= 3;
+  ['service', 'rma'].forEach(module => {
+    const td = document.createElement('td');
+    if (autoLead) {
+      // module_role() answers 'lead' for tier 3+ whatever the table says, so
+      // a select here would be a control that does nothing.
+      td.textContent = 'Lead (automatic)';
+      td.style.fontSize = '0.75rem';
+      td.style.color = 'var(--text-muted)';
+    } else {
+      const sel = document.createElement('select');
+      sel.className = 'settings-select';
+      sel.setAttribute('aria-label', OPS_MODULE_LABELS[module] + ' role for ' + (r.full_name || r.email));
+      OPS_ROLE_OPTIONS.forEach(([value, label]) => {
+        const o = document.createElement('option');
+        o.value = value;
+        o.textContent = label;
+        sel.appendChild(o);
+      });
+      sel.value = r[module] || '';
+      sel.addEventListener('change', () => saveOpsModuleAccess(r, module, sel, D));
+      td.appendChild(sel);
+    }
+    tr.appendChild(td);
+  });
+  return tr;
+}
+
+async function saveOpsModuleAccess(r, module, sel, D) {
+  // Bind everything this save is about before the await.
+  const email = r.email;
+  const who = r.full_name || r.email;
+  const prev = r[module] || '';
+  const next = sel.value;
+  if (next === prev) return;
+  const status = document.getElementById('settings-ops-access-status');
+  const say = (text, isError) => {
+    if (!status) return;
+    status.textContent = text;
+    status.style.color = isError ? 'var(--status-urgent)' : '';
+  };
+  sel.disabled = true;
+  say('Saving…');
+  try {
+    await D.moduleAccessSet(email, module, next || null);
+    r[module] = next || null;
+    const label = (OPS_ROLE_OPTIONS.find(o => o[0] === next) || ['', ''])[1];
+    say(next
+      ? `Saved. ${who} is ${label} in ${OPS_MODULE_LABELS[module]} from their next sign-in or app restart.`
+      : `Saved. ${who} loses ${OPS_MODULE_LABELS[module]} at their next sign-in or app restart.`);
+  } catch (e) {
+    sel.value = prev;   // put the select back to what is really stored
+    const msg = opsErrText(e);
+    say('Not saved: ' + msg, true);
+    showToast('Could not change module access: ' + msg, 'error');
+  } finally {
+    sel.disabled = false;
+  }
 }
 
 async function handleSaveSettings() {
@@ -5191,14 +5721,11 @@ async function handleSaveSettings() {
   appState.settings.pathFurmark = document.getElementById('settings-path-furmark').value.trim();
   appState.settings.pathPrime95 = document.getElementById('settings-path-prime95').value.trim();
   appState.settings.pathSsdUtility = document.getElementById('settings-path-ssd-utility').value.trim();
-  appState.settings.isMaster = document.getElementById('settings-is-master').checked;
   appState.settings.autoDetectHw = document.getElementById('settings-auto-detect-hw').checked;
-  appState.settings.lockAdminMode = document.getElementById('settings-lock-admin').checked;
 
   // Save new settings
   appState.settings.shopName = document.getElementById('settings-shop-name').value.trim();
   appState.settings.contactInfo = document.getElementById('settings-contact-info').value.trim();
-  appState.settings.accentColor = document.getElementById('settings-accent-color').value;
   appState.settings.soundEnabled = document.getElementById('settings-sound-enabled').checked;
   appState.settings.disableQcLock = document.getElementById('settings-disable-qc-lock').checked;
   appState.settings.defaultTech = document.getElementById('settings-default-tech').value;
@@ -5215,8 +5742,6 @@ async function handleSaveSettings() {
   appState.settings.dashboardPin = (document.getElementById('settings-dashboard-pin')?.value || '').trim() || '9374';
   appState.settings.urgentHours  = parseInt(document.getElementById('settings-urgent-hours')?.value) || 48;
 
-  applyAccentColor(appState.settings.accentColor);
-
   await saveDatabase();
   document.getElementById('settings-modal').classList.remove('active');
   
@@ -5226,15 +5751,9 @@ async function handleSaveSettings() {
     handleClientTicketSelect();
   }
 
-  if (!appState.settings.isMaster) {
-    switchScreen('client');
-  } else {
-    if (currentMode === 'staff') {
-      renderDashboard();
-    } else {
-      switchScreen('selector');
-    }
-  }
+  // v1.10 — saving Settings keeps you on the screen you opened it from (it is
+  // on the rail and on the bench). It used to route through the mode selector
+  // or the per-PC "Master mode" switch; both are gone.
 }
 
 // ==========================================================================
@@ -5254,12 +5773,6 @@ function setupEventListeners() {
   document.getElementById('win-btn-minimize').addEventListener('click', () => ipcRenderer.send('win:minimize'));
   document.getElementById('win-btn-maximize').addEventListener('click', () => ipcRenderer.send('win:maximize'));
   document.getElementById('win-btn-close').addEventListener('click', () => ipcRenderer.send('win:close'));
-
-  // Mode launch buttons
-  document.getElementById('btn-launch-staff').addEventListener('click', () => switchScreen('staff'));
-  document.getElementById('btn-launch-client').addEventListener('click', () => {
-    switchScreen('client');
-  });
 
   // Welcome Screen Listeners
   const welcomeSelect = document.getElementById('welcome-ticket-select');
@@ -5299,8 +5812,18 @@ function setupEventListeners() {
 
   const welcomeExit = document.getElementById('btn-welcome-exit');
   if (welcomeExit) {
+    // "← <home>" — back to the screen sign-in sends this person to.
     welcomeExit.addEventListener('click', () => {
-      switchScreen('selector');
+      goHome();
+    });
+  }
+
+  // v1.10 — bench → service queue. switchScreen's registry gate decides; the
+  // button is only shown to service techs and leads (see the 'client' branch).
+  const welcomeService = document.getElementById('btn-welcome-service');
+  if (welcomeService) {
+    welcomeService.addEventListener('click', () => {
+      switchScreen('service');
     });
   }
 
@@ -5335,15 +5858,12 @@ function setupEventListeners() {
     });
   }
 
-  // Theme change toggle — remembers the choice (admin app only; persisted in
-  // settings so it survives relaunches).
-  document.getElementById('btn-toggle-theme').addEventListener('click', async () => {
-    const isDark = document.body.classList.toggle('dark-mode');
-    document.body.classList.toggle('light-mode', !isDark);
-    if (!appState.settings) appState.settings = {};
-    appState.settings.darkMode = isDark;
-    try { await saveDatabase(); } catch (e) {}
+  // Theme toggle on the Builds header: a quick light/dark flip. The full choice
+  // (incl. "Match Windows") is Settings → Appearance; both write the same setting.
+  document.getElementById('btn-toggle-theme').addEventListener('click', () => {
+    setThemeChoice(document.body.classList.contains('dark-mode') ? 'light' : 'dark');
   });
+  setupAppearanceSettings();
 
   // Settings modals
   document.getElementById('btn-show-settings').addEventListener('click', openSettingsModal);
@@ -5914,18 +6434,10 @@ function setupEventListeners() {
     if (el) el.addEventListener('change', refreshQcBadge);
   });
 
-  // Client exit (takes client back to selector screen)
+  // Testing console → back to the bench board (v1.10; was "Switch Mode").
   document.getElementById('btn-client-exit').addEventListener('click', () => {
-    switchScreen('selector');
+    switchScreen('client');
   });
-
-  // Staff exit
-  const staffExit = document.getElementById('btn-staff-exit');
-  if (staffExit) {
-    staffExit.addEventListener('click', () => {
-      switchScreen('selector');
-    });
-  }
 
   document.getElementById('btn-client-refresh').addEventListener('click', () => {
     const currentId = document.getElementById('client-ticket-select').value;
@@ -7536,49 +8048,123 @@ function renderSsdHealthCard(prefix, h) {
 }
 
 // Accent Color Theme Applier
+// ==========================================================================
+// APPEARANCE (v1.10) — theme (light / dark / match Windows) + accent colour.
+// Settings → Appearance applies a choice the moment it is clicked and keeps
+// it in this PC's local database (appState.settings). darkMode is still
+// written alongside, so a PC rolled back to 1.9.x keeps the same look.
+// ==========================================================================
+const THEME_CHOICES = ['light', 'dark', 'system'];
+
+// main colour, its rgb channels (for rgba(var(--primary-pink-rgb), a)), the
+// hover shade, and the light/dark ends of the logo gradient.
+const ACCENTS = {
+  pink:   { primary: '#e7014e', rgb: '231, 1, 78',   hover: '#c4003f', light: '#ff1a75', dark: '#b3003b' },
+  red:    { primary: '#ef4444', rgb: '239, 68, 68',  hover: '#dc2626', light: '#f87171', dark: '#b91c1c' },
+  purple: { primary: '#8b5cf6', rgb: '139, 92, 246', hover: '#7c3aed', light: '#a78bfa', dark: '#6d28d9' },
+  blue:   { primary: '#3b82f6', rgb: '59, 130, 246', hover: '#2563eb', light: '#60a5fa', dark: '#1d4ed8' },
+  cyan:   { primary: '#06b6d4', rgb: '6, 182, 212',  hover: '#0891b2', light: '#22d3ee', dark: '#0e7490' },
+  green:  { primary: '#10b981', rgb: '16, 185, 129', hover: '#059669', light: '#34d399', dark: '#047857' },
+  gold:   { primary: '#f59e0b', rgb: '245, 158, 11', hover: '#d97706', light: '#fbbf24', dark: '#b45309' }
+};
+
+let systemThemeQuery = null;
+
+// The saved choice. PCs from before v1.10 only have darkMode (true / false /
+// never set — the light look).
+function themeChoiceFromSettings(s) {
+  if (s && THEME_CHOICES.indexOf(s.theme) !== -1) return s.theme;
+  if (s && s.darkMode === true) return 'dark';
+  return 'light';
+}
+
+function resolvedTheme(choice) {
+  if (choice === 'system') {
+    try { return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'; }
+    catch (e) { return 'light'; }
+  }
+  return choice === 'dark' ? 'dark' : 'light';
+}
+
+function applyThemeChoice(choice) {
+  const dark = resolvedTheme(choice) === 'dark';
+  document.body.classList.toggle('dark-mode', dark);
+  document.body.classList.toggle('light-mode', !dark);
+  // "Match Windows" follows a Windows theme change live, without a restart.
+  if (!systemThemeQuery) {
+    try {
+      systemThemeQuery = window.matchMedia('(prefers-color-scheme: dark)');
+      const follow = () => {
+        if (themeChoiceFromSettings(appState.settings) === 'system') applyThemeChoice('system');
+      };
+      if (systemThemeQuery.addEventListener) systemThemeQuery.addEventListener('change', follow);
+      else if (systemThemeQuery.addListener) systemThemeQuery.addListener(follow);
+    } catch (e) { /* no matchMedia: light / dark still work */ }
+  }
+}
+
+async function setThemeChoice(choice) {
+  if (THEME_CHOICES.indexOf(choice) === -1) return;
+  if (!appState.settings) appState.settings = {};
+  appState.settings.theme = choice;
+  appState.settings.darkMode = resolvedTheme(choice) === 'dark';
+  applyThemeChoice(choice);
+  renderAppearanceSettings();
+  try { await saveDatabase(); } catch (e) { console.warn('saving the theme failed:', e && e.message); }
+}
+
+async function setAccentChoice(color) {
+  if (!Object.prototype.hasOwnProperty.call(ACCENTS, color)) return;
+  if (!appState.settings) appState.settings = {};
+  appState.settings.accentColor = color;
+  applyAccentColor(color);
+  renderAppearanceSettings();
+  try { await saveDatabase(); } catch (e) { console.warn('saving the accent colour failed:', e && e.message); }
+}
+
+// Mark the current theme and accent in Settings → Appearance.
+function renderAppearanceSettings() {
+  const choice = themeChoiceFromSettings(appState.settings);
+  document.querySelectorAll('[data-theme-choice]').forEach(b => {
+    const on = b.getAttribute('data-theme-choice') === choice;
+    b.classList.toggle('active', on);
+    b.setAttribute('aria-checked', on ? 'true' : 'false');
+  });
+  const saved = appState.settings && appState.settings.accentColor;
+  const accent = Object.prototype.hasOwnProperty.call(ACCENTS, saved) ? saved : 'pink';
+  document.querySelectorAll('[data-accent]').forEach(b => {
+    const on = b.getAttribute('data-accent') === accent;
+    b.classList.toggle('active', on);
+    b.setAttribute('aria-checked', on ? 'true' : 'false');
+  });
+}
+
+function setupAppearanceSettings() {
+  document.querySelectorAll('[data-theme-choice]').forEach(b => {
+    b.addEventListener('click', () => setThemeChoice(b.getAttribute('data-theme-choice')));
+  });
+  document.querySelectorAll('[data-accent]').forEach(b => {
+    b.addEventListener('click', () => setAccentChoice(b.getAttribute('data-accent')));
+  });
+  renderAppearanceSettings();
+}
+
 function applyAccentColor(color) {
+  const a = Object.prototype.hasOwnProperty.call(ACCENTS, color) ? ACCENTS[color] : ACCENTS.pink;
   const root = document.documentElement;
-  let primary = '#e7014e';
-  let primaryRgb = '231, 1, 78';
-  
-  switch (color) {
-    case 'red':
-      primary = '#ef4444';
-      primaryRgb = '239, 68, 68';
-      break;
-    case 'purple':
-      primary = '#8b5cf6';
-      primaryRgb = '139, 92, 246';
-      break;
-    case 'cyan':
-      primary = '#06b6d4';
-      primaryRgb = '6, 182, 212';
-      break;
-    case 'gold':
-      primary = '#f59e0b';
-      primaryRgb = '245, 158, 11';
-      break;
-    case 'green':
-      primary = '#10b981';
-      primaryRgb = '16, 185, 129';
-      break;
-    case 'pink':
-    default:
-      primary = '#e7014e';
-      primaryRgb = '231, 1, 78';
-      break;
-  }
-  root.style.setProperty('--primary-pink', primary);
-  root.style.setProperty('--primary-pink-rgb', primaryRgb);
-  
-  const logoGrad = document.getElementById('logo-grad');
-  if (logoGrad) {
-    logoGrad.innerHTML = `
-      <stop offset="0%" stop-color="${color === 'red' ? '#f87171' : color === 'purple' ? '#a78bfa' : color === 'cyan' ? '#22d3ee' : color === 'gold' ? '#fbbf24' : color === 'green' ? '#34d399' : '#ff1a75'}" />
-      <stop offset="50%" stop-color="${primary}" />
-      <stop offset="100%" stop-color="${color === 'red' ? '#b91c1c' : color === 'purple' ? '#6d28d9' : color === 'cyan' ? '#0891b2' : color === 'gold' ? '#d97706' : color === 'green' ? '#059669' : '#b3003b'}" />
-    `;
-  }
+  root.style.setProperty('--primary-pink', a.primary);
+  root.style.setProperty('--primary-pink-rgb', a.rgb);
+  root.style.setProperty('--primary-pink-hover', a.hover);
+  // The Neo Tokyo mark on the splash and sign-in screens follows the accent.
+  ['splash-logo-grad', 'login-logo-grad'].forEach(id => {
+    const grad = document.getElementById(id);
+    if (!grad) return;
+    const stops = grad.querySelectorAll('stop');
+    if (stops.length < 3) return;
+    stops[0].setAttribute('stop-color', a.light);
+    stops[1].setAttribute('stop-color', a.primary);
+    stops[2].setAttribute('stop-color', a.dark);
+  });
 }
 
 // Format Date to YYYY-MM-DDTHH:MM (UTC-based to prevent timezone shifting)

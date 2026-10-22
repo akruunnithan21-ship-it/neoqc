@@ -1,0 +1,390 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   OPERATIONS UI KIT — styles for ops-ui.js (window.NeoQcUI)
+   The dialog, the photo lightbox, chips, priority badges, banners, the KPI
+   strip shared by Service and RMA, and icon sizing. Loaded after style.css
+   and built only from its tokens (--primary-pink, --glass-*, --text-*,
+   --status-*), so the Theme Accent picker and light/dark both follow.
+   Dark mode is `body.dark-mode`, exactly as style.css does it.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* ── layers ──────────────────────────────────────────────────────────────────
+   Other modals sit at 1000. A dialog opens ON TOP of the job panel, and the
+   lightbox on top of a dialog's gallery. Toasts (100000) and showConfirm
+   (100001) stay above everything. */
+#ops-dialog-modal { z-index: 1500; }
+#ops-lightbox     { z-index: 1600; }
+
+/* ── dialog ───────────────────────────────────────────────────────────────── */
+.ops-dialog-card {
+  width: 94%;
+  max-width: 560px;
+  max-height: 90vh;
+  /* More opaque than the plain glass slab: a dialog sits over another panel,
+     and that panel's text bleeding through makes the form hard to read. */
+  background: rgba(255, 255, 255, 0.94);
+}
+body.dark-mode .ops-dialog-card { background: rgba(17, 24, 39, 0.95); }
+.ops-dialog-card.ops-dialog-wide { max-width: 880px; }
+.ops-dialog-card.ops-dialog-danger { border-top: 3px solid var(--status-urgent); }
+
+#ops-dialog-root { display: flex; flex-direction: column; min-height: 0; max-height: 90vh; }
+.ops-dialog { display: flex; flex-direction: column; min-height: 0; max-height: 90vh; }
+.ops-dialog.busy { cursor: progress; }
+
+.ops-dialog-head { padding: 16px 20px; gap: 12px; align-items: flex-start; }
+.ops-dialog-titles { min-width: 0; }
+.ops-dialog-title {
+  margin: 0;
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 1.08rem;
+  font-weight: 700;
+  line-height: 1.3;
+  color: var(--text-dark);
+  overflow-wrap: anywhere;
+}
+.ops-dialog-sub {
+  margin-top: 3px;
+  font-size: 0.74rem;
+  color: var(--text-muted);
+  font-family: 'JetBrains Mono', monospace;
+  overflow-wrap: anywhere;
+}
+.ops-dialog-x { padding: 0 4px; line-height: 1; flex-shrink: 0; }
+.ops-dialog-x:hover:not(:disabled) { color: var(--text-dark); }
+.ops-dialog-x:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.ops-dialog-body {
+  padding: 18px 20px;
+  overflow-y: auto;
+  flex: 1 1 auto;
+  min-height: 0;
+  color: var(--text-dark);
+  font-size: 0.88rem;
+  line-height: 1.5;
+}
+.ops-dialog-msg { margin: 0; color: var(--text-muted); line-height: 1.55; white-space: pre-line; }
+
+.ops-dialog-err {
+  display: none;
+  margin: 0 20px 12px;
+  padding: 9px 12px;
+  border-radius: 9px;
+  font-size: 0.82rem;
+  line-height: 1.45;
+  color: var(--status-urgent);
+  background: rgba(239, 68, 68, 0.08);
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+.ops-dialog-err.show { display: block; }
+body.dark-mode .ops-dialog-err { color: #fca5a5; }
+
+.ops-dialog-foot { justify-content: flex-end; gap: 10px; padding: 14px 20px; flex-shrink: 0; }
+.ops-dialog-ok[aria-busy="true"] { cursor: progress; }
+
+.primary-pink-btn.ops-btn-danger { background: var(--status-urgent); }
+.primary-pink-btn.ops-btn-danger:hover:not(:disabled) { background: #dc2626; box-shadow: 0 0 10px rgba(239, 68, 68, 0.4); }
+
+/* Form pieces for dialog bodies, the same look as the service panel's fields. */
+.ops-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.ops-span2 { grid-column: 1 / -1; }
+.ops-field { display: flex; flex-direction: column; gap: 5px; font-size: 0.78rem; color: var(--text-muted); min-width: 0; }
+.ops-field > span:first-child { font-weight: 600; }
+.ops-field input, .ops-field textarea, .ops-field select {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 9px 11px;
+  border-radius: 8px;
+  font-family: inherit;
+  font-size: 0.88rem;
+  border: 1px solid var(--glass-border);
+  background: rgba(255, 255, 255, 0.6);
+  color: var(--text-dark);
+}
+body.dark-mode .ops-field input,
+body.dark-mode .ops-field textarea,
+body.dark-mode .ops-field select { background: rgba(255, 255, 255, 0.05); border-color: rgba(255, 255, 255, 0.14); }
+.ops-field input:focus, .ops-field textarea:focus, .ops-field select:focus { border-color: var(--primary-pink); outline: none; }
+.ops-field textarea { resize: vertical; min-height: 64px; }
+.ops-field select option { background: #12121e; color: #f0f0f0; }
+.ops-field .ops-req { color: var(--status-urgent); }
+.ops-hint { font-size: 0.75rem; color: var(--text-muted); line-height: 1.5; margin: 4px 0 0; }
+.ops-section-title {
+  font-size: 0.68rem; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase;
+  color: var(--text-muted); margin: 16px 0 8px;
+}
+.ops-section-title:first-child { margin-top: 0; }
+.ops-check {
+  display: flex; align-items: center; gap: 10px; margin-top: 10px;
+  padding: 9px 11px; border-radius: 10px; cursor: pointer; font-size: 0.85rem;
+  border: 1px solid transparent; color: var(--text-dark);
+}
+.ops-check:hover { background: rgba(var(--primary-pink-rgb), 0.06); border-color: rgba(var(--primary-pink-rgb), 0.2); }
+.ops-check input { width: 20px; height: 20px; accent-color: var(--primary-pink); flex-shrink: 0; }
+.ops-status { font-size: 0.8rem; line-height: 1.5; color: var(--text-muted); }
+.ops-status.ok  { color: var(--status-completed); font-weight: 600; }
+.ops-status.err { color: var(--status-urgent); }
+.ops-muted { color: var(--text-muted); }
+.ops-mono { font-family: 'JetBrains Mono', monospace; }
+.ops-empty {
+  padding: 14px 12px; text-align: center; font-size: 0.78rem; color: var(--text-muted);
+  border: 1px dashed var(--glass-border); border-radius: 9px;
+}
+
+/* ── chips ─────────────────────────────────────────────────────────────────
+   Toggle buttons. The pressed state has a tick as well as the accent colour,
+   so it never depends on colour alone. */
+.ops-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.ops-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 6px 13px;
+  border-radius: 999px;
+  border: 1px solid var(--glass-border);
+  background: rgba(127, 127, 160, 0.07);
+  color: var(--text-dark);
+  font-family: inherit;
+  font-size: 0.8rem;
+  font-weight: 600;
+  line-height: 1.2;
+  cursor: pointer;
+  user-select: none;
+  transition: background var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+.ops-chip:hover:not(:disabled) { border-color: rgba(var(--primary-pink-rgb), 0.5); }
+.ops-chip:active:not(:disabled) { transform: translateY(1px); transition-duration: var(--dur-tap); }
+.ops-chip[aria-pressed="true"] {
+  background: rgba(var(--primary-pink-rgb), 0.12);
+  border-color: var(--primary-pink);
+  color: var(--primary-pink);
+}
+.ops-chip[aria-pressed="true"]::before { content: '✓'; font-weight: 800; font-size: 0.78rem; line-height: 1; }
+.ops-chip:disabled { opacity: 0.45; cursor: not-allowed; }
+body.dark-mode .ops-chip { background: rgba(255, 255, 255, 0.04); border-color: rgba(255, 255, 255, 0.14); }
+body.dark-mode .ops-chip[aria-pressed="true"] {
+  background: rgba(var(--primary-pink-rgb), 0.2);
+  border-color: rgba(var(--primary-pink-rgb), 0.85);
+  color: #ff7aa6;
+}
+
+/* ── icons (inline SVG from typeIcon / channelIcon / itemIcon) ───────────── */
+.ops-ic { display: inline-block; width: 16px; height: 16px; vertical-align: -3px; flex-shrink: 0; color: inherit; }
+.ops-ic-sm { width: 13px; height: 13px; vertical-align: -2px; }
+.ops-ic-lg { width: 20px; height: 20px; vertical-align: -4px; }
+.ops-ic-xl { width: 28px; height: 28px; vertical-align: -7px; }
+
+/* ── priority badges ─────────────────────────────────────────────────────── */
+.ops-prio {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  line-height: 1.5;
+}
+.ops-prio-urgent { color: #fff; background: var(--status-urgent); }
+.ops-prio-high   { color: #b45309; background: rgba(245, 158, 11, 0.15); border-color: rgba(245, 158, 11, 0.45); }
+.ops-prio-normal { color: var(--text-muted); background: rgba(127, 127, 160, 0.12); }
+.ops-prio-low    { color: var(--text-muted); background: transparent; border-color: var(--glass-border); }
+body.dark-mode .ops-prio-high { color: #fbbf24; }
+
+/* ── late / due-soon words (colour is never the only signal) ─────────────── */
+.ops-late, .ops-soon {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: 1px solid;
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  line-height: 1.5;
+}
+.ops-late { color: var(--status-urgent); border-color: rgba(239, 68, 68, 0.5); background: rgba(239, 68, 68, 0.08); }
+.ops-soon { color: #b45309; border-color: rgba(245, 158, 11, 0.5); background: rgba(245, 158, 11, 0.08); }
+body.dark-mode .ops-late { color: #fca5a5; }
+body.dark-mode .ops-soon { color: #fbbf24; }
+
+/* ── banners ─────────────────────────────────────────────────────────────── */
+.ops-banner {
+  margin: 0 0 12px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--glass-border);
+  border-left-width: 4px;
+  font-size: 0.82rem;
+  line-height: 1.45;
+  color: var(--text-dark);
+  background: var(--glass-bg);
+  overflow-wrap: anywhere;
+}
+.ops-banner-info  { border-color: rgba(59, 130, 246, 0.35);  border-left-color: #3b82f6;               background: rgba(59, 130, 246, 0.07); }
+.ops-banner-warn  { border-color: rgba(245, 158, 11, 0.4);   border-left-color: var(--status-awaiting); background: rgba(245, 158, 11, 0.09); }
+.ops-banner-error { border-color: rgba(239, 68, 68, 0.4);    border-left-color: var(--status-urgent);   background: rgba(239, 68, 68, 0.07); }
+.ops-banner-ok    { border-color: rgba(16, 185, 129, 0.4);   border-left-color: var(--status-completed); background: rgba(16, 185, 129, 0.08); }
+/* Demo is striped so nobody mistakes practice tickets for the real board. */
+.ops-banner-demo {
+  font-weight: 600;
+  border-color: rgba(245, 158, 11, 0.55);
+  border-left-color: var(--status-awaiting);
+  background: repeating-linear-gradient(135deg,
+    rgba(245, 158, 11, 0.13) 0, rgba(245, 158, 11, 0.13) 12px,
+    rgba(245, 158, 11, 0.05) 12px, rgba(245, 158, 11, 0.05) 24px);
+}
+
+/* ── KPI strip (Service and RMA) ─────────────────────────────────────────── */
+.ops-kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 10px;
+  margin-bottom: 16px;
+}
+.ops-kpi {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 0;
+  padding: 11px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--glass-border);
+  border-left: 3px solid var(--kpi-c, var(--text-muted));
+  background: var(--glass-bg);
+  color: var(--text-dark);
+  font-family: inherit;
+  font-weight: 400;
+  text-align: left;
+  transition: border-color var(--dur-fast) var(--ease), transform var(--dur-tap) var(--ease);
+}
+button.ops-kpi { cursor: pointer; }
+button.ops-kpi:hover { transform: translateY(-1px); border-color: rgba(var(--primary-pink-rgb), 0.45); border-left-color: var(--kpi-c, var(--text-muted)); }
+button.ops-kpi:active { transform: translateY(1px); }
+.ops-kpi.on { border-color: var(--primary-pink); box-shadow: inset 0 0 0 1px var(--primary-pink); border-left-color: var(--kpi-c, var(--primary-pink)); }
+.ops-kpi-n {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 1.4rem;
+  font-weight: 700;
+  line-height: 1.1;
+  color: var(--kpi-n, var(--text-dark));
+}
+.ops-kpi-l { font-size: 0.7rem; line-height: 1.3; color: var(--text-muted); }
+.ops-kpi-sub { font-size: 0.66rem; font-weight: 700; color: var(--kpi-c, var(--text-muted)); }
+.ops-kpi.zero .ops-kpi-n { opacity: 0.45; }
+.ops-kpi-late     { --kpi-c: var(--status-urgent);    --kpi-n: var(--status-urgent); }
+.ops-kpi-customer { --kpi-c: var(--status-awaiting); }
+.ops-kpi-vendor   { --kpi-c: #8b7cf6; }
+.ops-kpi-ready    { --kpi-c: var(--status-completed); --kpi-n: var(--status-completed); }
+.ops-kpi-shop     { --kpi-c: #14b8a6; }
+.ops-kpi-queue    { --kpi-c: var(--primary-pink); }
+.ops-kpi-muted    { --kpi-c: var(--text-muted); }
+.ops-kpi-late.zero, .ops-kpi-ready.zero { --kpi-n: var(--text-dark); }
+
+/* ── lightbox ────────────────────────────────────────────────────────────────
+   Always dark, in both themes: photos are judged against a neutral black. */
+#ops-lightbox { background: rgba(5, 7, 14, 0.9); }
+#ops-lightbox.active { backdrop-filter: blur(6px); }
+#ops-lightbox-root { width: 100%; height: 100%; }
+.ops-lb {
+  position: relative;
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 52px 76px 20px;
+}
+.ops-lb-stage {
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.ops-lb-img {
+  display: block;
+  max-width: 100%;
+  max-height: calc(100vh - 170px);
+  object-fit: contain;
+  border-radius: 8px;
+  background: #111;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.55);
+}
+.ops-lb-doc {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  max-width: 440px;
+  padding: 28px 32px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.06);
+  color: #e5e7eb;
+  text-align: center;
+  font-size: 0.86rem;
+  line-height: 1.5;
+}
+.ops-lb-doc-title { font-family: 'Space Grotesk', sans-serif; font-weight: 700; font-size: 1rem; color: #fff; }
+.ops-lb-doc-hint { color: #aab3c5; font-size: 0.8rem; }
+.ops-lb-cap {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  width: 100%;
+  max-width: 1000px;
+  margin-top: 12px;
+  color: #e5e7eb;
+}
+.ops-lb-captext { min-width: 0; }
+.ops-lb-title { font-weight: 700; font-size: 0.9rem; overflow-wrap: anywhere; }
+.ops-lb-sub { font-size: 0.76rem; color: #aab3c5; margin-top: 2px; overflow-wrap: anywhere; }
+.ops-lb-count { font-family: 'JetBrains Mono', monospace; font-size: 0.75rem; color: #aab3c5; white-space: nowrap; }
+.ops-lb-btn {
+  position: absolute;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+  font-family: inherit;
+  font-size: 1.6rem;
+  line-height: 1;
+}
+.ops-lb-btn:hover { background: rgba(255, 255, 255, 0.18); }
+.ops-lb-close { top: 12px; right: 16px; font-size: 1.4rem; }
+.ops-lb-prev  { left: 16px;  top: 50%; transform: translateY(-50%); }
+.ops-lb-next  { right: 16px; top: 50%; transform: translateY(-50%); }
+.ops-lb-prev:active { transform: translateY(calc(-50% + 1px)); }
+.ops-lb-next:active { transform: translateY(calc(-50% + 1px)); }
+
+/* ── narrow windows ──────────────────────────────────────────────────────── */
+@media (max-width: 720px) {
+  .ops-grid { grid-template-columns: 1fr; }
+  .ops-dialog-card, .ops-dialog-card.ops-dialog-wide { width: 96%; max-width: none; }
+  .ops-lb { padding: 52px 12px 16px; }
+  .ops-lb-prev, .ops-lb-next { top: auto; bottom: 14px; transform: none; }
+  .ops-lb-prev:active, .ops-lb-next:active { transform: translateY(1px); }
+  .ops-lb-cap { padding: 0 52px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ops-chip, .ops-kpi { transition: none; }
+}

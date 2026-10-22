@@ -1,0 +1,717 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <!--
+    OPS HARNESS — review the Overview, Service and RMA screens in a normal browser.
+
+      npx serve -p 4321 -n .        (from the repo root)
+      http://localhost:4321/dev/ops-harness.html
+        ?screen=overview | service | rma | client       first screen
+        ?role=lead | tech | desk | sales                 who is "signed in"
+
+    It loads the REAL stylesheets and EVERY script the app loads for these
+    screens (shared/service-status, service-catalog, service-demo, modules,
+    ops-ui, ops-data, photo-tray, service-intake, service, rma, shell), in
+    index.html's order, with app.js replaced by the small stubs below: no
+    Electron, no Supabase (supabaseClient is null), and demo data forced on,
+    so nothing here can reach a database. No credentials of any kind.
+
+    "Viewing as" in the bar switches the signed-in person and re-renders:
+      lead   tier 5 owner (lead in every module)
+      tech   Athul Sudheer from the demo staff, tier 2, service tech + RMA tech
+      desk   Anagha K C from the demo staff, tier 1, service desk + RMA desk
+      sales  a tier-1 salesperson with RMA desk only
+    Module roles reach modules.js the way an offline sign-in does: through
+    its per-user cache (localStorage 'neo_modules'), then refreshAccess().
+    The dock (bottom right) opens the Service board / queue / visits, a ticket
+    panel, the intake, the RMA board / ship view, a part panel and New RMA —
+    each through the screen first, so the registry gate decides as in the app.
+
+    The Content-Security-Policy mirrors index.html's, so a module that relies
+    on inline handlers (onclick="…") breaks HERE the way it would in the app.
+    The three inline script blocks are allowed by their sha256 hashes; after
+    editing one, recompute them (the console names the expected hash), e.g.:
+      node -e "const c=require('crypto'),h=require('fs').readFileSync('dev/ops-harness.html','utf8').replace(/\r\n/g,'\n');for(const m of h.matchAll(/<(script)>([\s\S]*?)<\/\1>/g))console.log('sha256-'+c.createHash('sha256').update(m[2]).digest('base64'))"
+    This folder is excluded from the packaged app (electron-builder.json).
+  -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-LYqDQzXzNPs05czXtWXboscLnLXvqWqELd37PPwDZ+g=' 'sha256-3rIgZyrDjlQZrLzShG9icXTixYnfFlxThGOsforOX2M=' 'sha256-izIwlu3+GUnp43p+TP9yYzcco5WHYJJ1cXy0xGHNMk4='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: blob: https:; font-src 'self' https://fonts.gstatic.com data:; connect-src 'self' https: wss: data: blob:; worker-src 'self' blob:; child-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'">
+  <link rel="icon" href="data:,">
+  <title>Ops harness — Overview, Service and RMA (demo data)</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Syncopate:wght@700&family=Hanken+Grotesk:ital,wght@0,100..900;1,100..900&family=JetBrains+Mono:ital,wght@0,100..800;1,100..800&family=Space+Grotesk:wght@300..700&display=swap" rel="stylesheet">
+  <!-- Same sheets, same order as index.html. -->
+  <link rel="stylesheet" href="../style.css">
+  <link rel="stylesheet" href="../print-report.css">
+  <link rel="stylesheet" href="../shared/diagnostics-tokens.css">
+  <link rel="stylesheet" href="../ops.css">
+  <link rel="stylesheet" href="../service-v2.css">
+  <link rel="stylesheet" href="../intake.css">
+  <link rel="stylesheet" href="../rma.css">
+  <style>
+    /* Harness chrome only. The bar sits where the app's titlebar sits (32 px),
+       so the rail and every screen are offset exactly as in the app. */
+    .hx-bar { gap: 10px; }
+    .hx-title { display: flex; align-items: center; gap: 8px; white-space: nowrap; min-width: 0; }
+    .hx-tag {
+      font-size: 10px; font-weight: 700; letter-spacing: 0.04em; padding: 2px 8px; border-radius: 999px;
+      background: rgba(245, 158, 11, 0.15); color: #b45309; overflow: hidden; text-overflow: ellipsis; min-width: 0;
+    }
+    body.dark-mode .hx-tag { color: #fbbf24; }
+    .hx-btns { display: flex; align-items: center; gap: 6px; }
+    .hx-btn {
+      font: inherit; font-size: 0.72rem; font-weight: 700; cursor: pointer; white-space: nowrap;
+      padding: 3px 10px; border-radius: 7px; border: 1px solid rgba(100, 116, 139, 0.35);
+      background: transparent; color: var(--text-dark);
+    }
+    .hx-btn:hover { border-color: var(--primary-pink); color: var(--primary-pink); }
+    .hx-btn:focus-visible, .hx-select:focus-visible { outline: 2px solid var(--primary-pink); outline-offset: 1px; }
+    .hx-select {
+      font: inherit; font-size: 0.72rem; font-weight: 600; max-width: 260px;
+      padding: 2px 6px; border-radius: 7px; border: 1px solid rgba(100, 116, 139, 0.35);
+      background: var(--bg-color); color: var(--text-dark);
+    }
+    .hx-who { font-size: 0.68rem; color: var(--text-muted); font-weight: 600; }
+    .hx-placeholder { padding: 40px 24px; text-align: center; color: var(--text-muted); font-size: 0.9rem; }
+    .hx-placeholder h2 { color: var(--text-dark); margin: 0 0 8px; font-size: 1.1rem; }
+    .hx-placeholder .hx-btn { margin-top: 14px; }
+
+    /* The dock: under the modals (1000) so an open panel covers it, over the
+       rail (60) and the screens. */
+    .hx-dock {
+      position: fixed; right: 14px; bottom: 14px; z-index: 900; width: 340px; max-width: calc(100vw - 28px);
+      background: var(--bg-color); color: var(--text-dark);
+      border: 1px solid rgba(100, 116, 139, 0.3); border-radius: 12px;
+      box-shadow: 0 10px 34px rgba(15, 23, 42, 0.18);
+      font-family: 'Space Grotesk', sans-serif; font-size: 0.74rem;
+    }
+    .hx-dock-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 7px 10px; }
+    .hx-dock-head strong { font-size: 0.72rem; letter-spacing: 0.06em; text-transform: uppercase; }
+    .hx-dock-body { display: grid; gap: 8px; padding: 0 10px 10px; }
+    .hx-dock.is-collapsed { width: auto; }
+    .hx-dock.is-collapsed .hx-dock-body { display: none; }
+    .hx-grp { display: grid; grid-template-columns: 52px 1fr; align-items: center; gap: 6px; }
+    .hx-grp-l { color: var(--text-muted); font-weight: 700; font-size: 0.66rem; text-transform: uppercase; letter-spacing: 0.05em; }
+    .hx-row { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; min-width: 0; }
+    .hx-row .hx-select { flex: 1 1 150px; min-width: 0; max-width: none; }
+  </style>
+</head>
+<body class="light-mode">
+
+  <div id="hx-bar" class="custom-titlebar hx-bar">
+    <div class="hx-title">
+      <span>OPS HARNESS</span>
+      <span id="hx-tag" class="hx-tag">DEMO DATA · NOT CONNECTED</span>
+    </div>
+    <div class="hx-btns">
+      <label class="hx-who" for="hx-role">Viewing as</label>
+      <select id="hx-role" class="hx-select">
+        <option value="lead">Lead — tier 5 owner</option>
+        <option value="tech">Tech — Athul, tier 2</option>
+        <option value="desk">Desk — Anagha, tier 1</option>
+        <option value="sales">Sales — tier 1, RMA only</option>
+      </select>
+      <button type="button" class="hx-btn" data-hx="overview">Overview</button>
+      <button type="button" class="hx-btn" data-hx="service">Service</button>
+      <button type="button" class="hx-btn" data-hx="rma">RMA</button>
+      <button type="button" class="hx-btn" data-hx="theme" title="Switch light / dark">Light / dark</button>
+    </div>
+  </div>
+
+  <!-- ── The same shell markup as index.html (keep in step with it) ───────── -->
+  <nav id="app-rail" class="app-rail hidden" aria-label="Sections"></nav>
+
+  <div id="overview-screen" class="screen has-rail">
+    <header class="glass-slab navbar">
+      <div class="nav-brand">
+        <span class="nav-title">OVERVIEW</span>
+        <span id="ov-stat" class="sv-stat">—</span>
+      </div>
+      <div class="nav-controls">
+        <input type="text" id="ov-search" class="sv-search" placeholder="Customer, device, code, technician…" autocomplete="off">
+        <select id="ov-filter" class="filter-select">
+          <option value="attention">Needs attention</option>
+          <option value="open" selected>Everything open</option>
+          <option value="builds">Builds only</option>
+          <option value="service">Service only</option>
+          <option value="all">Including finished</option>
+        </select>
+      </div>
+    </header>
+    <main class="dashboard-container">
+      <div id="ov-tiles" class="ov-tiles"></div>
+      <p class="sv-lead">Everything the shop has open.</p>
+      <div id="ov-list" class="ov-list"></div>
+    </main>
+  </div>
+
+  <div id="service-screen" class="screen has-rail">
+    <header class="glass-slab navbar">
+      <div class="nav-brand">
+        <span class="nav-title">NEO TOKYO // SERVICE</span>
+        <span id="sv-stat" class="sv-stat">0 open</span>
+      </div>
+      <div id="sv-toolbar" class="sv2-toolbar"></div>
+    </header>
+    <main class="dashboard-container">
+      <div id="sv-root"></div>
+    </main>
+  </div>
+
+  <div id="sv-intake-modal" class="modal-overlay">
+    <div class="glass-slab modal-card sv-modal sv2-intake-card"><div id="sv-intake-root"></div></div>
+  </div>
+
+  <div id="sv-job-modal" class="modal-overlay">
+    <div class="glass-slab modal-card sv-modal">
+      <div class="modal-header">
+        <div>
+          <h2 id="sv-job-title">—</h2>
+          <div id="sv-job-sub" class="sv-job-sub"></div>
+        </div>
+        <button type="button" id="sv-job-close" class="close-btn">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div id="sv-job-ball" class="sv-job-ball"></div>
+        <div id="sv-job-actions" class="sv2-job-actions"></div>
+        <div id="sv-job-tabs" class="sv-tabs"></div>
+        <div id="sv-job-body" class="sv-job-body"></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="rma-screen" class="screen has-rail">
+    <header class="glass-slab navbar">
+      <div class="nav-brand">
+        <span class="nav-title">NEO TOKYO // RMA</span>
+        <span id="rma-stat" class="sv-stat">—</span>
+      </div>
+      <div id="rma-toolbar" class="rma-toolbar"></div>
+    </header>
+    <main class="dashboard-container">
+      <div id="rma-root"></div>
+    </main>
+  </div>
+
+  <div id="rma-unit-modal" class="modal-overlay">
+    <div class="glass-slab modal-card sv-modal rma-unit-card">
+      <div class="modal-header">
+        <div>
+          <h2 id="rma-unit-title">—</h2>
+          <div id="rma-unit-sub" class="sv-job-sub"></div>
+        </div>
+        <button type="button" id="rma-unit-close" class="close-btn" aria-label="Close" title="Close">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div id="rma-unit-root"></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="rma-intake-modal" class="modal-overlay">
+    <div class="glass-slab modal-card sv-modal rma-intake-card"><div id="rma-intake-root"></div></div>
+  </div>
+
+  <!-- Stand-ins for the screens the harness does not carry, so the rail's
+       Builds and Bench items, and routing, land somewhere honest. -->
+  <div id="staff-screen" class="screen has-rail">
+    <main class="dashboard-container">
+      <div class="hx-placeholder">
+        <h2>Builds are not part of this harness</h2>
+        <p>The build dashboard needs Electron and the local database. Open the app to see it.</p>
+      </div>
+    </main>
+  </div>
+  <div id="client-welcome-screen" class="screen">
+    <main class="dashboard-container">
+      <div class="hx-placeholder">
+        <h2>The Testing Client is not part of this harness</h2>
+        <p>In the app, a tier-2 technician lands here, and Bench on the rail comes back here, full-screen and without the rail.</p>
+        <button type="button" id="btn-welcome-service" class="hx-btn hidden" data-hx="service" title="Open the service queue">Service queue</button>
+      </div>
+    </main>
+  </div>
+  <div id="tier-notice-screen" class="screen">
+    <main class="dashboard-container">
+      <div class="hx-placeholder">
+        <h2>Tier notice</h2>
+        <p>In the app this person is told their workspace is on the web portal: no tier 2+, and no service or RMA role.</p>
+      </div>
+    </main>
+  </div>
+
+  <aside id="hx-dock" class="hx-dock" aria-label="Harness controls">
+    <div class="hx-dock-head">
+      <strong>Open</strong>
+      <button type="button" class="hx-btn" data-hx="dock" aria-expanded="true">Hide</button>
+    </div>
+    <div class="hx-dock-body">
+      <div class="hx-grp">
+        <span class="hx-grp-l">Service</span>
+        <div class="hx-row">
+          <button type="button" class="hx-btn" data-hx="sv-board">Board</button>
+          <button type="button" class="hx-btn" data-hx="sv-queue">Queue</button>
+          <button type="button" class="hx-btn" data-hx="sv-visits">Visits</button>
+          <button type="button" class="hx-btn" data-hx="sv-new">New ticket</button>
+        </div>
+      </div>
+      <div class="hx-grp">
+        <span class="hx-grp-l">Ticket</span>
+        <div class="hx-row">
+          <select id="hx-job" class="hx-select" aria-label="Demo ticket"></select>
+          <button type="button" class="hx-btn" data-hx="sv-open">Open panel</button>
+        </div>
+      </div>
+      <div class="hx-grp">
+        <span class="hx-grp-l">RMA</span>
+        <div class="hx-row">
+          <button type="button" class="hx-btn" data-hx="rma-board">Board</button>
+          <button type="button" class="hx-btn" data-hx="rma-ship">Ship to vendor</button>
+          <button type="button" class="hx-btn" data-hx="rma-new">New RMA</button>
+        </div>
+      </div>
+      <div class="hx-grp">
+        <span class="hx-grp-l">Part</span>
+        <div class="hx-row">
+          <select id="hx-unit" class="hx-select" aria-label="Demo RMA part"></select>
+          <button type="button" class="hx-btn" data-hx="rma-open">Open panel</button>
+        </div>
+      </div>
+    </div>
+  </aside>
+
+  <div id="ops-dialog-modal" class="modal-overlay ops-dialog-overlay" style="z-index: 1200;">
+    <div id="ops-dialog-root" class="glass-slab modal-card ops-dialog-card" role="dialog" aria-modal="true"></div>
+  </div>
+  <div id="ops-lightbox" class="modal-overlay ops-lightbox-overlay" style="z-index: 1300;">
+    <div id="ops-lightbox-root"></div>
+  </div>
+
+  <!-- ── Same order as index.html; app.js is replaced by the stubs ─────────── -->
+  <script src="../shared/icons.js"></script>
+  <script src="../shared/service-status.js"></script>
+  <script src="../shared/service-catalog.js"></script>
+  <script src="../shared/service-demo.js"></script>
+  <script>
+// ── Stubs for what app.js provides in the real app ──────────────────────────
+// Kept deliberately small: just enough of each for the ops scripts to run.
+var HX_ELECTRON = {
+  ipcRenderer: {
+    invoke: async function () { return null; },
+    send: function () {},
+    on: function () {}
+  },
+  shell: { openExternal: function (u) { console.log('openExternal', u); } }
+};
+window.require = function (name) {
+  if (name === 'electron') return HX_ELECTRON;
+  throw new Error('require(' + name + ') is not available in the ops harness');
+};
+var ipcRenderer = HX_ELECTRON.ipcRenderer;
+
+// No database, ever: supabaseClient stays null, so every read and write in
+// the data layer has nothing to call, and demo mode supplies the rows.
+var supabaseClient = null;
+var currentUser = null;
+var currentProfile = null;
+var currentMode = null;
+
+function hxStore(k, v) {
+  try {
+    if (v === undefined) return localStorage.getItem(k);
+    if (v === null) localStorage.removeItem(k); else localStorage.setItem(k, String(v));
+  } catch (e) { /* storage blocked: harness preferences just are not kept */ }
+  return null;
+}
+
+// Demo data on before the data layer even loads (it reads this key), and
+// again explicitly once it has (below).
+hxStore('neo_demo_ops', '1');
+
+// ── Who is "signed in" ──────────────────────────────────────────────────────
+// The technician and the desk clerk are people from the demo staff, so the
+// demo tickets assigned to them really are theirs ("Mine", claimed jobs).
+var HX_PEOPLE = {
+  lead:  { tag: 'LEAD · TIER 5', tier: 5, id: 'harness-owner', email: 'owner@harness.invalid', full_name: 'Harness Owner', designation: 'Owner', modules: null },
+  tech:  { tag: 'TECH · TIER 2 · SERVICE TECH · RMA TECH', tier: 2, demoId: 'demo_p_athul', designation: 'Technician', modules: { service: 'tech', rma: 'tech' } },
+  desk:  { tag: 'DESK · TIER 1 · SERVICE DESK · RMA DESK', tier: 1, demoId: 'demo_p_anagha', designation: 'Service desk', modules: { service: 'desk', rma: 'desk' } },
+  sales: { tag: 'SALES · TIER 1 · RMA DESK ONLY', tier: 1, id: 'harness-sales', email: 'sales@harness.invalid', full_name: 'Harness Sales', designation: 'Sales', modules: { service: null, rma: 'desk' } }
+};
+var hxRole = 'lead';
+
+function hxProfileFor(key) {
+  var p = HX_PEOPLE[key] || HX_PEOPLE.lead;
+  var staff = null;
+  if (p.demoId && window.NeoQcDemo && typeof window.NeoQcDemo.build === 'function') {
+    try {
+      staff = (window.NeoQcDemo.build(Date.now()).staff || []).filter(function (s) { return s && s.id === p.demoId; })[0] || null;
+    } catch (e) { staff = null; }
+  }
+  return {
+    id: staff ? staff.id : (p.id || 'harness-' + key),
+    email: staff ? staff.email : (p.email || key + '@harness.invalid'),
+    full_name: staff ? staff.full_name : (p.full_name || 'Harness ' + key),
+    designation: (staff && staff.designation) || p.designation,
+    tier: p.tier, active: true, is_staff: true
+  };
+}
+
+// modules.js keeps each person's my_modules() answer in localStorage
+// 'neo_modules', keyed by user id, for offline sign-in. With no database,
+// that cache is how a role reaches it: write it, then refreshAccess().
+function hxWriteRoles(profile, modules) {
+  if (!modules) return true;
+  try {
+    var all = {};
+    try { all = JSON.parse(localStorage.getItem('neo_modules') || '{}') || {}; } catch (e) { all = {}; }
+    all[profile.id] = { at: new Date().toISOString(), data: {
+      tier: profile.tier, service: modules.service || null, rma: modules.rma || null, qc: null, neohr: null
+    } };
+    localStorage.setItem('neo_modules', JSON.stringify(all));
+    return true;
+  } catch (e) { return false; }
+}
+
+function hxSignIn(key) {
+  hxRole = HX_PEOPLE[key] ? key : 'lead';
+  currentProfile = hxProfileFor(hxRole);
+  currentUser = { id: currentProfile.id, email: currentProfile.email };
+  hxStore('neo_hx_role', hxRole);
+  return hxWriteRoles(currentProfile, HX_PEOPLE[hxRole].modules);
+}
+
+(function () {
+  var q = null;
+  try { q = new URLSearchParams(location.search).get('role'); } catch (e) { q = null; }
+  hxSignIn(HX_PEOPLE[q] ? q : (HX_PEOPLE[hxStore('neo_hx_role')] ? hxStore('neo_hx_role') : 'lead'));
+})();
+
+// Two builds so the Overview shows the mixed list it shows in the app.
+var appState = {
+  settings: {},
+  tickets: [
+    { id: 't_hxdemo01', customerName: 'Demo build — Rahul P', status: 'building', technician: 'Athul',
+      specs: { cpu: 'Ryzen 7 7800X3D', gpu: 'RTX 4070 Super' },
+      deadline: new Date(Date.now() + 2 * 86400000).toISOString(),
+      createdAt: new Date(Date.now() - 86400000).toISOString(), updatedAt: new Date(Date.now() - 5 * 3600000).toISOString() },
+    { id: 't_hxdemo02', customerName: 'Demo build — Priya N', status: 'waiting_qc', technician: 'Adhil',
+      specs: { cpu: 'Core i5-14400F', gpu: 'RX 7600' },
+      deadline: new Date(Date.now() - 3600000).toISOString(),
+      createdAt: new Date(Date.now() - 3 * 86400000).toISOString(), updatedAt: new Date(Date.now() - 26 * 3600000).toISOString() }
+  ]
+};
+function getStatusLabelText(s) {
+  return ({ awaiting: 'Awaiting components', building: 'Build commenced', waiting_qc: 'Awaiting QC',
+            qc_testing: 'QC and testing', completed: 'Completed' })[s] || s || '';
+}
+function deadlineRisk(d) {
+  var t = d ? new Date(d).getTime() : NaN;
+  if (isNaN(t)) return 'none';
+  return t < Date.now() ? 'overdue' : (t - Date.now() < 48 * 3600000 ? 'soon' : 'ok');
+}
+function isAtRisk(d) { var r = deadlineRisk(d); return r === 'overdue' || r === 'soon'; }
+
+// Same as app.js: does NOT escape single quotes — never use it inside one.
+function escapeHtmlLite(s) {
+  return String(s).replace(/[&<>"]/g, function (c) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
+  });
+}
+
+function showToast(message, type, duration) {
+  type = type || 'info';
+  duration = duration == null ? 5000 : duration;
+  var stack = document.getElementById('neo-toast-stack');
+  if (!stack) { stack = document.createElement('div'); stack.id = 'neo-toast-stack'; document.body.appendChild(stack); }
+  var toast = document.createElement('div');
+  toast.className = 'neo-toast neo-toast-' + type;
+  var icon = document.createElement('span');
+  icon.className = 'neo-toast-icon';
+  icon.textContent = ({ info: 'i', success: '✓', warning: '!', error: '×' })[type] || 'i';
+  var msg = document.createElement('span');
+  msg.className = 'neo-toast-msg';
+  msg.textContent = String(message);
+  var close = document.createElement('button');
+  close.className = 'neo-toast-close';
+  close.setAttribute('aria-label', 'Dismiss notification');
+  close.textContent = '×';
+  toast.append(icon, msg, close);
+  var gone = false;
+  var dismiss = function () {
+    if (gone) return; gone = true;
+    toast.classList.remove('neo-toast-in'); toast.classList.add('neo-toast-out');
+    setTimeout(function () { if (toast.parentNode) toast.parentNode.removeChild(toast); }, 300);
+  };
+  close.addEventListener('click', dismiss);
+  stack.appendChild(toast);
+  requestAnimationFrame(function () { toast.classList.add('neo-toast-in'); });
+  if (duration > 0) setTimeout(dismiss, duration);
+  return dismiss;
+}
+
+// Promise<boolean>, like app.js. ALWAYS await it.
+function showConfirm(message, opts) {
+  opts = opts || {};
+  return new Promise(function (resolve) {
+    var overlay = document.createElement('div');
+    overlay.className = 'neo-confirm-overlay';
+    var box = document.createElement('div');
+    box.className = 'neo-confirm-box';
+    box.setAttribute('role', 'dialog');
+    box.setAttribute('aria-modal', 'true');
+    var h = document.createElement('h3'); h.className = 'neo-confirm-title'; h.textContent = opts.title || 'Please confirm';
+    var p = document.createElement('p'); p.className = 'neo-confirm-msg'; p.textContent = message;
+    var actions = document.createElement('div'); actions.className = 'neo-confirm-actions';
+    var cancel = document.createElement('button'); cancel.className = 'neo-confirm-cancel'; cancel.textContent = opts.cancelText || 'Cancel';
+    var ok = document.createElement('button'); ok.className = 'neo-confirm-ok' + (opts.danger ? ' danger' : ''); ok.textContent = opts.okText || 'Confirm';
+    actions.append(cancel, ok);
+    box.append(h, p, actions);
+    overlay.appendChild(box);
+    var onKey = function (e) { if (e.key === 'Escape') done(false); };
+    var done = function (v) {
+      document.removeEventListener('keydown', onKey);
+      overlay.classList.remove('neo-confirm-in'); overlay.classList.add('neo-confirm-out');
+      setTimeout(function () { if (overlay.parentNode) overlay.parentNode.removeChild(overlay); }, 220);
+      resolve(v);
+    };
+    cancel.addEventListener('click', function () { done(false); });
+    ok.addEventListener('click', function () { done(true); });
+    overlay.addEventListener('click', function (e) { if (e.target === overlay) done(false); });
+    document.addEventListener('keydown', onKey);
+    document.body.appendChild(overlay);
+    requestAnimationFrame(function () { overlay.classList.add('neo-confirm-in'); });
+    ok.focus();
+  });
+}
+
+function openSettingsModal() { showToast('Settings is not part of the harness. Demo data is always on here.', 'info'); }
+function openTicketModal() { showToast('Builds open in the app, not in the harness.', 'info'); }
+
+// The same registry gate, routing and screen branches as app.js, for the
+// screens the harness carries.
+var NON_OFFICE_MODES = ['client', 'client-console', 'selector'];
+var hxLastLoad = Promise.resolve();
+
+function hxCanOpen(mode) {
+  var M = window.NeoQcModules;
+  try { return !!(M && M.canOpen(mode, currentProfile)); } catch (e) { return false; }
+}
+
+function showTierNotice() {
+  document.querySelectorAll('.screen').forEach(function (s) { s.classList.remove('active'); });
+  document.getElementById('tier-notice-screen').classList.add('active');
+  currentMode = 'tier-notice';
+}
+
+function routeByTier() {
+  var M = window.NeoQcModules;
+  var home = null;
+  try { home = M && M.firstHome ? M.firstHome(currentProfile) : null; } catch (e) { home = null; }
+  if (!home || (NON_OFFICE_MODES.indexOf(home) === -1 && !hxCanOpen(home))) { showTierNotice(); return; }
+  switchScreen(home);
+}
+
+function switchScreen(mode) {
+  if (currentProfile && NON_OFFICE_MODES.indexOf(mode) === -1 && !hxCanOpen(mode)) {
+    var M = window.NeoQcModules;
+    var entry = M && M.byMode ? M.byMode(mode) : null;
+    showToast("You don't have access to " + ((entry && entry.label) || 'that screen') + '.', 'warning');
+    routeByTier();
+    return;
+  }
+  var screens = { overview: 'overview-screen', staff: 'staff-screen', service: 'service-screen', rma: 'rma-screen', client: 'client-welcome-screen' };
+  var target = document.getElementById(screens[mode] || 'overview-screen');
+  currentMode = screens[mode] ? mode : 'overview';
+  document.querySelectorAll('.screen').forEach(function (s) { s.classList.remove('active'); });
+  if (window.NeoQcShell) { try { window.NeoQcShell.syncRail(currentMode); } catch (e) { console.error(e); } }
+  target.classList.add('active');
+  var p = null;
+  try {
+    if (currentMode === 'overview' && window.NeoQcShell) p = window.NeoQcShell.ensureOverviewLoaded();
+    else if (currentMode === 'service' && window.NeoQcServiceUI) p = window.NeoQcServiceUI.ensureServiceLoaded();
+    else if (currentMode === 'rma' && window.NeoQcRmaUI) p = window.NeoQcRmaUI.ensureLoaded();
+    else if (currentMode === 'client') {
+      // As app.js: the bench's "Service queue" door, for a service tech or lead.
+      var r = null;
+      try { r = window.NeoQcModules ? window.NeoQcModules.roleFor('service') : null; } catch (e) { r = null; }
+      document.getElementById('btn-welcome-service').classList.toggle('hidden', !((r === 'tech' || r === 'lead') && hxCanOpen('service')));
+    }
+  } catch (e) { p = Promise.reject(e); }
+  hxLastLoad = Promise.resolve(p).catch(function (e) {
+    console.error('[harness] screen failed to load:', e);
+    showToast('The ' + currentMode + ' screen failed to load: ' + ((e && e.message) || e), 'error', 0);
+  });
+  try { history.replaceState(null, '', '?screen=' + currentMode + '&role=' + hxRole); } catch (e) {}
+}
+  </script>
+  <script src="../modules.js"></script>
+  <script src="../ops-ui.js"></script>
+  <script src="../ops-data.js"></script>
+  <script>
+// Demo data, forced: the harness has no database and must never pretend to.
+(function () {
+  if (!window.NeoQcData || typeof window.NeoQcData.setDemo !== 'function') {
+    console.error('[harness] ops-data.js did not load; the screens below have no data layer.');
+    return;
+  }
+  try {
+    Promise.resolve(window.NeoQcData.setDemo(true)).catch(function (e) { console.error('[harness] setDemo failed:', e); });
+  } catch (e) { console.error('[harness] setDemo failed:', e); }
+})();
+  </script>
+  <script src="../photo-tray.js"></script>
+  <script src="../service-intake.js"></script>
+  <script src="../service.js"></script>
+  <script src="../rma.js"></script>
+  <script src="../shell.js"></script>
+  <script>
+// Harness boot: the role switcher, the dock, then the first screen.
+(function () {
+  var roleSel = document.getElementById('hx-role');
+  var jobSel = document.getElementById('hx-job');
+  var unitSel = document.getElementById('hx-unit');
+  var dock = document.getElementById('hx-dock');
+  var S = function () { return window.NeoQcService || null; };
+  var D = function () { return window.NeoQcData || null; };
+
+  function paintChrome() {
+    roleSel.value = hxRole;
+    document.getElementById('hx-tag').textContent = 'DEMO DATA · ' + HX_PEOPLE[hxRole].tag + ' · NOT CONNECTED';
+    document.title = 'Ops harness — ' + (currentProfile ? currentProfile.full_name : '') + ' (demo data)';
+  }
+
+  // The pickers list every demo ticket and part, refreshed when the data
+  // layer says the rows changed. Built with textContent: names are data.
+  function fillSelect(sel, rows, labelOf, preferId) {
+    var keep = sel.value || preferId;
+    sel.textContent = '';
+    rows.forEach(function (r) {
+      var o = document.createElement('option');
+      o.value = String(r.id);
+      o.textContent = labelOf(r);
+      sel.appendChild(o);
+    });
+    if (rows.some(function (r) { return String(r.id) === keep; })) sel.value = keep;
+  }
+  function fillPickers() {
+    var d = D(), M = S();
+    if (!d) return;
+    var jobs = [], units = [];
+    try { jobs = d.jobs() || []; units = d.units() || []; } catch (e) { jobs = []; units = []; }
+    fillSelect(jobSel, jobs, function (j) {
+      return [j.public_code, j.customer_name, M ? M.staffLabel(j.stage) : j.stage].filter(Boolean).join(' · ');
+    }, 'demo_s_vishnu');
+    fillSelect(unitSel, units, function (u) {
+      return [u.public_code, M && M.itemLabel ? M.itemLabel(u.kind, u.brand, u.model) : u.model,
+              M && M.rmaStaffLabel ? M.rmaStaffLabel(u.stage) : u.stage].filter(Boolean).join(' · ');
+    }, 'demo_rc_rtx4070ti');
+  }
+
+  function panelOpen() {
+    return !!document.querySelector('.modal-overlay.active, .neo-confirm-overlay');
+  }
+
+  // Through the screen first, as a person would: the registry gate refuses a
+  // screen this role cannot open (toast + reroute), and then nothing opens.
+  function go(mode, then) {
+    if (panelOpen()) { showToast('Close the open panel or dialog first.', 'warning'); return; }
+    switchScreen(mode);
+    if (currentMode !== mode || !then) return;
+    var screenLoad = hxLastLoad;
+    then(screenLoad);
+  }
+
+  function clickIfShown(id, missing) {
+    var b = document.getElementById(id);
+    if (b && !b.classList.contains('hidden') && !b.disabled) { b.click(); return; }
+    showToast(missing, 'info');
+  }
+
+  var ACTIONS = {
+    overview: function () { go('overview'); },
+    service: function () { go('service'); },
+    rma: function () { go('rma'); },
+    'sv-board': function () { go('service', function () { window.NeoQcServiceUI.setView('board'); }); },
+    'sv-queue': function () { go('service', function () { window.NeoQcServiceUI.setView('queue'); }); },
+    'sv-visits': function () { go('service', function () { window.NeoQcServiceUI.setView('visits'); }); },
+    'sv-new': function () { go('service', function () { clickIfShown('sv-new', 'This person has no "New ticket" button.'); }); },
+    'sv-open': function () {
+      var id = jobSel.value;
+      if (!id) { showToast('The demo tickets have not loaded yet.', 'info'); return; }
+      go('service', function (loaded) { loaded.then(function () { window.NeoQcServiceUI.openJob(id); }); });
+    },
+    'rma-board': function () { go('rma', function () { document.querySelector('#rma-toolbar .rma-seg-btn[data-view="board"]').click(); }); },
+    'rma-ship': function () { go('rma', function () { document.querySelector('#rma-toolbar .rma-seg-btn[data-view="ship"]').click(); }); },
+    'rma-new': function () { go('rma', function () { clickIfShown('rma-new', 'This person has no "+ New RMA" button.'); }); },
+    'rma-open': function () {
+      var id = unitSel.value;
+      if (!id) { showToast('The demo parts have not loaded yet.', 'info'); return; }
+      go('rma', function (loaded) { loaded.then(function () { window.NeoQcRmaUI.openUnit(id); }); });
+    },
+    theme: function () {
+      var dark = document.body.classList.toggle('dark-mode');
+      document.body.classList.toggle('light-mode', !dark);
+      hxStore('neo_hx_theme', dark ? 'dark' : 'light');
+    },
+    dock: function (b) {
+      var collapsed = dock.classList.toggle('is-collapsed');
+      b.textContent = collapsed ? 'Show' : 'Hide';
+      b.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+      hxStore('neo_hx_dock', collapsed ? '0' : '1');
+    }
+  };
+
+  document.addEventListener('click', function (e) {
+    var b = e.target.closest('[data-hx]');
+    if (!b) return;
+    var fn = ACTIONS[b.dataset.hx];
+    if (fn) fn(b);
+  });
+
+  // Switching who is signed in. Refused while a panel is open: it was drawn
+  // for the previous person and would keep their buttons.
+  async function switchRole(key) {
+    if (key === hxRole) return;
+    if (panelOpen()) {
+      roleSel.value = hxRole;
+      showToast('Close the open panel or dialog first, then switch roles.', 'warning');
+      return;
+    }
+    if (!hxSignIn(key)) showToast('Browser storage is blocked, so module roles cannot be set; a tier-1 person will see nothing.', 'warning', 8000);
+    paintChrome();
+    // modules.js re-reads its cache, announces the change, and the rail,
+    // the Overview and both screens repaint from the 'access' event.
+    try { await window.NeoQcModules.refreshAccess(); } catch (e) { console.error('[harness] refreshAccess failed:', e); }
+    // Stay on this screen when the new person may open it; otherwise land
+    // where the app would send them after sign-in.
+    var here = currentMode;
+    if (here && NON_OFFICE_MODES.indexOf(here) === -1 && here !== 'tier-notice' && hxCanOpen(here)) switchScreen(here);
+    else routeByTier();
+  }
+  roleSel.addEventListener('change', function () { switchRole(roleSel.value); });
+
+  if (hxStore('neo_hx_theme') === 'dark') { document.body.classList.add('dark-mode'); document.body.classList.remove('light-mode'); }
+  if (hxStore('neo_hx_dock') === '0') ACTIONS.dock(dock.querySelector('[data-hx="dock"]'));
+  paintChrome();
+
+  var d = D();
+  if (d && typeof d.on === 'function') {
+    ['jobs', 'units'].forEach(function (k) { try { d.on(k, fillPickers); } catch (e) { console.error('[harness] cannot listen for ' + k + ':', e); } });
+  }
+  if (d && typeof d.ensureLoaded === 'function') Promise.resolve(d.ensureLoaded()).then(fillPickers, fillPickers);
+
+  if (window.NeoQcShell && window.NeoQcShell.initRail) window.NeoQcShell.initRail();
+  var first = null;
+  try { first = new URLSearchParams(location.search).get('screen'); } catch (e) { first = null; }
+  Promise.resolve(window.NeoQcModules ? window.NeoQcModules.refreshAccess() : null).then(function () {
+    // A deep link opens that screen if this person may; otherwise (or with
+    // none) the person lands where the app would put them.
+    var linked = first === 'client' || (['overview', 'staff', 'service', 'rma'].indexOf(first) !== -1 && hxCanOpen(first));
+    if (linked) switchScreen(first); else routeByTier();
+  });
+})();
+  </script>
+</body>
+</html>

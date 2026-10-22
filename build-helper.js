@@ -30,7 +30,11 @@ function assertNoMojibake(files) {
   }
   console.log('Encoding guard passed — no mojibake in text assets.');
 }
-assertNoMojibake(['index.html', 'customer.html', 'sales.html', 'app.js', 'main.js', 'style.css', 'print-report.css', 'print-render.js']);
+assertNoMojibake(['index.html', 'customer.html', 'sales.html', 'app.js', 'main.js', 'style.css', 'print-report.css', 'print-render.js',
+  // v1.10 Service + RMA — the shell, the registry, the data layer, the screens and their sheets.
+  'shell.js', 'modules.js', 'ops-ui.js', 'ops-data.js', 'photo-tray.js', 'service-intake.js', 'service.js', 'rma.js',
+  'ops.css', 'service-v2.css', 'intake.css', 'rma.css',
+  'shared/service-status.js', 'shared/service-catalog.js', 'shared/service-demo.js']);
 
 const configPath = path.join(__dirname, 'app-config.json');
 fs.writeFileSync(configPath, JSON.stringify({ mode }, null, 2), 'utf-8');

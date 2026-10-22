@@ -1,0 +1,401 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   RMA — parts on warranty claims (rma.js)
+   Built on the app's own tokens, so light and dark both follow body.dark-mode
+   without a second palette. The lane colours are the service board's: the
+   board is organised by whose turn it is, and the same colour means the same
+   thing on both screens. Nothing else here is saturated except "late", which
+   is always red AND the word "late" — colour is never the only signal.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* ── the screen header ──
+   The title and the open/late count keep to one line. When the toolbar does
+   not fit beside them it drops to a row of its own (full width) instead of
+   squeezing the title or cutting the search box short. */
+#rma-screen .navbar { flex-wrap: wrap; gap: 10px 16px; }
+#rma-screen .nav-brand { flex: 0 0 auto; white-space: nowrap; }
+#rma-screen .nav-title, #rma-stat { white-space: nowrap; }
+
+/* ── toolbar ── */
+#rma-toolbar { flex: 1 1 auto; min-width: 0; display: flex; justify-content: flex-end; }
+.rma-tb {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end;
+  gap: 8px 10px; min-width: 0; flex: 1 1 auto;   /* all of the toolbar's row */
+}
+.rma-seg {
+  display: inline-flex; padding: 3px; gap: 2px; border-radius: 10px;
+  background: rgba(127,127,160,0.10); border: 1px solid var(--glass-border);
+}
+.rma-seg-btn {
+  font-family: inherit; font-size: 0.78rem; font-weight: 700; cursor: pointer;
+  padding: 6px 12px; border-radius: 8px; border: none;
+  background: transparent; color: var(--text-muted);
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+.rma-seg-btn:hover { color: var(--text-dark); }
+.rma-seg-btn.on {
+  background: var(--glass-bg); color: var(--primary-pink);
+  box-shadow: 0 1px 4px rgba(15,23,42,0.08);
+}
+body.dark-mode .rma-seg-btn.on { background: rgba(255,255,255,0.08); }
+.rma-seg-n {
+  display: inline-block; min-width: 1.4em; margin-left: 4px; padding: 0 5px;
+  border-radius: 999px; font-family: 'JetBrains Mono', monospace; font-size: 0.68rem;
+  background: rgba(var(--primary-pink-rgb), 0.14); color: var(--primary-pink);
+}
+.rma-seg-n:empty { display: none; }
+
+.rma-srcs { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+.rma-src-chip {
+  font-family: inherit; font-size: 0.74rem; font-weight: 600; cursor: pointer;
+  padding: 5px 11px; border-radius: 999px;
+  border: 1px solid var(--glass-border); background: transparent; color: var(--text-muted);
+  transition: border-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease);
+}
+.rma-src-chip:hover { color: var(--text-dark); border-color: rgba(var(--primary-pink-rgb), 0.35); }
+.rma-src-chip.on {
+  color: var(--primary-pink); border-color: rgba(var(--primary-pink-rgb), 0.45);
+  background: rgba(var(--primary-pink-rgb), 0.08);
+}
+/* Wide enough for its whole placeholder; grows into a spare row's room. */
+.rma-search { min-width: 200px; flex: 1 1 300px; max-width: 380px; }
+.rma-tb-btn { white-space: nowrap; padding: 9px 14px; font-size: 0.84rem; }
+
+/* ── the screen's column: banners, KPIs and the active view, evenly spaced ── */
+#rma-root { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+#rma-root > .ops-banner, #rma-root > .ops-kpis { margin: 0; }
+.rma-loadfail { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.rma-loadfail .ops-banner { margin: 0; flex: 1 1 320px; }
+
+/* ── errors, empties ── */
+.rma-error {
+  padding: 18px; border-radius: 12px; font-size: 0.86rem; line-height: 1.6;
+  color: var(--status-urgent); background: rgba(239,68,68,0.06); border: 1px solid rgba(239,68,68,0.3);
+}
+.rma-loading { padding: 30px 10px; }
+.rma-empty-big {
+  padding: 36px 18px; text-align: center; color: var(--text-muted); font-size: 0.86rem;
+  border: 1px dashed var(--glass-border); border-radius: 12px;
+}
+.rma-muted { color: var(--text-muted); font-size: 0.92em; }
+.rma-warn { color: var(--status-urgent); }
+body.dark-mode .rma-warn { color: #fca5a5; }
+.rma-sr {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden;
+  clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+.rma-linkbtn {
+  font-family: inherit; font-size: 0.74rem; font-weight: 700; cursor: pointer;
+  padding: 3px 9px; border-radius: 999px; color: var(--primary-pink);
+  border: 1px solid rgba(var(--primary-pink-rgb), 0.35); background: transparent;
+}
+.rma-linkbtn:hover { background: rgba(var(--primary-pink-rgb), 0.08); }
+.rma-small { padding: 6px 11px; font-size: 0.78rem; }
+.rma-mt { margin-top: 10px; }
+
+/* ── board (lanes reuse the service board's .sv-col look; KPI tiles are
+      NeoQcUI's .ops-kpis, styled in ops.css) ── */
+.rma-board { min-height: 200px; }
+.rma-card {
+  padding: 10px 11px; border-radius: 9px; cursor: pointer;
+  background: var(--glass-bg); border: 1px solid var(--glass-border);
+  border-left: 3px solid transparent;
+  transition: border-color var(--dur-fast) var(--ease), transform var(--dur-tap) var(--ease);
+}
+.rma-card:hover { border-color: var(--primary-pink); transform: translateY(-1px); }
+.rma-card:active { transform: translateY(1px); }
+.rma-card.risk-soon     { border-left-color: var(--status-awaiting); }
+.rma-card.risk-breached { border-left-color: var(--status-urgent); background: rgba(239,68,68,0.06); }
+.rma-card-top { display: flex; align-items: baseline; gap: 7px; }
+.rma-kind {
+  flex: 0 0 auto; align-self: center; display: inline-flex; align-items: center; justify-content: center;
+  width: 24px; height: 24px; border-radius: 6px;
+  color: var(--text-dark); background: rgba(127,127,160,0.14);
+  font-size: 0.6rem; font-weight: 700; overflow: hidden;
+}
+.rma-kind .ops-ic { width: 16px; height: 16px; vertical-align: 0; }
+.rma-card-name { flex: 1 1 auto; min-width: 0; font-size: 0.86rem; font-weight: 700; overflow-wrap: anywhere; }
+.rma-idle { flex: 0 0 auto; font-family: 'JetBrains Mono', monospace; font-size: 1rem; font-weight: 700; color: var(--text-muted); }
+.rma-card.risk-soon .rma-idle     { color: var(--status-awaiting); }
+.rma-card.risk-breached .rma-idle { color: var(--status-urgent); }
+.rma-card-who { margin-top: 3px; font-size: 0.74rem; color: var(--text-muted); overflow-wrap: anywhere; }
+.rma-card-stage { margin-top: 6px; font-size: 0.78rem; font-weight: 600; }
+.rma-card-line { margin-top: 4px; font-size: 0.74rem; color: var(--text-muted); overflow-wrap: anywhere; }
+.rma-card-chips { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 7px; }
+.rma-card-foot {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  margin-top: 8px; padding-top: 6px; border-top: 1px solid var(--glass-border); font-size: 0.68rem;
+}
+.rma-handler { color: var(--text-muted); overflow-wrap: anywhere; text-align: right; }
+
+.rma-pill {
+  display: inline-block; font-size: 0.68rem; font-weight: 600; line-height: 1.5;
+  padding: 1px 8px; border-radius: 999px;
+  color: var(--text-muted); background: rgba(127,127,160,0.12); border: 1px solid var(--glass-border);
+}
+.rma-pill-ticket { color: #2563eb; background: rgba(59,130,246,0.10); border-color: rgba(59,130,246,0.3); }
+body.dark-mode .rma-pill-ticket { color: #93c5fd; }
+.rma-fee-quoted   { color: #b45309; background: rgba(245,158,11,0.12); border-color: rgba(245,158,11,0.4); }
+.rma-fee-accepted { color: #b91c1c; background: rgba(239,68,68,0.10); border-color: rgba(239,68,68,0.35); }
+.rma-fee-paid     { color: #047857; background: rgba(16,185,129,0.12); border-color: rgba(16,185,129,0.35); }
+.rma-fee-waived   { color: var(--text-muted); }
+body.dark-mode .rma-fee-quoted   { color: #fcd34d; }
+body.dark-mode .rma-fee-accepted { color: #fca5a5; }
+body.dark-mode .rma-fee-paid     { color: #6ee7b7; }
+
+/* ── ship to vendor ── */
+.rma-ship-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; flex-wrap: wrap; }
+.rma-ship-head .sv-lead { margin-bottom: 0; }
+.rma-ship-group {
+  border-radius: 12px; overflow: hidden;
+  background: var(--glass-bg); border: 1px solid var(--glass-border);
+}
+.rma-ship-group.is-novendor { border-color: rgba(245,158,11,0.45); }
+.rma-ship-ghead {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  padding: 11px 14px; border-bottom: 1px solid var(--glass-border);
+  background: rgba(127,127,160,0.06);
+}
+.rma-ship-ghead h3 { font-size: 0.95rem; margin: 0; }
+.rma-ship-gsub { font-size: 0.74rem; color: var(--text-muted); flex: 1 1 auto; }
+.rma-ship-all { display: inline-flex; align-items: center; }
+.rma-ship-all input, .rma-ship-pick input { width: 18px; height: 18px; accent-color: var(--primary-pink); cursor: pointer; }
+.rma-dispatch-btn { padding: 8px 14px; font-size: 0.82rem; }
+.rma-ship-row {
+  display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; gap: 10px; align-items: start;
+  padding: 11px 14px; border-bottom: 1px solid var(--glass-border);
+}
+.rma-ship-row:last-child { border-bottom: none; }
+.rma-ship-row.is-blocked { background: rgba(127,127,160,0.04); }
+.rma-ship-row.is-blocked .rma-ship-title { opacity: 0.85; }
+.rma-ship-pick { display: flex; align-items: center; padding-top: 2px; }
+.rma-ship-pick input:disabled { cursor: not-allowed; opacity: 0.45; }
+.rma-ship-title { font-size: 0.86rem; overflow-wrap: anywhere; }
+.rma-ship-sub { margin-top: 3px; font-size: 0.74rem; color: var(--text-muted); overflow-wrap: anywhere; }
+.rma-ship-side { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.rma-ship-vendor { min-width: 180px; width: auto; }
+.rma-open-btn { padding: 6px 12px; font-size: 0.78rem; }
+.rma-gate-list {
+  margin: 7px 0 0; padding: 7px 10px 7px 26px; border-radius: 8px; font-size: 0.76rem; line-height: 1.5;
+  color: #b45309; background: rgba(245,158,11,0.09); border: 1px solid rgba(245,158,11,0.3);
+}
+body.dark-mode .rma-gate-list { color: #fcd34d; }
+.rma-gate-note { margin-top: 6px; font-size: 0.74rem; color: var(--text-muted); }
+
+/* ── vendors ── */
+.rma-vendors-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+.rma-vendors-head h3 { margin: 0; font-size: 1rem; }
+.rma-table-wrap { overflow-x: auto; border-radius: 12px; border: 1px solid var(--glass-border); background: var(--glass-bg); }
+.rma-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+.rma-table th {
+  text-align: left; font-size: 0.68rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--text-muted); padding: 10px 12px; border-bottom: 1px solid var(--glass-border);
+  background: rgba(127,127,160,0.06); white-space: nowrap;
+}
+.rma-table td { padding: 9px 12px; border-bottom: 1px solid var(--glass-border); overflow-wrap: anywhere; }
+.rma-table tr:last-child td { border-bottom: none; }
+.rma-table .num { text-align: right; font-family: 'JetBrains Mono', monospace; white-space: nowrap; }
+.rma-table tr.is-inactive td { opacity: 0.6; }
+
+/* ── unit panel ── */
+#rma-unit-modal .modal-card { max-width: 860px; }
+#rma-intake-modal .modal-card { max-width: 940px; }
+.rma-u-head { margin-bottom: 10px; }
+.rma-u-head .sv-job-ball { margin-bottom: 8px; }
+.rma-u-meta { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 0.76rem; color: var(--text-muted); }
+.rma-u-meta > span { overflow-wrap: anywhere; }
+.rma-gates {
+  margin: 10px 0 4px; padding: 10px 14px; border-radius: 10px; font-size: 0.8rem; line-height: 1.55;
+  color: #92400e; background: rgba(245,158,11,0.10); border: 1px solid rgba(245,158,11,0.4);
+}
+body.dark-mode .rma-gates { color: #fcd34d; }
+.rma-gates.is-note { color: var(--text-muted); background: rgba(127,127,160,0.08); border-color: var(--glass-border); }
+.rma-gates-title { font-weight: 700; margin-bottom: 4px; }
+.rma-gates ul { margin: 0; padding-left: 18px; }
+.rma-u-actions { display: flex; flex-wrap: wrap; gap: 7px; margin: 12px 0 6px; }
+.rma-u-actions .rma-act { padding: 7px 12px; font-size: 0.8rem; }
+.rma-u-actions:empty { display: none; }
+.rma-u-body { min-height: 220px; }
+.rma-facts { margin-bottom: 8px; }
+.rma-fs { border: none; margin: 0; padding: 0; min-width: 0; }
+.rma-fs:disabled input, .rma-fs:disabled textarea, .rma-fs:disabled select { opacity: 0.75; cursor: not-allowed; }
+.rma-sec-title {
+  margin: 18px 0 9px; font-size: 0.68rem; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase;
+  color: var(--text-muted);
+}
+.rma-inline { display: flex; gap: 8px; align-items: center; }
+.rma-inline select { flex: 1 1 auto; min-width: 0; }
+.rma-vendor-field { min-width: 0; }
+
+.rma-fee {
+  margin-top: 20px; padding: 13px 16px; border-radius: 11px;
+  background: rgba(127,127,160,0.05); border: 1px solid var(--glass-border);
+}
+.rma-fee-top { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.rma-fee-k { font-size: 0.68rem; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase; color: var(--text-muted); }
+.rma-fee-amt { font-family: 'JetBrains Mono', monospace; font-size: 1.05rem; font-weight: 700; }
+.rma-fee-line { margin-top: 5px; font-size: 0.8rem; overflow-wrap: anywhere; }
+.rma-fee-btns { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 10px; }
+.rma-fee .sv-hint { margin: 8px 0 0; }
+
+.rma-ev-kind {
+  font-size: 0.62rem; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase;
+  padding: 0 6px; border-radius: 4px; background: rgba(127,127,160,0.14); color: var(--text-muted);
+}
+.rma-timeline { max-height: 420px; }
+.sv-ev-tag.is-internal { color: var(--text-muted); }
+
+.rma-ticket-sentence {
+  margin: 0 0 6px; padding: 9px 13px; border-radius: 9px; font-size: 0.86rem; font-weight: 600;
+  background: rgba(20,184,166,0.08); border: 1px solid rgba(20,184,166,0.3);
+}
+.rma-ticket-units { display: flex; flex-direction: column; gap: 6px; }
+.rma-ticket-unit {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 8px 11px; border-radius: 8px; font-size: 0.8rem;
+  background: var(--glass-bg); border: 1px solid var(--glass-border);
+}
+.rma-ticket-unit > span:nth-child(2) { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+
+.rma-ph-add { margin-bottom: 16px; }
+.rma-gallery { min-height: 60px; }
+/* The ticket item's own photos, read-only under the part's (they count for shipping too). */
+.rma-itemgal { margin-top: 18px; padding-top: 12px; border-top: 1px solid var(--glass-border); }
+.rma-itemgal .sv-hint { margin: 0 0 8px; }
+.rma-itemgal .rma-gallery { min-height: 0; }
+
+/* ── "this serial is in one of our builds" (a suggestion, never a step) ── */
+.rma-hint-slot:empty { display: none; }
+.rma-build-hint {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 8px 12px; border-radius: 9px; font-size: 0.8rem; line-height: 1.45;
+  background: rgba(59,130,246,0.07); border: 1px solid rgba(59,130,246,0.3);
+}
+.rma-build-hint.is-linked { background: rgba(16,185,129,0.08); border-color: rgba(16,185,129,0.35); }
+
+/* ── dialogs ── */
+.rma-dlg-tray:empty { display: none; }
+.rma-dlg { display: flex; flex-direction: column; gap: 12px; font-size: 0.86rem; line-height: 1.55; }
+.rma-dlg p { margin: 0; }
+.rma-dlg .sv-hint { margin-bottom: 0; }
+.rma-dlg .sv-check { margin-top: 4px; }
+.rma-dlg-list {
+  margin: 0; padding: 8px 12px 8px 28px; border-radius: 9px; font-size: 0.8rem;
+  background: rgba(127,127,160,0.06); border: 1px solid var(--glass-border); max-height: 180px; overflow-y: auto;
+}
+.rma-arrive-list { display: flex; flex-direction: column; gap: 8px; max-height: 300px; overflow-y: auto; }
+.rma-arrive-box {
+  padding: 8px 10px; border-radius: 9px;
+  background: rgba(127,127,160,0.05); border: 1px solid var(--glass-border);
+}
+.rma-arrive-head { font-size: 0.74rem; color: var(--text-muted); display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.rma-arrive-box .sv-check { margin-top: 4px; padding: 6px 8px; min-height: 0; font-size: 0.82rem; }
+
+/* ── New RMA ── */
+#rma-intake-root { display: flex; flex-direction: column; min-height: 0; flex: 1 1 auto; overflow: hidden; }
+.rma-in { display: flex; flex-direction: column; min-height: 0; flex: 1 1 auto; overflow: hidden; }
+.rma-in .modal-header h2 { margin: 0; }
+/* min-height 0 lets the body scroll inside the card instead of pushing the
+   footer (and its Create button) out of the 90vh card. */
+.rma-in-body { display: flex; flex-direction: column; gap: 6px; min-height: 0; }
+.rma-in-sec { padding: 14px 0; border-bottom: 1px solid var(--glass-border); }
+.rma-in-sec:first-child { padding-top: 0; }
+.rma-in-sec:last-child { border-bottom: none; }
+.rma-in-h { margin: 0 0 10px; font-size: 0.8rem; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-muted); }
+.rma-in-hrow { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+.rma-in-hrow .rma-in-h { margin: 0; }
+
+.rma-src-cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.rma-src-card {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 4px; text-align: left;
+  padding: 13px 15px; border-radius: 12px; cursor: pointer; font-family: inherit;
+  border: 1.5px solid var(--glass-border); background: var(--glass-bg); color: var(--text-dark);
+  transition: border-color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease);
+}
+.rma-src-card:hover:not(:disabled) { border-color: rgba(var(--primary-pink-rgb), 0.45); }
+.rma-src-card.on { border-color: var(--primary-pink); background: rgba(var(--primary-pink-rgb), 0.07); }
+.rma-src-card-t { font-size: 0.92rem; font-weight: 700; }
+.rma-src-card.on .rma-src-card-t { color: var(--primary-pink); }
+.rma-src-card-s { font-size: 0.74rem; font-weight: 500; color: var(--text-muted); }
+.rma-src-card:disabled { cursor: default; opacity: 0.75; }
+
+.rma-in-lookup:not(:empty) { margin-top: 10px; display: flex; flex-direction: column; gap: 8px; font-size: 0.8rem; }
+.rma-in-found { color: var(--text-dark); }
+.rma-in-warn {
+  padding: 9px 12px; border-radius: 9px; line-height: 1.5;
+  background: rgba(245,158,11,0.10); border: 1px solid rgba(245,158,11,0.4);
+}
+.rma-in-warn.is-info { background: rgba(59,130,246,0.07); border-color: rgba(59,130,246,0.3); }
+.rma-in-warn .sv-hint { margin: 6px 0 0; }
+.rma-in-warnrow { margin-top: 4px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.rma-in-box { margin-top: 12px; }
+
+.rma-in-unit {
+  margin-bottom: 12px; padding: 13px 15px; border-radius: 12px;
+  background: rgba(127,127,160,0.05); border: 1px solid var(--glass-border);
+}
+.rma-in-unit-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+.rma-in-unit-n { font-size: 0.86rem; font-weight: 700; }
+.rma-in-owner .sv-hint { margin: 6px 0 0; }
+.rma-in-fee .sv-hint { margin: 0; align-self: end; padding-bottom: 10px; }
+.rma-in-tray { margin-top: 12px; }
+
+.rma-in-foot { gap: 12px; flex-wrap: wrap; }
+.rma-in-status { margin-top: 0; flex: 1 1 260px; min-width: 0; }
+.rma-in-btns { display: flex; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
+
+.rma-in-done { display: flex; flex-direction: column; gap: 10px; }
+.rma-in-done-h { font-size: 1.05rem; font-weight: 700; }
+.rma-in-done-row {
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 14px; align-items: center;
+  padding: 12px 14px; border-radius: 11px;
+  background: var(--glass-bg); border: 1px solid var(--glass-border);
+}
+.rma-in-done-code {
+  font-family: 'JetBrains Mono', monospace; font-size: 1.15rem; font-weight: 700; letter-spacing: 0.03em;
+  color: var(--primary-pink);
+}
+.rma-in-done-what { font-size: 0.84rem; overflow-wrap: anywhere; }
+.rma-in-done-btns { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
+.rma-in-fails {
+  padding: 10px 13px; border-radius: 10px; font-size: 0.8rem;
+  color: var(--status-urgent); background: rgba(239,68,68,0.06); border: 1px solid rgba(239,68,68,0.3);
+}
+.rma-in-failrow { margin-top: 6px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; color: var(--text-dark); }
+
+/* ── narrower office windows (down to ~1100 px) ── */
+@media (max-width: 760px) {
+  .rma-src-cards { grid-template-columns: 1fr; }
+  .rma-in-done-row { grid-template-columns: 1fr; }
+  .rma-in-done-btns { justify-content: flex-start; }
+  .rma-ship-row { grid-template-columns: 28px minmax(0, 1fr); }
+  .rma-ship-side { grid-column: 2; justify-content: flex-start; }
+}
+
+/* ── printed labels ──
+   'sys:print' prints the whole main window. While rma.js has the body flagged
+   .rma-printing, everything except the label sheet is taken out of the print
+   (display:none, so the hidden app does not add blank pages). The !important
+   on visibility beats print-report.css, which hides everything outside the QC
+   report container; the specificity of the first rule beats its
+   `.print-only { display:block !important }`, so the QC report stays out. */
+.rma-print-sheet { display: none; }
+@media print {
+  body.rma-printing > *:not(#rma-print-sheet) { display: none !important; }
+  body.rma-printing #rma-print-sheet { display: block !important; position: static; }
+  body.rma-printing #rma-print-sheet,
+  body.rma-printing #rma-print-sheet * { visibility: visible !important; color: #000 !important; }
+  body.rma-printing .rma-labels { display: grid; grid-template-columns: 1fr 1fr; gap: 6mm; }
+  body.rma-printing .rma-label {
+    border: 1.5px solid #000; border-radius: 3mm; padding: 4mm 5mm; min-height: 46mm;
+    page-break-inside: avoid; break-inside: avoid;
+    font-family: 'Hanken Grotesk', 'Space Grotesk', sans-serif; font-size: 9.5pt; line-height: 1.35;
+  }
+  body.rma-printing .rma-label-brand { font-size: 7pt; font-weight: 700; letter-spacing: 0.18em; }
+  body.rma-printing .rma-label-code {
+    margin: 2mm 0 1.5mm; font-family: 'JetBrains Mono', monospace; font-size: 17pt; font-weight: 700; letter-spacing: 0.04em;
+  }
+  body.rma-printing .rma-label-kind { font-weight: 700; }
+  body.rma-printing .rma-label-item { margin-bottom: 1.5mm; overflow-wrap: anywhere; }
+  body.rma-printing .rma-label-row { font-size: 8.5pt; overflow-wrap: anywhere; }
+  body.rma-printing .rma-label-row span { display: inline-block; min-width: 13mm; font-weight: 700; }
+}
