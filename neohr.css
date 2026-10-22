@@ -1,0 +1,219 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   NEOHR (Neo OS 1.11) — the NeoHR screen (neohr.js): Team today, Work logs,
+   Field activity and the NeoHR app card, plus the People editor's four-role
+   grid. Everything is prefixed hr- and built only from the tokens in
+   style.css and ops.css (--primary-pink, --glass-*, --text-*, --status-*),
+   so the accent picker and light/dark follow. Dark mode is body.dark-mode.
+
+   Colour is never the only signal: "At work today" is written on the card,
+   a full load bar also says its numbers.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+#hr-root [hidden], #hr-root .hidden { display: none !important; }
+
+/* ── toolbar (in the navbar) ─────────────────────────────────────────────── */
+#neohr-screen .navbar { flex-wrap: wrap; gap: 12px; }
+.hr-toolbar {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end;
+  gap: 10px; min-width: 0; flex: 1 1 auto;
+}
+.hr-tabs, .hr-presets {
+  display: inline-flex; flex-wrap: wrap; gap: 2px; padding: 3px; border-radius: 11px;
+  background: rgba(127, 127, 160, 0.12); border: 1px solid var(--glass-border);
+}
+.hr-tab, .hr-chip {
+  padding: 7px 13px; border-radius: 8px; font-size: 0.8rem; font-family: inherit;
+  background: transparent; color: var(--text-muted); border: 0; cursor: pointer; white-space: nowrap;
+}
+.hr-chip { padding: 5px 11px; font-size: 0.76rem; }
+.hr-tab:hover, .hr-chip:hover { color: var(--text-dark); background: rgba(var(--primary-pink-rgb), 0.06); }
+.hr-tab.on, .hr-chip.on { color: var(--primary-pink); background: var(--glass-bg); box-shadow: 0 1px 4px rgba(15, 23, 42, 0.08); font-weight: 700; }
+body.dark-mode .hr-tab.on, body.dark-mode .hr-chip.on { background: rgba(255, 255, 255, 0.08); box-shadow: none; }
+.hr-tab:focus-visible, .hr-chip:focus-visible, .hr-btn:focus-visible, .hr-expand:focus-visible {
+  outline: 2px solid var(--primary-pink); outline-offset: 2px;
+}
+.hr-refresh { white-space: nowrap; padding: 7px 12px; font-size: 0.8rem; }
+.hr-refresh[disabled] { opacity: 0.6; cursor: progress; }
+
+/* ── layout ──────────────────────────────────────────────────────────────── */
+#hr-root { display: flex; flex-direction: column; gap: 14px; padding-bottom: 24px; }
+.hr-body { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.hr-empty {
+  padding: 16px 12px; text-align: center; font-size: 0.82rem; color: var(--text-muted);
+  border: 1px dashed var(--glass-border); border-radius: 10px;
+}
+.hr-loading { font-style: italic; }
+.hr-summary { font-size: 0.82rem; font-weight: 700; color: var(--text-dark); }
+.hr-hint { margin: 0; font-size: 0.74rem; color: var(--text-muted); line-height: 1.5; }
+.hr-muted { font-size: 0.76rem; color: var(--text-muted); }
+.hr-btn { padding: 6px 13px; font-size: 0.8rem; }
+.hr-btn.text-btn { padding: 4px 6px; }
+
+/* ── filters (Work logs, Field activity) ─────────────────────────────────── */
+.hr-filters {
+  display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px 14px;
+  padding: 10px 12px; border-radius: 12px;
+  background: rgba(127, 127, 160, 0.05); border: 1px solid var(--glass-border);
+}
+.hr-f { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.hr-f > span { font-size: 0.68rem; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: var(--text-muted); }
+.hr-f select, .hr-f input {
+  font: inherit; font-size: 0.82rem; padding: 6px 9px; border-radius: 8px; min-width: 0;
+  border: 1px solid var(--glass-border); background: var(--glass-bg); color: var(--text-dark);
+}
+.hr-f select { min-width: 190px; max-width: 280px; }
+.hr-f-grow { flex: 1 1 200px; }
+.hr-f select:focus-visible, .hr-f input:focus-visible { outline: 2px solid var(--primary-pink); outline-offset: 1px; }
+body.dark-mode .hr-f input[type="date"] { color-scheme: dark; }
+.hr-range-err { flex-basis: 100%; font-size: 0.78rem; font-weight: 600; color: var(--status-urgent); }
+.hr-range-err:empty { display: none; }
+body.dark-mode .hr-range-err { color: #fca5a5; }
+
+/* ── Team today: tiles ───────────────────────────────────────────────────── */
+.hr-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; }
+.hr-tile {
+  padding: 12px 14px; border-radius: 12px;
+  background: var(--glass-bg); border: 1px solid var(--glass-border);
+  border-left: 3px solid var(--hr-t, var(--text-muted));
+}
+.hr-tile-n { font-family: 'JetBrains Mono', monospace; font-size: 1.45rem; font-weight: 700; line-height: 1.1; color: var(--text-dark); }
+.hr-tile-l { font-size: 0.7rem; color: var(--text-muted); margin-top: 3px; line-height: 1.35; }
+.hr-t-ok   { --hr-t: var(--status-completed); }
+.hr-t-busy { --hr-t: var(--status-building); }
+.hr-t-free { --hr-t: #14b8a6; }
+.hr-t-late { --hr-t: var(--status-urgent); }
+
+/* the NeoHR app strip */
+.hr-strip {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 10px 12px; border-radius: 12px; font-size: 0.82rem; color: var(--text-dark); line-height: 1.45;
+  background: rgba(var(--primary-pink-rgb), 0.05); border: 1px solid rgba(var(--primary-pink-rgb), 0.25);
+}
+.hr-strip > span:nth-child(2) { flex: 1 1 260px; }
+.hr-strip-ic { font-size: 1.2rem; }
+
+/* ── Team today: people ──────────────────────────────────────────────────── */
+.hr-people { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 10px; }
+.hr-person {
+  display: flex; flex-direction: column; gap: 6px; min-width: 0;
+  padding: 11px 13px; border-radius: 12px;
+  background: var(--glass-bg); border: 1px solid var(--glass-border);
+  border-left: 4px solid var(--text-muted);
+}
+.hr-person.is-on { border-left-color: var(--status-completed); }
+.hr-person-head { display: flex; align-items: flex-start; gap: 8px; }
+.hr-person-who { flex: 1 1 auto; min-width: 0; }
+.hr-person-name { font-size: 0.92rem; font-weight: 700; color: var(--text-dark); overflow-wrap: anywhere; }
+.hr-person-sub { font-size: 0.72rem; color: var(--text-muted); overflow-wrap: anywhere; line-height: 1.4; }
+.hr-state {
+  flex-shrink: 0; font-size: 0.66rem; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase;
+  padding: 2px 8px; border-radius: 999px; color: var(--text-muted); background: rgba(127, 127, 160, 0.14);
+}
+.hr-person.is-on .hr-state { color: #047857; background: rgba(16, 185, 129, 0.13); }
+body.dark-mode .hr-person.is-on .hr-state { color: #6ee7b7; }
+.hr-facts { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 0.76rem; color: var(--text-dark); }
+.hr-facts b { font-weight: 700; color: var(--text-muted); margin-right: 3px; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.04em; }
+.hr-load-row { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 10px; }
+.hr-load { height: 8px; border-radius: 999px; background: rgba(127, 127, 160, 0.18); overflow: hidden; }
+.hr-load i { display: block; height: 100%; border-radius: inherit; background: var(--status-completed); }
+.hr-load.full i { background: var(--status-urgent); }
+.hr-load-n { font-family: 'JetBrains Mono', monospace; font-size: 0.7rem; color: var(--text-muted); white-space: nowrap; }
+.hr-tags { display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; }
+.hr-tag {
+  font-size: 0.7rem; padding: 2px 8px; border-radius: 999px; max-width: 260px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--text-dark); background: rgba(127, 127, 160, 0.13);
+}
+.hr-tag-offer { color: #b45309; background: rgba(245, 158, 11, 0.13); }
+body.dark-mode .hr-tag-offer { color: #fbbf24; }
+.hr-lastlog {
+  font-size: 0.76rem; color: var(--text-dark); line-height: 1.4; overflow-wrap: anywhere;
+  padding: 6px 9px; border-radius: 8px; background: rgba(127, 127, 160, 0.08);
+}
+.hr-lastlog-t { font-family: 'JetBrains Mono', monospace; font-size: 0.7rem; color: var(--text-muted); margin-right: 4px; }
+.hr-person-acts { display: flex; justify-content: flex-end; gap: 4px; margin-top: auto; padding-top: 4px; border-top: 1px solid var(--glass-border); }
+.hr-cat {
+  display: inline-block; font-size: 0.66rem; font-weight: 700; padding: 1px 7px; border-radius: 999px;
+  color: var(--status-testing); background: rgba(99, 102, 241, 0.12); vertical-align: 1px;
+}
+body.dark-mode .hr-cat { color: #a5b4fc; }
+
+/* ── Work logs ───────────────────────────────────────────────────────────── */
+.hr-day { display: flex; flex-direction: column; gap: 6px; }
+.hr-day-h {
+  display: flex; align-items: center; gap: 8px; margin: 4px 0 0;
+  font-size: 0.76rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-dark);
+}
+.hr-day-n {
+  font-family: 'JetBrains Mono', monospace; font-size: 0.66rem; font-weight: 700; letter-spacing: 0;
+  padding: 1px 7px; border-radius: 999px; color: var(--text-muted); background: rgba(127, 127, 160, 0.16); text-transform: none;
+}
+.hr-logs { display: flex; flex-direction: column; gap: 6px; }
+.hr-log {
+  display: grid; grid-template-columns: 52px minmax(0, 1fr); gap: 10px;
+  padding: 9px 12px; border-radius: 10px;
+  background: var(--glass-bg); border: 1px solid var(--glass-border);
+}
+.hr-log-t { font-family: 'JetBrains Mono', monospace; font-size: 0.78rem; font-weight: 700; color: var(--text-muted); padding-top: 1px; }
+.hr-log-main { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.hr-log-top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.hr-log-who { font-size: 0.74rem; font-weight: 700; color: var(--primary-pink); }
+.hr-log-title { font-size: 0.88rem; font-weight: 700; color: var(--text-dark); overflow-wrap: anywhere; line-height: 1.35; }
+.hr-log-desc { font-size: 0.8rem; color: var(--text-dark); white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.45; }
+.hr-log-desc.clamp { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.hr-more { align-self: flex-start; font-size: 0.74rem; }
+.hr-log-loc { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 0.74rem; color: var(--text-muted); }
+
+/* ── Field activity ──────────────────────────────────────────────────────── */
+.hr-table-wrap { overflow-x: auto; border-radius: 12px; border: 1px solid var(--glass-border); background: var(--glass-bg); }
+.hr-table { width: 100%; border-collapse: collapse; font-size: 0.8rem; color: var(--text-dark); }
+.hr-table th, .hr-table td { padding: 8px 10px; text-align: left; border-bottom: 1px solid var(--glass-border); vertical-align: top; }
+.hr-table thead th {
+  font-size: 0.66rem; font-weight: 800; letter-spacing: 0.05em; text-transform: uppercase; color: var(--text-muted);
+  background: rgba(127, 127, 160, 0.07); white-space: nowrap;
+}
+.hr-table tbody th { font-weight: 700; }
+.hr-table .hr-n { font-family: 'JetBrains Mono', monospace; font-size: 0.76rem; white-space: nowrap; }
+.hr-table tr:last-child th, .hr-table tr:last-child td { border-bottom: 0; }
+.hr-drow th, .hr-drow td { background: rgba(127, 127, 160, 0.05); font-size: 0.76rem; color: var(--text-muted); }
+.hr-drow th { padding-left: 30px; font-weight: 600; }
+.hr-total th, .hr-total td { font-weight: 700; background: rgba(var(--primary-pink-rgb), 0.04); }
+.hr-expand {
+  font: inherit; font-weight: 700; color: var(--text-dark); background: none; border: 0; padding: 0; cursor: pointer; text-align: left;
+}
+.hr-expand span { display: inline-block; width: 1em; color: var(--text-muted); }
+
+/* ── NeoHR app ───────────────────────────────────────────────────────────── */
+.hr-app {
+  max-width: 860px; display: flex; flex-direction: column; gap: 12px;
+  padding: 18px 20px; border-radius: 14px;
+  background: var(--glass-bg); border: 1px solid var(--glass-border);
+  border-top: 3px solid var(--primary-pink);
+}
+.hr-app-head { display: flex; align-items: flex-start; gap: 12px; }
+.hr-app-ic { font-size: 1.9rem; line-height: 1; }
+.hr-app-title { margin: 0; font-size: 1.05rem; font-weight: 800; color: var(--text-dark); display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.hr-ver {
+  font-family: 'JetBrains Mono', monospace; font-size: 0.78rem; font-weight: 700;
+  padding: 2px 9px; border-radius: 999px; color: #fff; background: var(--primary-pink);
+}
+.hr-app-sub, .hr-app-p { margin: 2px 0 0; font-size: 0.82rem; color: var(--text-muted); line-height: 1.5; }
+.hr-app-p { color: var(--text-dark); }
+.hr-app-dl { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.hr-app-meta { font-size: 0.74rem; color: var(--text-muted); }
+.hr-app-h { margin: 6px 0 0; font-size: 0.76rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-dark); }
+.hr-steps { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 6px; font-size: 0.82rem; color: var(--text-dark); line-height: 1.5; }
+.hr-notes {
+  white-space: pre-wrap; overflow-wrap: anywhere; font-size: 0.8rem; line-height: 1.5; color: var(--text-dark);
+  padding: 10px 12px; border-radius: 10px; background: rgba(127, 127, 160, 0.07); max-height: 320px; overflow-y: auto;
+}
+.hr-app-foot { display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding-top: 8px; border-top: 1px solid var(--glass-border); }
+
+/* ── Settings → People: Service / RMA / Builds / NeoHR roles in one row ──── */
+.hr-roles-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+
+@media (max-width: 860px) {
+  .hr-people { grid-template-columns: 1fr; }
+  .hr-log { grid-template-columns: 1fr; gap: 4px; }
+  .hr-roles-grid { grid-template-columns: 1fr 1fr; }
+}

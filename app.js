@@ -2224,6 +2224,18 @@ function switchScreen(mode, selectedId = null) {
         .catch(e => console.warn('queue load failed:', e && e.message));
     }
 
+  } else if (mode === 'neohr') {
+    // v1.11 — NeoHR, the people side: Team today, Work logs, Field activity
+    // and the NeoHR phone app. Read-only; neohr.js owns it, and the registry
+    // gate above has already decided this person (tier 3+ or a NeoHR lead)
+    // may open it.
+    document.getElementById('neohr-screen').classList.add('active');
+    if (window.NeoQcHr && typeof window.NeoQcHr.ensureLoaded === 'function') {
+      Promise.resolve()
+        .then(() => window.NeoQcHr.ensureLoaded())
+        .catch(e => console.warn('neohr load failed:', e && e.message));
+    }
+
   } else if (mode === 'overview') {
     // Builds and service in one list. Reads both caches; owns neither.
     document.getElementById('overview-screen').classList.add('active');
@@ -2427,6 +2439,7 @@ function showLoginScreen() {
 //                                  button there is one click away)
 //   a service / RMA role         → that module (a tier-1 counter clerk with a
 //                                  desk role gets the app, not the notice)
+//   a NeoHR lead with no work role → NeoHR (v1.11: HR below tier 3)
 //   tier 1 with no role          → the friendly "use the web portal" notice.
 // Module roles are asked for fresh at every sign-in (a grant takes effect at
 // the next sign-in or restart), but that can never strand someone on the
@@ -2666,6 +2679,10 @@ function closeSessionOverlays() {
   // person's feed all go. Its dialogs are ops dialogs, closed above.
   const Q = window.NeoQcQueue;
   if (Q && typeof Q.reset === 'function') run('The work queue', () => Q.reset());
+  // v1.11 — NeoHR: everyone's logs and the team view go, and its refresh
+  // timer stops.
+  const HR = window.NeoQcHr;
+  if (HR && typeof HR.reset === 'function') run('NeoHR', () => HR.reset());
   if (techAreaTimer) { clearInterval(techAreaTimer); techAreaTimer = null; }
 
   // The build ticket form, closed the way requestCloseTicketModal does after
@@ -5771,7 +5788,8 @@ function openSettingsModal() {
 //       open Service or RMA. Demo data is read-only and never written to
 //       Supabase (NeoQcData enforces that); this only flips the switch.
 //   (b) "People" — tier 4+ only: everyone with a login, their designation,
-//       tier, Active/Staff state, module roles (Service / RMA / Builds), work
+//       tier, Active/Staff state, module roles (Service / RMA / Builds, and
+//       NeoHR — set by hand only, presets never touch it), work
 //       pools, build level and capacity. Writes go through NeoQcData → RPC
 //       staff_update / staff_apply_preset, which check the same rules on the
 //       server (tier 4 changes tier ≤ 3 accounts only; only tier 5 sets tiers;
@@ -5783,7 +5801,10 @@ function openSettingsModal() {
 // textContent — never innerHTML with a value in it.
 let opsSettingsSeq = 0;
 const OPS_ROLE_OPTIONS = [['', '—'], ['desk', 'Desk'], ['tech', 'Tech'], ['lead', 'Lead']];
-const OPS_MODULE_LABELS = { service: 'Service', rma: 'RMA', qc: 'Builds' };
+const OPS_MODULE_LABELS = { service: 'Service', rma: 'RMA', qc: 'Builds', neohr: 'NeoHR' };
+// A person's roles, in the People list and its Edit dialog. NeoHR is set here
+// by hand only: designation presets never touch it (sql/work-queue.sql).
+const OPS_PERSON_MODULES = ['service', 'rma', 'qc', 'neohr'];
 const OPS_MODAL_IDS = ['sv-job-modal', 'sv-intake-modal', 'rma-unit-modal', 'rma-intake-modal', 'ops-dialog-modal'];
 const OPS_OWNER_ONLY = 'Only the owner can change a tier 4 or 5 account.';
 const OPS_PEOPLE_HELP = "Create their login in Supabase → Authentication → Add user (auto-confirm; the PIN is the password). They then appear here as 'New — not staff yet'. Open them, set the designation and turn on Staff.";
@@ -5836,7 +5857,7 @@ function renderOpsSettings() {
     (canAdmin
       ? '<div class="settings-field" id="settings-ops-people" style="margin-top:14px;">' +
           '<div class="settings-label">People</div>' +
-          '<p class="q-people-help">Who works here and what they can do. A person’s <strong>designation</strong> picks a preset of roles and pools; anything you set by hand for them wins. <strong>Desk</strong> takes work in and moves it on; <strong>Tech</strong> can also claim work; <strong>Lead</strong> can also offer work to people, set priority and waive fees. Tier 3 and above are leads everywhere automatically. The <strong>pools</strong> decide who claims builds and service jobs from the Queue. A change takes effect for that person at their next sign-in or app restart.</p>' +
+          '<p class="q-people-help">Who works here and what they can do. A person’s <strong>designation</strong> picks a preset of roles and pools; anything you set by hand for them wins. <strong>Desk</strong> takes work in and moves it on; <strong>Tech</strong> can also claim work; <strong>Lead</strong> can also offer work to people, set priority and waive fees. A <strong>NeoHR</strong> lead (for HR) sees everyone’s work logs and field activity. Tier 3 and above are leads everywhere automatically. The <strong>pools</strong> decide who claims builds and service jobs from the Queue. A change takes effect for that person at their next sign-in or app restart.</p>' +
           '<p class="q-people-help" id="settings-ops-people-add"><strong>Adding someone:</strong> </p>' +
           '<div class="q-people-bar">' +
             '<input type="text" id="settings-ops-people-search" class="settings-input" placeholder="Search people by name, email or designation…" autocomplete="off" spellcheck="false">' +
@@ -5848,7 +5869,7 @@ function renderOpsSettings() {
         (canPresets
           ? '<div class="settings-field" id="settings-ops-presets" style="margin-top:14px;">' +
               '<div class="settings-label">Designation presets</div>' +
-              '<p class="q-people-help">What each designation gets: its Service, RMA and Builds roles, the work pools, the build level and capacity. A preset is applied when you set or change someone’s designation, or press <strong>Apply preset</strong>; anything set by hand for a person wins. Removing a role in a preset removes it from people when the preset is applied.</p>' +
+              '<p class="q-people-help">What each designation gets: its Service, RMA and Builds roles, the work pools, the build level and capacity. A preset is applied when you set or change someone’s designation, or press <strong>Apply preset</strong>; anything set by hand for a person wins. Removing a role in a preset removes it from people when the preset is applied. Presets never change anyone’s NeoHR role.</p>' +
               '<div class="q-people-bar"><button type="button" id="settings-ops-preset-add" class="secondary-btn">+ Add preset</button></div>' +
               '<div id="settings-ops-presets-list" class="q-people-list"></div>' +
             '</div>'
@@ -5929,6 +5950,9 @@ function rerenderOpsScreen() {
     Promise.resolve().then(() => window.NeoQcRmaUI.ensureLoaded()).catch(warn('RMA'));
   } else if (currentMode === 'overview' && window.NeoQcShell && window.NeoQcShell.ensureOverviewLoaded) {
     Promise.resolve().then(() => window.NeoQcShell.ensureOverviewLoaded()).catch(warn('Overview'));
+  } else if (currentMode === 'neohr' && window.NeoQcHr && window.NeoQcHr.refresh) {
+    // Its team cards leave out service jobs while demo data is on.
+    Promise.resolve().then(() => window.NeoQcHr.refresh()).catch(warn('NeoHR'));
   }
 }
 
@@ -6103,7 +6127,7 @@ function buildOpsPersonRow(r, D) {
   const tags = opsNode('div', 'q-prow-tags');
   if (r.is_staff === false) tags.appendChild(opsTag('New — not staff yet', 'is-new'));
   else if (r.active === false) tags.appendChild(opsTag('Inactive', 'is-off'));
-  ['service', 'rma', 'qc'].forEach(m => {
+  OPS_PERSON_MODULES.forEach(m => {
     const role = auto ? 'Lead (auto)' : opsRoleLabel(r.roles && r.roles[m]);
     tags.appendChild(opsTag(OPS_MODULE_LABELS[m] + ': ' + role, auto ? 'is-auto' : ''));
   });
@@ -6183,8 +6207,8 @@ async function editOpsPerson(r, D) {
 
   body.appendChild(opsNode('div', 'ops-section-title', 'Roles'));
   const roleSel = {};
-  const roles = opsNode('div', 'q-dlg-grid3');
-  ['service', 'rma', 'qc'].forEach(m => {
+  const roles = opsNode('div', 'hr-roles-grid');
+  OPS_PERSON_MODULES.forEach(m => {
     if (auto) {
       const ro = opsInput('text', 'Lead (automatic)');
       ro.readOnly = true;
@@ -6198,6 +6222,7 @@ async function editOpsPerson(r, D) {
   body.appendChild(roles);
   if (auto) body.appendChild(opsNode('p', 'ops-hint', 'Tier 3 and above are leads in every module automatically.'));
   else if (self) body.appendChild(opsNode('p', 'ops-hint', 'Your own roles are changed by someone senior to you.'));
+  body.appendChild(opsNode('p', 'ops-hint', 'NeoHR: Lead sees everyone’s work logs and field activity (the NeoHR screen here, and the Team view on the phone). Presets never change it.'));
 
   body.appendChild(opsNode('div', 'ops-section-title', 'Work queue'));
   const chkBP = opsCheck('Build pool — can claim builds from the Queue', !!r.build_pool);
@@ -6254,7 +6279,7 @@ async function editOpsPerson(r, D) {
         if (chkStaff.input.checked !== !!r.is_staff) patch.is_staff = chkStaff.input.checked;
         if (!auto) {
           const changedRoles = {};
-          ['service', 'rma', 'qc'].forEach(m => {
+          OPS_PERSON_MODULES.forEach(m => {
             const v = roleSel[m] ? (roleSel[m].value || null) : null;
             const was = (r.roles && r.roles[m]) || null;
             if (roleSel[m] && v !== was) changedRoles[m] = v;
@@ -6305,7 +6330,7 @@ async function applyOpsPreset(r, D) {
   const seq = opsSettingsSeq;
   const block = opsChangeBlock(r);
   if (block) { showToast(block, 'warning'); return; }
-  const ok = await showConfirm('Apply the “' + (r.designation || '') + '” preset to ' + who + '? Their Service, RMA and Builds roles, pools, build level and capacity are set from it.',
+  const ok = await showConfirm('Apply the “' + (r.designation || '') + '” preset to ' + who + '? Their Service, RMA and Builds roles, pools, build level and capacity are set from it. Their NeoHR role stays as it is.',
     { title: 'Apply preset', okText: 'Apply' });
   if (!ok || seq !== opsSettingsSeq) return;
   opsSay('Applying the preset…');

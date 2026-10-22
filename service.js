@@ -4036,8 +4036,10 @@
       case 'not_eligible': return r.why ? String(r.why) : 'You can no longer take ' + code + '.';
       // 'expired' = the caller is on the item's skip list: the offer timed
       // out, was declined, or the app's own offer was withdrawn (no alert).
-      case 'expired': return 'The offer of ' + code + ' has ended.';
-      case 'not_offered': return code + ' is not offered to you any more.';
+      // 'not_offered' = a lead withdrew it (or the card was stale): the same
+      // neutral sentence — the person only needs to know it is over.
+      case 'expired':
+      case 'not_offered': return 'The offer of ' + code + ' has ended.';
       case 'changed': return 'Someone else took or changed ' + code + ' just now' + (r.by ? ' (' + r.by + ')' : '') + ' — check and try again.';
       case 'closed': return code + ' is closed.';
       case 'not_found': return code + ' no longer exists.';

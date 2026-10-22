@@ -35,6 +35,13 @@
   new table is select-only for clients; the eligibility sentences, costs and
   the 4 h / 30 min clock match shared/work-queue.js.
 
+  NeoHR 2.1 (neo_dashboard, same file): the SQL port of the service status
+  model — _svc_ball / _svc_budget_in / _svc_risk_ms / _rma_ball /
+  _rma_budget_days / _rma_risk_ms — is RUN against ballOf / BUDGET_BY_TYPE /
+  serviceRisk / rmaBallOf / rmaBudgetDays / rmaRisk on a grid of inputs
+  (tests/sql-eval.js); the row-level composition (_svc_state ↔
+  ticketWithUnits) runs on PGlite in the scratchpad's pgtest/dash22.mjs.
+
   Pass paths to check other copies: node tests/sql-parity.test.js v2.sql v2.1.sql
   (those files, in that order, nothing else appended).
 */
@@ -688,8 +695,10 @@ function arrayVar(text, name) {
 var WQ_API = ['work_queue', 'work_claim', 'work_offer', 'work_respond', 'work_release', 'build_queue_send', 'work_team',
               'work_events_for', 'work_tick', 'work_alert_resolve', 'my_work_profile', 'my_modules', 'service_tech_list',
               'service_claim', 'service_create', 'staff_list', 'staff_update', 'staff_apply_preset', 'preset_list',
-              'preset_upsert', 'preset_delete', 'work_log_push', 'work_log_pull', 'work_log_team'];
-var WQ_TABLES = ['staff_work', 'designation_presets', 'work_alerts', 'work_events', 'work_logs'];
+              'preset_upsert', 'preset_delete', 'work_log_push', 'work_log_pull', 'work_log_team',
+              // NeoHR 2.1
+              'neo_dashboard'];
+var WQ_TABLES =['staff_work', 'designation_presets', 'work_alerts', 'work_events', 'work_logs'];
 
 wqTest('v2.2: my_modules keeps every v2 key and adds build_pool / service_pool / build_level', function () {
   var old = objKeys(fnBody('my_modules', V2)), now = objKeys(fnBody('my_modules'));
@@ -889,6 +898,162 @@ wqTest('v2.2 ↔ shared/work-queue.js: eligibility sentences, costs, the 4 h / 3
   assert.ok(new RegExp("interval\\s+'" + WQJS.OFFER_MINUTES + " minutes'").test(fnBody('_work_offer_set')), 'offers last OFFER_MINUTES');
   assert.ok(new RegExp("interval\\s+'" + WQJS.CLAIM_HOURS + " hours'").test(fnBody('work_tick')), 'the tick uses CLAIM_HOURS');
   labelsMatch('_svc_category_label', S.CATEGORIES);
+});
+
+// ═══ NeoHR 2.1 — neo_dashboard's service status model (work-queue.sql §9b) ═══
+// The dashboard's "late" and whose-turn counts are serviceRisk() and
+// ticketWithUnits() of shared/service-status.js, ported to SQL. The pure
+// helpers take plain milliseconds, so the SQL is RUN here (tests/sql-eval.js)
+// on the same inputs as the JS and every answer must agree. The composition
+// over real rows (_svc_state, parts and vendors) runs on PGlite in
+// scratchpad pgtest/dash22.mjs; its shape is checked statically below.
+
+var DASH_NOW = Date.UTC(2026, 9, 22, 6, 30, 0, 123);
+var MIN_MS = 60000, HOUR_MS = 3600000, DAY_MS = 86400000;
+function iso(ms) { return ms == null ? null : new Date(ms).toISOString(); }
+
+// Idle times around every budget either side uses (days), with the exact
+// boundary where it is a whole number of milliseconds both sides agree on.
+function idleGrid(budgets) {
+  var out = [0, 1, 59 * MIN_MS, 90 * DAY_MS];
+  budgets.forEach(function (b) {
+    var exact = [0.75, 1].every(function (f) { var v = b * f * DAY_MS; return v === Math.round(v) && (v / DAY_MS) === b * f; });
+    [0.5, 0.74, 0.76, 0.99, 1.01, 1.5].concat(exact ? [0.75, 1] : []).forEach(function (f) { out.push(Math.round(b * f * DAY_MS)); });
+    if (exact) { out.push(b * 0.75 * DAY_MS - 1, b * DAY_MS - 1); }
+  });
+  return out.filter(function (v, i, a) { return v >= 0 && a.indexOf(v) === i; });
+}
+function svcRiskGrid(call) {
+  var budgets = [];
+  Object.keys(S.BUDGET_BY_TYPE).forEach(function (t) {
+    Object.keys(S.BUDGET_BY_TYPE[t]).forEach(function (st) {
+      var b = S.BUDGET_BY_TYPE[t][st];
+      if (b != null && budgets.indexOf(b) === -1) budgets.push(b);
+    });
+  });
+  budgets.push(0.5);                                  // a visit stage with no time booked
+  var idles = idleGrid(budgets);
+  var promises = [null, -1, 0, 1, DAY_MS - 1, DAY_MS, DAY_MS + 1, 3 * DAY_MS];
+  var visits = [null, -30 * MIN_MS - 1, -30 * MIN_MS, -29 * MIN_MS, 0, 60 * MIN_MS, 60 * MIN_MS + 1, 5 * HOUR_MS];
+  var bad = [], n = 0;
+  Object.keys(S.TYPES).forEach(function (type) {
+    S.STAGE_ORDER.concat(['bogus_stage']).forEach(function (stage) {
+      var vs = S.isVisitStage(stage) ? visits : [null, 0];
+      idles.forEach(function (idle) {
+        promises.forEach(function (p) {
+          vs.forEach(function (v) {
+            n++;
+            var job = { service_type: type, stage: stage, stage_since: iso(DASH_NOW - idle),
+                        promised_at: iso(p == null ? null : DASH_NOW + p), visit_start: iso(v == null ? null : DASH_NOW + v) };
+            var js = S.serviceRisk(job, DASH_NOW);
+            var sql = call('_svc_risk_ms', [type, stage, idle, p, v]);
+            if (sql !== js && bad.length < 5) bad.push(type + '/' + stage + ' idle ' + idle + ' promise ' + p + ' visit ' + v + ': SQL ' + sql + ', JS ' + js);
+          });
+        });
+      });
+    });
+  });
+  return { n: n, bad: bad };
+}
+function rmaRiskGrid(call) {
+  var idles = idleGrid([1, 2, 3, 4, 5, 7, 14, 21]);
+  var bad = [], n = 0;
+  S.RMA_ORDER.concat(['bogus_stage']).forEach(function (stage) {
+    ['collect', 'courier', 'with_device', null].forEach(function (method) {
+      [null, 7, 21].forEach(function (tat) {
+        idles.forEach(function (idle) {
+          var backs = [null, -1, 0, 1, 2 * HOUR_MS, 30 * DAY_MS];
+          if (idle % 3 === 0) backs.push(idle / 3, idle / 3 + 1);    // the last quarter of the expected wait, exactly
+          backs.forEach(function (back) {
+            n++;
+            var unit = { stage: stage, return_method: method, stage_since: iso(DASH_NOW - idle),
+                         expected_back_at: iso(back == null ? null : DASH_NOW + back) };
+            var js = S.rmaRisk(unit, DASH_NOW, tat == null ? null : { typical_tat_days: tat });
+            var sql = call('_rma_risk_ms', [stage, method, idle, back, back == null ? null : back + idle, tat]);
+            if (sql !== js && bad.length < 5) bad.push(stage + '/' + method + '/tat ' + tat + ' idle ' + idle + ' back ' + back + ': SQL ' + sql + ', JS ' + js);
+          });
+        });
+      });
+    });
+  });
+  return { n: n, bad: bad };
+}
+
+wqTest('NeoHR 2.1: _svc_ball ↔ ballOf, _svc_budget_in ↔ BUDGET_BY_TYPE, _rma_ball / _rma_budget_days ↔ the RMA model', function () {
+  assert.ok(SQLFN, 'tests/sql-eval.js could not read the SQL: ' + (SQLFN_ERR && SQLFN_ERR.message));
+  ['_svc_ball', '_svc_budget_in', '_svc_budget_days', '_svc_risk_ms', '_rma_ball', '_rma_budget_days', '_rma_risk_ms', '_svc_state']
+    .forEach(function (f) { assert.ok(SQLFN.has(f), f + '() not found'); });
+  S.STAGE_ORDER.concat(['bogus_stage', null]).forEach(function (st) {
+    assert.strictEqual(SQLFN('_svc_ball', [st]), S.ballOf(st), '_svc_ball(' + st + ')');
+  });
+  Object.keys(S.TYPES).concat(['bogus_type']).forEach(function (t) {
+    var table = Object.prototype.hasOwnProperty.call(S.BUDGET_BY_TYPE, t) ? S.BUDGET_BY_TYPE[t] : {};
+    S.STAGE_ORDER.forEach(function (st) {
+      var want = Object.prototype.hasOwnProperty.call(table, st) ? table[st] : null;
+      assert.strictEqual(SQLFN('_svc_budget_in', [t, st]), want, '_svc_budget_in(' + t + ', ' + st + ')');
+    });
+  });
+  S.RMA_ORDER.concat(['bogus_stage']).forEach(function (st) {
+    ['collect', 'courier', 'with_device', null, 'bogus'].forEach(function (m) {
+      assert.strictEqual(SQLFN('_rma_ball', [st, m]), S.rmaBallOf({ stage: st, return_method: m }), '_rma_ball(' + st + ', ' + m + ')');
+      [null, 0, 9, 30].forEach(function (tat) {
+        var v = tat == null ? null : { typical_tat_days: tat };
+        assert.strictEqual(SQLFN('_rma_budget_days', [st, m, tat]), S.rmaBudgetDays({ stage: st, return_method: m }, v),
+                           '_rma_budget_days(' + st + ', ' + m + ', ' + tat + ')');
+      });
+    });
+  });
+  sameSet(strings((/p_job\.stage\s+in\s*\(([^)]*)\)/i.exec(fnBody('_svc_state')) || [])[1] || ''), S.MIRROR_STAGES,
+          '_svc_state reads held parts for exactly the mirror stages');
+});
+
+wqTest('NeoHR 2.1: _svc_risk_ms ↔ serviceRisk() and _rma_risk_ms ↔ rmaRisk(), run on a grid of inputs', function () {
+  assert.ok(SQLFN, 'tests/sql-eval.js could not read the SQL: ' + (SQLFN_ERR && SQLFN_ERR.message));
+  var a = svcRiskGrid(SQLFN);
+  assert.ok(a.n > 20000, 'the service grid is too small (' + a.n + ')');
+  assert.ok(!a.bad.length, 'serviceRisk differs on ' + a.bad.join(' | '));
+  var b = rmaRiskGrid(SQLFN);
+  assert.ok(b.n > 5000, 'the RMA grid is too small (' + b.n + ')');
+  assert.ok(!b.bad.length, 'rmaRisk differs on ' + b.bad.join(' | '));
+  // The grid catches a wrong rule (a mutated copy of the SQL must disagree).
+  var E = require(path.join(__dirname, 'sql-eval.js'));
+  [["p_visit_ms < -1800000", "p_visit_ms < -3600000", svcRiskGrid],
+   ["p_promise_ms <= 86400000", "p_promise_ms < 86400000", svcRiskGrid],
+   ["when 'parts_on_order' then 7", "when 'parts_on_order' then 8", svcRiskGrid],
+   ["p_back_in_ms <= p_span_ms * 0.25", "p_back_in_ms < p_span_ms * 0.25", rmaRiskGrid]].forEach(function (m) {
+    assert.ok(SQL.indexOf(m[0]) !== -1, 'self-check: "' + m[0] + '" not found in the SQL');
+    var wrong = E.compile(SQL.split(m[0]).join(m[1]));
+    assert.ok(m[2](wrong).bad.length, 'the grid does not notice "' + m[0] + '" → "' + m[1] + '"');
+  });
+});
+
+wqTest('NeoHR 2.1: neo_dashboard — sections by permission, the status model, India days', function () {
+  var b = fnBody('neo_dashboard');
+  assert.ok(b, 'neo_dashboard not found');
+  // Each section behind the read rule of what it counts (omitted, never zeros).
+  [['queue', /if\s+v_db\s+or\s+v_ds\s+then[\s\S]*?jsonb_build_object\(\s*'queue'/i],
+   ['service', /if\s+v_ds\s+then[\s\S]*?jsonb_build_object\(\s*'service'/i],
+   ['builds', /if\s+v_db\s+then[\s\S]*?jsonb_build_object\(\s*'builds'/i],
+   ['rma', /if\s+v_dr\s+then[\s\S]*?jsonb_build_object\(\s*'rma'/i],
+   ['team', /if\s+v_head\s+then[\s\S]*?jsonb_build_object\(\s*'team'/i]].forEach(function (x) {
+    assert.ok(x[1].test(b), 'neo_dashboard: the ' + x[0] + ' section sits behind its read rule');
+  });
+  assert.ok(/v_db\s+boolean\s*:=\s*public\.has_module\('qc',\s*'desk'\)/i.test(b) && /v_ds\s+boolean\s*:=\s*public\.has_module\('service',\s*'desk'\)/i.test(b)
+            && /v_dr\s+boolean\s*:=\s*public\.has_module\('rma',\s*'desk'\)/i.test(b) && /v_head\s+boolean\s*:=\s*public\.my_tier\(\)\s*>=\s*3/i.test(b),
+            'neo_dashboard: Builds / Service / RMA desk+, team for tier 3+');
+  assert.ok(/'late',\s*count\(\*\)\s*filter\s*\(where\s+st\.risk\s*=\s*2\)/i.test(b) && /_svc_state\(s,\s*v_now\)/i.test(b),
+            'neo_dashboard: late = ticketWithUnits risk 2 (through _svc_state)');
+  ['shop', 'customer', 'third_party'].forEach(function (ball) {
+    assert.ok(new RegExp("filter\\s*\\(where\\s+st\\.ball\\s*=\\s*'" + ball + "'\\)").test(b), 'neo_dashboard counts the ' + ball + ' ball');
+  });
+  assert.ok(/\(\(now\(\)\s+at\s+time\s+zone\s+'Asia\/Kolkata'\)::date\)::timestamp\s+at\s+time\s+zone\s+'Asia\/Kolkata'/i.test(b),
+            'A11: India day bounds');
+  assert.ok(new RegExp("interval\\s+'" + WQJS.CLAIM_HOURS + " hours'").test(b), 'the queue section uses CLAIM_HOURS');
+  assert.ok(/limit\s+6\b/i.test(b), 'attention: at most 6 items');
+  var st = fnBody('_svc_state');
+  assert.ok(/bool_or\(x\.b\s*=\s*'customer'\)\s*then\s*'customer'\s*when\s+bool_or\(x\.b\s*=\s*'shop'\)\s*then\s*'shop'\s*when\s+bool_or\(x\.b\s*=\s*'third_party'\)/i.test(st)
+            && /max\(x\.r\)/i.test(st) && /c\.holds_ticket\s+and\s+c\.stage\s*<>\s*'closed'/i.test(st),
+            '_svc_state: the most urgent held part\'s ball (customer, shop, third party — BALL_URGENCY) and the worst risk');
 });
 
 // ═══ The demo rows are `select *` rows ═══════════════════════════════════

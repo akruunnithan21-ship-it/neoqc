@@ -318,7 +318,7 @@ declare
     'work_queue','work_claim','work_offer','work_respond','work_release','build_queue_send','work_team',
     'work_events_for','work_tick','work_alert_resolve','my_work_profile','my_modules','service_tech_list',
     'service_claim','service_create','staff_list','staff_update','staff_apply_preset','preset_list',
-    'preset_upsert','preset_delete','work_log_push','work_log_pull','work_log_team'];
+    'preset_upsert','preset_delete','work_log_push','work_log_pull','work_log_team','neo_dashboard'];
   v_internal text[] := array[
     '_designation_key','_build_tier','_first_name','_staff_for_short_name','_work_defaults','_work_settings',
     '_work_cost_build','_work_cost_service','_work_load','_work_why_not','_work_why_text','_svc_category_label',
@@ -326,7 +326,9 @@ declare
     '_work_offer_set','_work_offer_clear','_work_pick','_work_auto_offer','_work_item','_svc_apply_visit',
     '_svc_visit_event','_work_accept','_work_expire','_work_release_build','_work_person_gone','_preset_apply',
     '_work_staff_entry','_work_lockdown','tg_tickets_work_guard','tg_tickets_work_added','tg_tickets_work_gone',
-    'tg_service_jobs_work_gone','tg_service_jobs_zy_offer_guard','tg_service_jobs_zy_offer_insert'];
+    'tg_service_jobs_work_gone','tg_service_jobs_zy_offer_guard','tg_service_jobs_zy_offer_insert',
+    -- NeoHR 2.1: the service status model behind neo_dashboard
+    '_svc_ball','_svc_budget_in','_svc_budget_days','_svc_risk_ms','_rma_ball','_rma_budget_days','_rma_risk_ms','_svc_state'];
   n int;
 begin
   foreach t in array array['staff_work', 'designation_presets', 'work_alerts', 'work_events', 'work_logs'] loop
@@ -438,6 +440,36 @@ begin
                          and public._work_why_not('service', null, (select id from neo_wqt.users where alias = 'desk')) = 'no_role'
                          and public._work_why_not('service', null, (select id from profiles where email = 'zq.newhire@neotokyo.test')) = 'not_staff',
                          '_work_why_not: senior / role / pool / staff');
+
+  -- NeoHR 2.1: the service status model behind neo_dashboard, in real numeric
+  -- (tests/sql-parity.test.js runs the same helpers against the JS on a grid).
+  perform neo_wqt.assert(public._svc_ball('quoted') = 'customer' and public._svc_ball('at_vendor') = 'third_party'
+                         and public._svc_ball('closed') = 'nobody' and public._svc_ball('nonsense') = 'shop',
+                         '_svc_ball: whose turn a stage is');
+  perform neo_wqt.assert(public._svc_budget_days('remote', 'received') = 1 and public._svc_budget_days('in_store', 'on_site') = 0.5
+                         and public._svc_budget_days('on_site', 'scheduled') is null
+                         and public._svc_budget_days('bogus', 'diagnosing') = 2,
+                         '_svc_budget_days: the type''s own table, then the first one that budgets the stage');
+  perform neo_wqt.assert(public._svc_risk_ms('in_store', 'diagnosing', 2 * 86400000, null, null) = 2
+                         and public._svc_risk_ms('in_store', 'diagnosing', 1.5 * 86400000, null, null) = 1
+                         and public._svc_risk_ms('in_store', 'diagnosing', 1.49 * 86400000, null, null) = 0
+                         and public._svc_risk_ms('in_store', 'ready', 0, -1, null) = 0
+                         and public._svc_risk_ms('in_store', 'received', 0, 0, null) = 2
+                         and public._svc_risk_ms('in_store', 'received', 0, 86400000, null) = 1
+                         and public._svc_risk_ms('on_site', 'scheduled', 0, null, -1800001) = 2
+                         and public._svc_risk_ms('on_site', 'scheduled', 0, null, -1800000) = 1
+                         and public._svc_risk_ms('on_site', 'en_route', 0, null, -1800000) = 0
+                         and public._svc_risk_ms('on_site', 'scheduled', 43200000, null, null) = 2,
+                         '_svc_risk_ms: broken / near promise, the visit clock, idle budgets');
+  perform neo_wqt.assert(public._rma_ball('ready_to_return', 'courier') = 'shop' and public._rma_ball('ready_to_return', 'collect') = 'customer'
+                         and public._rma_ball('ready_to_return', null) = 'customer'
+                         and public._rma_risk_ms('with_vendor', 'collect', 0, 0, 1000, 21) = 2
+                         and public._rma_risk_ms('with_vendor', 'collect', 3000, 1000, 4000, 21) = 1
+                         and public._rma_risk_ms('with_vendor', 'collect', 99 * 86400000.0, 1001, 4000, 21) = 0
+                         and public._rma_risk_ms('with_vendor', 'collect', 21 * 86400000, null, null, 21) = 2
+                         and public._rma_risk_ms('with_vendor', 'collect', 20 * 86400000, null, null, 21) = 1
+                         and public._rma_risk_ms('with_vendor', 'collect', 14 * 86400000, null, null, null) = 2,
+                         '_rma_ball / _rma_risk_ms: the return method, the expected date, the vendor''s turnaround');
 end $$;
 
 
@@ -1619,8 +1651,9 @@ begin
                          and e ? 'preset_key' and e ? 'open_items' and e ? 'auto_lead' and e ? 'capacity_points',
                          format('staff_list entry shape (%s)', e));
   select x.value into e from jsonb_array_elements(r) as x(value) where x.value ->> 'email' = neo_wqt.email('tech3');
-  perform neo_wqt.assert((e ->> 'open_items')::int >= 1 and e -> 'roles' ->> 'qc' = 'tech' and e -> 'roles' ? 'rma',
-                         'staff_list counts open items and lists explicit roles');
+  perform neo_wqt.assert((e ->> 'open_items')::int >= 1 and e -> 'roles' ->> 'qc' = 'tech' and e -> 'roles' ? 'rma'
+                         and e -> 'roles' ->> 'neohr' = 'desk',
+                         'staff_list counts open items and lists explicit roles (NeoHR 2.1: neohr too)');
 
   perform neo_wqt.expect_error(format('select public.staff_update(%L, %L::jsonb)', neo_wqt.email('cto'), '{"designation":"x"}'),
                                '%NEO_DENIED: Only the owner can change a tier 4 or 5 account.%');
@@ -1636,8 +1669,23 @@ begin
                                '%NEO_GATE: The build level is junior, senior or none.%');
   perform neo_wqt.expect_error(format('select public.staff_update(%L, %L::jsonb)', neo_wqt.email('tech1'), '{"capacity_points":0}'),
                                '%NEO_GATE: The capacity must be a whole number between 1 and 50.%');
-  perform neo_wqt.expect_error(format('select public.staff_update(%L, %L::jsonb)', neo_wqt.email('tech1'), '{"roles":{"neohr":"lead"}}'),
-                               '%NEO_GATE: "neohr" is not a module you can set here.%');
+  -- v2.2 (NeoHR 2.1): People sets the neohr role too (it used to answer
+  -- '"neohr" is not a module you can set here.'); any other module still errs.
+  perform neo_wqt.expect_error(format('select public.staff_update(%L, %L::jsonb)', neo_wqt.email('tech1'), '{"roles":{"hr":"lead"}}'),
+                               '%NEO_GATE: "hr" is not a module you can set here.%');
+  r := public.staff_update(neo_wqt.email('tech1'), '{"roles":{"neohr":"lead"}}'::jsonb);
+  perform neo_wqt.assert(r -> 'roles' ->> 'neohr' = 'lead' and r -> 'roles' ->> 'service' = 'tech' and r -> 'roles' ->> 'qc' = 'tech'
+                         and (select granted_by from public.module_access
+                               where module = 'neohr' and profile_id = (select id from neo_wqt.users where alias = 'tech1'))
+                             = lower(neo_wqt.email('ceo')),
+                         format('NeoHR 2.1: staff_update sets the neohr role and returns it (%s)', r -> 'roles'));
+  r := public.staff_update(neo_wqt.email('tech1'), '{"roles":{"neohr":null}}'::jsonb);
+  perform neo_wqt.assert(r -> 'roles' ? 'neohr' and r -> 'roles' ->> 'neohr' is null
+                         and not exists (select 1 from public.module_access
+                                          where module = 'neohr' and profile_id = (select id from neo_wqt.users where alias = 'tech1')),
+                         'NeoHR 2.1: a null neohr role removes it (and staff_list still names the key)');
+  perform neo_wqt.expect_error(format('select public.staff_update(%L, %L::jsonb)', neo_wqt.email('ceo'), '{"roles":{"neohr":"desk"}}'),
+                               '%NEO_DENIED: You can''t change your own roles.%');
   perform neo_wqt.expect_error(format('select public.staff_update(%L, %L::jsonb)', neo_wqt.email('tech1'), '{"roles":{"qc":"boss"}}'),
                                '%NEO_GATE: A role is desk, tech, lead or none.%');
   perform neo_wqt.expect_error(format('select public.staff_update(%L, %L::jsonb)', 'nobody@neotokyo.test', '{"designation":"x"}'),
@@ -1875,8 +1923,9 @@ begin
   perform neo_wqt.expect_error($q$insert into public.work_logs (id, employee_email, title, created_at, updated_at)
                                   values (gen_random_uuid(), 'x', 'x', now(), now())$q$, '%permission denied%');
   perform neo_wqt.expect_error($q$update public.work_logs set title = 'x'$q$, '%permission denied%');
+  -- v2.2 (NeoHR 2.1): a neohr lead may read them too, so the sentence names both.
   perform neo_wqt.expect_error($q$select public.work_log_team('2026-01-15', '2026-01-15')$q$,
-                               '%NEO_DENIED: Only tier 3 and above can see the team''s logs.%');
+                               '%NEO_DENIED: Only tier 3 and above, or a NeoHR lead, can see the team''s logs.%');
 end $$;
 
 select neo_wqt.login('twin1');
@@ -1968,7 +2017,462 @@ begin
 end $$;
 
 
--- ── 15. Done ─────────────────────────────────────────────────────────────────
+-- ── 15. NeoHR 2.1: neo_dashboard ─────────────────────────────────────────────
+-- Live data may already hold open work, so every count is checked as the
+-- DIFFERENCE this section's own items make (now() does not move inside the
+-- transaction). The rules themselves (late, whose turn) are compared with
+-- shared/service-status.js in tests/sql-parity.test.js and pgtest/dash22.mjs.
+select neo_wqt.login('owner');
+do $$ begin perform neo_wqt.put('dash_owner', public.neo_dashboard()::text); end $$;
+select neo_wqt.login('plain');
+do $$ begin perform neo_wqt.put('dash_plain', public.neo_dashboard()::text); end $$;
+
+-- solo becomes a pool technician (service + builds; senior, so any tier) and
+-- twin1 a service lead: throw-away logins, so nothing real is theirs.
+reset role;
+select neo_wqt.no_jwt();
+insert into public.module_access (profile_id, module, role, granted_by)
+select u.id, m.module, m.role, 'tests'
+  from neo_wqt.users u
+  join (values ('solo', 'service', 'tech'), ('solo', 'qc', 'tech'), ('twin1', 'service', 'lead')) as m(alias, module, role)
+    on m.alias = u.alias
+on conflict (profile_id, module) do update set role = excluded.role;
+update public.staff_work set build_pool = true, service_pool = true, build_level = 'senior', capacity_points = 50, max_jobs = 20
+ where profile_id = (select id from neo_wqt.users where alias = 'solo');
+-- and twin2 a junior builder (builds only)
+insert into neo_wqt.users (alias, id, email, tier, name)
+select 'twin2', p.id, p.email, p.tier, p.full_name from public.profiles p where p.email = 'zq.twin.two@neotokyo.test';
+insert into public.module_access (profile_id, module, role, granted_by)
+select id, 'qc', 'tech', 'tests' from neo_wqt.users where alias = 'twin2'
+on conflict (profile_id, module) do update set role = excluded.role;
+insert into public.staff_work (profile_id, build_pool, service_pool, build_level, capacity_points, max_jobs, updated_by)
+select id, true, false, 'junior', 50, 20, 'tests' from neo_wqt.users where alias = 'twin2'
+on conflict (profile_id) do update set build_pool = true, service_pool = false, build_level = 'junior', capacity_points = 50, max_jobs = 20;
+create function neo_wqt.n(p jsonb, p_sec text, p_key text) returns int language sql immutable as $$
+  select (p -> p_sec ->> p_key)::int
+$$;
+create function neo_wqt.d(p_before text, p_after jsonb, p_sec text, p_key text) returns int language sql immutable as $$
+  select neo_wqt.n(p_after, p_sec, p_key) - neo_wqt.n(p_before::jsonb, p_sec, p_key)
+$$;
+grant execute on function neo_wqt.n(jsonb, text, text), neo_wqt.d(text, jsonb, text, text) to authenticated;
+
+-- The items (as the owner, every trigger standing aside so times are exact).
+-- lo / hi are today's India day bounds.
+reset role;
+select neo_wqt.no_jwt();
+do $$
+declare
+  v_lo timestamptz := ((now() at time zone 'Asia/Kolkata')::date)::timestamp at time zone 'Asia/Kolkata';
+  v_hi timestamptz := ((now() at time zone 'Asia/Kolkata')::date + 1)::timestamp at time zone 'Asia/Kolkata';
+  v_t2 text := neo_wqt.email('tech2');
+  v_t2n text := neo_wqt.name('tech2');
+  v_solo uuid := (select id from neo_wqt.users where alias = 'solo');
+begin
+  perform set_config('neo.migrating', '1', true);
+  perform set_config('neo.rma_nosync', '1', true);
+  perform neo_wqt.put('dash_lo', v_lo::text); perform neo_wqt.put('dash_hi', v_hi::text);
+  -- builds: four of solo's around the day bounds, a quote, two in the queue
+  insert into public.tickets (id, type, customer_name, status, technician, technician_email, assigned_via, assigned_at,
+                              queued_at, deadline, specs, created_at, updated_at)
+  select v.id, 'build', v.cust, v.status, v.tech, v.email, case when v.email is not null then 'claim' end,
+         case when v.email is not null then now() end, v.q, v.dl,
+         '{"cpu":"Ryzen 5 7600","gpu":"RTX 4060","__build":{"tier":2}}'::jsonb, now() - interval '2 days', now() - interval '1 hour'
+    from (values
+      ('t_wqt_h1', 'Zq Dash Build Lo',        'building',   'Zqsolo', 'zq.solo@neotokyo.test', null::timestamptz, v_lo),
+      ('t_wqt_h2', 'Zq Dash Build Hi',        'waiting_qc', 'Zqsolo', 'zq.solo@neotokyo.test', null, v_hi - interval '1 second'),
+      ('t_wqt_h3', 'Zq Dash Build Tomorrow',  'qc_testing', 'Zqsolo', 'zq.solo@neotokyo.test', null, v_hi),
+      ('t_wqt_h4', 'Zq Dash Build Yesterday', 'awaiting',   'Zqsolo', 'zq.solo@neotokyo.test', null, v_lo - interval '1 second'),
+      ('t_wqt_h5', 'Zq Dash Build Quote',     'awaiting',   null,     null,                    null, null),
+      ('t_wqt_h6', 'Zq Dash Build Waiting',   'awaiting',   null,     null,                    now() - interval '5 hours', null),
+      ('t_wqt_h7', 'Zq Dash Build Offer',     'awaiting',   null,     null,                    now() - interval '1 hour', null)
+    ) as v(id, cust, status, tech, email, q, dl);
+  -- a high-value build nobody has claimed for a month (the oldest in the queue)
+  insert into public.tickets (id, type, customer_name, status, queued_at, specs, created_at, updated_at)
+  values ('t_wqt_h8', 'build', 'Zq Dash Build Senior', 'awaiting', now() - interval '30 days',
+          '{"__build":{"tier":5}}'::jsonb, now() - interval '31 days', now() - interval '1 hour');
+  -- and an older small one that twin2 already declined
+  insert into public.tickets (id, type, customer_name, status, queued_at, declined_emails, specs, created_at, updated_at)
+  values ('t_wqt_h9', 'build', 'Zq Dash Build Declined', 'awaiting', now() - interval '40 days', array['zq.twin.two@neotokyo.test'],
+          '{"__build":{"tier":1}}'::jsonb, now() - interval '41 days', now() - interval '1 hour');
+  -- service: solo's late bench job and quote; a ticket waiting on two parts
+  -- (one on the customer, one overdue at a vendor); tech2's ready / parts /
+  -- visit-later-today jobs
+  insert into public.service_jobs (id, public_code, model_version, service_type, stage, stage_since, customer_name, customer_phone,
+                                   device_label, category, assignee, assignee_email, assigned_via, assigned_at, queued_at,
+                                   needed_by, visit_start, site_address, site_area)
+  values
+    ('s_wqt_n1', 'NT-WQTN0001', 2, 'in_store', 'diagnosing', now() - interval '3 days', 'Zqcustomer Late Bench', '9000000351',
+     'Zq Late Laptop', 'repair', 'Zqsolo Person', 'zq.solo@neotokyo.test', 'claim', now() - interval '3 days', null, null, null, null, null),
+    ('s_wqt_n2', 'NT-WQTN0002', 2, 'in_store', 'quoted', now(), 'Zqcustomer Quote', '9000000352',
+     null, 'upgrade', 'Zqsolo Person', 'zq.solo@neotokyo.test', 'claim', now(), null, v_hi - interval '1 second', null, null, null),
+    ('s_wqt_n3', 'NT-WQTN0003', 2, 'on_site', 'at_vendor', now(), 'Zqcustomer Held', '9000000353',
+     'Zq Held PC', 'warranty_claim', null, null, null, null, now() - interval '5 hours', null, null, '7 Zq Street', 'Zqarea'),
+    ('s_wqt_n4', 'NT-WQTN0004', 2, 'in_store', 'ready', now(), 'Zqcustomer Ready', '9000000354',
+     null, 'repair', v_t2n, v_t2, 'claim', now(), null, null, null, null, null),
+    ('s_wqt_n5', 'NT-WQTN0005', 2, 'in_store', 'parts_on_order', now(), 'Zqcustomer Parts', '9000000355',
+     null, 'repair', v_t2n, v_t2, 'claim', now(), null, null, null, null, null),
+    ('s_wqt_n6', 'NT-WQTN0006', 2, 'on_site', 'scheduled', now(), 'Zqcustomer Visit', '9000000356',
+     null, 'networking', v_t2n, v_t2, 'claim', now(), null, null, v_hi - interval '1 minute', '9 Zq Road', 'Zqarea');
+  insert into public.service_items (id, job_id, sort, is_primary, kind, label, serial)
+  values ('si_wqt_n1', 's_wqt_n1', 0, true, 'laptop', 'Zq Late Laptop', 'ZQ-SER-1');
+  insert into public.rma_intakes (id, source, sender_kind) values ('ri_wqt_n1', 'walk_in', 'customer');
+  insert into public.rma_cases (id, public_code, intake_id, service_job_id, holds_ticket, kind, stage, stage_since,
+                                expected_back_at, return_method, handler_email, handler_name)
+  values ('rc_wqt_n1', 'RM-WQTN0001', 'ri_wqt_n1', 's_wqt_n3', true, 'gpu', 'awaiting_docs', now(), null, 'collect', null, null),
+         ('rc_wqt_n2', 'RM-WQTN0002', 'ri_wqt_n1', 's_wqt_n3', true, 'psu', 'with_vendor', now() - interval '20 days',
+          now() - interval '1 day', 'collect', null, null),
+         ('rc_wqt_n3', 'RM-WQTN0003', 'ri_wqt_n1', null, false, 'ssd', 'ready_to_return', now(), null, 'courier',
+          'zq.solo@neotokyo.test', 'Zqsolo Person'),
+         ('rc_wqt_n4', 'RM-WQTN0004', 'ri_wqt_n1', null, false, 'ram', 'closed', now(), null, 'collect',
+          'zq.solo@neotokyo.test', 'Zqsolo Person');
+  -- one alert of each kind, older than anything live, so it sorts first
+  insert into public.work_alerts (kind, item_kind, item_id, item_code, title, body, created_at)
+  values ('no_candidate', 'service', 's_wqt_n3', 'NT-WQTN0003', 'Zq Held PC', 'Zq service alert for the dashboard', '2000-01-01'),
+         ('no_candidate', 'build', 't_wqt_h6', 'WQT_H6', 'Zq Dash Build Waiting', 'Zq build alert for the dashboard', '2000-01-01');
+  -- a log and a site arrival on each side of today's India midnight
+  insert into public.work_logs (id, profile_id, employee_email, title, created_at, updated_at)
+  values (gen_random_uuid(), v_solo, 'zq.solo@neotokyo.test', 'Zq dash log today', v_lo, v_lo),
+         (gen_random_uuid(), v_solo, 'zq.solo@neotokyo.test', 'Zq dash log yesterday', v_lo - interval '1 second', v_lo);
+  insert into public.field_activity (client_request_id, employee_email, employee_name, kind, at, ref_id, source)
+  values (gen_random_uuid(), 'zq.solo@neotokyo.test', 'Zqsolo Person', 'arrived', v_lo, 's_wqt_n1', 'neohr'),
+         (gen_random_uuid(), 'zq.solo@neotokyo.test', 'Zqsolo Person', 'arrived', v_lo - interval '1 second', 's_wqt_n1', 'neohr');
+  perform set_config('neo.rma_nosync', '', true);
+  perform set_config('neo.migrating', '', true);
+end $$;
+
+select neo_wqt.login('head');
+do $$
+begin
+  perform neo_wqt.assert((public.work_offer('build', 't_wqt_h7', 'zq.solo@neotokyo.test', 'Dashboard test') ->> 'ok')::boolean,
+                         'TEST SETUP: h7 offered to solo');
+end $$;
+
+-- Who gets which section: present only when the caller may read it.
+select neo_wqt.login('sales');
+do $$
+declare r jsonb;
+begin
+  r := public.neo_dashboard();
+  perform neo_wqt.assert((select string_agg(k, ',' order by k) from jsonb_object_keys(r) k) = 'attention,me,now'
+                         and r -> 'attention' = '[]'::jsonb and r -> 'me' ->> 'name' = neo_wqt.name('sales')
+                         and (r -> 'me' ->> 'tier')::int = 1 and r -> 'me' ? 'designation',
+                         format('neo_dashboard: sales (no module role, no pool) get now / me / attention only (%s)', r));
+end $$;
+
+select neo_wqt.login('plain');      -- builds desk only
+do $$
+declare r jsonb; b text := neo_wqt.get('dash_plain');
+begin
+  r := public.neo_dashboard();
+  perform neo_wqt.assert((select string_agg(k, ',' order by k) from jsonb_object_keys(r) k) = 'attention,builds,me,now,queue',
+                         format('neo_dashboard: a builds desk gets queue + builds, no service / rma / team / mine (%s)',
+                                (select string_agg(k, ',' order by k) from jsonb_object_keys(r) k)));
+  perform neo_wqt.assert(neo_wqt.d(b, r, 'queue', 'open') = 4 and neo_wqt.d(b, r, 'queue', 'overdue') = 3,
+                         format('a builds desk counts only builds in the queue (%s → %s)', b::jsonb -> 'queue', r -> 'queue'));
+end $$;
+
+select neo_wqt.login('desk');       -- service + builds + rma desk, no pool
+do $$
+declare r jsonb;
+begin
+  r := public.neo_dashboard();
+  perform neo_wqt.assert((select string_agg(k, ',' order by k) from jsonb_object_keys(r) k) = 'attention,builds,me,now,queue,rma,service',
+                         format('neo_dashboard: the desk gets queue, service, builds and rma, no mine (not in a pool) and no team (%s)',
+                                (select string_agg(k, ',' order by k) from jsonb_object_keys(r) k)));
+end $$;
+
+select neo_wqt.login('owner');
+do $$
+declare
+  r jsonb; b text := neo_wqt.get('dash_owner');
+  v_hi timestamptz := neo_wqt.get('dash_hi')::timestamptz;
+  v_edge int := case when v_hi - interval '1 second' <= now() then 1 else 0 end;   -- the last second of the day
+begin
+  r := public.neo_dashboard();
+  perform neo_wqt.assert(r ? 'queue' and r ? 'service' and r ? 'builds' and r ? 'rma' and r ? 'team'
+                         and (r ->> 'now')::timestamptz = now() and r -> 'me' ->> 'name' = neo_wqt.name('owner'),
+                         'neo_dashboard: tier 5 gets every section');
+  -- service: whose turn (held parts decide a mirror-stage ticket: n3 is on the customer and late)
+  perform neo_wqt.assert(neo_wqt.d(b, r, 'service', 'open') = 6 and neo_wqt.d(b, r, 'service', 'on_us') = 2
+                         and neo_wqt.d(b, r, 'service', 'on_customer') = 3 and neo_wqt.d(b, r, 'service', 'on_supplier') = 1
+                         and neo_wqt.d(b, r, 'service', 'ready_to_collect') = 1 and neo_wqt.d(b, r, 'service', 'late') = 2
+                         and neo_wqt.d(b, r, 'service', 'visits_today') = 1
+                         and neo_wqt.n(r, 'service', 'on_us') + neo_wqt.n(r, 'service', 'on_customer') + neo_wqt.n(r, 'service', 'on_supplier')
+                             = neo_wqt.n(r, 'service', 'open'),
+                         format('service section: open, whose turn, ready, late, visits today (%s → %s)', b::jsonb -> 'service', r -> 'service'));
+  perform neo_wqt.assert(neo_wqt.d(b, r, 'builds', 'open') = 9 and neo_wqt.d(b, r, 'builds', 'awaiting') = 6
+                         and neo_wqt.d(b, r, 'builds', 'building') = 1 and neo_wqt.d(b, r, 'builds', 'waiting_qc') = 1
+                         and neo_wqt.d(b, r, 'builds', 'qc_testing') = 1 and neo_wqt.d(b, r, 'builds', 'not_sent') = 1
+                         and neo_wqt.d(b, r, 'builds', 'overdue') = 2 + v_edge and neo_wqt.d(b, r, 'builds', 'due_48h') = 2 - v_edge,
+                         format('builds section (%s → %s)', b::jsonb -> 'builds', r -> 'builds'));
+  perform neo_wqt.assert(neo_wqt.d(b, r, 'queue', 'open') = 5 and neo_wqt.d(b, r, 'queue', 'overdue') = 4
+                         and neo_wqt.n(r, 'queue', 'oldest_minutes') >= 40 * 24 * 60,
+                         format('queue section: both kinds, past 4 hours, the longest wait (%s → %s)', b::jsonb -> 'queue', r -> 'queue'));
+  perform neo_wqt.assert(neo_wqt.d(b, r, 'rma', 'open') = 3 and neo_wqt.d(b, r, 'rma', 'at_vendor') = 1
+                         and neo_wqt.d(b, r, 'rma', 'ready_to_return') = 1,
+                         format('rma section (%s → %s)', b::jsonb -> 'rma', r -> 'rma'));
+  perform neo_wqt.assert(neo_wqt.d(b, r, 'team', 'people') = 2 and neo_wqt.d(b, r, 'team', 'busy') >= 1
+                         and neo_wqt.d(b, r, 'team', 'free') >= 1
+                         and neo_wqt.n(r, 'team', 'busy') + neo_wqt.n(r, 'team', 'free') = neo_wqt.n(r, 'team', 'people')
+                         and neo_wqt.d(b, r, 'team', 'logs_today') = 1 and neo_wqt.d(b, r, 'team', 'visits_today') = 1
+                         and neo_wqt.d(b, r, 'team', 'alerts') = 2 and neo_wqt.n(r, 'team', 'load_pct') between 0 and 1000,
+                         format('team section: people, busy + free, India-day logs and arrivals, alerts (%s → %s)', b::jsonb -> 'team', r -> 'team'));
+end $$;
+
+select neo_wqt.login('solo');
+do $$
+declare
+  r jsonb; a jsonb;
+  v_hi timestamptz := neo_wqt.get('dash_hi')::timestamptz;
+  v_edge int := case when v_hi - interval '1 second' <= now() then 1 else 0 end;
+begin
+  r := public.neo_dashboard();
+  perform neo_wqt.assert((select string_agg(k, ',' order by k) from jsonb_object_keys(r) k) = 'attention,builds,me,mine,now,queue,service',
+                         format('neo_dashboard: a pool technician gets mine, queue, service and builds — no rma role, no team (%s)',
+                                (select string_agg(k, ',' order by k) from jsonb_object_keys(r) k)));
+  perform neo_wqt.assert(neo_wqt.n(r, 'mine', 'items') = 6 and neo_wqt.n(r, 'mine', 'offers') = 1
+                         and neo_wqt.n(r, 'mine', 'due_today') = 3 and neo_wqt.n(r, 'mine', 'overdue') = 3 + v_edge,
+                         format('mine: items, offers, due today inside India''s day (00:00 in, 24:00 out), overdue (%s)', r -> 'mine'));
+  a := r -> 'attention';
+  perform neo_wqt.assert(jsonb_array_length(a) = 6
+                         and not exists (select 1 from jsonb_array_elements(a) e(value)
+                                          where (select string_agg(k, ',' order by k) from jsonb_object_keys(e.value) k) <> 'at,code,id,kind,title,why'),
+                         format('attention: six lines of kind, id, code, title, why, at (%s)', a));
+  perform neo_wqt.assert(a -> 0 ->> 'id' = 't_wqt_h7' and a -> 0 ->> 'kind' = 'build' and a -> 0 ->> 'code' = 'WQT_H7'
+                         and a -> 0 ->> 'why' = 'Offered to you — accept by ' || neo_wqt.hm(interval '30 minutes') || '.'
+                         and (a -> 0 ->> 'at')::timestamptz = now() + interval '30 minutes',
+                         format('attention: the offer to me comes first, with its India-time deadline (%s)', a -> 0));
+  perform neo_wqt.assert(a -> 1 ->> 'id' = 's_wqt_n1' and a -> 1 ->> 'why' = 'Late — Diagnosing.' and a -> 1 ->> 'title' = 'Zq Late Laptop'
+                         and a -> 1 ->> 'code' = 'NT-WQTN0001'
+                         and a -> 2 ->> 'id' = 't_wqt_h4' and a -> 2 ->> 'why' = 'Past its deadline.'
+                         and a -> 3 ->> 'id' = 't_wqt_h1' and a -> 3 ->> 'title' = 'Zq Dash Build Lo',
+                         format('attention: then my late work, oldest first (%s)', a));
+  perform neo_wqt.assert(a -> 4 ->> 'why' = 'Nobody has claimed it in 4 hours.' and a -> 5 ->> 'why' = 'Nobody has claimed it in 4 hours.'
+                         and a::text not like '%9000000351%' and a::text not like '%Zqcustomer%',
+                         'attention: then the queue past its 4 hours; never a customer''s name or phone');
+end $$;
+
+select neo_wqt.login('twin2');      -- a junior builder, holding nothing
+do $$
+declare r jsonb;
+begin
+  r := public.neo_dashboard();
+  perform neo_wqt.assert(r ? 'mine' and r ? 'queue' and r ? 'builds' and not (r ? 'service') and not (r ? 'rma'),
+                         format('a builds-only pool member: mine, queue, builds (%s)', (select string_agg(k, ',' order by k) from jsonb_object_keys(r) k)));
+  perform neo_wqt.assert(not exists (select 1 from jsonb_array_elements(r -> 'attention') e(value) where e.value ->> 'id' in ('t_wqt_h8', 't_wqt_h9'))
+                         and exists (select 1 from jsonb_array_elements(r -> 'attention') e(value)
+                                      where e.value ->> 'why' = 'Nobody has claimed it in 4 hours.' and e.value ->> 'kind' = 'build')
+                         and not exists (select 1 from jsonb_array_elements(r -> 'attention') e(value) where e.value ->> 'kind' = 'service'),
+                         format('attention: a junior is nudged about the builds they could claim — never a high-value one, never one they declined (%s)', r -> 'attention'));
+end $$;
+
+select neo_wqt.login('twin1');      -- a service lead (tier 1), holding nothing
+do $$
+declare r jsonb;
+begin
+  r := public.neo_dashboard();
+  perform neo_wqt.assert((select string_agg(k, ',' order by k) from jsonb_object_keys(r) k) = 'attention,me,now,queue,service',
+                         format('a service lead with no builds role: queue and service only (%s)', r));
+  perform neo_wqt.assert(r -> 'attention' -> 0 ->> 'why' = 'Zq service alert for the dashboard'
+                         and r -> 'attention' -> 0 ->> 'id' = 's_wqt_n3' and r -> 'attention' -> 0 ->> 'kind' = 'service'
+                         and r::text not like '%Zq build alert%',
+                         format('C14: a service lead''s attention has the service alert and never a build alert (%s)', r -> 'attention'));
+end $$;
+reset role;
+select neo_wqt.no_jwt();
+insert into public.module_access (profile_id, module, role, granted_by)
+select id, 'qc', 'lead', 'tests' from neo_wqt.users where alias = 'twin1';
+select neo_wqt.login('twin1');
+do $$
+declare r jsonb;
+begin
+  r := public.neo_dashboard();
+  perform neo_wqt.assert(r -> 'attention' -> 0 ->> 'why' = 'Zq service alert for the dashboard'
+                         and r -> 'attention' -> 1 ->> 'why' = 'Zq build alert for the dashboard' and r ? 'builds',
+                         format('and a builds lead gets the build alert too (%s)', r -> 'attention'));
+end $$;
+
+-- A neohr lead below tier 3 (HR) reads the team and everyone's logs — the
+-- NeoHR screen and the phone's Team tab — but leads no kind of work.
+reset role;
+select neo_wqt.no_jwt();
+insert into public.module_access (profile_id, module, role, granted_by)
+select id, 'neohr', 'lead', 'tests' from neo_wqt.users where alias = 'desk'
+on conflict (profile_id, module) do update set role = 'lead';
+select neo_wqt.login('desk');
+do $$
+declare r jsonb; p jsonb; n bigint;
+begin
+  perform neo_wqt.assert((public.my_work_profile() ->> 'team_view')::boolean, 'NeoHR 2.1: a neohr lead gets team_view');
+  r := public.work_team();
+  p := neo_wqt.person(r, 'zq.solo@neotokyo.test');
+  perform neo_wqt.assert(p is not null and (p ->> 'logs_today')::int >= 1 and p ->> 'last_seen_at' is not null
+                         and p -> 'items' = '[]'::jsonb and p -> 'offers' = '[]'::jsonb and r -> 'alerts' = '[]'::jsonb,
+                         format('a neohr lead sees people, last seen and logs today, but no items, offers or alerts (%s)', p));
+  r := public.work_log_team(((now() at time zone 'Asia/Kolkata')::date), ((now() at time zone 'Asia/Kolkata')::date), 'zq.solo@neotokyo.test');
+  perform neo_wqt.assert(exists (select 1 from jsonb_array_elements(r -> 'rows') e(value) where e.value ->> 'title' = 'Zq dash log today')
+                         and not exists (select 1 from jsonb_array_elements(r -> 'rows') e(value) where e.value ->> 'title' = 'Zq dash log yesterday'),
+                         'a neohr lead reads the team''s logs (India day)');
+  select count(*) into n from public.work_logs where employee_email = 'zq.solo@neotokyo.test';
+  perform neo_wqt.assert(n >= 4, 'RLS: a neohr lead reads everyone''s work_logs rows');
+  perform neo_wqt.assert(not (public.neo_dashboard() ? 'team'), 'the dashboard''s team section stays tier 3+');
+end $$;
+reset role;
+select neo_wqt.no_jwt();
+delete from public.module_access where module = 'neohr' and profile_id = (select id from neo_wqt.users where alias = 'desk');
+
+
+-- ── 16. NeoHR 2.1: what the phone does for a technician, under RLS ───────────
+-- solo (Service tech + Builds tech, no RMA role) works s_wqt_n1 / n2 the way
+-- NeoHR does over REST. Storage is checked when this role may write
+-- storage.objects directly (PGlite, and normally the SQL editor); otherwise a
+-- warning says it was skipped.
+do $$
+begin
+  begin
+    insert into storage.objects (bucket_id, name, owner_id)
+    values ('service-media', 's_wqt_n1/zq-by-the-desk.jpg', (select id::text from neo_wqt.users where alias = 'desk'));
+    perform neo_wqt.put('st_owner', 'yes');
+  exception when insufficient_privilege or undefined_column or undefined_table then
+    raise warning 'work-queue tests: the owner cannot write storage.objects here (%); the someone-else''s-file checks of section 16 are skipped', sqlerrm;
+    perform neo_wqt.put('st_owner', 'no');
+  end;
+  perform neo_wqt.put('st_ok', 'no');
+  insert into public.service_secrets (job_id, secret, set_by_email, set_by_name)
+  values ('s_wqt_n2', 'zq-1234', neo_wqt.email('desk'), neo_wqt.name('desk'));
+end $$;
+
+select neo_wqt.login('solo');
+do $$
+declare
+  r jsonb; n bigint; v_id bigint;
+  v_path text := 's_wqt_n1/' || 'mh0z3k1c' || '-' || 'a1b2c3d4' || '.jpg';
+  v_bad text := 's_wqt_n1/mh0z3k1d-e5f6g7h8.jpg';
+  v_st boolean := true;
+  v_other boolean := neo_wqt.get('st_owner') = 'yes';
+begin
+  -- the job detail: my own job's contact and site, its items, its timeline, a build
+  select count(*) into n from public.v_tech_day d
+   where d.id in ('s_wqt_n1', 's_wqt_n2') and d.customer_phone is not null and d.customer_name like 'Zqcustomer %';
+  perform neo_wqt.assert(n = 2 and not exists (select 1 from public.v_tech_day where id = 's_wqt_n4'),
+                         'v_tech_day: my own jobs with name and phone, nobody else''s');
+  perform neo_wqt.assert((select count(*) from public.service_items where job_id = 's_wqt_n1') = 1, 'service_items: the job''s items');
+  perform neo_wqt.assert(exists (select 1 from public.tickets where id = 't_wqt_h1' and specs ->> 'cpu' = 'Ryzen 5 7600'),
+                         'a build''s detail is readable');
+  -- notes
+  r := public.service_add_note('s_wqt_n1', 'Zq internal note', false);
+  perform neo_wqt.assert(r ->> 'kind' = 'note' and not (r ->> 'customer_visible')::boolean, 'service_add_note: internal');
+  r := public.service_add_note('s_wqt_n1', 'Zq note for the customer', true);
+  perform neo_wqt.assert((r ->> 'customer_visible')::boolean and r ->> 'actor_email' = 'zq.solo@neotokyo.test',
+                         'service_add_note: customer-visible, in my name');
+  select count(*) into n from (select 1 from public.service_events where job_id = 's_wqt_n1' order by at desc, id desc limit 30) x;
+  perform neo_wqt.assert(n >= 2, 'service_events: the timeline (newest 30)');
+  -- the direct REST writes the policies give a technician (NeoHR itself uses the RPCs)
+  insert into public.service_events (job_id, kind, actor_kind, actor_email, actor_name, body, customer_visible)
+  values ('s_wqt_n1', 'note', 'staff', 'zq.solo@neotokyo.test', 'Zqsolo Person', 'Zq direct note', false);
+  perform neo_wqt.expect_error($q$insert into public.service_events (job_id, kind, actor_kind, actor_email, body)
+                                  values ('s_wqt_n1', 'claim', 'staff', 'zq.solo@neotokyo.test', 'forged')$q$, '%row-level security%');
+  insert into public.service_items (job_id, sort, kind, label) values ('s_wqt_n1', 1, 'other', 'Zq charger');
+  perform neo_wqt.assert((select count(*) from public.service_items where job_id = 's_wqt_n1') = 2,
+                         'service_items / service_events: a technician may add a row directly (insert + select policies)');
+  -- photos: the file, then the row; a failed row removes its own file
+  begin
+    insert into storage.objects (bucket_id, name, owner_id) values ('service-media', v_path, auth.uid()::text);
+    perform neo_wqt.put('st_ok', 'yes');
+  exception when insufficient_privilege or undefined_column or undefined_table then
+    if sqlerrm like '%row-level security%' then
+      raise exception 'FAIL: a technician cannot upload a photo to their own job''s folder (%)', sqlerrm;
+    end if;
+    raise warning 'work-queue tests: this role cannot write storage.objects directly (%); the photo file checks are skipped', sqlerrm;
+    v_st := false;
+  end;
+  insert into public.service_media (job_id, rma_case_id, service_item_id, path, phase, role, remark, remark_by, remark_at,
+                                    uploaded_by, uploaded_name)
+  values ('s_wqt_n1', null, 'si_wqt_n1', v_path, 'during', 'during', 'Zq dust in the fan', 'Zqsolo Person', now(),
+          'zq.solo@neotokyo.test', 'Zqsolo Person')
+  returning id into v_id;
+  perform neo_wqt.assert(exists (select 1 from public.service_media where id = v_id and path = v_path),
+                         'service_media: a technician records the photo and reads the row back (return=representation)');
+  if v_st then
+    perform neo_wqt.assert(exists (select 1 from storage.objects where bucket_id = 'service-media' and name = v_path),
+                           'the file is readable (signable) by its uploader');
+    insert into storage.objects (bucket_id, name, owner_id) values ('service-media', v_bad, auth.uid()::text);
+  end if;
+  begin
+    insert into public.service_media (job_id, path, phase, role, customer_visible, uploaded_by, uploaded_name)
+    values ('s_wqt_n1', v_bad, 'intake', 'invoice', true, 'zq.solo@neotokyo.test', 'Zqsolo Person');
+    raise exception 'FAIL: an invoice shown to the customer was accepted';
+  exception when check_violation then null;
+  end;
+  if v_st then
+    begin
+      delete from storage.objects where bucket_id = 'service-media' and name = v_bad;
+      get diagnostics n = row_count;
+      perform neo_wqt.assert(n = 1, 'the uploader removes their own file when its row is refused');
+      delete from storage.objects where bucket_id = 'service-media' and name = 's_wqt_n1/zq-by-the-desk.jpg';
+      get diagnostics n = row_count;
+      perform neo_wqt.assert(n = 0, 'but not a file someone else uploaded');
+    exception when others then
+      if sqlerrm like 'FAIL:%' then raise; end if;
+      raise warning 'work-queue tests: storage deletes are refused here (%); skipped', sqlerrm;
+    end;
+  end if;
+  if v_other then
+    perform neo_wqt.assert(exists (select 1 from storage.objects where bucket_id = 'service-media' and name = 's_wqt_n1/zq-by-the-desk.jpg'),
+                           'a technician can read (sign) the job''s other photos');
+  end if;
+  -- moves: the extras, the stale check, the RMA mirror stages
+  perform neo_wqt.expect_error($q$select public.service_move('s_wqt_n1', 'received', 'in_service')$q$, '%NEO_STALE:%');
+  perform neo_wqt.expect_error($q$select public.service_move('s_wqt_n1', 'diagnosing', 'parts_on_order', null, true, '{}'::jsonb)$q$,
+                               '%NEO_GATE: Say who we are waiting on%');
+  perform neo_wqt.expect_error($q$select public.service_move('s_wqt_n1', 'diagnosing', 'at_vendor', null, true, '{"waiting_party":"Zq Vendor"}'::jsonb)$q$,
+                               '%NEO_RMA_HOLD:%');
+  r := public.service_move('s_wqt_n1', 'diagnosing', 'in_service', 'Zq starting the repair', false, '{}'::jsonb);
+  perform neo_wqt.assert(r ->> 'stage' = 'in_service', 'service_move: a technician moves their job on');
+  perform neo_wqt.expect_error($q$select public.service_move('s_wqt_n1', 'in_service', 'ready', null, true, '{}'::jsonb)$q$,
+                               '%NEO_GATE: Say what happened%');
+  r := public.service_move('s_wqt_n1', 'in_service', 'ready', null, true, '{"outcome":"repaired"}'::jsonb);
+  perform neo_wqt.assert(r ->> 'stage' = 'ready' and r ->> 'outcome' = 'repaired', 'service_move: ready needs an outcome (p_extra)');
+  perform neo_wqt.assert(exists (select 1 from public.service_events where job_id = 's_wqt_n1' and kind = 'stage' and to_stage = 'in_service'
+                                   and not customer_visible and body = 'Zq starting the repair')
+                         and exists (select 1 from public.service_events where job_id = 's_wqt_n1' and kind = 'stage' and to_stage = 'ready'
+                                       and customer_visible),
+                         'the move is on the timeline; a note on it keeps its own tick');
+  -- the device password: shown on request, every view on the internal timeline
+  r := public.service_get_password('s_wqt_n2');
+  perform neo_wqt.assert(r ->> 'secret' = 'zq-1234' and r ->> 'set_by_name' = neo_wqt.name('desk'), 'service_get_password for a technician');
+  perform neo_wqt.assert(exists (select 1 from public.service_events where job_id = 's_wqt_n2' and kind = 'edit' and not customer_visible
+                                   and body = 'Device password viewed by Zqsolo Person'),
+                         'and the view is logged');
+  -- My RMA parts: the open parts I handle, with the vendor's name
+  select count(*) into n from public.rma_cases c where c.handler_email = 'zq.solo@neotokyo.test' and c.stage <> 'closed';
+  perform neo_wqt.assert(n = 1, format('rma_cases: a technician with no RMA role reads the parts they handle (%s)', n));
+  perform neo_wqt.assert(exists (select 1 from public.rma_vendors), 'rma_vendors: readable for the vendor name');
+end $$;
+
+-- Someone without a service role gets none of it.
+select neo_wqt.login('plain');
+do $$
+declare v_st boolean := neo_wqt.get('st_ok') = 'yes';
+begin
+  perform neo_wqt.assert((select count(*) from public.service_items where job_id = 's_wqt_n1') = 0
+                         and (select count(*) from public.service_events where job_id = 's_wqt_n1') = 0
+                         and (select count(*) from public.v_tech_day) = 0
+                         and (select count(*) from public.service_media where job_id = 's_wqt_n1') = 0,
+                         'no service role: no items, timeline, day or photos');
+  perform neo_wqt.expect_error($q$select public.service_add_note('s_wqt_n1', 'x', false)$q$, '%NEO_DENIED%');
+  perform neo_wqt.expect_error($q$select public.service_get_password('s_wqt_n2')$q$, '%NEO_DENIED%');
+  perform neo_wqt.expect_error($q$select public.service_move('s_wqt_n2', 'quoted', 'approved')$q$, '%NEO_DENIED%');
+  perform neo_wqt.expect_error($q$insert into public.service_media (job_id, path, phase, role, uploaded_by) values ('s_wqt_n1', 's_wqt_n1/x.jpg', 'during', 'during', 'x')$q$,
+                               '%row-level security%');
+  if v_st then
+    perform neo_wqt.expect_error($q$insert into storage.objects (bucket_id, name) values ('service-media', 's_wqt_n1/y.jpg')$q$,
+                                 '%row-level security%');
+  end if;
+end $$;
+
+
+-- ── 17. Done ─────────────────────────────────────────────────────────────────
 reset role;
 select 'work-queue tests: all passed' as result;
 

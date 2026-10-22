@@ -578,7 +578,7 @@
       } else if (kind === 'offer-other') {
         var l2 = at - now;
         var nm = n.getAttribute('data-q-name') || 'someone';
-        n.textContent = l2 > 0 ? ('Offered to ' + nm + ' · ' + fmtLeft(l2) + ' left') : ('Offer to ' + nm + ' ran out');
+        n.textContent = l2 > 0 ? ('Offered to ' + nm + ' · ' + fmtLeft(l2) + ' left') : ('The offer to ' + nm + ' has ended');
         if (l2 <= 0 && !n.dataset.qDone) { n.dataset.qDone = '1'; refetch = true; }
       }
     });
@@ -1016,8 +1016,10 @@
       case 'closed': return 'This one is finished.';
       case 'not_found': return 'That item no longer exists.';
       // Timed out, declined, or the app's own offer withdrawn: all 'expired'.
-      case 'expired': return 'This offer has ended.';
-      case 'not_offered': return 'It isn’t offered to you any more.';
+      // A lead's withdrawal (or a stale card) answers 'not_offered'. The
+      // person only needs to know it is over, not why.
+      case 'expired':
+      case 'not_offered': return 'This offer has ended.';
       case 'not_eligible': return res.why || 'You can’t take this one.';
       case 'assigned': return 'It already has a technician.';
       default: return res.message || ('That did not work' + (res.reason ? ' (' + res.reason + ')' : '') + '. Refresh and try again.');

@@ -1,6 +1,6 @@
 # NeoHR data contract
 
-**Contract version:** 3. It comes from the database migrations `service_v2_rma` (`sql/service-v2.sql`), `service_v2_1_secrets` (`sql/service-v2.1.sql`) and `work_queue_v2_2` (`sql/work-queue.sql`). Version 3 adds the work queue for builds and service (§8), synced work logs (§9) and sign-in over plain REST (§8.1); version 2 replaced the `v_tech_activity` view with the `tech_activity` RPC and changed phone normalisation, check-out handling, claim retries and re-timed claims. See §12 for the lists.
+**Contract version:** 3.1. It comes from the database migrations `service_v2_rma` (`sql/service-v2.sql`), `service_v2_1_secrets` (`sql/service-v2.1.sql`) and `work_queue_v2_2` (`sql/work-queue.sql`). Version 3.1 (NeoHR 2.1, additive) adds the simplified dashboard, the technician's job detail, moves, photos and RMA parts from the phone, and the NeoHR update manifest (§10). Version 3 adds the work queue for builds and service (§8), synced work logs (§9) and sign-in over plain REST (§8.1); version 2 replaced the `v_tech_activity` view with the `tech_activity` RPC and changed phone normalisation, check-out handling, claim retries and re-timed claims. See §13 for the lists.
 **Audience:** the Android (Kotlin) developer turning *Daily Logger* (today a local-only Room/SQLite app) into **NeoHR**. NeoHR talks to the same Supabase project as the Neo Tokyo desktop app and website.
 
 This file is the only promise the server makes to NeoHR. Everything listed here exists in the database once `service_v2_rma` is applied. Anything not listed (tables, columns, other RPCs) may change without notice, so NeoHR must not read or write it.
@@ -27,6 +27,10 @@ This file is the only promise the server makes to NeoHR. Everything listed here 
 | HR / manager activity report | RPC `tech_activity`, table `field_activity` |
 | Technician picker | RPC `service_tech_list` |
 | A part pulled from a customer's machine on site | RPC `rma_create` with `source: "field"` (§6.8) |
+| The Dashboard tab (simplified, by what the person may read) | RPC `neo_dashboard` (§10.1) |
+| A service job's detail: items, timeline, move, note, photos, device password | `v_tech_day`, `service_items`, `service_events`, `service_move`, `service_add_note`, bucket `service-media` + `service_media`, `service_get_password` (§10.2–§10.4) |
+| A build's detail; my RMA parts | `tickets` (named columns only), `rma_cases` (§10.2) |
+| "Update available — NeoHR x.y.z" | GitHub Releases + `neohr.json` (§10.5) |
 
 Daily Logger's local Room database stays the source of truth for the person's own log while offline. The server receives an idempotent copy (see §6).
 
@@ -81,8 +85,8 @@ The person's row in `profiles` must have `active = true` and `is_staff = true`. 
 Each person has a **tier** (1–5) and, per module, an optional **role**: `desk` < `tech` < `lead`.
 
 - Tier 3 and above is automatically `lead` in every module.
-- Everyone else gets roles from the `module_access` table. Tier 4+ set the `service`, `rma` and `qc` roles in the desktop app under Settings → General → People (in the Operations section; it saves through the desktop-only RPC `staff_update`). People does not set the `neohr` role: `staff_update` answers `NEO_GATE: "neohr" is not a module you can set here.` Tier 4+ grant it with the RPC `module_access_set({"p_email": "…", "p_module": "neohr", "p_role": "lead"})` (no 1.11 screen calls it) or in SQL.
-- Modules: `service`, `rma`, `qc`, `neohr`. The server checks the `neohr` role in one place: a `neohr` lead sees everyone's activity (`tech_activity`, `field_activity`). Other `neohr` uses are reserved for NeoHR's own features.
+- Everyone else gets roles from the `module_access` table. Tier 4+ set the `service`, `rma`, `qc` and (contract 3.1) `neohr` roles in the desktop app under Settings → General → People (in the Operations section; it saves through the desktop-only RPC `staff_update`, whose `roles` take `service`, `rma`, `qc` and `neohr`). A designation preset sets `service`, `rma` and `qc` only and never touches `neohr`. `module_access_set({"p_email": "…", "p_module": "neohr", "p_role": "lead"})` still works too.
+- Modules: `service`, `rma`, `qc`, `neohr`. The server checks the `neohr` role for one thing: a `neohr` **lead** (HR; tier 3+ are leads automatically) sees everyone's activity and logs — `tech_activity`, `field_activity`, `work_log_team`, `work_logs`, and the team (`work_team`, without the items and alerts of kinds they do not lead); `my_work_profile.team_view` is `true` for them. Other `neohr` uses are reserved for NeoHR's own features.
 
 ### `my_modules()` — call once after sign-in, then cache
 ```
@@ -106,6 +110,7 @@ Version 3 added `build_pool`, `service_pool` (booleans) and `build_level` (`"jun
 | Post field activity **for someone else** | `service` role `lead` |
 | Log a part pulled on site (`rma_create`, `source: "field"`) | `service` or `rma` role `desk` or higher (techs qualify) |
 | Read everyone's activity (HR, managers) | `service` role `lead`, `neohr` role `lead`, or tier 3+ |
+| Read everyone's work logs and the team | `neohr` role `lead`, or tier 3+ |
 
 A role change takes effect on the person's **next request**; no new sign-in is needed. The desktop app tells people to restart, so NeoHR can simply re-call `my_modules()` when it returns to the foreground.
 
@@ -410,6 +415,8 @@ Response: `{"ok": true, "job": {…}}`
 To take a note while offline, queue it as a `record_field_activity` with `kind: "note"`, `ref_type: "service_job"` and the job's `ref_id`. That path is idempotent, and the note stays internal.
 
 ### 6.5 Photos on a job
+**Contract 3.1:** NeoHR 2.1 uploads exactly as Neo OS does — path `<jobId>/<base36 time>-<8 random>.jpg`, the full `service_media` row and the clean-up on failure are in §10.4, which replaces the path below (the bucket accepts both). NeoHR 2.1 adds photos **online only**, with a new path for every attempt. The advice below about keeping the path with a queued item and checking for an existing row before a retry applies only to a future offline queue (§10.4, last paragraph).
+
 1. Upload the image (JPEG, PNG or WebP; HEIC accepted; at most 15 MB; NeoHR should resize to at most 2048 px, JPEG quality 0.85) to the private bucket **`service-media`**, at the path **`<jobId>/<uuid>.jpg`**. The bucket follows the module roles: uploading and reading need a `service` role (desk, tech or lead); only the uploader or a `service` lead can delete a file. (An `rma` role can also read, but not change, the photos recorded on a job's item once that item is sent under warranty claim; this does not affect NeoHR.) Use a fresh UUID per photo and keep it with the queued item, so a retry overwrites nothing and duplicates nothing.
    ```kotlin
    supabase.storage.from("service-media").upload("$jobId/$photoUuid.jpg", bytes) { upsert = false }
@@ -502,7 +509,7 @@ From `sql/service-v2.1.sql`. A customer leaving a device may give its password o
 | Action | Queue offline? | Why |
 |---|---|---|
 | `record_field_activity` (all kinds) | **Yes** | idempotent on `client_request_id`; stores device time `at` |
-| Photo upload + `service_media` insert | Yes, with the per-photo UUID path and the existence check in §6.5 | |
+| Photo upload + `service_media` insert | **No** in NeoHR 2.1 (nor in Neo OS): online only, a new path for every attempt (§10.4) | a failure goes back to the person, who adds the photo again; a later version may queue it (§10.4, last paragraph) |
 | `service_claim` | **No** | first come, first served; a stale claim misleads the customer |
 | `service_release` | **No** | the job must return to the queue while someone can still take it |
 | `service_add_note` | **No** (use a `note` field activity instead) | not idempotent |
@@ -601,7 +608,7 @@ The answer body is the function's JSON value itself. Errors are PostgREST's body
 | Key | Use |
 |---|---|
 | `home` | `"work"` exactly when `work_queue()` will answer (Builds or Service desk and up); otherwise `"logs"`. A pool flag never selects `work` on its own. |
-| `team_view` | tier 3+: show the Team tab and everyone's logs (`work_log_team`). |
+| `team_view` | tier 3+ or a `neohr` lead (contract 3.1): show the Team tab and everyone's logs (`work_log_team`). |
 | `lead_builds` / `lead_service` | may offer items of that kind (`work_offer`) and sees that kind's alerts. |
 | `desk_builds` / `desk_service` | reads items of that kind in the queue. |
 | `build_pool`, `service_pool`, `build_level` | the person's own work settings (`build_level`: `"junior"`, `"senior"` or `null`). |
@@ -646,7 +653,7 @@ The answer body is the function's JSON value itself. Errors are PostgREST's body
 | `code` | what people say: the build's last 6 characters, or the `NT-` code |
 | `title`, `sub` | build: customer name, `cpu · gpu`; service: device (or category), `type · category` |
 | `customer` | a **first name only** for a pure technician until the job is theirs; desk and leads see the whole name. Never a phone or an address (`area` only) — after a claim, read the job from `v_tech_day` (§8.10). |
-| `stage` | build `status` (`awaiting`, `building`, `waiting_qc`, `qc_testing`) or service `stage` (§11) |
+| `stage` | build `status` (`awaiting`, `building`, `waiting_qc`, `qc_testing`) or service `stage` (§12) |
 | `priority` | builds: `urgent` when the deadline is less than 48 h away, else `normal`; service: the ticket's priority |
 | `build_tier`, `needs_senior` | builds: 1–5; `true` for tier 4–5 |
 | `deadline` | builds: the deadline; service: the visit start, else the needed-by date |
@@ -746,7 +753,7 @@ Service: every rule of `service_release` (§6.3) applies and its `"job"` is in t
 ```
 `changed`: someone took or changed it since the screen loaded — refresh. `offered`: someone else holds a live offer — withdraw it first. An item that someone holds can be offered to someone else (a reassignment): the holder keeps it until the target accepts. Errors: `NEO_DENIED: Only a lead can offer work to a technician.`, `NEO_GATE: Say why you're offering it to them.`, `NEO_GATE: This one is finished.`, `NEO_GATE: No active staff account with that email.`, `NEO_GATE: Adhil M can't take this — they aren't in the build pool.` (and the other `why_not` reasons, said of them).
 
-### 8.9 `work_team()` — leads and tier 3+
+### 8.9 `work_team()` — leads, `neohr` leads and tier 3+
 `{}` →
 ```json
 {"now": "2026-10-22T08:58:18.413+00:00",
@@ -759,7 +766,7 @@ Service: every rule of `service_release` (§6.3) applies and its `"job"` is in t
              "last_seen_at": "2026-10-22T08:40:02+00:00", "logs_today": 3}],
  "alerts": [ "…as in work_queue…" ]}
 ```
-People: everyone active who is in a pool or holds work or a live offer, by name. `items`, `offers` and `alerts` list only the kinds the caller leads. `last_seen_at` (the latest field activity or work log) and `logs_today` (India day) are `null` unless the caller is tier 3+. `NEO_DENIED: Only leads can see the team.` otherwise. To dismiss an alert: `work_alert_resolve({"p_id": 1})` → `{"ok": true}` (or `{"ok": true, "already": true}`).
+People: everyone active who is in a pool or holds work or a live offer, by name. `items`, `offers` and `alerts` list only the kinds the caller leads. `last_seen_at` (the latest field activity or work log) and `logs_today` (India day) are `null` unless the caller is tier 3+ or a `neohr` lead. A `neohr` lead who leads no kind of work (HR) gets the people with empty `items` / `offers` and no `alerts` (contract 3.1). `NEO_DENIED: Only leads can see the team.` for anyone else. To dismiss an alert: `work_alert_resolve({"p_id": 1})` → `{"ok": true}` (or `{"ok": true, "already": true}`).
 
 ### 8.10 My work on site — `v_tech_day` and `record_field_activity`
 For each of the caller's own **service** items, read the contact and site details from the view (§5.2), in memory only — never in Room:
@@ -858,7 +865,7 @@ First sign-in: `{"p_since": null, "p_after": null}`. Then send back the cursor o
 - **Keep `next_since` and `next_after` as the exact strings returned** and send them back unchanged (`next_since` can carry microseconds; reformatting it can repeat or skip rows).
 - Import: insert rows whose `id` is not a local `remoteId`; skip tombstones, and delete (through the repository, so search stays in step) any local row whose `remoteId` has a tombstone.
 
-### 9.4 `work_log_team(p_from, p_to, p_email)` — tier 3+
+### 9.4 `work_log_team(p_from, p_to, p_email)` — tier 3+ or a `neohr` lead
 Shop days (India), inclusive, at most 62 days per call; `p_email` optional (one person).
 ```json
 {"p_from": "2026-10-21", "p_to": "2026-10-21", "p_email": null}
@@ -870,25 +877,187 @@ Shop days (India), inclusive, at most 62 days per call; `p_email` optional (one 
            "location_name": "Kakkanad", "latitude": 10.0159, "longitude": 76.3419,
            "created_at": "2026-10-21T04:01:12+00:00", "updated_at": "2026-10-21T04:01:12+00:00"}]}
 ```
-Deleted logs are left out; newest first; at most 2000 rows (`more: true` when there are more — ask for fewer days or one person). A log whose login was deleted is labelled with its stored email. A day is India time: `2026-10-21T18:30:00Z` is already the 22nd. Errors: `NEO_DENIED: Only tier 3 and above can see the team's logs.`, `NEO_GATE: The end date is before the start date.`, `NEO_GATE: Ask for at most 62 days at a time.`
+Deleted logs are left out; newest first; at most 2000 rows (`more: true` when there are more — ask for fewer days or one person). A log whose login was deleted is labelled with its stored email. A day is India time: `2026-10-21T18:30:00Z` is already the 22nd. Errors: `NEO_DENIED: Only tier 3 and above, or a NeoHR lead, can see the team's logs.` (contract 3.1; version 3 said "Only tier 3 and above can see the team's logs."), `NEO_GATE: The end date is before the start date.`, `NEO_GATE: Ask for at most 62 days at a time.`
 
 ### 9.5 Who reads what
-`work_logs` is readable directly (`GET /rest/v1/work_logs`) only for your own rows, or everyone's for tier 3+; nobody writes it except through `work_log_push`. It is not in realtime.
+`work_logs` is readable directly (`GET /rest/v1/work_logs`) only for your own rows, or everyone's for tier 3+ and `neohr` leads; nobody writes it except through `work_log_push`. It is not in realtime.
 
 ---
 
-## 10. Privacy
+## 10. The technician's one app (contract version 3.1, NeoHR 2.1)
+
+NeoHR 2.1 is a module of Neo OS: one Neo OS account, and everything a technician needs when they cannot reach a Neo OS PC. Everything here uses the session, headers and error rules of §8.1 / §4. The dashboard answers are real answers of the RPC (PGlite, `pgtest/dashshapes.mjs`), shortened only where it says `…`.
+
+### 10.1 `neo_dashboard()` — the Dashboard tab
+Any active staff member; `{}` →
+```json
+{"now": "2026-10-22T11:12:40.096+00:00",
+ "me": {"name": "Athul Sudheer", "designation": "Service Engineer", "tier": 2},
+ "mine": {"items": 0, "offers": 1, "due_today": 0, "overdue": 0},
+ "queue": {"open": 3, "overdue": 2, "oldest_minutes": 360},
+ "service": {"open": 3, "on_us": 2, "on_customer": 0, "on_supplier": 1, "ready_to_collect": 0, "visits_today": 0, "late": 1},
+ "builds": {"open": 6, "awaiting": 4, "building": 1, "waiting_qc": 0, "qc_testing": 1, "due_48h": 1, "overdue": 0, "not_sent": 2},
+ "rma": {"open": 0, "at_vendor": 0, "ready_to_return": 0},
+ "attention": [
+  {"kind": "service", "id": "s_mvjfza0d5ktkj", "code": "NT-9C7L7RX4", "title": "Networking",
+   "why": "Offered to you — accept by 17:12.", "at": "2026-10-22T11:42:40.074+00:00"},
+  {"kind": "service", "id": "s_mvjfza0va2dxz", "code": "NT-UCE3N44E", "title": "ASUS TUF A15",
+   "why": "Nobody has claimed it in 4 hours.", "at": "2026-10-22T09:12:40.071+00:00"},
+  {"kind": "build", "id": "t_wqlegacy_queued", "code": "QUEUED", "title": "Legacy Waiting Build",
+   "why": "Nobody has claimed it in 4 hours.", "at": "2026-10-22T10:12:40.071+00:00"}]}
+```
+A head (tier 3+) also gets
+```json
+ "team": {"people": 5, "busy": 3, "free": 2, "load_pct": 14, "logs_today": 0, "visits_today": 0, "alerts": 0}
+```
+and a person with no work role and no pool (for example sales) gets only `{"now", "me", "attention": []}`.
+
+**A section is there only when the caller may read what it counts; otherwise it is left out — never sent as zeros.** Hide a section's tiles when its key is missing; ignore unknown keys.
+
+| Section | Present for | Keys (all whole numbers) |
+|---|---|---|
+| `mine` | someone in a work pool, or holding an item or a live offer | `items` my open items (builds and service, of the kinds I read); `offers` live offers to me; `due_today` my items whose deadline (build) or visit start, else needed-by date (service — the queue ITEM's `deadline`) falls inside today's India day; `overdue` my builds past their deadline plus my service tickets that are late. An item due earlier today and now overdue counts in both. |
+| `queue` | Builds or Service desk and up (`my_work_profile.home == "work"`) | `open` what `work_queue()` shows as open, of the kinds I read; `overdue` open past its 4 hours (the server is offering it); `oldest_minutes` the longest wait, `0` when the queue is empty |
+| `service` | Service desk and up (techs included) | `open` every open ticket; `on_us` / `on_customer` / `on_supplier` whose turn it is (they add up to `open`); `ready_to_collect` stage `ready`; `visits_today` on-site / remote visits booked for today (any stage); `late` |
+| `builds` | Builds desk and up | `open` not completed; `awaiting` / `building` / `waiting_qc` / `qc_testing` by status (`awaiting` = any other status); `due_48h` deadline within the next 48 hours; `overdue` deadline passed; `not_sent` quotes not sent to the floor |
+| `rma` | RMA desk and up | `open` parts not closed; `at_vendor` stage `with_vendor`; `ready_to_return` |
+| `team` | tier 3+ | the people `work_team` lists: `people`; `busy` holding an item or a live offer; `free` holding nothing; `load_pct` points held against the capacity of everyone in a pool (can pass 100); `logs_today` work logs made today; `visits_today` NeoHR "Arrived" check-ins today; `alerts` unresolved "Needs a lead" alerts |
+
+**late and whose turn** are exactly the Neo OS service board's (`shared/service-status.js` `serviceRisk` / `ticketWithUnits`, ported to SQL and kept in step by `tests/sql-parity.test.js`): a broken promise date, a booked visit 30 minutes past its start with nobody there, or a stage idle past its budget; a ticket waiting on parts under warranty claim takes the most urgent part's turn and the worst part's lateness. NeoHR shows the numbers; it never recomputes them. Days are India days (`Asia/Kolkata`).
+
+`attention`: at most 6 lines, one per item (its most urgent reason), most urgent first, then oldest `at` first. `kind` is `build` or `service` — tap opens that item's detail (§10.2). `title` is the build's customer name or the service job's device (else its category), never a service customer's name or phone.
+
+| Order | When | `why` (exact) | `at` |
+|---|---|---|---|
+| 0 | a live offer to me | "Offered to you — accept by HH:MM." (India time) | the offer's end |
+| 1 | my build past its deadline / my late service job | "Past its deadline." / "Late — Diagnosing." (the stage's staff label, §12) | the deadline / when it entered the stage |
+| 2 | an unresolved alert of a kind I lead | the alert's `body` (§8.3) | when it was raised |
+| 3 | an open item past its 4 hours with no live offer that I could claim (eligible, not declined by me), or any such item of a kind I lead | "Nobody has claimed it in 4 hours." | its claim due time |
+| 4 | anyone's late work of a kind I lead | "Past its deadline. Adhil has it." / "Late — Parts on order. Ananthakrishnan A R has it." / "… Nobody has it." | as 1 |
+| 5 | my item due later today | "Due today at HH:MM." | its deadline |
+
+Refresh it on open, on pull-to-refresh and every 30 s while the tab is visible (after a fire-and-forget `work_tick()`). Offline: show the last answer with "as of HH:MM" (its `now`). Errors: only `NEO_DENIED: Sign in with an active staff account to do this.`
+
+### 10.2 Reading a job (the detail screens)
+**Service job.** The header (code, type, stage, priority) comes from the `work_queue` ITEM; whose turn the stage is, from the stage's `ball` in `shared/service-status.js` (`quoted`, `work_done`, `resolved`, `ready` → the customer; `parts_on_order`, `at_vendor` → a supplier; anything else → us). Then, with any `service` role:
+- **Contact and site** — own jobs only, from `v_tech_day` (§5.2, §8.10), in memory only.
+- **Items:**
+  ```
+  GET {URL}/rest/v1/service_items?job_id=eq.<jobId>&select=id,sort,is_primary,kind,label,serial,condition_remarks,accessories,powers_on&order=sort.asc
+  ```
+  `[{"id": "si_…", "sort": 0, "is_primary": true, "kind": "laptop", "label": "ASUS TUF A15", "serial": "…", "condition_remarks": null, "accessories": [], "powers_on": null}]` — `kind` labels are `S.ITEM_KINDS`.
+- **Timeline** (newest 30):
+  ```
+  GET {URL}/rest/v1/service_events?job_id=eq.<jobId>&select=id,at,kind,actor_name,from_stage,to_stage,body,customer_visible&order=at.desc,id.desc&limit=30
+  ```
+  Mark rows with `customer_visible: true` ("the customer sees this"). `kind` is one of `stage`, `note`, `edit`, `media`, `claim`, `release`, `assign`, `rma`, `field`, `suggest`, `priority`, `offer`; a `stage` row's `body` may be null (show "from → to" with the staff labels).
+- **Device password:** a button; on tap call `service_get_password` (§6.10). `{"secret": null}` means none is on file (and nothing was logged). Show it 30 s, never store it.
+
+**Build.** Read named columns only — `specs` also holds the Windows key and prices, which a phone has no use for:
+```
+GET {URL}/rest/v1/tickets?id=eq.<t_…>&select=id,customer_name,status,deadline,technician,technician_email,queued_at,offered_to_name,offer_expires_at,completed_at,build_checks,qc_checks,cpu:specs->>cpu,gpu:specs->>gpu,ram:specs->>ram,storage:specs->>storage,psu:specs->>psu,case:specs->>case,mobo:specs->>mobo,cooler_type:specs->>coolerType,cooler_model:specs->>coolerModel,os:specs->>os,sales_exec:specs->__build->>salesExec,build_tier:specs->__build->>tier
+```
+Assembly progress = ticked of `build_checks` `cpuRamSsd, moboCase, cooler, cables, posted` (5); QC progress = ticked of `qc_checks` `physCabinet, physMobo, physRam, physScrews, softWindows, softDrivers, softBios, portUsb, portVideo, portAudio, portWifi` (11). Both read-only on the phone: "Assembly checks and QC run on the Neo OS Testing Client on the PC being built."
+
+**My RMA parts** (the parts I am handling, read-only; a `service` or `rma` role reads them):
+```
+GET {URL}/rest/v1/rma_cases?handler_email=eq.<my_work_profile.email>&stage=neq.closed&select=id,public_code,kind,brand,model,stage,stage_since,expected_back_at,rma_vendors(name,public_name)&order=stage_since.asc
+```
+Use the `email` exactly as `my_work_profile()` returned it. Stage labels are in §12; actions stay in Neo OS.
+
+### 10.3 Writes from the job screen (online only)
+**Move a stage** — `service_move(p_job_id, p_from, p_to, p_note, p_visible, p_extra)`, any `service` role (NeoHR offers it on the person's own jobs):
+```json
+{"p_job_id": "s_mgx1k2abcde", "p_from": "diagnosing", "p_to": "in_service", "p_note": "Fan replaced", "p_visible": false, "p_extra": {}}
+```
+- `p_from` is the stage the screen showed; if the job moved since, the answer is `NEO_STALE: Someone moved this ticket to … already. Reopen it to see where it is.` (refresh).
+- Offer the job type's track minus the current stage and minus `rma_raised`, `at_vendor`, `back_from_vendor` (the RMA module moves those; a try answers `NEO_RMA_HOLD: …`). Tracks (`shared/service-status.js` `STAGES_BY_TYPE`): in-store `logged, received, diagnosing, quoted, approved, parts_to_order, parts_on_order, (rma…), in_service, verifying, ready, closed`; on-site `logged, scheduled, en_route, on_site, work_done, revisit_needed, quoted, approved, parts_to_order, parts_on_order, (rma…), closed`; remote `logged, session_booked, in_session, resolved, quoted, closed`.
+- `p_extra` by target: `parts_on_order` (and `at_vendor`) need `"waiting_party"` (who we wait on, ≤ 120; optional `"next_chase_at"`) — else `NEO_GATE: Say who we are waiting on — that is the whole point of the chase list.`; `ready` and `closed` need `"outcome"` (a key of `S.OUTCOMES`, offered in the order of `S.outcomesFor(job)`; closing a `ready` job reuses its outcome) — else `NEO_GATE: Say what happened — the customer sees this, and "Closed" on its own tells them nothing.`; any move may carry `"promised_at"`, `"visit_start"`, `"visit_end"` (ISO with offset; `NEO_GATE: The visit ends before it starts.`). Type conversion (`convert_to`) is for Neo OS.
+- The move itself is always on the customer's timeline; `p_note` rides on it with its own `p_visible` (default it to `false`).
+- Answer: the whole ticket row (`stage`, `stage_since`, `outcome`, … — it also carries the customer's phone and address: keep it in memory only). Other errors: `NEO_DENIED: You don't have access to move service tickets.`, `NEO_GATE: That ticket no longer exists.`, `NEO_GATE: The ticket is already at ….`, `NEO_GATE: … is not a step for … ticket.`, `NEO_RMA_HOLD: This ticket is waiting on RMA ….`, `NEO_GATE: The note is too long — keep it under 4000 characters.`
+
+**Add a note** — `service_add_note` (§6.4): internal by default, `p_visible: true` only when the technician ticks "the customer can read this".
+
+**Device password** — `service_get_password` (§6.10). **On-site actions, hand back, accept / decline** — §8.5–§8.10.
+
+### 10.4 Photos — exactly as Neo OS uploads them
+1. Camera or gallery → JPEG, longest side ≤ 1600 px (Neo OS uses 2048; both fine), ≤ 15 MB, white behind any transparency.
+2. **Path**, made fresh for every upload attempt (NeoHR 2.1 keeps nothing on the phone and never retries a path):
+   `<jobId>/<t36>-<r8>.jpg` — `t36` = the time in milliseconds in base 36, lower case (`Long.toString(System.currentTimeMillis(), 36)`), `r8` = 8 random characters from `0-9a-z` (a secure random source). Example `s_mgx1k2abcde/mh1v7k2c-4f9q2x7a.jpg`.
+3. **Upload** (`service` role; the bucket refuses anyone else):
+   ```
+   POST {URL}/storage/v1/object/service-media/<path>
+   apikey: <anon key>
+   Authorization: Bearer <access_token>
+   Content-Type: image/jpeg
+   x-upsert: false
+   cache-control: max-age=3600
+
+   <the JPEG bytes>
+   ```
+   `200` (a small JSON naming the key). An "already exists" answer (`"error": "Duplicate"`, HTTP 400 or 409) can only come from a second try of the same path, so it means the first try landed. Neither client meets it in practice, because every attempt makes a new path; NeoHR 2.1 treats it as landed and goes on to 4.
+4. **Record it** — the same row Neo OS writes:
+   ```
+   POST {URL}/rest/v1/service_media
+   Prefer: return=representation
+   Content-Type: application/json
+
+   {"job_id": "s_mgx1k2abcde", "rma_case_id": null, "service_item_id": null, "path": "s_mgx1k2abcde/mh1v7k2c-4f9q2x7a.jpg",
+    "phase": "during", "role": "during", "remark": "Dust in the PSU fan", "remark_by": "Athul Sudheer",
+    "remark_at": "2026-10-22T11:20:05.000Z", "uploaded_by": "athul.sudheer@neotokyo.in", "uploaded_name": "Athul Sudheer"}
+   ```
+   → `201` `[{…the row, with its id}]`. `role` from the phone: `condition`, `damage`, `during`, `after` or `other` (never `invoice`, `serial_label`, `vendor_doc`). `phase` follows the role: `condition` / `damage` → `intake`; `during` → `during`; `after` → `after`; `other` → `during`. `remark` is optional; when it is set, `remark_by` is the person's name (else their email) and `remark_at` now, otherwise all three are `null`. `service_item_id` may name one of the job's items (§10.2).
+5. **If the row is refused** (any HTTP error answer), remove the file — the uploader may delete their own:
+   ```
+   DELETE {URL}/storage/v1/object/service-media
+   Content-Type: application/json
+
+   {"prefixes": ["s_mgx1k2abcde/mh1v7k2c-4f9q2x7a.jpg"]}
+   ```
+   When the insert **timed out**, do **not** delete: the row may have been written. NeoHR 2.1, like Neo OS, then reports the failure and stops. It does not retry that path and does not check for the row. The person adds the photo again (a gallery photo is picked again, a camera shot is taken again), which makes a new path. If the timed-out insert did land, the job shows the same photo twice, and a `service` lead can delete the extra one in Neo OS.
+6. To show a photo: `POST {URL}/storage/v1/object/sign/service-media/<path>` with `{"expiresIn": 900}` → `{"signedURL": "/object/sign/service-media/<path>?token=…"}`; open `{URL}/storage/v1` + `signedURL`. Never cache the signed link beyond its 15 minutes.
+
+NeoHR 2.1 adds photos **online only** (§7): nothing is queued in Room, and every failure goes back to the person. The customer sees a photo only when the desk ticks "show customer".
+
+*For a later version that queues photos offline (not built in NeoHR 2.1):* make the path once per photo and keep it, with the JPEG and the pending row, in a Room outbox. Retry with the same path; an "already exists" upload answer then means the file landed. Before inserting on a retry, `GET {URL}/rest/v1/service_media?path=eq.<path>&select=id`; if a row is there, the photo is done. With that, a timed-out attempt can be repeated without a duplicate row.
+
+### 10.5 The NeoHR app's own updates (`neohr.json`)
+NeoHR updates itself from GitHub Releases of the public repository `akruunnithan21-ship-it/neoqc`, the same repository Neo OS updates from:
+- A NeoHR release is tagged `neohr-vMAJOR.MINOR.PATCH`, published as a **pre-release and never "Latest"** (Neo OS desktops update from the Latest release, which must stay theirs), and carries exactly two assets: `NeoHR-<version>.apk` and `neohr.json`.
+- `neohr.json`:
+  ```json
+  {"versionCode": 20100, "versionName": "2.1.0", "apk": "NeoHR-2.1.0.apk", "size": 23874560,
+   "sha256": "<64 lower-case hex digits of the APK>", "minSdk": 29,
+   "notes": "Plain text, at most 2000 characters.", "mandatory": false}
+  ```
+  | Key | Rule |
+  |---|---|
+  | `versionCode` | `major × 10000 + minor × 100 + patch` (2.1.0 → 20100) — the number compared with the installed app's |
+  | `versionName` | `"major.minor.patch"`, the tag without `neohr-v` |
+  | `apk` | the APK asset's file name in the same release |
+  | `size`, `sha256` | the APK's exact byte count and SHA-256; refuse to install a download that does not match both |
+  | `minSdk` | the lowest Android API level it runs on; do not offer it to an older phone |
+  | `notes` | shown under "Update available — NeoHR 2.1.1" |
+  | `mandatory` | `false` in this release (reserved) |
+  Unknown keys are ignored.
+- **Check:** `GET https://api.github.com/repos/akruunnithan21-ship-it/neoqc/releases?per_page=30` with `Accept: application/vnd.github+json`, no credentials. A `403` or `429` is GitHub's rate limit (60 an hour per network): stay quiet and try later. Keep releases that are not drafts and whose `tag_name` matches `^neohr-v\d+\.\d+\.\d+$`; take the newest by version number (2.10.0 is newer than 2.9.0); download its `neohr.json` asset (`browser_download_url`); offer the update when its `versionCode` is higher than the installed one. Download the APK from the asset named by `apk`, in the same release.
+- Neo OS's NeoHR screen reads the same list to show the latest version and its download link. Publishing a release is done only by the owner's release step (`tools/publish-neohr.mjs --publish` in the phone project).
+
+---
+
+## 11. Privacy
 
 - The queue (`v_service_queue`) never exposes phone, surname or address, and its location is rounded to about 1 km. Full contact details arrive only after a claim, via `v_tech_day`.
 - Location is recorded only on the explicit events a technician posts (check-in, check-out, punch). There is no continuous tracking, and NeoHR must not add any.
 - Technicians' home addresses belong in NeoHR's own storage, never in these tables.
 - What the database allows is wider than what NeoHR should show. Row-level security lets any `service` desk+ member read every ticket, because the desktop board needs that. NeoHR should still read only the views above, so a phone app never holds more customer data than the person's own day needs.
-- Who can read the activity log: the person, any `service` lead, any `neohr` lead, and tier 3+ (owner, founders, department heads). HR staff below tier 3 need a `neohr` lead role. Settings → General → People cannot grant it (it sets only `service`, `rma` and `qc`); a tier 4+ account grants it with `module_access_set` (`p_module` `neohr`) or in SQL — see §3.
+- Who can read the activity log and everyone's work logs: the person, any `neohr` lead, and tier 3+ (owner, founders, department heads); a `service` lead also reads the activity log. HR staff below tier 3 need a `neohr` lead role, which tier 4+ grant in Settings → General → People (the NeoHR role column) — see §3.
+- The dashboard (§10.1) counts; it never lists customers. Its attention lines name a service job by its device, never its customer.
 - A customer's tracking page never shows a distributor's name: it names the part's brand (or the vendor's public name).
 
 ---
 
-## 11. Stage vocabulary NeoHR will meet
+## 12. Stage vocabulary NeoHR will meet
 
 On-site jobs: `logged` → `scheduled` → `en_route` → `on_site` → `work_done`, with `revisit_needed`, `parts_to_order`, `parts_on_order`, `quoted`, `approved` and `closed` along the way. While a part is away under warranty claim, the server alone sets `rma_raised`, `at_vendor` or `back_from_vendor`; when the desk releases the part from an on-site job (§6.9), the job jumps from there to `work_done` or `revisit_needed`. Remote jobs use `logged` → `session_booked` → `in_session` → `resolved` → `closed`.
 
@@ -907,6 +1076,21 @@ On-site jobs: `logged` → `scheduled` → `en_route` → `on_site` → `work_do
 | rma_raised / at_vendor / back_from_vendor | RMA raised — not shipped yet / At vendor / Back from vendor |
 | closed | Closed |
 
+In-store jobs (contract 3.1: the phone now shows and moves them, §10.3): `logged` → `received` → `diagnosing` → `quoted` → `approved` → `parts_to_order` / `parts_on_order` → `in_service` → `verifying` → `ready` → `closed`, with the RMA stages as above.
+
+| stage | staff label |
+|---|---|
+| received | Received at counter |
+| diagnosing | Diagnosing |
+| quoted | Quote sent — awaiting approval |
+| approved | Approved — queued for bench |
+| parts_on_order | Parts on order |
+| in_service | On the bench |
+| verifying | Verifying / soak |
+| ready | Ready for collection |
+
+The full list, with the customer's wording and whose turn each stage is, is `STAGES` in `shared/service-status.js`; the phone keeps a copy of those labels.
+
 RMA parts (`rma_cases.stage`, returned by `rma_create`): a field pull starts at `with_tech`, then the counter takes it to `received`, and it goes on through `testing`, `awaiting_docs`, `ready_to_ship`, `with_vendor`, `back_from_vendor`, `customer_decision`, `ready_to_return`, `returning` and `closed`. A part a customer is still to bring in is `logged`.
 
 | RMA stage | staff label | customer label |
@@ -920,9 +1104,17 @@ RMA parts (`rma_cases.stage`, returned by `rma_create`): a field pull starts at 
 
 ---
 
-## 12. Changes to this contract
+## 13. Changes to this contract
 
 Additive changes (a new column, a new optional field, a new RPC) can ship at any time, so NeoHR must ignore unknown JSON keys. Removing or renaming anything here means a new contract version and a note in this file first.
+
+### Version 3.1 (additive, `sql/work-queue.sql`, Neo OS 1.11.0 / NeoHR 2.1)
+- New: `neo_dashboard()` — the phone's simplified dashboard; each section only for the people who may read it (§10.1). Its "late" and whose-turn counts are the desktop's own rule.
+- New in the contract (the server already allowed it): the technician's job detail reads (`service_items`, `service_events`, `rma_cases` for "My RMA parts", a build's named columns), `service_move` from the phone, and the photo upload exactly as Neo OS does it, online only (§10.2–§10.4).
+- New: the NeoHR update manifest `neohr.json` on GitHub pre-releases tagged `neohr-v…` (§10.5).
+- Changed: a `neohr` lead (HR; tier 3+ always are) now reads everyone's work logs (`work_log_team`, `work_logs`) and the team (`work_team`: people, load, last seen, logs today; items, offers and alerts still only of the kinds they lead), and gets `team_view: true`. `work_log_team`'s refusal reads "Only tier 3 and above, or a NeoHR lead, can see the team's logs."
+- Changed: People (`staff_update` / `staff_list`) sets and shows the `neohr` role; presets still never touch it.
+- Unchanged: every version 3 shape.
 
 ### Version 3 (`sql/work-queue.sql`, Neo OS 1.11.0)
 - New: the work queue (§8): `my_work_profile`, `work_queue`, `work_tick`, `work_claim`, `work_respond`, `work_release`, `work_offer`, `work_team`, `work_alert_resolve`, `work_events_for`. Builds and service tickets wait in one queue: 4 hours to claim, then the server offers the item; an offer lasts 30 minutes.
@@ -942,7 +1134,7 @@ Additive changes (a new column, a new optional field, a new RPC) can ship at any
 - The view `v_tech_activity` is gone. Use the RPC `tech_activity(p_from, p_to)` (§5.3); same keys, plus a date range. A `neohr` lead now sees everyone's activity, in `tech_activity` and in `field_activity`.
 - Phone numbers keep their country code (`919847012345`, `971501234567`) instead of being cut to 10 digits; a leading `00` is dropped, and 11-digit Kuwait / Oman / Bahrain / Qatar numbers are valid (§4).
 - `service_claim` at a different time than the one already booked tells the customer the visit moved (§6.2).
-- `rma_release_hold` on an on-site job goes to `work_done` or `revisit_needed` (§6.9, §11).
+- `rma_release_hold` on an on-site job goes to `work_done` or `revisit_needed` (§6.9, §12).
 - `record_field_activity`: a check-out from `scheduled` / `en_route` finishes the visit and counts it (§6.1).
 - `record_field_activity`: `departed` + `customer_absent` moves the job to `revisit_needed` (not `scheduled`), clears the spent visit time and tells the customer we will call to rebook (§6.1).
 - Who has a job changes only through `service_claim` / `service_release` (and a lead's `service_assign`); a direct write of `assignee` / `assignee_email` is refused for anyone but a lead. Timeline rows written directly (not through an RPC) may only be kinds `stage`, `note`, `edit`, `media`, with no `meta`, in the signed-in person's own name — claim, release and assign rows (which `tech_activity` counts) come only from the RPCs.

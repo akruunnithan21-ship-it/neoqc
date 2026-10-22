@@ -4,12 +4,15 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <!--
-    OPS HARNESS — review the Overview, Queue, Service and RMA screens in a normal browser.
+    OPS HARNESS — review the Overview, Queue, Service, RMA and NeoHR screens in a normal browser.
 
       npx serve -p 4321 -n .        (from the repo root)
       http://localhost:4321/dev/ops-harness.html
-        ?screen=overview | queue | service | rma | client   first screen
-        ?role=lead | tech | desk | sales                     who is "signed in"
+        ?screen=overview | queue | service | rma | neohr | client   first screen
+        ?role=lead | tech | desk | sales | hr                        who is "signed in"
+
+    NeoHR (v1.11) reads STUBBED work logs, field activity and a stub NeoHR
+    release (never GitHub, never a database), with the Queue's stub team.
 
     The Queue (v1.11) reads a STUBBED work_queue feed built below from the
     demo service tickets plus a few harness builds (an offer to you, an open
@@ -29,6 +32,7 @@
       tech   Athul Sudheer from the demo staff, tier 2, service tech + RMA tech
       desk   Anagha K C from the demo staff, tier 1, service desk + RMA desk
       sales  a tier-1 salesperson with RMA desk only
+      hr     a tier-2 HR person: NeoHR lead and nothing else (lands on NeoHR)
     Module roles reach modules.js the way an offline sign-in does: through
     its per-user cache (localStorage 'neo_modules'), then refreshAccess().
     The dock (bottom right) opens the Service board / queue / visits, a ticket
@@ -42,7 +46,7 @@
       node -e "const c=require('crypto'),h=require('fs').readFileSync('dev/ops-harness.html','utf8').replace(/\r\n/g,'\n');for(const m of h.matchAll(/<(script)>([\s\S]*?)<\/\1>/g))console.log('sha256-'+c.createHash('sha256').update(m[2]).digest('base64'))"
     This folder is excluded from the packaged app (electron-builder.json).
   -->
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-De6glN05yNmowHQA+/nPKV/awdtBExnjy8AsnbjJAdo=' 'sha256-ov3z9cuxol5f/5CcGbnFxkZyC/rgtciWhkbpilNLoFc=' 'sha256-8rEAnJmvf0LGkxn7pMQmOquADuu6xOquef7FdWjEqkU='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: blob: https:; font-src 'self' https://fonts.gstatic.com data:; connect-src 'self' https: wss: data: blob:; worker-src 'self' blob:; child-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-KTH5/X/U+YoH8lDHCKjWulZF8V8I2B3jUHDdrMmbmWM=' 'sha256-fDwCPhiUYOww7OHnfqyQmfClvygIrOUiu9Qol3ejz5w=' 'sha256-ZYJyftR9Qit73jEYvj+NtWjk0Pcup3Gk4ZlBDCTSHvg='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: blob: https:; font-src 'self' https://fonts.gstatic.com data:; connect-src 'self' https: wss: data: blob:; worker-src 'self' blob:; child-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'">
   <link rel="icon" href="data:,">
   <title>Ops harness — Overview, Service and RMA (demo data)</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -57,6 +61,7 @@
   <link rel="stylesheet" href="../intake.css">
   <link rel="stylesheet" href="../rma.css">
   <link rel="stylesheet" href="../queue.css">
+  <link rel="stylesheet" href="../neohr.css">
   <style>
     /* Harness chrome only. The bar sits where the app's titlebar sits (32 px),
        so the rail and every screen are offset exactly as in the app. */
@@ -119,11 +124,13 @@
         <option value="tech">Tech — Athul, tier 2</option>
         <option value="desk">Desk — Anagha, tier 1</option>
         <option value="sales">Sales — tier 1, RMA only</option>
+        <option value="hr">HR — tier 2, NeoHR lead</option>
       </select>
       <button type="button" class="hx-btn" data-hx="overview">Overview</button>
       <button type="button" class="hx-btn" data-hx="queue">Queue</button>
       <button type="button" class="hx-btn" data-hx="service">Service</button>
       <button type="button" class="hx-btn" data-hx="rma">RMA</button>
+      <button type="button" class="hx-btn" data-hx="neohr">NeoHR</button>
       <button type="button" class="hx-btn" data-hx="theme" title="Switch light / dark">Light / dark</button>
     </div>
   </div>
@@ -233,6 +240,19 @@
 
   <div id="rma-intake-modal" class="modal-overlay">
     <div class="glass-slab modal-card sv-modal rma-intake-card"><div id="rma-intake-root"></div></div>
+  </div>
+
+  <div id="neohr-screen" class="screen has-rail">
+    <header class="glass-slab navbar">
+      <div class="nav-brand">
+        <span class="nav-title">NEO TOKYO // NEOHR</span>
+        <span id="hr-stat" class="sv-stat">—</span>
+      </div>
+      <div id="hr-toolbar" class="hr-toolbar"></div>
+    </header>
+    <main class="dashboard-container">
+      <div id="hr-root"></div>
+    </main>
   </div>
 
   <!-- Stand-ins for the screens the harness does not carry, so the rail's
@@ -361,7 +381,8 @@ var HX_PEOPLE = {
   tech:  { tag: 'TECH · TIER 2 · SERVICE/RMA/BUILDS TECH · BOTH POOLS', tier: 2, demoId: 'demo_p_athul', designation: 'Technician',
            modules: { service: 'tech', rma: 'tech', qc: 'tech', build_pool: true, service_pool: true, build_level: 'junior' } },
   desk:  { tag: 'DESK · TIER 1 · SERVICE/RMA/BUILDS DESK', tier: 1, demoId: 'demo_p_anagha', designation: 'Service desk', modules: { service: 'desk', rma: 'desk', qc: 'desk' } },
-  sales: { tag: 'SALES · TIER 1 · RMA DESK ONLY', tier: 1, id: 'harness-sales', email: 'sales@harness.invalid', full_name: 'Harness Sales', designation: 'Sales', modules: { service: null, rma: 'desk' } }
+  sales: { tag: 'SALES · TIER 1 · RMA DESK ONLY', tier: 1, id: 'harness-sales', email: 'sales@harness.invalid', full_name: 'Harness Sales', designation: 'Sales', modules: { service: null, rma: 'desk' } },
+  hr:    { tag: 'HR · TIER 2 · NEOHR LEAD ONLY', tier: 2, id: 'harness-hr', email: 'hr@harness.invalid', full_name: 'Harness HR', designation: 'HR', modules: { neohr: 'lead' } }
 };
 var hxRole = 'lead';
 
@@ -391,7 +412,7 @@ function hxWriteRoles(profile, modules) {
     var all = {};
     try { all = JSON.parse(localStorage.getItem('neo_modules') || '{}') || {}; } catch (e) { all = {}; }
     all[profile.id] = { at: new Date().toISOString(), data: {
-      tier: profile.tier, service: modules.service || null, rma: modules.rma || null, qc: modules.qc || null, neohr: null,
+      tier: profile.tier, service: modules.service || null, rma: modules.rma || null, qc: modules.qc || null, neohr: modules.neohr || null,
       build_pool: !!modules.build_pool, service_pool: !!modules.service_pool, build_level: modules.build_level || null
     } };
     localStorage.setItem('neo_modules', JSON.stringify(all));
@@ -546,7 +567,7 @@ function switchScreen(mode) {
     routeByTier();
     return;
   }
-  var screens = { overview: 'overview-screen', queue: 'queue-screen', staff: 'staff-screen', service: 'service-screen', rma: 'rma-screen', client: 'client-welcome-screen' };
+  var screens = { overview: 'overview-screen', queue: 'queue-screen', staff: 'staff-screen', service: 'service-screen', rma: 'rma-screen', neohr: 'neohr-screen', client: 'client-welcome-screen' };
   var target = document.getElementById(screens[mode] || 'overview-screen');
   currentMode = screens[mode] ? mode : 'overview';
   document.querySelectorAll('.screen').forEach(function (s) { s.classList.remove('active'); });
@@ -558,6 +579,7 @@ function switchScreen(mode) {
     else if (currentMode === 'queue' && window.NeoQcQueue) p = window.NeoQcQueue.ensureLoaded();
     else if (currentMode === 'service' && window.NeoQcServiceUI) p = window.NeoQcServiceUI.ensureServiceLoaded();
     else if (currentMode === 'rma' && window.NeoQcRmaUI) p = window.NeoQcRmaUI.ensureLoaded();
+    else if (currentMode === 'neohr' && window.NeoQcHr) p = window.NeoQcHr.ensureLoaded();
     else if (currentMode === 'client') {
       // As app.js: the bench's "Service queue" door, for a service tech or lead.
       var r = null;
@@ -686,6 +708,63 @@ function switchScreen(mode) {
   D.workTeam = function () { return Promise.resolve(hxTeam()); };
   D.workTick = function () { return Promise.resolve(null); };
   if (typeof D.workEvents !== 'function') D.workEvents = function () { return Promise.resolve([]); };
+
+  // NeoHR (v1.11): stub logs and field activity for the stub team, and a
+  // stub release — the harness never asks GitHub or a database.
+  var HX_HR = [
+    { email: 'demo.senior@harness.invalid', name: 'Demo Senior' },
+    { email: 'demo.tech@harness.invalid', name: 'Demo Tech' },
+    { email: 'demo.desk@harness.invalid', name: 'Demo Desk' }
+  ];
+  var HX_LOGS = [['Assembled and cable-managed a build', 'Build'], ['On site: replaced a laptop keyboard', 'Service'],
+                 ['Counter: took in two repairs', 'Desk'], ['Counted RAM and SSD stock', 'Stores']];
+  function hxDay(ms) { return new Date(ms + 330 * 60000).toISOString().slice(0, 10); }
+  function hxLogs(from, to, email) {
+    var now = Date.now(), rows = [];
+    for (var d = 0; d < 12; d++) {
+      HX_HR.forEach(function (p, i) {
+        for (var k = 0; k < 2; k++) {
+          var at = now - d * 86400000 - (i * 2 + k * 3 + 1) * 3600000;
+          var day = hxDay(at);
+          if (day < from || day > to || (email && email !== p.email)) continue;
+          var t = HX_LOGS[(i + k + d) % HX_LOGS.length];
+          var site = t[1] === 'Service';
+          rows.push({ id: 'hx-log-' + d + '-' + i + '-' + k, employee_email: p.email, employee_name: p.name, title: t[0],
+            description: k ? 'What was done, and what is left for tomorrow.' : null, category: t[1],
+            location_name: site ? 'Kakkanad' : null, latitude: site ? 10.0159 : null, longitude: site ? 76.3419 : null,
+            created_at: iso(at), updated_at: iso(at), day: day });
+        }
+      });
+    }
+    rows.sort(function (a, b) { return Date.parse(b.created_at) - Date.parse(a.created_at); });
+    return { from: from, to: to, rows: rows, more: false };
+  }
+  function hxAct(from, to) {
+    var now = Date.now(), rows = [];
+    for (var d = 0; d < 12; d++) {
+      var day = hxDay(now - d * 86400000);
+      if (day < from || day > to) continue;
+      HX_HR.slice(0, 2).forEach(function (p, i) {
+        var first = now - d * 86400000 - 7 * 3600000, last = first + (5 + i) * 3600000;
+        rows.push({ employee_email: p.email, employee_name: p.name, day: day, claims: (d + i) % 3, releases: d % 4 === 1 ? 1 : 0,
+          released_by_lead: 0, manager_assigns: i, visits_left: i ? 2 : 0, visits_arrived: i ? 2 : 0, visits_done: i ? 1 : 0,
+          revisits: i && d % 2 ? 1 : 0, parts_needed: 0, customer_absent: 0, punch_ins: 1, punch_outs: d ? 1 : 0,
+          first_at: iso(first), last_at: iso(Math.min(last, now)) });
+      });
+    }
+    return rows;
+  }
+  D.workLogTeam = function (f, t, e) { return Promise.resolve(hxLogs(f, t, e ? low(e) : null)); };
+  D.techActivity = function (f, t) { return Promise.resolve(hxAct(f, t)); };
+  D.neoDashboard = function () { return Promise.resolve({ now: iso(Date.now()) }); };
+  D.latestNeoHrRelease = function () {
+    var now = Date.now();
+    return Promise.resolve({ checkedAt: iso(now), stale: false, error: null, release: {
+      version: '2.1.0', versionCode: 20100, tag: 'neohr-v2.1.0', title: 'NeoHR 2.1.0 (harness)', publishedAt: iso(now - 2 * 86400000),
+      prerelease: true, notes: 'Harness release notes.\n- A stub: the harness never asks GitHub.',
+      pageUrl: 'https://github.com/akruunnithan21-ship-it/neoqc/releases/tag/neohr-v2.1.0',
+      apk: { name: 'NeoHR-2.1.0.apk', size: 9876543, url: 'https://github.com/akruunnithan21-ship-it/neoqc/releases/download/neohr-v2.1.0/NeoHR-2.1.0.apk' } } });
+  };
 })();
   </script>
   <script src="../photo-tray.js"></script>
@@ -693,6 +772,7 @@ function switchScreen(mode) {
   <script src="../service.js"></script>
   <script src="../rma.js"></script>
   <script src="../queue.js"></script>
+  <script src="../neohr.js"></script>
   <script src="../shell.js"></script>
   <script>
 // Harness boot: the role switcher, the dock, then the first screen.
@@ -762,6 +842,7 @@ function switchScreen(mode) {
     queue: function () { go('queue'); },
     service: function () { go('service'); },
     rma: function () { go('rma'); },
+    neohr: function () { go('neohr'); },
     'sv-board': function () { go('service', function () { window.NeoQcServiceUI.setView('board'); }); },
     'sv-queue': function () { go('service', function () { window.NeoQcServiceUI.setView('queue'); }); },
     'sv-visits': function () { go('service', function () { window.NeoQcServiceUI.setView('visits'); }); },
@@ -837,7 +918,7 @@ function switchScreen(mode) {
   Promise.resolve(window.NeoQcModules ? window.NeoQcModules.refreshAccess() : null).then(function () {
     // A deep link opens that screen if this person may; otherwise (or with
     // none) the person lands where the app would put them.
-    var linked = first === 'client' || (['overview', 'queue', 'staff', 'service', 'rma'].indexOf(first) !== -1 && hxCanOpen(first));
+    var linked = first === 'client' || (['overview', 'queue', 'staff', 'service', 'rma', 'neohr'].indexOf(first) !== -1 && hxCanOpen(first));
     if (linked) switchScreen(first); else routeByTier();
   });
 })();

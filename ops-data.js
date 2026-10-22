@@ -2500,6 +2500,196 @@
     return rpc('my_work_profile', {}, READ_MS);
   }
 
+  // ── NeoHR (the people side; reads only) ───────────────────────────────────
+  // Logs, field activity and the team are real people's data, never demo
+  // data, so these read the server in demo mode too. Who may see whose rows
+  // is the server's rule (tier 3+ or a NeoHR lead).
+  var HR_DAY = /^\d{4}-\d{2}-\d{2}$/;
+  function hrDay(v, what) {
+    var s = v == null ? '' : String(v).trim();
+    if (!HR_DAY.test(s) || isNaN(Date.parse(s + 'T00:00:00Z'))) throw new Error('NEO_GATE: Choose a ' + what + ' date.');
+    return s;
+  }
+  function hrSpanDays(from, to) { return Math.round((Date.parse(to + 'T00:00:00Z') - Date.parse(from + 'T00:00:00Z')) / DAY); }
+
+  // The small dashboard the phone shows (rpc neo_dashboard): only the
+  // sections the caller may read come back.
+  async function neoDashboard() {
+    readable();
+    if (!profile()) throw new Error('NEO_DENIED: Sign in first.');
+    var res = await rpc('neo_dashboard', {}, READ_MS);
+    if (typeof res === 'string') { try { res = JSON.parse(res); } catch (e) { res = null; } }
+    return (res && typeof res === 'object' && !Array.isArray(res)) ? res : {};
+  }
+
+  // Everyone's (or one person's) work logs for shop days from..to
+  // ('YYYY-MM-DD', India time, both included, at most 62 days), newest
+  // first, at most 2000 → { from, to, rows: [...], more }.
+  async function workLogTeam(from, to, email) {
+    var f = hrDay(from, 'start'), t = hrDay(to, 'end');
+    if (t < f) throw new Error('NEO_GATE: The end date is before the start date.');
+    if (hrSpanDays(f, t) > 61) throw new Error('NEO_GATE: Ask for at most 62 days at a time.');
+    readable();
+    if (!profile()) throw new Error('NEO_DENIED: Sign in first.');
+    var res = await rpc('work_log_team', { p_from: f, p_to: t, p_email: clean(email) ? lowerS(email) : null }, READ_MS);
+    if (typeof res === 'string') { try { res = JSON.parse(res); } catch (e) { res = null; } }
+    var out = (res && typeof res === 'object' && !Array.isArray(res)) ? res : {};
+    if (Array.isArray(res)) out = { rows: res };
+    if (!Array.isArray(out.rows)) out.rows = [];
+    out.more = out.more === true;
+    return out;
+  }
+
+  // Field activity per person per day (rpc tech_activity): claims, hand-backs,
+  // assignments, site visits and their outcomes, punches. A service or NeoHR
+  // lead (tier 3+ are both) gets everyone; anyone else only themselves.
+  async function techActivity(from, to) {
+    var f = hrDay(from, 'start'), t = hrDay(to, 'end');
+    if (t < f) throw new Error('NEO_GATE: The end date is before the start date.');
+    if (hrSpanDays(f, t) > 366) throw new Error('NEO_GATE: Ask for at most a year at a time.');
+    readable();
+    if (!profile()) throw new Error('NEO_DENIED: Sign in first.');
+    var res = await rpc('tech_activity', { p_from: f, p_to: t }, READ_MS);
+    if (typeof res === 'string') { try { res = JSON.parse(res); } catch (e) { res = null; } }
+    return Array.isArray(res) ? res.filter(function (r) { return r && typeof r === 'object'; }) : [];
+  }
+
+  // The latest NeoHR phone release (GitHub Releases of the public repo; the
+  // same rule the phone's own updater uses, NEOHR-SPEC §2): non-draft
+  // releases tagged neohr-vMAJOR.MINOR.PATCH, newest version first. No
+  // credentials. GitHub allows 60 unauthenticated reads an hour per network,
+  // so an answer is kept 15 minutes in memory and 30 on this PC.
+  // NEVER rejects: { release | null, checkedAt, stale, error } — error is a
+  // sentence (and the last good answer, if any, comes back with stale:true).
+  var NEOHR_REPO = 'akruunnithan21-ship-it/neoqc';
+  var NEOHR_API = 'https://api.github.com/repos/' + NEOHR_REPO + '/releases?per_page=30';
+  var NEOHR_PAGE = 'https://github.com/' + NEOHR_REPO + '/releases/';
+  var NEOHR_TAG = /^neohr-v(\d{1,4})\.(\d{1,4})\.(\d{1,4})$/;
+  var NEOHR_CACHE_KEY = 'neo_neohr_release';
+  var NEOHR_MEM_MS = 15 * 60000, NEOHR_DISK_MS = 30 * 60000, NEOHR_FETCH_MS = 12000;
+  var neohrMem = null;                 // { at, release }
+  var neohrBusy = null;
+
+  function semverCmp(a, b) { return (a[0] - b[0]) || (a[1] - b[1]) || (a[2] - b[2]); }
+  // The release body is the Markdown notes file (publish-neohr.mjs passes
+  // tools/notes/<v>.md as --notes-file); the card shows plain text. Made the
+  // same way as that tool's notesToPlain, which writes neohr.json's notes:
+  // the first "# " heading is the release title and goes, then heading #'s,
+  // "- " bullets (→ "• "), links (→ their text), **, __ and backticks.
+  // Plain text passes through unchanged (apart from "- " bullets).
+  function neohrNotesPlain(md) {
+    var lines = String(md).replace(/\r\n?/g, '\n').split('\n');
+    var h1 = -1;
+    for (var i = 0; i < lines.length && h1 < 0; i++) if (/^#\s+\S/.test(lines[i])) h1 = i;
+    return lines.filter(function (l, j) { return j !== h1; }).map(function (l) {
+      return l.replace(/^#{1,6}\s+/, '')
+        .replace(/^\s*[-*+]\s+/, '• ')
+        .replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1')
+        .replace(/(\*\*|__|`)/g, '')
+        .replace(/\s+$/, '');
+    }).join('\n').replace(/\n{3,}/g, '\n\n').trim();
+  }
+  function neohrPick(list) {
+    if (!Array.isArray(list)) return null;
+    var best = null;
+    list.forEach(function (r) {
+      if (!r || typeof r !== 'object' || r.draft) return;
+      var m = NEOHR_TAG.exec(String(r.tag_name || ''));
+      if (!m) return;
+      var v = [Number(m[1]), Number(m[2]), Number(m[3])];
+      // Newest version first — by number, never by text (2.10.0 > 2.9.0).
+      if (!best || semverCmp(v, best.v) > 0) best = { v: v, r: r };
+    });
+    if (!best) return null;
+    var r = best.r, ver = best.v.join('.');
+    var assets = Array.isArray(r.assets) ? r.assets : [];
+    var want = 'neohr-' + ver + '.apk';
+    var apk = null;
+    assets.forEach(function (a) {
+      if (!a || typeof a.name !== 'string' || !/\.apk$/i.test(a.name)) return;
+      if (!apk || (a.name.toLowerCase() === want && apk.name.toLowerCase() !== want)) apk = a;
+    });
+    // Only links into this repo's releases are ever handed to the browser.
+    var dl = apk && typeof apk.browser_download_url === 'string' &&
+      apk.browser_download_url.indexOf(NEOHR_PAGE + 'download/') === 0 ? apk.browser_download_url : null;
+    var page = typeof r.html_url === 'string' && r.html_url.indexOf(NEOHR_PAGE) === 0 ? r.html_url : NEOHR_PAGE + 'tag/' + encodeURIComponent(r.tag_name);
+    var notes = typeof r.body === 'string' ? neohrNotesPlain(r.body) : '';
+    if (notes.length > 2000) notes = notes.slice(0, 2000).replace(/\s+\S*$/, '') + '…';
+    return {
+      version: ver,
+      versionCode: best.v[0] * 10000 + best.v[1] * 100 + best.v[2],
+      tag: String(r.tag_name),
+      title: typeof r.name === 'string' && r.name.trim() ? r.name.trim().slice(0, 200) : 'NeoHR ' + ver,
+      publishedAt: r.published_at || r.created_at || null,
+      prerelease: r.prerelease === true,
+      notes: notes,
+      pageUrl: page,
+      apk: dl ? { name: String(apk.name).slice(0, 120), size: Number(apk.size) || null, url: dl } : null
+    };
+  }
+  function neohrDiskRead() {
+    try {
+      var o = JSON.parse(localStorage.getItem(NEOHR_CACHE_KEY) || 'null');
+      return (o && typeof o === 'object' && typeof o.at === 'number') ? o : null;
+    } catch (e) { return null; }
+  }
+  function neohrDiskWrite(o) {
+    try { localStorage.setItem(NEOHR_CACHE_KEY, JSON.stringify(o)); } catch (e) { /* kept in memory only */ }
+  }
+  function neohrAnswer(o, stale, error) {
+    return { release: o ? o.release : null, checkedAt: o ? new Date(o.at).toISOString() : null, stale: !!stale, error: error || null };
+  }
+
+  function latestNeoHrRelease(opts) {
+    var force = !!(opts && opts.force);
+    var now = Date.now();
+    if (!force && neohrMem && now - neohrMem.at < NEOHR_MEM_MS) return Promise.resolve(neohrAnswer(neohrMem, false, null));
+    var disk = neohrDiskRead();
+    if (!force && disk && now - disk.at < NEOHR_DISK_MS && now >= disk.at) {
+      neohrMem = disk;
+      return Promise.resolve(neohrAnswer(disk, false, null));
+    }
+    if (neohrBusy) return neohrBusy;
+    var p = (async function () {
+      var lastGood = neohrMem || disk;
+      try {
+        if (typeof fetch !== 'function') throw new Error('offline');
+        var ctl = typeof AbortController === 'function' ? new AbortController() : null;
+        var timer = setTimeout(function () { if (ctl) ctl.abort(); }, NEOHR_FETCH_MS);
+        var resp;
+        try {
+          resp = await fetch(NEOHR_API, {
+            method: 'GET', headers: { Accept: 'application/vnd.github+json' },
+            credentials: 'omit', cache: 'no-store', referrerPolicy: 'no-referrer',
+            signal: ctl ? ctl.signal : undefined
+          });
+        } finally { clearTimeout(timer); }
+        if (!resp || !resp.ok) {
+          var status = resp ? resp.status : 0;
+          var limited = status === 429 || (status === 403 && resp.headers && resp.headers.get && resp.headers.get('x-ratelimit-remaining') === '0');
+          var msg = limited ? 'GitHub is limiting requests from this network just now — try again in a few minutes.'
+            : status === 404 ? 'The release list could not be found on GitHub.'
+            : 'GitHub did not answer (' + (status || 'no response') + ').';
+          return neohrAnswer(lastGood, !!lastGood, msg);
+        }
+        var list = await resp.json();
+        var o = { at: Date.now(), release: neohrPick(list) };
+        neohrMem = o;
+        neohrDiskWrite(o);
+        return neohrAnswer(o, false, null);
+      } catch (e) {
+        console.warn('[ops-data] NeoHR release check failed:', e && e.message);
+        return neohrAnswer(lastGood, !!lastGood, 'Could not reach GitHub — check the internet connection and try again.');
+      }
+    })();
+    // Cleared AFTER it is set: the body above can finish before this line
+    // runs (no fetch at all), and a guard cleared first would stick forever.
+    neohrBusy = p;
+    var clear = function () { if (neohrBusy === p) neohrBusy = null; };
+    p.then(clear, clear);
+    return p;
+  }
+
   // ── people and designation presets (tier 4+, Settings → People) ──────────
   // Reads work in demo mode (the people are real); writes do not.
   function listOf(res, key) {
@@ -2747,6 +2937,12 @@
     workOffsetMs: workOffsetMs,
     buildQueueSend: buildQueueSend,
     myWorkProfile: myWorkProfile,
+
+    // NeoHR (reads only)
+    neoDashboard: neoDashboard,
+    workLogTeam: workLogTeam,
+    techActivity: techActivity,
+    latestNeoHrRelease: latestNeoHrRelease,
 
     // people and designation presets (tier 4+)
     staffList: staffListRpc,

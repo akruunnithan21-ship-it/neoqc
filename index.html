@@ -27,6 +27,8 @@
   <link rel="stylesheet" href="rma.css">
   <!-- v1.11 the work queue (q- prefix), after the v1.10 sheets for the same reason. -->
   <link rel="stylesheet" href="queue.css">
+  <!-- v1.11 NeoHR (hr- prefix). -->
+  <link rel="stylesheet" href="neohr.css">
 </head>
 <body class="light-mode">
   
@@ -445,6 +447,26 @@
   <!-- ── New RMA ──────────────────────────────────────────────────────────── -->
   <div id="rma-intake-modal" class="modal-overlay">
     <div class="glass-slab modal-card sv-modal rma-intake-card"><div id="rma-intake-root"></div></div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       NEOHR (v1.11) — the people side of Neo OS, for heads (tier 3+) and
+       NeoHR leads: Team today, Work logs, Field activity and the NeoHR phone
+       app. neohr.js renders the toolbar and every tab; it is read-only and
+       opens no modal of its own.
+       ══════════════════════════════════════════════════════════════════════ -->
+  <div id="neohr-screen" class="screen has-rail">
+    <header class="glass-slab navbar">
+      <div class="nav-brand">
+        <svg class="brand-logo-svg" viewBox="0 0 100 100" style="width:22px;height:22px;vertical-align:middle;margin-right:6px;color:var(--primary-pink);"><circle cx="50" cy="50" r="40" stroke="currentColor" stroke-width="10" fill="none" stroke-dasharray="78.776 5" stroke-dashoffset="60.332" /><path d="M 50,23 L 72,70 C 58,58 50,56 50,56 C 50,56 42,58 28,70 Z" fill="currentColor" /></svg>
+        <span class="nav-title">NEO TOKYO // NEOHR</span>
+        <span id="hr-stat" class="sv-stat">—</span>
+      </div>
+      <div id="hr-toolbar" class="hr-toolbar"></div>
+    </header>
+    <main class="dashboard-container">
+      <div id="hr-root"></div>
+    </main>
   </div>
 
   <div id="client-screen" class="screen">
@@ -2586,23 +2608,21 @@
     <div class="glass-slab modal-card" style="max-width: 650px; width: 100%; padding: 30px; border-radius: 20px;">
       <div class="modal-header" style="border-bottom: 1px solid var(--glass-border); padding-bottom: 15px; margin-bottom: 20px;">
         <h2 style="font-family: 'Syncopate', sans-serif; font-size: 1.3rem; color: var(--primary-pink); letter-spacing: 0.05em; margin: 0;">NEO OS UPDATED</h2>
-        <span data-app-version style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; font-weight: 700; background: rgba(var(--primary-pink-rgb), 0.1); color: var(--primary-pink); padding: 4px 8px; border-radius: 4px;">v1.10.0</span>
+        <span data-app-version style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; font-weight: 700; background: rgba(var(--primary-pink-rgb), 0.1); color: var(--primary-pink); padding: 4px 8px; border-radius: 4px;">v1.11.0</span>
       </div>
       <div class="modal-body" style="font-size: 0.92rem; line-height: 1.6; color: var(--text-dark); max-height: 420px; overflow-y: auto; padding-right: 5px;">
-        <p style="margin-top: 0;"><strong>Neo QC is now Neo OS.</strong> Same app, same sign-in, same tickets — just a name that fits everything it does now: builds, QC, service and RMA. The installer and the desktop shortcut still say NeoQC for now. Here's what's new in <strong data-app-version>v1.10.0</strong>:</p>
+        <p style="margin-top: 0;"><strong>One queue for builds and service.</strong> Here's what's new in <strong data-app-version>v1.11.0</strong>:</p>
         <ul style="padding-left: 20px; display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px;">
-          <li><strong>Service tickets, rebuilt.</strong> A ticket is in-store, on-site or remote, and records how it reached us — walk-in, phone, WhatsApp or courier. Items can come from anywhere: our build, bought elsewhere, or “not sure”. Condition photos at intake each carry their own remark.</li>
-          <li><strong>Customer data and passwords.</strong> We do not back up customer data and are not responsible for it — the customer is asked to back up their own drives before handing the device over. If they give us a device password, it goes in its own field, stays hidden, and is deleted when the ticket closes.</li>
-          <li><strong>The technician queue.</strong> New tickets wait in a queue until a technician claims one. On-site visits and remote sessions get booked times, and on a visit the technician checks in and out as they go. Technicians get first pick of on-site work: a lead can assign one only after it has waited, or straight away if it is urgent.</li>
-          <li><strong>New: an RMA section for parts on warranty claims.</strong> Log a part that arrives by courier, comes in over the counter, or comes out of a service ticket — each one gets its own RM- code. A ticket follows its parts automatically, so you can see when it is waiting on one. Dispatch parts to vendors together, charge a handling fee for parts bought elsewhere, and a drive cannot go out until you record what happens to the data on it.</li>
-          <li><strong>Access by role.</strong> Service and RMA each have Desk, Tech and Lead roles, set in Settings → Operations. Help Desk staff can now sign in and use the app.</li>
-          <li><strong>Straight to your work, your colours.</strong> The “Select Application Mode” page is gone — Neo OS opens on the screen your role works in, and the Testing Client is one click away under Bench. Settings has a new Appearance tab: light, dark or match Windows, and seven accent colours.</li>
-          <li><strong>Demo data for training.</strong> Turn on “Show demo service and RMA data” in Settings → Operations to fill Service and RMA with practice tickets. It is read-only, and your real tickets come back when you turn it off.</li>
-          <li><strong>On the website.</strong> Staff can raise a new service request or RMA from the web portal, and customers can track a part with its RM- code and the last four digits of their phone, the same way as a repair.</li>
+          <li><strong>One work queue.</strong> New PC builds and service tickets now wait together on the new Queue screen. Technicians claim what suits them — on the way in, between jobs, or at the bench — and every item has 4 hours to be claimed.</li>
+          <li><strong>Offers, with 30 minutes to answer.</strong> If nobody claims an item in 4 hours, Neo OS offers it to the technician with the most room. Leads can offer work too. Accept or decline within 30 minutes; a decline or no answer moves it to the next person, and leads are told when nobody can take it.</li>
+          <li><strong>Builds go through the queue.</strong> Builds are no longer assigned automatically: a build made here goes straight to the queue, and a website quote waits under “Not sent to the floor” until someone sends it. High-value builds can only be taken by senior builders.</li>
+          <li><strong>People, roles and presets.</strong> Settings → Operations → People (tier 4 and above) holds each person's designation, roles (Service, RMA, Builds, NeoHR), work pools, build level and capacity. A designation gives the standard access for that job, and you can still adjust anyone. New logins show up as “New — not staff yet”.</li>
+          <li><strong>NeoHR is part of Neo OS.</strong> The phone app signs in with the same email and PIN. Technicians can claim and accept work, move their service jobs on, add notes and photos, and check in and out on site from the phone; heads get a simple dashboard. In Neo OS, the new NeoHR screen shows the team today, work logs, field activity and the app's download link.</li>
+          <li><strong>Your own home screen.</strong> Technicians now open on the Queue, desk staff on Service, and heads on Overview.</li>
         </ul>
       </div>
       <div class="modal-footer" style="border-top: 1px solid var(--glass-border); padding-top: 15px; display: flex; justify-content: flex-end; margin-top: 20px;">
-        <button id="btn-close-changelog" data-app-version-label class="primary-pink-btn" style="padding: 10px 24px; font-weight: 700; font-size: 0.95rem;">Launch Neo OS v1.10.0</button>
+        <button id="btn-close-changelog" data-app-version-label class="primary-pink-btn" style="padding: 10px 24px; font-weight: 700; font-size: 0.95rem;">Launch Neo OS v1.11.0</button>
       </div>
     </div>
   </div>
@@ -2645,6 +2665,7 @@
   <script src="service.js"></script>
   <script src="rma.js"></script>
   <script src="queue.js"></script>
+  <script src="neohr.js"></script>
   <script src="shell.js"></script>
 </body>
 </html>

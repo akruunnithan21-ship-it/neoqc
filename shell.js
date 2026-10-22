@@ -243,7 +243,8 @@
   }
 
   // Builds the rail from the registry. Only items this person can open are
-  // drawn; hidden placeholders (NeoHR) never are. The registry may mark the
+  // drawn; hidden placeholders never are. (NeoHR was one until v1.11; it is
+  // now a real screen, shown to tier 3+ and NeoHR leads.) The registry may mark the
   // gap above Bench/Settings with a spacer entry; if it does not, the spacer
   // goes before the first action item, which is where it has always been.
   function renderRail() {

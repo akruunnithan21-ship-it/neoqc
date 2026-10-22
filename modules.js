@@ -31,7 +31,7 @@
   var MODULE_KEYS = ['service', 'rma', 'qc', 'neohr'];
   var ROLE_RANK = { desk: 1, tech: 2, lead: 3 };
   var LEVELS = ['junior', 'senior'];
-  var OFFICE_MODES = ['overview', 'queue', 'staff', 'service', 'rma'];
+  var OFFICE_MODES = ['overview', 'queue', 'staff', 'service', 'rma', 'neohr'];
 
   // Rail order. `needs` is read only by canOpen() below; the rail never
   // interprets it itself, so the rule lives in one function. Shapes:
@@ -48,8 +48,13 @@
     { id: 'builds',   label: 'Builds',   icon: '🖥', screenId: 'staff-screen',    mode: 'staff',    needs: { module: 'qc', role: 'desk' } },
     { id: 'service',  label: 'Service',  icon: '🔧', screenId: 'service-screen',  mode: 'service',  needs: { module: 'service', role: 'desk' } },
     { id: 'rma',      label: 'RMA',      icon: '📦', screenId: 'rma-screen',      mode: 'rma',      needs: { module: 'rma', role: 'desk' } },
-    // Placeholder so the id is reserved; nothing can open it yet.
-    { id: 'neohr',    label: 'NeoHR',    icon: '👥', screenId: null, mode: null, hidden: true },
+    // NeoHR (v1.11): the people side — who is at work today, everyone's work
+    // logs and field activity, and the NeoHR phone app. It shows every
+    // person's logs, so only tier 3+ (heads) or a NeoHR lead (HR) opens it —
+    // the same people the server lets read them (tech_activity,
+    // work_log_team).
+    { id: 'neohr',    label: 'NeoHR',    icon: '👥', screenId: 'neohr-screen', mode: 'neohr',
+      needs: { anyOf: [{ tier: 3 }, { module: 'neohr', role: 'lead' }] } },
     // The gap above Bench / Settings. shell.js recognises { spacer: true }.
     { id: 'spacer',   spacer: true },
     { id: 'bench',    label: 'Bench',    icon: '⚗', action: 'bench',
@@ -311,6 +316,9 @@
     if (roleFor('service', p)) return 'service';
     if (roleFor('qc', p)) return 'staff';
     if (roleFor('rma', p)) return 'rma';
+    // HR below tier 3 (a NeoHR lead with no work role) lands on NeoHR, not
+    // on the bench or the "use the web portal" notice.
+    if (roleFor('neohr', p) === 'lead' && canOpen('neohr', p)) return 'neohr';
     if (t === 2) return 'client';
     return null;
   }

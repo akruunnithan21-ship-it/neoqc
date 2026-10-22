@@ -37,6 +37,18 @@
 --   * NeoHR (the phone) signs in with the Neo OS email + PIN and syncs its work
 --     logs; tier 3+ see everyone's.
 --
+-- NeoHR 2.1 (owner requests 2026-10-22, same release, same file)
+--   * neo_dashboard(): the phone's simplified dashboard — one JSON, each
+--     section present only when the caller may read what it counts. Its
+--     "late" and whose-turn ("ball") counts are the service status model of
+--     shared/service-status.js (serviceRisk + ticketWithUnits), ported as
+--     _svc_state and its pure helpers; tests/sql-parity.test.js runs both.
+--   * People sets the neohr role too (staff_update roles / staff_list); a
+--     preset still never touches it. A neohr lead (HR; tier 3+ are leads
+--     automatically) reads everyone's work logs (work_log_team, work_logs)
+--     and the team (work_team: people, load, last seen, logs today — items,
+--     offers and alerts still only of the kinds they lead).
+--
 -- OLD CLIENTS KEEP WORKING (v1.9.11 and 1.10.0 desktops, the website)
 --   * Every new column is nullable or defaulted; old inserts name only old columns.
 --   * A non-RPC UPDATE of a build silently KEEPS the server-owned columns
@@ -225,11 +237,12 @@ create policy we_select on public.work_events for select to authenticated
 revoke all on table public.work_events from anon, authenticated;
 grant select on table public.work_events to authenticated;
 
--- Work logs: your own, or everyone's for tier 3+.
+-- Work logs: your own, or everyone's for a neohr lead (HR; tier 3+ are leads
+-- of every module automatically).
 alter table public.work_logs enable row level security;
 drop policy if exists wl_select on public.work_logs;
 create policy wl_select on public.work_logs for select to authenticated
-  using (profile_id = (select auth.uid()) or (select public.my_tier()) >= 3);
+  using (profile_id = (select auth.uid()) or (select public.has_module('neohr', 'lead')));
 revoke all on table public.work_logs from anon, authenticated;
 grant select on table public.work_logs to authenticated;
 
@@ -392,7 +405,7 @@ begin
       from pg_proc p
       join pg_namespace n on n.oid = p.pronamespace
      where n.nspname = 'public'
-       and p.proname ~ '^(_work_|_preset_apply$|_svc_apply_visit$|_svc_visit_event$|_svc_category_label$|_designation_key$|_build_tier$|_first_name$|_staff_for_short_name$|_ist_hm$|tg_tickets_work_|tg_service_jobs_zy_offer_|tg_service_jobs_work_gone$)'
+       and p.proname ~ '^(_work_|_preset_apply$|_svc_apply_visit$|_svc_visit_event$|_svc_category_label$|_designation_key$|_build_tier$|_first_name$|_staff_for_short_name$|_ist_hm$|_svc_ball$|_svc_budget_in$|_svc_budget_days$|_svc_risk_ms$|_rma_ball$|_rma_budget_days$|_rma_risk_ms$|_svc_state$|tg_tickets_work_|tg_service_jobs_zy_offer_|tg_service_jobs_work_gone$)'
   loop
     execute format('revoke all on function %s from public, anon, authenticated', r.sig);
     execute format('grant execute on function %s to service_role', r.sig);
@@ -1296,7 +1309,8 @@ returns jsonb language sql stable security definer set search_path = public as $
     'roles', jsonb_build_object(
       'service', (select ma.role from public.module_access ma where ma.profile_id = p.id and ma.module = 'service'),
       'rma',     (select ma.role from public.module_access ma where ma.profile_id = p.id and ma.module = 'rma'),
-      'qc',      (select ma.role from public.module_access ma where ma.profile_id = p.id and ma.module = 'qc')),
+      'qc',      (select ma.role from public.module_access ma where ma.profile_id = p.id and ma.module = 'qc'),
+      'neohr',   (select ma.role from public.module_access ma where ma.profile_id = p.id and ma.module = 'neohr')),
     'auto_lead', p.tier >= 3,
     'build_pool', w.build_pool, 'service_pool', w.service_pool, 'build_level', w.build_level,
     'capacity_points', w.capacity_points, 'max_jobs', w.max_jobs,
@@ -2252,7 +2266,9 @@ begin
 end $$;
 
 -- Leads: who holds what. Items and offers only of the kinds the caller leads;
--- last_seen_at / logs_today only for tier 3+.
+-- last_seen_at / logs_today only for a neohr lead (HR, and tier 3+, who lead
+-- every module), who may also open the team without leading a kind (the
+-- NeoHR screen's "Team today").
 create or replace function public.work_team()
 returns jsonb
 language plpgsql stable security definer
@@ -2262,7 +2278,7 @@ declare
   v_me public.profiles := public._neo_me();
   v_lb boolean := public.has_module('qc', 'lead');
   v_ls boolean := public.has_module('service', 'lead');
-  v_hr boolean := public.my_tier() >= 3;
+  v_hr boolean := public.has_module('neohr', 'lead');
   v_lo timestamptz := ((now() at time zone 'Asia/Kolkata')::date)::timestamp at time zone 'Asia/Kolkata';
   v_hi timestamptz := ((now() at time zone 'Asia/Kolkata')::date + 1)::timestamp at time zone 'Asia/Kolkata';
   v_people jsonb;
@@ -2486,7 +2502,8 @@ begin
     'department', v_me.department, 'tier', v_me.tier, 'modules', public.my_modules(),
     'build_pool', w.build_pool, 'service_pool', w.service_pool, 'build_level', w.build_level,
     'capacity_points', w.capacity_points, 'max_jobs', w.max_jobs,
-    'team_view', public.my_tier() >= 3,
+    -- the Team tab and everyone's logs: a neohr lead (tier 3+ always are)
+    'team_view', public.has_module('neohr', 'lead'),
     'lead_builds', public.has_module('qc', 'lead'), 'lead_service', public.has_module('service', 'lead'),
     'desk_builds', v_db, 'desk_service', v_ds,
     -- 'work' exactly when work_queue() would answer (a pool flag alone never does).
@@ -2595,10 +2612,11 @@ begin
   if p ? 'roles' then
     v_roles := p -> 'roles';
     if jsonb_typeof(v_roles) <> 'object' then
-      raise exception 'NEO_GATE: Roles must be given per module (service, rma, qc).';
+      raise exception 'NEO_GATE: Roles must be given per module (service, rma, qc, neohr).';
     end if;
     for k in select jsonb_object_keys(v_roles) loop
-      if k not in ('service', 'rma', 'qc') then
+      -- neohr (NeoHR 2.1): set here by hand only; presets never touch it.
+      if k not in ('service', 'rma', 'qc', 'neohr') then
         raise exception 'NEO_GATE: "%" is not a module you can set here.', k;
       end if;
       if jsonb_typeof(v_roles -> k) not in ('null', 'string')
@@ -2671,7 +2689,7 @@ begin
            updated_at      = now();
   end if;
   if p ? 'roles' then
-    foreach m in array array['service', 'rma', 'qc'] loop
+    foreach m in array array['service', 'rma', 'qc', 'neohr'] loop
       continue when not (v_roles ? m);
       v_role := nullif(lower(btrim(coalesce(v_roles ->> m, ''))), '');
       if v_role is null then
@@ -2978,8 +2996,9 @@ begin
                             'more', v_more);
 end $$;
 
--- Tier 3+: everyone's (or one person's) logs for shop days p_from..p_to
--- (inclusive, at most 62 days), not deleted, newest first, at most 2000.
+-- A neohr lead (HR; tier 3+ always are): everyone's (or one person's) logs
+-- for shop days p_from..p_to (inclusive, at most 62 days), not deleted,
+-- newest first, at most 2000.
 create or replace function public.work_log_team(p_from date, p_to date, p_email text default null)
 returns jsonb
 language plpgsql stable security definer
@@ -2996,7 +3015,9 @@ declare
   v_rows jsonb;
   v_n int;
 begin
-  if public.my_tier() < 3 then raise exception 'NEO_DENIED: Only tier 3 and above can see the team''s logs.'; end if;
+  if not public.has_module('neohr', 'lead') then
+    raise exception 'NEO_DENIED: Only tier 3 and above, or a NeoHR lead, can see the team''s logs.';
+  end if;
   if v_to < v_from then raise exception 'NEO_GATE: The end date is before the start date.'; end if;
   if v_to - v_from > 61 then raise exception 'NEO_GATE: Ask for at most 62 days at a time.'; end if;
   v_lo := v_from::timestamp at time zone 'Asia/Kolkata';
@@ -3029,6 +3050,440 @@ end $$;
 
 
 -- =============================================================================
+-- §9b NeoHR DASHBOARD (NeoHR 2.1): the phone's simplified view
+-- =============================================================================
+
+-- The service status model of shared/service-status.js, ported for the
+-- dashboard's "late" and whose-turn counts. The pure helpers take plain
+-- numbers (milliseconds, as the JS does), so tests/sql-parity.test.js runs
+-- them against the JS rules on a grid of inputs without a database, and
+-- pgtest/dash22.mjs compares _svc_state with ticketWithUnits on real rows.
+-- Change both sides together. (One statement: defined, then locked down.)
+do $wq$
+begin
+
+-- STAGES[stage].ball (ballOf): 'shop' | 'customer' | 'third_party' | 'nobody'.
+-- An unknown stage is the shop's problem, as in the JS.
+create or replace function public._svc_ball(p_stage text)
+returns text language sql immutable set search_path = public as $$
+  select case p_stage
+    when 'quoted' then 'customer' when 'work_done' then 'customer' when 'resolved' then 'customer'
+    when 'ready' then 'customer'
+    when 'parts_on_order' then 'third_party' when 'at_vendor' then 'third_party'
+    when 'closed' then 'nobody'
+    else 'shop' end
+$$;
+
+-- BUDGET_BY_TYPE[type][stage]: the idle budget in days in that type's own
+-- table, or null when it has none (visit stages have none on purpose).
+create or replace function public._svc_budget_in(p_type text, p_stage text)
+returns numeric language sql immutable set search_path = public as $$
+  select case p_type
+    when 'in_store' then case p_stage
+      when 'logged' then 1 when 'received' then 1 when 'diagnosing' then 2 when 'quoted' then 3
+      when 'approved' then 2 when 'parts_to_order' then 1 when 'parts_on_order' then 7 when 'rma_raised' then 1
+      when 'at_vendor' then 14 when 'back_from_vendor' then 1 when 'in_service' then 3 when 'verifying' then 1
+      when 'ready' then 3 end
+    when 'on_site' then case p_stage
+      when 'logged' then 0.5 when 'on_site' then 0.5 when 'work_done' then 2 when 'revisit_needed' then 1
+      when 'quoted' then 3 when 'approved' then 2 when 'parts_to_order' then 1 when 'parts_on_order' then 7
+      when 'rma_raised' then 1 when 'at_vendor' then 14 when 'back_from_vendor' then 1 end
+    when 'remote' then case p_stage
+      when 'logged' then 0.1667 when 'in_session' then 0.125 when 'resolved' then 1 when 'quoted' then 3 end
+  end
+$$;
+
+-- _budgetFor(type, stage) for a stage that is not a visit stage: the type's
+-- own table, else the first of in_store, on_site, remote that budgets it (a
+-- converted ticket can sit in a stage its new type lacks); an unknown type
+-- reads as in_store.
+create or replace function public._svc_budget_days(p_type text, p_stage text)
+returns numeric language sql immutable set search_path = public as $$
+  select coalesce(public._svc_budget_in(p_type, p_stage), public._svc_budget_in('in_store', p_stage),
+                  public._svc_budget_in('on_site', p_stage), public._svc_budget_in('remote', p_stage))
+$$;
+
+-- serviceRisk(job, now) for a typed job (every v2 row has service_type):
+-- 0 ok | 1 soon | 2 late. p_idle_ms = now - stage_since (never below 0);
+-- p_promise_ms = promised_at - now; p_visit_ms = visit_start - now (null:
+-- none). A broken promise outranks everything; a booked visit is its own
+-- clock (late 30 minutes after the start, soon from an hour before it while
+-- still scheduled); a visit stage with no time has half a day.
+create or replace function public._svc_risk_ms(p_type text, p_stage text, p_idle_ms numeric,
+                                               p_promise_ms numeric, p_visit_ms numeric)
+returns int language plpgsql immutable set search_path = public as $$
+declare
+  v_done boolean;
+  v_budget numeric;
+begin
+  if p_stage = 'closed' then return 0; end if;
+  v_done := p_stage in ('ready', 'closed', 'work_done', 'resolved');
+  if p_promise_ms is not null and p_promise_ms <= 0 and not v_done then return 2; end if;
+  if p_stage in ('scheduled', 'en_route', 'session_booked') then
+    if p_visit_ms is not null then
+      if p_visit_ms < -1800000 then return 2; end if;
+      if p_stage = 'scheduled' and p_visit_ms <= 3600000 then return 1; end if;
+      v_budget := null;
+    else
+      v_budget := 0.5;
+    end if;
+  else
+    v_budget := public._svc_budget_days(p_type, p_stage);
+  end if;
+  if v_budget is not null then
+    if p_idle_ms >= v_budget * 86400000 then return 2; end if;
+    if p_idle_ms >= v_budget * 0.75 * 86400000 then return 1; end if;
+  end if;
+  if p_promise_ms is not null and not v_done and p_promise_ms <= 86400000 then return 1; end if;
+  return 0;
+end $$;
+
+-- rmaBallOf(unit): ready_to_return is the customer's turn only when they
+-- collect it (an unknown return method reads as collect).
+create or replace function public._rma_ball(p_stage text, p_return_method text)
+returns text language sql immutable set search_path = public as $$
+  select case p_stage
+    when 'ready_to_return' then case when p_return_method in ('courier', 'with_device') then 'shop' else 'customer' end
+    when 'logged' then 'customer' when 'awaiting_docs' then 'customer' when 'customer_decision' then 'customer'
+    when 'with_vendor' then 'third_party' when 'returning' then 'third_party'
+    when 'closed' then 'nobody'
+    else 'shop' end
+$$;
+
+-- rmaBudgetDays(unit, vendor): with_vendor uses the vendor's typical
+-- turnaround (14 without one), ready_to_return its return method.
+create or replace function public._rma_budget_days(p_stage text, p_return_method text, p_tat int)
+returns numeric language sql immutable set search_path = public as $$
+  select case p_stage
+    when 'with_vendor' then case when p_tat > 0 then p_tat else 14 end
+    when 'ready_to_return' then case when p_return_method in ('courier', 'with_device') then 1 else 5 end
+    when 'logged' then 3 when 'with_tech' then 1 when 'received' then 1 when 'testing' then 2
+    when 'awaiting_docs' then 3 when 'ready_to_ship' then 3 when 'back_from_vendor' then 1
+    when 'customer_decision' then 3 when 'returning' then 4 end
+$$;
+
+-- rmaRisk(unit, now, vendor): 0 | 1 | 2. At a vendor with an expected date
+-- that date is the clock (soon in the last quarter of the wait), whatever the
+-- idle days. p_back_in_ms = expected_back_at - now; p_span_ms =
+-- expected_back_at - stage_since.
+create or replace function public._rma_risk_ms(p_stage text, p_return_method text, p_idle_ms numeric,
+                                               p_back_in_ms numeric, p_span_ms numeric, p_tat int)
+returns int language plpgsql immutable set search_path = public as $$
+declare
+  v_budget numeric;
+begin
+  if p_stage = 'closed' then return 0; end if;
+  if p_stage = 'with_vendor' and p_back_in_ms is not null then
+    if p_back_in_ms <= 0 then return 2; end if;
+    if p_span_ms is not null and p_span_ms > 0 and p_back_in_ms <= p_span_ms * 0.25 then return 1; end if;
+    return 0;
+  end if;
+  v_budget := public._rma_budget_days(p_stage, p_return_method, p_tat);
+  if v_budget is null then return 0; end if;
+  if p_idle_ms >= v_budget * 86400000 then return 2; end if;
+  if p_idle_ms >= v_budget * 0.75 * 86400000 then return 1; end if;
+  return 0;
+end $$;
+
+-- ticketWithUnits(job, units, vendors, now): whose turn it is and how late a
+-- ticket is. A ticket in a mirror stage (rma_raised / at_vendor /
+-- back_from_vendor) that holds open parts takes the most urgent part's ball
+-- (customer, then shop, then a third party) and the worst part's risk; any
+-- other ticket reads by its own stage. Times are whole milliseconds, as JS
+-- Date has them.
+create or replace function public._svc_state(p_job public.service_jobs, p_now timestamptz,
+                                             out ball text, out risk int)
+language plpgsql stable security definer set search_path = public as $$
+declare
+  v_t numeric := floor(extract(epoch from p_now) * 1000);
+  h record;
+begin
+  if p_job.stage = 'closed' then ball := 'nobody'; risk := 0; return; end if;
+  ball := public._svc_ball(p_job.stage);
+  risk := public._svc_risk_ms(p_job.service_type, p_job.stage,
+            greatest(0, v_t - floor(extract(epoch from p_job.stage_since) * 1000)),
+            floor(extract(epoch from p_job.promised_at) * 1000) - v_t,
+            floor(extract(epoch from p_job.visit_start) * 1000) - v_t);
+  if p_job.stage in ('rma_raised', 'at_vendor', 'back_from_vendor') then
+    select case when bool_or(x.b = 'customer') then 'customer' when bool_or(x.b = 'shop') then 'shop'
+                when bool_or(x.b = 'third_party') then 'third_party' else 'nobody' end as b,
+           max(x.r) as r, count(*) as n
+      into h
+      from (select public._rma_ball(c.stage, c.return_method) as b,
+                   public._rma_risk_ms(c.stage, c.return_method,
+                     greatest(0, v_t - floor(extract(epoch from c.stage_since) * 1000)),
+                     floor(extract(epoch from c.expected_back_at) * 1000) - v_t,
+                     floor(extract(epoch from c.expected_back_at) * 1000) - floor(extract(epoch from c.stage_since) * 1000),
+                     v.typical_tat_days) as r
+              from public.rma_cases c
+              left join public.rma_vendors v on v.id = c.vendor_id
+             where c.service_job_id = p_job.id and c.holds_ticket and c.stage <> 'closed') x;
+    if h.n > 0 then ball := h.b; risk := h.r; end if;
+  end if;
+end $$;
+
+perform public._work_lockdown();
+end $wq$;
+
+-- Any active staff member. Every section is present only when the caller may
+-- read what it counts — the per-kind rules of work_queue — and is left out
+-- (never sent as zeros) otherwise:
+--   mine     in a work pool, or holding an item or a live offer
+--   queue    Builds or Service desk+ (open items of the kinds they read)
+--   service  Service desk+        builds  Builds desk+        rma  RMA desk+
+--   team     tier 3+
+-- attention: at most 6 items, most urgent first. Days are India days.
+create or replace function public.neo_dashboard()
+returns jsonb
+language plpgsql stable security definer
+set search_path = public
+as $$
+declare
+  v_me public.profiles := public._neo_me();
+  v_em text := lower(v_me.email);
+  v_now timestamptz := now();
+  v_lo timestamptz := ((now() at time zone 'Asia/Kolkata')::date)::timestamp at time zone 'Asia/Kolkata';
+  v_hi timestamptz := ((now() at time zone 'Asia/Kolkata')::date + 1)::timestamp at time zone 'Asia/Kolkata';
+  v_db boolean := public.has_module('qc', 'desk');
+  v_ds boolean := public.has_module('service', 'desk');
+  v_dr boolean := public.has_module('rma', 'desk');
+  v_lb boolean := public.has_module('qc', 'lead');
+  v_ls boolean := public.has_module('service', 'lead');
+  v_head boolean := public.my_tier() >= 3;
+  -- may I take a build of tier 1-3 / 4-5, a service job (the claim rule)
+  v_okb_lo boolean := public._work_why_not('build', 1, v_me.id) is null;
+  v_okb_hi boolean := public._work_why_not('build', 5, v_me.id) is null;
+  v_oks boolean := public._work_why_not('service', null, v_me.id) is null;
+  w record;
+  v_out jsonb;
+  v_sec jsonb;
+begin
+  select * into w from public._work_settings(v_me.id);
+  v_out := jsonb_build_object('now', v_now,
+             'me', jsonb_build_object('name', v_me.full_name, 'designation', v_me.designation, 'tier', v_me.tier));
+
+  -- mine: my open items of the kinds I read. due_today = deadline (builds) or
+  -- visit / needed-by time (service, as the queue's ITEM deadline) inside
+  -- today; overdue = a build past its deadline or a late service ticket. An
+  -- item due earlier today and now overdue counts in both.
+  with m as (
+    select t.deadline as due, t.deadline <= v_now as late
+      from public.tickets t
+     where v_db and lower(t.technician_email) = v_em and t.status is distinct from 'completed'
+    union all
+    select coalesce(s.visit_start, s.needed_by), st.risk = 2
+      from public.service_jobs s
+      cross join lateral public._svc_state(s, v_now) st
+     where v_ds and lower(s.assignee_email) = v_em and s.stage <> 'closed'
+  ), o as (
+    select 1 from public.tickets t
+     where v_db and t.offer_expires_at > v_now and lower(t.offered_to_email) = v_em
+       and t.status is distinct from 'completed' and lower(coalesce(t.technician_email, '')) <> v_em
+    union all
+    select 1 from public.service_jobs s
+     where v_ds and s.offer_expires_at > v_now and lower(s.offered_to_email) = v_em
+       and s.stage <> 'closed' and lower(coalesce(s.assignee_email, '')) <> v_em
+  )
+  select jsonb_build_object(
+           'items', (select count(*) from m),
+           'offers', (select count(*) from o),
+           'due_today', (select count(*) from m where m.due >= v_lo and m.due < v_hi),
+           'overdue', (select count(*) from m where m.late))
+    into v_sec;
+  if w.build_pool or w.service_pool or (v_sec ->> 'items')::int > 0 or (v_sec ->> 'offers')::int > 0 then
+    v_out := v_out || jsonb_build_object('mine', v_sec);
+  end if;
+
+  -- queue: what work_queue shows as open. overdue = past its 4 hours (the
+  -- server is offering it); oldest_minutes = the longest wait (0 when empty).
+  if v_db or v_ds then
+    with q as (
+      select t.queued_at as since
+        from public.tickets t
+       where v_db and t.technician_email is null and btrim(coalesce(t.technician, '')) = ''
+         and t.status is distinct from 'completed' and t.queued_at is not null
+      union all
+      select coalesce(s.queued_at, s.created_at)
+        from public.service_jobs s
+       where v_ds and s.assignee_email is null and s.stage <> 'closed'
+    )
+    select jsonb_build_object(
+             'open', count(*),
+             'overdue', count(*) filter (where q.since + interval '4 hours' <= v_now),
+             'oldest_minutes', coalesce(greatest(0, floor(extract(epoch from (v_now - min(q.since))) / 60))::int, 0))
+      into v_sec
+      from q;
+    v_out := v_out || jsonb_build_object('queue', v_sec);
+  end if;
+
+  -- service: every open ticket by whose turn it is (on_us + on_customer +
+  -- on_supplier = open) and how many are late; visits booked for today.
+  if v_ds then
+    select jsonb_build_object(
+             'open', count(*),
+             'on_us', count(*) filter (where st.ball = 'shop'),
+             'on_customer', count(*) filter (where st.ball = 'customer'),
+             'on_supplier', count(*) filter (where st.ball = 'third_party'),
+             'ready_to_collect', count(*) filter (where s.stage = 'ready'),
+             'visits_today', (select count(*) from public.service_jobs v
+                               where v.service_type <> 'in_store' and v.visit_start >= v_lo and v.visit_start < v_hi),
+             'late', count(*) filter (where st.risk = 2))
+      into v_sec
+      from public.service_jobs s
+      cross join lateral public._svc_state(s, v_now) st
+     where s.stage <> 'closed';
+    v_out := v_out || jsonb_build_object('service', v_sec);
+  end if;
+
+  -- builds: every build not completed, by status (anything else is
+  -- awaiting); deadlines; quotes not sent to the floor.
+  if v_db then
+    select jsonb_build_object(
+             'open', count(*),
+             'awaiting', count(*) filter (where coalesce(t.status, '') not in ('building', 'waiting_qc', 'qc_testing')),
+             'building', count(*) filter (where t.status = 'building'),
+             'waiting_qc', count(*) filter (where t.status = 'waiting_qc'),
+             'qc_testing', count(*) filter (where t.status = 'qc_testing'),
+             'due_48h', count(*) filter (where t.deadline > v_now and t.deadline < v_now + interval '48 hours'),
+             'overdue', count(*) filter (where t.deadline <= v_now),
+             'not_sent', count(*) filter (where t.technician_email is null and btrim(coalesce(t.technician, '')) = ''
+                                            and t.queued_at is null))
+      into v_sec
+      from public.tickets t
+     where t.status is distinct from 'completed';
+    v_out := v_out || jsonb_build_object('builds', v_sec);
+  end if;
+
+  if v_dr then
+    select jsonb_build_object(
+             'open', count(*),
+             'at_vendor', count(*) filter (where c.stage = 'with_vendor'),
+             'ready_to_return', count(*) filter (where c.stage = 'ready_to_return'))
+      into v_sec
+      from public.rma_cases c
+     where c.stage <> 'closed';
+    v_out := v_out || jsonb_build_object('rma', v_sec);
+  end if;
+
+  -- team (heads): the people work_team lists; busy = holding an item or a
+  -- live offer, free = holding nothing; load = points held against the
+  -- capacity of everyone in a pool; site visits = NeoHR "Arrived" today.
+  if v_head then
+    select jsonb_build_object(
+             'people', count(*),
+             'busy', count(*) filter (where x.jobs > 0),
+             'free', count(*) filter (where x.jobs = 0),
+             'load_pct', case when coalesce(sum(x.capacity_points) filter (where x.in_pool), 0) > 0
+                              then round(100.0 * sum(x.points) filter (where x.in_pool)
+                                         / sum(x.capacity_points) filter (where x.in_pool))::int
+                              else 0 end,
+             'logs_today', (select count(*) from public.work_logs wl
+                             where wl.deleted_at is null and wl.created_at >= v_lo and wl.created_at < v_hi),
+             'visits_today', (select count(*) from public.field_activity fa
+                               where fa.kind = 'arrived' and fa.at >= v_lo and fa.at < v_hi),
+             'alerts', (select count(*) from public.work_alerts a where a.resolved_at is null))
+      into v_sec
+      from (select (pw.build_pool or pw.service_pool) as in_pool, pw.capacity_points, l.points, l.jobs
+              from public.profiles p
+              cross join lateral public._work_settings(p.id) pw
+              cross join lateral public._work_load(p.email) l
+             where p.active and coalesce(p.is_staff, false)
+               and (pw.build_pool or pw.service_pool or l.jobs > 0)) x;
+    v_out := v_out || jsonb_build_object('team', v_sec);
+  end if;
+
+  -- attention: one line per item, its most urgent reason; most urgent first.
+  --   0 offered to me · 1 mine and late · 2 alerts (lead of that kind)
+  --   3 not claimed in 4 hours: one I could claim (eligible, not declined
+  --     by me), or any of a kind I lead
+  --   4 anyone's late work (lead of that kind) · 5 mine, due later today
+  with c as (
+    select 0 as prio, 'build'::text as kind, t.id, upper(right(t.id, 6)) as code, t.customer_name as title,
+           'Offered to you — accept by ' || public._ist_hm(t.offer_expires_at) || '.' as why, t.offer_expires_at as at
+      from public.tickets t
+     where v_db and t.offer_expires_at > v_now and lower(t.offered_to_email) = v_em
+       and t.status is distinct from 'completed' and lower(coalesce(t.technician_email, '')) <> v_em
+    union all
+    select 0, 'service', s.id, s.public_code,
+           coalesce(nullif(btrim(coalesce(s.device_label, '')), ''), public._svc_category_label(s.category)),
+           'Offered to you — accept by ' || public._ist_hm(s.offer_expires_at) || '.', s.offer_expires_at
+      from public.service_jobs s
+     where v_ds and s.offer_expires_at > v_now and lower(s.offered_to_email) = v_em
+       and s.stage <> 'closed' and lower(coalesce(s.assignee_email, '')) <> v_em
+    union all
+    select case when lower(t.technician_email) = v_em then 1 else 4 end, 'build', t.id, upper(right(t.id, 6)), t.customer_name,
+           'Past its deadline.' || case when lower(t.technician_email) = v_em then ''
+                                        else coalesce(' ' || nullif(btrim(coalesce(t.technician, '')), '') || ' has it.',
+                                                      ' Nobody has it.') end,
+           t.deadline
+      from public.tickets t
+     where v_db and t.status is distinct from 'completed' and t.deadline <= v_now
+       and (lower(t.technician_email) = v_em or v_lb)
+    union all
+    select case when lower(s.assignee_email) = v_em then 1 else 4 end, 'service', s.id, s.public_code,
+           coalesce(nullif(btrim(coalesce(s.device_label, '')), ''), public._svc_category_label(s.category)),
+           'Late — ' || public._svc_stage_label(s.stage) || '.'
+             || case when lower(s.assignee_email) = v_em then ''
+                     else coalesce(' ' || nullif(btrim(coalesce(s.assignee, '')), '') || ' has it.', ' Nobody has it.') end,
+           s.stage_since
+      from public.service_jobs s
+      cross join lateral public._svc_state(s, v_now) st
+     where v_ds and s.stage <> 'closed' and st.risk = 2
+       and (lower(s.assignee_email) = v_em or v_ls)
+    union all
+    select 2, a.item_kind, a.item_id, a.item_code, a.title, a.body, a.created_at
+      from public.work_alerts a
+     where a.resolved_at is null
+       and ((a.item_kind = 'build' and v_lb and v_db) or (a.item_kind = 'service' and v_ls and v_ds))
+    union all
+    select 3, 'build', t.id, upper(right(t.id, 6)), t.customer_name,
+           'Nobody has claimed it in 4 hours.', t.queued_at + interval '4 hours'
+      from public.tickets t
+     where v_db
+       and (v_lb or (case when public._build_tier(t.specs) >= 4 then v_okb_hi else v_okb_lo end
+                     and not (v_em = any (coalesce(t.declined_emails, '{}'::text[])))))
+       and t.technician_email is null and btrim(coalesce(t.technician, '')) = ''
+       and t.status is distinct from 'completed' and t.queued_at is not null
+       and t.queued_at + interval '4 hours' <= v_now and not coalesce(t.offer_expires_at > v_now, false)
+    union all
+    select 3, 'service', s.id, s.public_code,
+           coalesce(nullif(btrim(coalesce(s.device_label, '')), ''), public._svc_category_label(s.category)),
+           'Nobody has claimed it in 4 hours.', coalesce(s.queued_at, s.created_at) + interval '4 hours'
+      from public.service_jobs s
+     where v_ds
+       and (v_ls or (v_oks and not (v_em = any (coalesce(s.declined_emails, '{}'::text[])))))
+       and s.assignee_email is null and s.stage <> 'closed'
+       and coalesce(s.queued_at, s.created_at) + interval '4 hours' <= v_now
+       and not coalesce(s.offer_expires_at > v_now, false)
+    union all
+    select 5, 'build', t.id, upper(right(t.id, 6)), t.customer_name,
+           'Due today at ' || public._ist_hm(t.deadline) || '.', t.deadline
+      from public.tickets t
+     where v_db and lower(t.technician_email) = v_em and t.status is distinct from 'completed'
+       and t.deadline > v_now and t.deadline < v_hi
+    union all
+    select 5, 'service', s.id, s.public_code,
+           coalesce(nullif(btrim(coalesce(s.device_label, '')), ''), public._svc_category_label(s.category)),
+           'Due today at ' || public._ist_hm(coalesce(s.visit_start, s.needed_by)) || '.',
+           coalesce(s.visit_start, s.needed_by)
+      from public.service_jobs s
+     where v_ds and lower(s.assignee_email) = v_em and s.stage <> 'closed'
+       and coalesce(s.visit_start, s.needed_by) > v_now and coalesce(s.visit_start, s.needed_by) < v_hi
+  ), one as (
+    select distinct on (c.kind, c.id) c.* from c order by c.kind, c.id, c.prio, c.at nulls last
+  ), top as (
+    select * from one order by one.prio, one.at nulls last, one.code, one.id limit 6
+  )
+  select coalesce(jsonb_agg(jsonb_build_object('kind', top.kind, 'id', top.id, 'code', top.code, 'title', top.title,
+                                               'why', top.why, 'at', top.at)
+                            order by top.prio, top.at nulls last, top.code, top.id), '[]'::jsonb)
+    into v_sec
+    from top;
+  return v_out || jsonb_build_object('attention', v_sec);
+end $$;
+
+
+-- =============================================================================
 -- §10  FUNCTION PRIVILEGES
 --      Postgres grants EXECUTE to PUBLIC by default and Supabase adds anon and
 --      authenticated. Every function in this file is revoked from all three,
@@ -3048,6 +3503,8 @@ declare
     '_work_offer_set','_work_offer_clear','_work_pick','_work_auto_offer','_work_item','_svc_apply_visit',
     '_svc_visit_event','_work_accept','_work_expire','_work_release_build','_work_person_gone','_preset_apply',
     '_work_staff_entry','_work_lockdown',
+    '_svc_ball','_svc_budget_in','_svc_budget_days','_svc_risk_ms','_rma_ball','_rma_budget_days','_rma_risk_ms',
+    '_svc_state',
     -- triggers
     'tg_tickets_work_guard','tg_tickets_work_added','tg_tickets_work_gone','tg_service_jobs_work_gone',
     'tg_service_jobs_zy_offer_guard','tg_service_jobs_zy_offer_insert',
@@ -3056,13 +3513,13 @@ declare
     'work_queue','work_claim','work_offer','work_respond','work_release','build_queue_send','work_team',
     'work_events_for','work_tick','work_alert_resolve','my_work_profile',
     'staff_list','staff_update','staff_apply_preset','preset_list','preset_upsert','preset_delete',
-    'work_log_push','work_log_pull','work_log_team'];
+    'work_log_push','work_log_pull','work_log_team','neo_dashboard'];
   v_authenticated text[] := array[
     'my_modules','service_tech_list','service_claim','service_create',
     'work_queue','work_claim','work_offer','work_respond','work_release','build_queue_send','work_team',
     'work_events_for','work_tick','work_alert_resolve','my_work_profile',
     'staff_list','staff_update','staff_apply_preset','preset_list','preset_upsert','preset_delete',
-    'work_log_push','work_log_pull','work_log_team'];
+    'work_log_push','work_log_pull','work_log_team','neo_dashboard'];
 begin
   for r in
     select format('%I.%I(%s)', n.nspname, p.proname, pg_get_function_identity_arguments(p.oid)) as sig, p.proname
