@@ -36,7 +36,11 @@
     "!.claude/**",
     "!.github/**",
     "!*.log",
-    "!*.pdf"
+    "!*.pdf",
+    "!sql/**",
+    "!tests/**",
+    "!dev/**",
+    "!docs/**"
   ],
   "asarUnpack": [
     "assets/diagnostics/**",

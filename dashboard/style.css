@@ -922,7 +922,8 @@ body::before {
 .lw-title { font-family: 'Syncopate', sans-serif; font-size: 1.05rem; margin: 8px 0 6px; }
 .lw-note { font-size: 0.85rem; color: var(--text-muted); line-height: 1.5; margin-bottom: 20px; }
 .lw-note strong { color: var(--pink); }
-.login-wall form { width: 100%; text-align: left; }
+/* Signing in again over a lapsed session (webReauth): the form is kept. */
+.lw-reauth { width: 100%; margin: -8px 0 14px; padding: 10px 12px; border-radius: var(--radius-sm); background: var(--amber-dim); border: 1px solid var(--amber); color: var(--text); font-size: 0.85rem; line-height: 1.45; text-align: left; }.login-wall form { width: 100%; text-align: left; }
 .lw-label { display: block; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); margin: 12px 0 5px; font-weight: 600; }
 .lw-input {
   width: 100%; padding: 12px 14px; border-radius: var(--radius-sm);
@@ -1336,3 +1337,310 @@ body::before {
 }
 
 .svc-promise.svc-late { color: #fca5a5; font-weight: 600; }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   SERVICE + RMA REQUESTS (v1.10.0) — New service request, New RMA, My requests
+   Built for a salesperson on a phone first: one column, 16px inputs (iOS zooms
+   the page on anything smaller), 44px tap targets on touch screens, and the
+   Create button pinned to the bottom so it is never a long scroll away.
+   Every colour is an existing token or an existing badge value.
+   ══════════════════════════════════════════════════════════════════════════ */
+.wo-view { max-width: 820px; }
+.wo-view.wo-wide { max-width: min(1180px, 100%); }
+.wo-lead { color: var(--text-muted); font-size: 0.88rem; line-height: 1.55; margin: -10px 0 18px; }
+
+.wo-form { display: flex; flex-direction: column; gap: 14px; }
+.wo-card { padding: 18px 20px; }
+.wo-card-title {
+  font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.08em;
+  color: var(--pink); margin: 0 0 12px; font-weight: 700;
+}
+.wo-card-title-gap { margin-top: 18px; }
+
+.wo-field { display: flex; flex-direction: column; gap: 6px; min-width: 0; margin-bottom: 12px; }
+.wo-field:last-child { margin-bottom: 0; }
+.wo-flabel {
+  font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em;
+  color: var(--text-muted); font-weight: 600;
+}
+.wo-input {
+  width: 100%; min-width: 0;
+  background: rgba(255,255,255,0.05); border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm); color: var(--text);
+  font-family: 'Space Grotesk', sans-serif; font-size: 1rem; line-height: 1.4;
+  padding: 10px 12px; min-height: 44px; outline: none;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+textarea.wo-input { resize: vertical; min-height: 64px; }
+select.wo-input { cursor: pointer; }
+.wo-input option { background: var(--bg2); color: var(--text); }
+.wo-input::placeholder { color: var(--text-dim); }
+.wo-input:focus { border-color: var(--pink); box-shadow: 0 0 0 3px var(--pink-dim); }
+.wo-input-phone { font-family: 'JetBrains Mono', monospace; letter-spacing: 0.06em; font-size: 1.1rem; }
+.wo-input[type="date"], .wo-input[type="datetime-local"] { color-scheme: dark; }
+.wo-invalid,
+.wo-input.wo-invalid { border-color: var(--red) !important; box-shadow: 0 0 0 3px var(--red-dim) !important; }
+.wo-chips.wo-invalid { border: 1px solid var(--red); border-radius: var(--radius-sm); padding: 6px; }
+
+.wo-grid2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 12px; }
+.wo-grid3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0 12px; }
+.wo-grid-align { align-items: end; }
+.wo-grid2 > .wo-field, .wo-grid3 > .wo-field { margin-bottom: 12px; }
+
+.wo-check {
+  display: flex; align-items: flex-start; gap: 10px; cursor: pointer;
+  font-size: 0.9rem; color: var(--text); line-height: 1.4;
+  padding: 10px 0; margin-bottom: 12px; min-height: 44px;
+}
+.wo-check input { width: 20px; height: 20px; margin-top: 1px; accent-color: var(--pink); flex: none; cursor: pointer; }
+
+/* Chips: toggle buttons. The selected state is colour AND a tick, never colour alone. */
+.wo-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.wo-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  min-height: 38px; padding: 7px 14px; border-radius: 999px;
+  border: 1px solid var(--glass-border); background: var(--glass); color: var(--text);
+  font-family: inherit; font-size: 0.86rem; font-weight: 600; cursor: pointer; text-align: left;
+  transition: border-color 0.15s, background 0.15s, color 0.15s;
+}
+.wo-chip:hover { border-color: var(--pink-glow); }
+.wo-chip.on { background: var(--pink-dim); border-color: var(--pink); color: #ffd3e6; }
+.wo-chip.on::before { content: '\2713'; font-weight: 800; color: var(--pink); }
+.wo-chip-sm { min-height: 32px; padding: 4px 11px; font-size: 0.78rem; font-weight: 600; }
+.wo-more { align-self: flex-start; margin-top: 10px; color: var(--pink); }
+.wo-chips-faults .wo-chip { font-weight: 500; }
+
+/* Type cards: three big choices, a radio group. */
+.wo-type-cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.wo-type-card {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 4px;
+  padding: 14px 14px 13px; min-height: 96px; border-radius: var(--radius-sm);
+  border: 1px solid var(--glass-border); background: var(--glass); color: var(--text);
+  font-family: inherit; text-align: left; cursor: pointer;
+  transition: border-color 0.15s, background 0.15s, transform 0.15s;
+}
+.wo-type-card:hover { border-color: var(--pink-glow); transform: translateY(-1px); }
+.wo-type-card.on { border-color: var(--pink); background: var(--pink-dim); box-shadow: 0 0 0 3px var(--pink-dim); }
+.wo-type-icon { color: var(--text-muted); display: inline-flex; }
+.wo-type-card.on .wo-type-icon { color: var(--pink); }
+.wo-type-name { font-size: 0.98rem; font-weight: 700; }
+.wo-type-card.on .wo-type-name::after { content: ' \2713'; color: var(--pink); }
+.wo-type-help { font-size: 0.76rem; color: var(--text-muted); line-height: 1.35; }
+
+.wo-hint { font-size: 0.78rem; color: var(--text-muted); line-height: 1.5; margin: 4px 0 10px; }
+.wo-hint:empty { display: none; }
+.wo-hint-accent { color: #ffd3e6; }
+.wo-note {
+  margin-top: 12px; font-size: 0.82rem; color: var(--text-muted); line-height: 1.5;
+  padding: 10px 12px; border: 1px dashed var(--glass-border); border-radius: var(--radius-sm);
+}
+.wo-muted { color: var(--text-muted); }
+.wo-ok-text { color: #86efac; }
+.wo-warn-text { color: #fcd34d; }
+
+/* Phone lookup result */
+.wo-lookup {
+  margin: -2px 0 12px; padding: 10px 12px; border-radius: var(--radius-sm);
+  background: rgba(255,255,255,0.03); border: 1px solid var(--glass-border);
+  font-size: 0.85rem; line-height: 1.5;
+}
+.wo-lookup-line { margin: 2px 0; overflow-wrap: anywhere; }
+.wo-lookup-line strong { color: #86efac; }
+.wo-dup {
+  margin-top: 8px; padding: 9px 11px; border-radius: var(--radius-sm);
+  background: var(--amber-dim); border: 1px solid rgba(245,158,11,0.35);
+}
+.wo-dup-soft { background: rgba(124,92,255,0.10); border-color: rgba(124,92,255,0.35); }
+.wo-dup-title { font-size: 0.8rem; font-weight: 700; color: #fcd34d; margin-bottom: 4px; }
+.wo-dup-soft .wo-dup-title { color: #ddd0ff; }
+.wo-dup-row { font-size: 0.82rem; margin: 3px 0; overflow-wrap: anywhere; }
+.wo-dup-row .mono { font-weight: 600; }
+.wo-dup-note { font-size: 0.76rem; color: var(--text-muted); margin-top: 6px; }
+.wo-past { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px; }
+.wo-past-label { font-size: 0.74rem; color: var(--text-muted); margin-right: 2px; }
+
+/* Priority summary under the fault */
+.wo-summary { margin-top: 4px; font-size: 0.85rem; }
+.wo-summary:empty { display: none; }
+.wo-sum-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 4px 0; }
+.wo-sum-k { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); font-weight: 600; }
+.wo-sum-why { color: var(--text-muted); font-size: 0.82rem; }
+.wo-sum-note { font-size: 0.74rem; color: var(--text-dim); margin-top: 4px; }
+.wo-prio { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 0.76rem; font-weight: 700; border: 1px solid transparent; }
+.wo-prio-low    { background: rgba(148,163,184,0.12); color: #94a3b8; }
+.wo-prio-normal { background: var(--glass); color: var(--text); border-color: var(--glass-border); }
+.wo-prio-high   { background: var(--amber-dim); color: #fcd34d; }
+.wo-prio-urgent { background: var(--red-dim); color: #fca5a5; }
+
+/* Submit bar — pinned to the bottom of the screen while the form scrolls */
+.wo-submit-bar {
+  position: sticky; bottom: 0; z-index: 20;
+  display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 10px 14px;
+  margin-top: 4px; padding: 12px 14px calc(12px + env(safe-area-inset-bottom, 0px));
+  background: rgba(14,14,26,0.92); border: 1px solid var(--glass-border); border-radius: var(--radius-sm);
+  -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px);
+}
+/* A short viewport is usually a phone with its keyboard open (Android shrinks
+   the viewport). A pinned bar there would sit on top of the very field being
+   typed in, so it goes back into the flow. */
+@media (max-height: 560px) {
+  .wo-submit-bar { position: static; }
+}
+.wo-view .qb-draft-note:empty { display: none; }
+.wo-submit-btn { min-height: 46px; padding: 12px 26px; font-size: 0.95rem; }
+.wo-submit-btn:disabled { opacity: 0.55; cursor: default; transform: none; }
+.wo-status { flex: 1 1 240px; min-width: 0; font-size: 0.84rem; line-height: 1.45; color: var(--text-muted); overflow-wrap: anywhere; }
+.wo-status:empty { display: none; }
+.wo-status.wo-err  { color: #fca5a5; font-weight: 600; }
+.wo-status.wo-busy { color: var(--text-muted); }
+.wo-status.wo-info { color: #a5f3fc; }
+
+/* Small secondary buttons (copy, remove, retry) */
+.wo-mini {
+  font-family: inherit; font-size: 0.76rem; font-weight: 600; cursor: pointer;
+  min-height: 32px; padding: 5px 12px; border-radius: 999px;
+  border: 1px solid var(--glass-border); background: var(--glass); color: var(--text);
+  transition: border-color 0.15s, color 0.15s; white-space: nowrap;
+}
+.wo-mini:hover:not(:disabled) { border-color: var(--pink); color: var(--pink); }
+.wo-mini:disabled { opacity: 0.5; cursor: default; }
+
+/* RMA parts */
+.wo-units { display: flex; flex-direction: column; gap: 12px; margin-bottom: 12px; }
+.wo-unit {
+  padding: 14px; border-radius: var(--radius-sm);
+  border: 1px solid var(--glass-border); background: rgba(255,255,255,0.025);
+}
+.wo-unit-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+.wo-unit-title { font-weight: 700; font-size: 0.92rem; }
+.wo-unit-remove:hover:not(:disabled) { border-color: var(--red); color: var(--red); }
+.wo-fee {
+  margin: 0 0 12px; padding: 9px 11px; border-radius: var(--radius-sm); font-size: 0.82rem; line-height: 1.45;
+  background: var(--amber-dim); border: 1px solid rgba(245,158,11,0.35); color: #fcd9a0;
+}
+.wo-owner { margin-top: 4px; padding-top: 10px; border-top: 1px dashed var(--glass-border); }
+.wo-owner-title { font-size: 0.82rem; font-weight: 700; }
+.wo-add-btn { width: 100%; min-height: 44px; border-style: dashed; color: var(--pink); }
+.wo-add-btn:disabled { opacity: 0.5; cursor: default; }
+
+/* Success panels */
+.wo-done { padding: 22px 22px 20px; }
+.wo-done-title { font-size: 1.15rem; font-weight: 700; margin-bottom: 10px; color: #86efac; }
+.wo-done-title:focus { outline: none; }   /* focused by script for screen readers, not a control */
+.wo-code-row, .wo-link-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 10px 0; }
+.wo-code {
+  font-size: clamp(1.5rem, 6vw, 2rem); font-weight: 700; letter-spacing: 0.08em; color: var(--text);
+  padding: 6px 14px; border-radius: var(--radius-sm); background: rgba(255,255,255,0.05); border: 1px solid var(--glass-border);
+}
+.wo-code-sm { font-size: 1.05rem; padding: 3px 10px; letter-spacing: 0.06em; }
+.wo-link { color: var(--pink); font-size: 0.82rem; overflow-wrap: anywhere; text-decoration: none; min-width: 0; }
+.wo-link:hover { text-decoration: underline; }
+.wo-done-facts { font-size: 0.86rem; color: var(--text-muted); margin: 8px 0 4px; line-height: 1.5; }
+.wo-done-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 16px; }
+.wo-done-actions .btn-ghost { min-height: 44px; }
+.wo-wa-btn { min-height: 44px; }
+.wo-wa-btn:disabled { opacity: 0.6; cursor: default; transform: none; }
+.wo-wa-fallback { margin-top: 10px; font-size: 0.84rem; color: #fcd34d; }
+.wo-wa-fallback a { color: var(--pink); font-weight: 700; }
+.wo-rma-list { display: flex; flex-direction: column; gap: 8px; margin: 12px 0 4px; }
+.wo-rma-row {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px;
+  padding: 10px 12px; border-radius: var(--radius-sm); border: 1px solid var(--glass-border); background: rgba(255,255,255,0.03);
+}
+.wo-rma-main { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; min-width: 0; }
+.wo-rma-label { font-size: 0.86rem; overflow-wrap: anywhere; }
+.wo-rma-acts { display: flex; gap: 8px; flex-wrap: wrap; }
+
+/* My requests */
+.wo-updated { font-size: 0.74rem; color: var(--text-dim); font-family: 'JetBrains Mono', monospace; }
+.wo-section-title {
+  font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted);
+  margin: 22px 0 10px; display: flex; align-items: center; gap: 8px;
+}
+.wo-count {
+  font-family: 'JetBrains Mono', monospace; font-size: 0.72rem; color: var(--text-muted);
+  padding: 1px 8px; border-radius: 999px; border: 1px solid var(--glass-border); background: var(--glass);
+}
+.wo-count:empty { display: none; }
+.wo-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.wo-table { width: 100%; border-collapse: collapse; }
+.wo-table thead th {
+  background: rgba(255,255,255,0.04); padding: 11px 14px; font-size: 0.72rem; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.07em; color: var(--text-muted); text-align: left;
+  border-bottom: 1px solid var(--glass-border); white-space: nowrap;
+}
+.wo-table tbody tr { border-bottom: 1px solid rgba(255,255,255,0.04); }
+.wo-table tbody tr:last-child { border-bottom: none; }
+.wo-table tbody tr:hover { background: rgba(255,255,255,0.03); }
+.wo-table td { padding: 11px 14px; font-size: 0.84rem; vertical-align: middle; overflow-wrap: anywhere; }
+.wo-table td.cell-id { white-space: nowrap; }
+.wo-table .wo-row-closed { opacity: 0.62; }
+.wo-cell-act { text-align: right; white-space: nowrap; }
+.wo-late { color: var(--red); font-weight: 700; }
+
+/* Keyboard focus is always visible on the new controls. */
+.wo-chip:focus-visible, .wo-type-card:focus-visible, .wo-mini:focus-visible,
+.wo-view .btn-ghost:focus-visible, .wo-view .btn-primary:focus-visible, .wo-check input:focus-visible,
+.svc-mini-btn:focus-visible {
+  outline: 2px solid var(--pink); outline-offset: 2px;
+}
+
+/* Touch screens: every control at least 44px tall. */
+@media (pointer: coarse) {
+  .wo-chip, .wo-mini, .svc-mini-btn { min-height: 44px; }
+  .wo-chip-sm { min-height: 40px; }
+}
+
+@media (max-width: 600px) {
+  .wo-card { padding: 16px 14px; }
+  .wo-grid2, .wo-grid3 { grid-template-columns: minmax(0, 1fr); }
+  .wo-type-cards { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+  .wo-type-card {
+    display: grid; grid-template-columns: 30px minmax(0, 1fr); grid-template-rows: auto auto;
+    column-gap: 12px; row-gap: 2px; align-items: center; min-height: 64px; padding: 12px 14px;
+  }
+  .wo-type-icon { grid-row: 1 / 3; }
+  .wo-submit-bar { margin-left: -4px; margin-right: -4px; }
+  .wo-submit-btn { width: 100%; justify-content: center; }
+  .wo-status { flex-basis: 100%; }
+  .wo-done { padding: 18px 14px; }
+  .wo-done-actions > * { flex: 1 1 100%; justify-content: center; }
+  .wo-rma-acts { width: 100%; }
+  .wo-rma-acts .wo-mini { flex: 1 1 0; }
+  /* The tables become one card per request: a phone cannot show nine columns. */
+  .wo-table thead { display: none; }
+  .wo-table, .wo-table tbody, .wo-table tr, .wo-table td { display: block; width: 100%; }
+  .wo-table tbody tr { padding: 10px 12px; border-bottom: 1px solid var(--glass-border); }
+  .wo-table td { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; padding: 4px 0; text-align: right; }
+  .wo-table td::before {
+    content: attr(data-label); flex: none; text-align: left;
+    font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted);
+  }
+  .wo-table td.wo-cell-act { justify-content: flex-end; padding-top: 8px; }
+  .wo-table td.wo-cell-act::before { content: none; }
+}
+
+/* ── Public tracking additions: visit line, parts under warranty claim ── */
+.svc-visit { margin: 14px 0 0; font-size: 0.95rem; color: var(--text); font-weight: 600; }
+.svc-promise:empty { margin: 0; }
+.svc-visit.svc-muted { color: var(--text-muted); font-weight: 400; font-size: 0.88rem; }
+.svc-visit.svc-late { color: #fca5a5; }
+.svc-mini-btn {
+  margin-top: 8px; font-family: inherit; font-size: 0.76rem; font-weight: 600; cursor: pointer;
+  min-height: 32px; padding: 5px 12px; border-radius: 999px;
+  border: 1px solid var(--glass-border); background: var(--glass); color: var(--text);
+}
+.svc-mini-btn:hover { border-color: var(--pink); color: var(--pink); }
+.svc-parts-list { display: flex; flex-direction: column; gap: 10px; }
+.svc-part {
+  padding: 11px 13px; border-radius: var(--radius-sm); border: 1px solid var(--glass-border);
+  border-left: 4px solid var(--text-dim); background: rgba(255,255,255,0.03);
+}
+.svc-pball-shop        { border-left-color: #22d3ee; }
+.svc-pball-customer    { border-left-color: var(--amber); }
+.svc-pball-third_party { border-left-color: #a78bfa; }
+.svc-pball-nobody      { border-left-color: var(--green); }
+.svc-part-top { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 10px; }
+.svc-part-name { font-weight: 600; overflow-wrap: anywhere; }
+.svc-part-code { font-size: 0.78rem; color: var(--text-muted); }
+.svc-part-status { margin-top: 4px; font-size: 0.86rem; color: var(--text-muted); line-height: 1.45; }

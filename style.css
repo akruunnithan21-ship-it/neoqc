@@ -390,7 +390,7 @@
   .neo-confirm-ok.danger:hover { background: #dc2626; }
 
   /* ---- Staff login + tier notice (v2.0.0 P1) ---- */
-  /* Centre the card, like #mode-selector-screen (the generic .screen.active is
+  /* Centre the card, like #splash-screen (the generic .screen.active is
      flex-column but does not centre, so without this the card stretches full-width). */
   #login-screen, #tier-notice-screen {
     justify-content: center;
@@ -593,32 +593,6 @@
     transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.25s ease, border 0.3s ease, background 0.3s ease;
   }
   
-  /* Mode Selector Launch Screen */
-  #mode-selector-screen.active {
-    display: flex;
-  }
-
-  /* Minimal aesthetic backdrop: soft brand-pink and cool-blue radials over a
-     clean vertical wash. Replaces the busy japanese_vector_bg.png wallpaper. */
-  #mode-selector-screen {
-    justify-content: center;
-    align-items: center;
-    height: calc(100vh - 32px); /* Offset for sticky custom titlebar */
-    overflow: hidden;
-    background:
-      radial-gradient(900px 620px at 12% 8%, rgba(var(--primary-pink-rgb), 0.07), transparent 62%),
-      radial-gradient(820px 620px at 88% 92%, rgba(59, 130, 246, 0.06), transparent 62%),
-      linear-gradient(180deg, #FAFBFC 0%, #F2F4F8 100%);
-    position: relative;
-  }
-
-  body.dark-mode #mode-selector-screen {
-    background:
-      radial-gradient(900px 620px at 12% 8%, rgba(var(--primary-pink-rgb), 0.13), transparent 62%),
-      radial-gradient(820px 620px at 88% 92%, rgba(59, 130, 246, 0.09), transparent 62%),
-      linear-gradient(180deg, #0A0E17 0%, #060910 100%);
-  }
-
   #splash-screen.active {
     display: flex;
   }
@@ -649,8 +623,7 @@
 
   /* Slow-moving aurora of brand colours drifting behind the glass on the splash
      and landing screens — subtle, organic motion (not a static wash). */
-  #splash-screen::before,
-  #mode-selector-screen::before {
+  #splash-screen::before {
     content: '';
     position: absolute;
     inset: -25%;
@@ -665,8 +638,7 @@
     animation: aurora-drift 22s ease-in-out infinite;
     will-change: transform;
   }
-  body.dark-mode #splash-screen::before,
-  body.dark-mode #mode-selector-screen::before {
+  body.dark-mode #splash-screen::before {
     background:
       radial-gradient(620px 520px at 22% 28%, rgba(var(--primary-pink-rgb), 0.20), transparent 60%),
       radial-gradient(580px 500px at 78% 68%, rgba(59, 130, 246, 0.16), transparent 60%),
@@ -677,10 +649,8 @@
      decorative .ambient-glow blobs, which must stay position:absolute (out of
      flow). Overriding them to relative pushed them into the flex column and
      knocked the card off-centre. */
-  #splash-screen > *:not(.ambient-glow),
-  #mode-selector-screen > *:not(.ambient-glow) { position: relative; z-index: 1; }
-  #splash-screen > .ambient-glow,
-  #mode-selector-screen > .ambient-glow { z-index: 1; }
+  #splash-screen > *:not(.ambient-glow) { position: relative; z-index: 1; }
+  #splash-screen > .ambient-glow { z-index: 1; }
 
   @keyframes aurora-drift {
     0%   { transform: translate(0, 0) scale(1) rotate(0deg); }
@@ -748,27 +718,6 @@
     letter-spacing: 0.05em;
   }
   
-  .mode-selector-card {
-    position: relative;
-    padding: 45px 35px;
-    max-width: 580px;
-    width: 90%;
-    text-align: center;
-    border-radius: 24px;
-    background: rgba(255, 255, 255, 0.65) !important;
-    backdrop-filter: blur(20px);
-    -webkit-backdrop-filter: blur(20px);
-    border: 1px solid rgba(255, 255, 255, 0.6) !important;
-    box-shadow: 0 20px 50px rgba(15, 23, 42, 0.08), 0 0 40px rgba(var(--primary-pink-rgb), 0.03);
-    z-index: 1; /* Place above ambient glows */
-  }
-  
-  body.dark-mode .mode-selector-card {
-    background: rgba(11, 15, 25, 0.65) !important;
-    border-color: rgba(255, 255, 255, 0.08) !important;
-    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.25), 0 0 40px rgba(var(--primary-pink-rgb), 0.1);
-  }
-
   /* Traditional Hanko Stamp Accent */
   .hanko-stamp {
     position: absolute;
@@ -852,114 +801,10 @@
     text-transform: uppercase;
   }
   
-  .mode-selector-card h2 {
-    font-size: 1.5rem;
-    margin-bottom: 8px;
-  }
-  
   .selector-desc {
     color: var(--text-muted);
     margin-bottom: 30px;
     font-size: 0.95rem;
-  }
-  
-  .mode-buttons-row {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 20px;
-  }
-  
-  .mode-btn {
-    border: 1px solid var(--glass-border);
-    background: var(--glass-bg);
-    border-radius: 20px;
-    padding: 30px 24px;
-    cursor: pointer;
-    text-align: left;
-    transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
-    display: flex;
-    flex-direction: column;
-    position: relative;
-    overflow: hidden;
-    /* <button> doesn't inherit the page text color (UA default is black), so
-       set it explicitly to the theme's primary text token — which flips with
-       light/dark. Without this the titles were black-on-dark in dark mode;
-       hardcoding light then broke light mode. var(--text-dark) is correct in
-       both (dark ink on light theme, light ink on dark theme). */
-    color: var(--text-dark);
-  }
-  
-  /* Grid pattern effect inside button */
-  .mode-btn::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    background: linear-gradient(rgba(255, 255, 255, 0.02) 1px, transparent 1px),
-                linear-gradient(90deg, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
-    background-size: 8px 8px;
-    opacity: 0;
-    transition: opacity 0.3s ease;
-    pointer-events: none;
-  }
-  
-  .mode-btn:hover::before {
-    opacity: 1;
-  }
-
-  .mode-btn.primary-pink:hover {
-    transform: translateY(-6px);
-    box-shadow: 0 15px 30px rgba(var(--primary-pink-rgb), 0.18), 0 0 15px rgba(var(--primary-pink-rgb), 0.1);
-    border-color: var(--primary-pink) !important;
-  }
-  
-  .mode-btn.primary-pink:hover .mode-icon {
-    transform: scale(1.15) rotate(-5deg);
-    filter: drop-shadow(0 0 8px var(--primary-pink));
-  }
-
-  .mode-btn.primary-pink:hover .mode-title {
-    color: var(--primary-pink);
-  }
-
-  .mode-btn.dark-slate:hover {
-    transform: translateY(-6px);
-    box-shadow: 0 15px 30px rgba(0, 240, 255, 0.18), 0 0 15px rgba(0, 240, 255, 0.1);
-    border-color: #00f0ff !important;
-  }
-
-  .mode-btn.dark-slate:hover .mode-icon {
-    transform: scale(1.15) rotate(5deg);
-    filter: drop-shadow(0 0 8px #00f0ff);
-  }
-
-  .mode-btn.dark-slate:hover .mode-title {
-    color: #00f0ff;
-  }
-
-  .mode-icon {
-    font-size: 2.2rem;
-    margin-bottom: 16px;
-    transition: transform 0.3s ease, filter 0.3s ease;
-  }
-  
-  .mode-title {
-    font-size: 1.15rem;
-    font-family: 'Space Grotesk', sans-serif;
-    font-weight: 700;
-    margin-bottom: 6px;
-    transition: color 0.3s ease;
-    color: var(--text-dark);   /* theme-aware: flips with light/dark */
-  }
-
-  .mode-text {
-    font-size: 0.85rem;
-    color: var(--text-muted);   /* theme-aware muted (flips light/dark) */
-    line-height: 1.35;
-    position: relative;
-    z-index: 2;
   }
   
   /* Buttons styling */
@@ -6088,3 +5933,110 @@ body.dark-mode .app-rail { background: rgba(255, 255, 255, 0.025); }
   color: var(--text-muted); font-size: 0.8rem; padding: 2px 4px; border-radius: 4px;
 }
 .sv-ph-del:hover { color: var(--status-urgent); }
+
+/* ── Settings → Appearance (v1.10) ─────────────────────────────────────────
+   Theme cards (light / dark / match Windows) and accent swatches. Each swatch
+   carries its own colour in --sw (inline), so it shows its colour whatever the
+   current accent is. */
+.appearance-theme-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+.appearance-theme-btn {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border-radius: 14px;
+  border: 1px solid var(--glass-border);
+  background: var(--glass-bg);
+  color: var(--text-dark);
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 600;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease), transform var(--dur-tap) var(--ease);
+}
+.appearance-theme-btn:hover { border-color: rgba(var(--primary-pink-rgb), 0.5); }
+.appearance-theme-btn:active { transform: scale(0.98); }
+.appearance-theme-btn.active {
+  border-color: var(--primary-pink);
+  box-shadow: 0 0 0 3px rgba(var(--primary-pink-rgb), 0.18);
+}
+.appearance-theme-btn:focus-visible,
+.appearance-swatch:focus-visible {
+  outline: 2px solid var(--primary-pink);
+  outline-offset: 2px;
+}
+.atb-preview {
+  position: relative;
+  display: block;
+  height: 64px;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+}
+/* a pretend title bar and card inside each preview */
+.atb-preview::before {
+  content: '';
+  position: absolute;
+  left: 10px; right: 10px; top: 10px;
+  height: 8px;
+  border-radius: 4px;
+  background: rgba(var(--primary-pink-rgb), 0.85);
+}
+.atb-preview::after {
+  content: '';
+  position: absolute;
+  left: 10px; right: 32%; top: 26px; bottom: 10px;
+  border-radius: 6px;
+}
+.atb-light { background: linear-gradient(135deg, #F8F9FA 0%, #EFF1F5 100%); }
+.atb-light::after { background: rgba(255, 255, 255, 0.92); border: 1px solid rgba(15, 23, 42, 0.08); }
+.atb-dark { background: linear-gradient(140deg, #0A0E17 0%, #121826 100%); border-color: rgba(255, 255, 255, 0.12); }
+.atb-dark::after { background: rgba(17, 24, 39, 0.92); border: 1px solid rgba(255, 255, 255, 0.08); }
+.atb-system { background: linear-gradient(90deg, #F8F9FA 0 50%, #0A0E17 50% 100%); }
+.atb-system::after { background: linear-gradient(90deg, rgba(255, 255, 255, 0.92) 0 50%, rgba(17, 24, 39, 0.92) 50% 100%); }
+
+.appearance-swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.appearance-swatch {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px 6px 6px;
+  border-radius: 999px;
+  border: 1px solid var(--glass-border);
+  background: var(--glass-bg);
+  color: var(--text-dark);
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease), transform var(--dur-tap) var(--ease);
+}
+.appearance-swatch:hover { border-color: var(--sw); }
+.appearance-swatch:active { transform: scale(0.97); }
+.appearance-swatch .sw-dot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--sw);
+  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.35);
+  color: #fff;
+  font-size: 0.75rem;
+  line-height: 1;
+}
+.appearance-swatch.active { border-color: var(--sw); box-shadow: 0 0 0 2px var(--sw); }
+.appearance-swatch.active .sw-dot::after { content: '✓'; font-weight: 800; }
+@media (max-width: 640px) {
+  .appearance-theme-row { grid-template-columns: 1fr; }
+}

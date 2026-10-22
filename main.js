@@ -135,7 +135,7 @@ function createWindow() {
     minHeight: 650,
     frame: false, // Frameless window!
     transparent: false,
-    title: "Neo QC",
+    title: "Neo OS",
     icon: path.join(__dirname, 'assets', 'icon.ico'),
     webPreferences: {
       nodeIntegration: true,
@@ -169,11 +169,11 @@ function createWindow() {
       log.error(`Renderer crashed ${recentCrashes.length} times in 20s — stopping the reload loop.`);
       try {
         dialog.showErrorBox(
-          'Neo QC — Repeated Renderer Crash',
-          `Neo QC keeps crashing while starting up.\n\n` +
+          'Neo OS — Repeated Renderer Crash',
+          `Neo OS keeps crashing while starting up.\n\n` +
           `Reason: ${details.reason} (exit code ${details.exitCode})\n\n` +
           `Please send the log file to the developer:\n${log.transports.file.getFile().path}\n\n` +
-          `Neo QC will now exit. Try reinstalling from the latest release.`
+          `Neo OS will now exit. Try reinstalling from the latest release.`
         );
       } catch (e) {}
       app.quit();
@@ -224,7 +224,11 @@ function createWindow() {
       mainWindow.webContents.openDevTools({ mode: 'detach' });
       const watched = ['index.html', 'app.js', 'style.css', 'print-report.css',
         'print-render.js', 'web-lookup.js',
-        'ssd-grading.js', 'shared', 'assets/component-data'];
+        'ssd-grading.js', 'shared', 'assets/component-data',
+        // v1.10 Service + RMA renderer files
+        'shell.js', 'modules.js', 'ops-ui.js', 'ops-data.js', 'photo-tray.js',
+        'service-intake.js', 'service.js', 'rma.js',
+        'ops.css', 'service-v2.css', 'intake.css', 'rma.css'];
       let pending = null;
       const scheduleReload = (label) => {
         if (pending) clearTimeout(pending);
@@ -316,7 +320,7 @@ app.whenReady().then(() => {
   if (!checkAdminElevated()) {
     dialog.showErrorBox(
       'Administrator Privileges Required',
-      'Neo QC requires administrator privileges to access low-level CPU/GPU registers and temperature sensors. Please run the application as Administrator.'
+      'Neo OS requires administrator privileges to access low-level CPU/GPU registers and temperature sensors. Please run the application as Administrator.'
     );
     app.quit();
     process.exit(0);
@@ -402,14 +406,14 @@ app.whenReady().then(() => {
   });
 
   // Re-check for updates on demand (renderer calls this whenever the user
-  // lands back on the mode-selector screen). Rate-limited to once per 10
-  // minutes so bouncing between modes doesn't hammer GitHub's release API —
+  // lands on their home screen). Rate-limited to once per 10
+  // minutes so bouncing between screens doesn't hammer GitHub's release API —
   // the boot-time check below still always runs.
   let lastUpdateCheck = Date.now();
   ipcMain.on('update:check', () => {
     if (Date.now() - lastUpdateCheck < 10 * 60 * 1000) return;
     lastUpdateCheck = Date.now();
-    log.info('Re-checking for updates (mode-selector landing).');
+    log.info('Re-checking for updates (home screen landing).');
     autoUpdater.checkForUpdates().catch(e => log.warn('update:check failed:', e.message));
   });
 

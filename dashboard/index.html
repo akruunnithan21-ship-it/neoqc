@@ -41,7 +41,7 @@
     <!-- Signed-out: only Track + Log in are public -->
     <nav id="menu-public" class="menu-list">
       <button class="menu-item" data-nav="customer"><span class="mi-ic">🔍</span> Track your build</button>
-      <button class="menu-item" data-nav="service"><span class="mi-ic">🔧</span> Track a repair</button>
+      <button class="menu-item" data-nav="service"><span class="mi-ic">🔧</span> Track a repair or RMA</button>
       <button class="menu-item" data-nav="login"><span class="mi-ic">🔑</span> Log in</button>
     </nav>
 
@@ -58,8 +58,14 @@
       <button class="menu-item hidden" id="menu-ticketstatus" data-nav="ticket-status"><span class="mi-ic">🎫</span> <span id="menu-ts-label">Ticket Status</span></button>
       <button class="menu-item hidden" id="menu-newbuild" data-nav="new-build"><span class="mi-ic">➕</span> New Build</button>
       <button class="menu-item hidden" id="menu-board" data-nav="board"><span class="mi-ic">🗂</span> Pipeline</button>
+      <!-- Service + RMA requests: every signed-in staff member (sales on their
+           phones most of all). The server decides what each account may do. -->
+      <button class="menu-item" id="menu-newservice" data-nav="new-service"><span class="mi-ic">🛠</span> New service request</button>
+      <button class="menu-item" id="menu-newrma" data-nav="new-rma"><span class="mi-ic">📦</span> New RMA</button>
+      <button class="menu-item" id="menu-myrequests" data-nav="my-requests"><span class="mi-ic">📋</span> My requests</button>
       <button class="menu-item" data-nav="profile"><span class="mi-ic">👤</span> Edit Profile</button>
       <button class="menu-item" data-nav="customer"><span class="mi-ic">🔍</span> Track a build</button>
+      <button class="menu-item" data-nav="service"><span class="mi-ic">🔧</span> Track a repair or RMA</button>
       <button class="menu-item menu-signout" id="menu-signout"><span class="mi-ic">⎋</span> Sign out</button>
     </div>
   </aside>
@@ -91,20 +97,22 @@
   <main id="view-service" class="view hidden">
     <div class="hero">
       <h1 class="hero-title">Where is my <span>PC</span>?</h1>
-      <p class="hero-sub">Repairs, warranty claims and upgrades. Enter the tracking code we gave you and the last 4 digits of your phone number.</p>
+      <p class="hero-sub">Repairs, warranty claims and parts sent to us. Enter the tracking code we gave you and the last 4 digits of your phone number.</p>
     </div>
 
     <div id="svc-form-wrap" class="lookup-card glass">
       <form id="svc-form" class="svc-form" autocomplete="off">
         <div class="lookup-row">
           <input id="svc-code-input" class="lookup-input svc-code-in" maxlength="11"
-                 placeholder="NT-XXXXXXXX" autocomplete="off" spellcheck="false">
+                 placeholder="NT-… or RM-…" autocomplete="off" spellcheck="false"
+                 aria-label="Tracking code">
           <input id="svc-phone-input" class="lookup-input svc-phone-in" maxlength="4"
-                 inputmode="numeric" placeholder="Last 4" autocomplete="off" spellcheck="false">
+                 inputmode="numeric" placeholder="Last 4" autocomplete="off" spellcheck="false"
+                 aria-label="Last 4 digits of your phone number">
           <button id="svc-lookup-btn" type="submit" class="btn-primary">Check status</button>
         </div>
       </form>
-      <p class="lookup-hint">Both are on the receipt we gave you when you dropped the item off. We ask for the phone digits so that only you can see your job.</p>
+      <p class="lookup-hint">The code starts with NT- for a repair or visit, and RM- for a part under warranty claim, including parts you couriered to us. It is on your receipt or in the message we sent you. We ask for the phone digits so that only you can see it.</p>
     </div>
 
     <div id="svc-error" class="error-box hidden"></div>
@@ -113,14 +121,27 @@
       <div class="svc-card glass">
         <div id="svc-sentence" class="svc-sentence">—</div>
         <div id="svc-since" class="svc-since"></div>
+        <div id="svc-visit" class="svc-visit hidden"></div>
         <div id="svc-promise" class="svc-promise"></div>
         <div id="svc-handler" class="svc-handler hidden"></div>
 
         <div class="svc-meta">
-          <div class="svc-meta-item"><div class="label">Item</div><div class="value" id="svc-device">—</div></div>
-          <div class="svc-meta-item"><div class="label">In the name of</div><div class="value" id="svc-name">—</div></div>
+          <div class="svc-meta-item"><div class="label" id="svc-device-label">Item</div><div class="value" id="svc-device">—</div></div>
+          <div class="svc-meta-item hidden" id="svc-type-item"><div class="label">Service</div><div class="value" id="svc-type">—</div></div>
+          <div class="svc-meta-item" id="svc-name-item"><div class="label" id="svc-name-label">In the name of</div><div class="value" id="svc-name">—</div></div>
+          <div class="svc-meta-item hidden" id="svc-linked-item">
+            <div class="label">Linked repair</div>
+            <div class="value mono" id="svc-linked">—</div>
+            <button type="button" id="svc-linked-btn" class="svc-mini-btn">Track the repair</button>
+          </div>
           <div class="svc-meta-item"><div class="label">Reference</div><div class="value mono" id="svc-code">—</div></div>
         </div>
+      </div>
+
+      <!-- Parts of this repair that went for a warranty claim (RM- codes). -->
+      <div id="svc-parts" class="svc-card glass hidden">
+        <h3 class="svc-tl-title">Parts under warranty claim</h3>
+        <div id="svc-parts-list" class="svc-parts-list"></div>
       </div>
 
       <div class="svc-card glass">
@@ -128,7 +149,7 @@
         <div id="svc-timeline" class="svc-timeline"></div>
       </div>
 
-      <p class="svc-foot">This page updates itself. If something looks wrong, call the shop and quote your reference.</p>
+      <p class="svc-foot">This page updates itself<span id="svc-updated"></span>. If something looks wrong, call the shop and quote your reference.</p>
     </div>
   </main>
 
@@ -141,6 +162,7 @@
       </svg>
       <h2 class="lw-title">Staff Sign-In</h2>
       <p class="lw-note">This area is for Neo Tokyo staff only. If you're a customer, go back and use <strong>Track your build</strong> to see your order status.</p>
+      <p id="web-login-reauth" class="lw-reauth hidden" role="status">Your sign-in has expired. Sign in again to carry on — the request you were filling in is kept.</p>
       <form id="web-login-form" autocomplete="off">
         <label class="lw-label" for="web-login-email">Email</label>
         <input id="web-login-email" class="lw-input" type="email" placeholder="you@neotokyo.in" autocomplete="username" spellcheck="false" required>
@@ -321,6 +343,307 @@
     </div>
   </main>
 
+  <!-- ─────────────────────────── NEW SERVICE REQUEST (all staff) ─── -->
+  <!-- Deliberately NOT a <form>: a phone keyboard's "Go" key and a barcode
+       scanner both send Enter, and Enter must never create a ticket. The only
+       way to submit is the button. Every value goes to service_create, which
+       re-validates everything; nothing here is trusted by the server. -->
+  <main id="view-new-service" class="view hidden wo-view">
+    <div class="sales-toolbar">
+      <div class="toolbar-left"><h2 class="sales-title">New service request</h2></div>
+      <div class="toolbar-right">
+        <span id="ns-draft-note" class="qb-draft-note"></span>
+        <button type="button" id="ns-clear" class="btn-ghost">Start over</button>
+      </div>
+    </div>
+    <p class="wo-lead">For a customer who called, messaged or is about to drop in. The request goes to the service queue, a technician takes it, and you get a tracking code to send the customer.</p>
+
+    <div id="ns-form" class="wo-form">
+      <section class="glass wo-card">
+        <h3 class="wo-card-title">Customer</h3>
+        <label class="wo-field">
+          <span class="wo-flabel">Phone number</span>
+          <input id="ns-phone" class="wo-input wo-input-phone" type="tel" inputmode="tel" maxlength="20" autocomplete="off" placeholder="Mobile (+ country code if not Indian)">
+        </label>
+        <div id="ns-lookup" class="wo-lookup hidden" aria-live="polite"></div>
+        <div class="wo-grid2">
+          <label class="wo-field">
+            <span class="wo-flabel">Name</span>
+            <input id="ns-name" class="wo-input" maxlength="120" autocomplete="off" placeholder="Customer or business name">
+          </label>
+          <label class="wo-field">
+            <span class="wo-flabel">Email (optional)</span>
+            <input id="ns-email" class="wo-input" type="email" maxlength="160" autocomplete="off" placeholder="name@example.com">
+          </label>
+        </div>
+        <div class="wo-field">
+          <span class="wo-flabel" id="ns-channel-label">How did they reach us?</span>
+          <div id="ns-channel" class="wo-chips" role="group" aria-labelledby="ns-channel-label"></div>
+        </div>
+      </section>
+
+      <section class="glass wo-card">
+        <h3 class="wo-card-title">Where is the work?</h3>
+        <div id="ns-type" class="wo-type-cards" role="radiogroup" aria-label="Where is the work?"></div>
+        <p id="ns-type-hint" class="wo-hint wo-hint-accent hidden"></p>
+        <p id="ns-instore-note" class="wo-note">The customer brings it to the shop. The ticket starts as “Logged — not in hand yet”, and the counter marks it received when it arrives.</p>
+      </section>
+
+      <section class="glass wo-card">
+        <h3 class="wo-card-title">The device and the fault</h3>
+        <div class="wo-grid2">
+          <label class="wo-field">
+            <span class="wo-flabel">What is it?</span>
+            <select id="ns-kind" class="wo-input"></select>
+          </label>
+          <label class="wo-field">
+            <span class="wo-flabel">Make and model (optional)</span>
+            <input id="ns-device" class="wo-input" maxlength="120" autocomplete="off" placeholder="e.g. ASUS TUF A15">
+          </label>
+        </div>
+        <div class="wo-field">
+          <span class="wo-flabel" id="ns-source-label">Where is it from?</span>
+          <div id="ns-source" class="wo-chips" role="group" aria-labelledby="ns-source-label"></div>
+        </div>
+        <div class="wo-field">
+          <span class="wo-flabel" id="ns-faults-label">What's wrong? Pick any that fit</span>
+          <div id="ns-faults" class="wo-chips wo-chips-faults" role="group" aria-labelledby="ns-faults-label"></div>
+          <button type="button" id="ns-faults-more" class="wo-mini wo-more hidden" aria-controls="ns-faults"></button>
+        </div>
+        <label class="wo-field">
+          <span class="wo-flabel">In the customer's words</span>
+          <textarea id="ns-fault-text" class="wo-input" rows="3" maxlength="2000" placeholder="What they told you, as close to their words as you can"></textarea>
+        </label>
+        <div class="wo-grid2">
+          <label class="wo-field">
+            <span class="wo-flabel">Category</span>
+            <select id="ns-category" class="wo-input"></select>
+          </label>
+          <label class="wo-field">
+            <span class="wo-flabel">Customer needs it by (optional)</span>
+            <input id="ns-needed" class="wo-input" type="date">
+          </label>
+        </div>
+        <div id="ns-summary" class="wo-summary" aria-live="polite"></div>
+      </section>
+
+      <section id="ns-onsite" class="glass wo-card hidden">
+        <h3 class="wo-card-title">Where do we go?</h3>
+        <label class="wo-field">
+          <span class="wo-flabel">Address</span>
+          <textarea id="ns-address" class="wo-input" rows="2" maxlength="500" placeholder="House or office, street"></textarea>
+        </label>
+        <div class="wo-grid3">
+          <label class="wo-field">
+            <span class="wo-flabel">Area</span>
+            <input id="ns-area" class="wo-input" maxlength="80" autocomplete="off" placeholder="e.g. Edappally">
+          </label>
+          <label class="wo-field">
+            <span class="wo-flabel">Pincode</span>
+            <input id="ns-pincode" class="wo-input" inputmode="numeric" maxlength="6" autocomplete="off" placeholder="682024">
+          </label>
+          <label class="wo-field">
+            <span class="wo-flabel">Landmark (optional)</span>
+            <input id="ns-landmark" class="wo-input" maxlength="120" autocomplete="off" placeholder="e.g. opposite the metro station">
+          </label>
+        </div>
+        <label class="wo-field">
+          <span class="wo-flabel">Google Maps link (optional)</span>
+          <input id="ns-maps" class="wo-input" type="url" maxlength="600" autocomplete="off" placeholder="Paste the location the customer shared">
+        </label>
+        <div id="ns-maps-status" class="wo-hint" aria-live="polite"></div>
+        <label class="wo-field">
+          <span class="wo-flabel">Person to ask for at the site (optional)</span>
+          <input id="ns-contact" class="wo-input" maxlength="120" autocomplete="off" placeholder="Name and number, if not the caller">
+        </label>
+        <div class="wo-grid2 wo-grid-align">
+          <label class="wo-check">
+            <input type="checkbox" id="ns-business">
+            <span>It's a business or office</span>
+          </label>
+          <label class="wo-field">
+            <span class="wo-flabel">Machines to look at (optional)</span>
+            <input id="ns-machines" class="wo-input" type="number" inputmode="numeric" min="1" max="500" step="1" placeholder="1">
+          </label>
+        </div>
+      </section>
+
+      <section id="ns-remote" class="glass wo-card hidden">
+        <h3 class="wo-card-title">Remote session</h3>
+        <div class="wo-field">
+          <span class="wo-flabel" id="ns-tool-label">Which app will they use? (optional)</span>
+          <div id="ns-tool" class="wo-chips" role="group" aria-labelledby="ns-tool-label"></div>
+        </div>
+        <label class="wo-field">
+          <span class="wo-flabel">Session ID (optional)</span>
+          <input id="ns-session" class="wo-input" maxlength="80" autocomplete="off" placeholder="e.g. AnyDesk ID 123 456 789">
+        </label>
+        <p class="wo-hint">Only the ID. Never write down a password; the customer reads it out on the call.</p>
+        <label class="wo-check">
+          <input type="checkbox" id="ns-consent">
+          <span>The customer agreed to us connecting to their computer</span>
+        </label>
+      </section>
+
+      <section id="ns-when" class="glass wo-card hidden">
+        <h3 class="wo-card-title">When suits the customer?</h3>
+        <div class="wo-grid2">
+          <label class="wo-field">
+            <span class="wo-flabel">From</span>
+            <input id="ns-win-from" class="wo-input" type="datetime-local">
+          </label>
+          <label class="wo-field">
+            <span class="wo-flabel">To</span>
+            <input id="ns-win-to" class="wo-input" type="datetime-local">
+          </label>
+        </div>
+        <label class="wo-field">
+          <span class="wo-flabel">Note (optional)</span>
+          <input id="ns-win-note" class="wo-input" maxlength="200" autocomplete="off" placeholder="e.g. weekdays after 5 pm">
+        </label>
+        <p class="wo-hint">The technician books the exact time when they take the job.</p>
+      </section>
+
+      <section class="glass wo-card">
+        <h3 class="wo-card-title">Who should take it? (optional)</h3>
+        <p class="wo-hint">Suggest a technician if the customer asked for someone, or someone has served them before. The request still goes to the queue.</p>
+        <div class="wo-grid2">
+          <label class="wo-field">
+            <span class="wo-flabel">Technician</span>
+            <select id="ns-tech" class="wo-input"></select>
+          </label>
+          <label class="wo-field">
+            <span class="wo-flabel">Why them?</span>
+            <input id="ns-tech-reason" class="wo-input" maxlength="200" autocomplete="off" placeholder="e.g. Customer asked for them">
+          </label>
+        </div>
+        <div id="ns-tech-status" class="wo-hint" aria-live="polite"></div>
+      </section>
+
+      <div class="wo-submit-bar">
+        <div id="ns-status" class="wo-status" aria-live="polite"></div>
+        <button type="button" id="ns-submit" class="btn-primary wo-submit-btn">Create service request</button>
+      </div>
+    </div>
+
+    <section id="ns-done" class="glass wo-card wo-done hidden" aria-live="polite"></section>
+  </main>
+
+  <!-- ─────────────────────────────────── NEW RMA (all staff) ─── -->
+  <!-- Logs parts that are on their way to us. Always in_hand = false from the
+       website: only the desk can say a part is physically here. -->
+  <main id="view-new-rma" class="view hidden wo-view">
+    <div class="sales-toolbar">
+      <div class="toolbar-left"><h2 class="sales-title">New RMA</h2></div>
+      <div class="toolbar-right">
+        <span id="nr-draft-note" class="qb-draft-note"></span>
+        <button type="button" id="nr-clear" class="btn-ghost">Start over</button>
+      </div>
+    </div>
+    <p class="wo-lead">Log parts coming to us for a warranty claim, from a customer or from another technician. Each part gets its own RM- tracking code, and shows as “Expected” until it reaches the shop.</p>
+
+    <div id="nr-form" class="wo-form">
+      <section class="glass wo-card">
+        <h3 class="wo-card-title">Who is sending it?</h3>
+        <div class="wo-field">
+          <span class="wo-flabel" id="nr-sender-label">Sender</span>
+          <div id="nr-sender-kind" class="wo-chips" role="group" aria-labelledby="nr-sender-label"></div>
+        </div>
+        <label class="wo-field">
+          <span class="wo-flabel">Phone number</span>
+          <input id="nr-phone" class="wo-input wo-input-phone" type="tel" inputmode="tel" maxlength="20" autocomplete="off" placeholder="Mobile (+ country code if not Indian)">
+        </label>
+        <div id="nr-lookup" class="wo-lookup hidden" aria-live="polite"></div>
+        <label class="wo-field">
+          <span class="wo-flabel" id="nr-name-label">Name</span>
+          <input id="nr-name" class="wo-input" maxlength="120" autocomplete="off" placeholder="Customer, or the shop sending it">
+        </label>
+      </section>
+
+      <section class="glass wo-card">
+        <h3 class="wo-card-title">How will it reach us?</h3>
+        <div id="nr-arrival" class="wo-chips" role="group" aria-label="How will it reach us?"></div>
+        <div id="nr-courier" class="wo-grid2 hidden">
+          <label class="wo-field">
+            <span class="wo-flabel">Courier (optional)</span>
+            <input id="nr-courier-name" class="wo-input" maxlength="80" autocomplete="off" placeholder="e.g. DTDC">
+          </label>
+          <label class="wo-field">
+            <span class="wo-flabel">Tracking / AWB number (optional)</span>
+            <input id="nr-awb" class="wo-input" maxlength="60" autocomplete="off" placeholder="If they have it already">
+          </label>
+        </div>
+        <h3 class="wo-card-title wo-card-title-gap">How does it go back?</h3>
+        <div id="nr-return" class="wo-chips" role="group" aria-label="How does it go back?"></div>
+        <label id="nr-return-address-wrap" class="wo-field hidden">
+          <span class="wo-flabel">Return address</span>
+          <textarea id="nr-return-address" class="wo-input" rows="2" maxlength="500" placeholder="Full address with pincode"></textarea>
+        </label>
+      </section>
+
+      <section class="glass wo-card">
+        <h3 class="wo-card-title">Parts</h3>
+        <div id="nr-units" class="wo-units"></div>
+        <button type="button" id="nr-add-unit" class="btn-ghost wo-add-btn">+ Add another part</button>
+      </section>
+
+      <section class="glass wo-card">
+        <label class="wo-field">
+          <span class="wo-flabel">Anything the desk should know (optional)</span>
+          <textarea id="nr-notes" class="wo-input" rows="2" maxlength="1000" placeholder="e.g. Box will come with two other parts from the same shop"></textarea>
+        </label>
+      </section>
+
+      <div class="wo-submit-bar">
+        <div id="nr-status" class="wo-status" aria-live="polite"></div>
+        <button type="button" id="nr-submit" class="btn-primary wo-submit-btn">Log RMA</button>
+      </div>
+    </div>
+
+    <section id="nr-done" class="glass wo-card wo-done hidden" aria-live="polite"></section>
+  </main>
+
+  <!-- ───────────────────────────────── MY REQUESTS (all staff) ─── -->
+  <!-- Read through service_my_requests() only (a curated RPC): sales never get
+       table access to service or RMA rows, and nothing here subscribes to
+       realtime. Polled every 60 s while the view is open. -->
+  <main id="view-my-requests" class="view hidden wo-view wo-wide">
+    <div class="sales-toolbar">
+      <div class="toolbar-left">
+        <h2 class="sales-title">My requests</h2>
+        <span id="mr-updated" class="wo-updated"></span>
+      </div>
+      <div class="toolbar-right">
+        <input id="mr-search" class="filter-input" type="search" placeholder="Customer, code or device" autocomplete="off">
+        <button type="button" id="mr-refresh" class="btn-ghost">Refresh</button>
+      </div>
+    </div>
+    <p class="ts-hint">Service requests and RMA parts you logged in the last 60 days, and where each one is now.</p>
+    <div id="mr-status" class="wo-status" aria-live="polite"></div>
+
+    <h3 class="wo-section-title">Service requests <span id="mr-jobs-count" class="wo-count"></span></h3>
+    <div class="table-wrapper">
+      <table class="wo-table" id="mr-jobs-table">
+        <thead>
+          <tr><th>Code</th><th>Customer</th><th>Type</th><th>Device</th><th>Where it is</th><th>Technician</th><th>Logged</th><th>Next</th><th><span class="wo-sr">Actions</span></th></tr>
+        </thead>
+        <tbody id="mr-jobs"></tbody>
+      </table>
+    </div>
+    <p id="mr-jobs-empty" class="no-tickets hidden">No service requests from you in the last 60 days.</p>
+
+    <h3 class="wo-section-title">RMA parts <span id="mr-rma-count" class="wo-count"></span></h3>
+    <div class="table-wrapper">
+      <table class="wo-table" id="mr-rma-table">
+        <thead>
+          <tr><th>Code</th><th>Part</th><th>Where it is</th><th>Logged</th><th><span class="wo-sr">Actions</span></th></tr>
+        </thead>
+        <tbody id="mr-rma"></tbody>
+      </table>
+    </div>
+    <p id="mr-rma-empty" class="no-tickets hidden">No RMA parts from you in the last 60 days.</p>
+  </main>
+
   <!-- ───────────────────────────────── EDIT PROFILE (staff) ─── -->
   <main id="view-profile" class="view hidden">
     <div class="profile-card glass">
@@ -399,6 +722,7 @@
   <script src="shared/invoice-import.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
   <script src="shared/service-status.js"></script>
+  <script src="shared/service-catalog.js"></script>
   <script src="app.js"></script>
   <script src="service.js"></script>
 </body>

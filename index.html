@@ -11,7 +11,7 @@
        needed for it; pdfjs uses a local worker (worker-src blob:). To roll back a
        suspected breakage, delete this one <meta> tag. -->
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: blob: https:; font-src 'self' https://fonts.gstatic.com data:; connect-src 'self' https: wss: data: blob: file:; worker-src 'self' blob:; child-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'">
-  <title>Neo Tokyo Operations</title>
+  <title>Neo OS</title>
   <!-- Google Fonts: Space Grotesk, Hanken Grotesk, JetBrains Mono -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -19,6 +19,12 @@
   <link rel="stylesheet" href="style.css">
   <link rel="stylesheet" href="print-report.css">
   <link rel="stylesheet" href="shared/diagnostics-tokens.css">
+  <!-- v1.10 Service + RMA. After the existing sheets on purpose, so their
+       prefixed rules (ops- sv2- svi- rma-) win over anything older. -->
+  <link rel="stylesheet" href="ops.css">
+  <link rel="stylesheet" href="service-v2.css">
+  <link rel="stylesheet" href="intake.css">
+  <link rel="stylesheet" href="rma.css">
 </head>
 <body class="light-mode">
   
@@ -26,7 +32,7 @@
   <div class="custom-titlebar">
     <div class="titlebar-drag-area">
       <svg class="titlebar-logo-svg" viewBox="0 0 100 100"><circle cx="50" cy="50" r="40" stroke="currentColor" stroke-width="10" fill="none" stroke-dasharray="78.776 5" stroke-dashoffset="60.332" /><path d="M 50,23 L 72,70 C 58,58 50,56 50,56 C 50,56 42,58 28,70 Z" fill="currentColor" /></svg>
-      <span class="titlebar-text">NEO TOKYO // OPERATIONS</span>
+      <span class="titlebar-text">NEO OS</span>
       <span id="update-status-pill" class="update-status-pill" style="display:none;"></span>
     </div>
     <button id="titlebar-user" class="titlebar-user hidden" title="Sign out">
@@ -72,7 +78,7 @@
       </div>
       <h1 class="logo-title">NEO TOKYO</h1>
       <p class="logo-tagline">ACCELERATING YOUR INFRA</p>
-      <p class="logo-subtitle">QUALITY CONTROL LAB SYSTEM</p>
+      <p class="logo-subtitle">NEO OS</p>
       <p id="splash-status-text" class="splash-status-text">Starting up…</p>
     </div>
   </div>
@@ -103,7 +109,7 @@
             <p class="logo-tagline">ACCELERATING YOUR INFRA</p>
           </div>
         </div>
-        <p class="logo-subtitle">QUALITY CONTROL LAB SYSTEM</p>
+        <p class="logo-subtitle">NEO OS</p>
       </div>
       <h2>Staff Sign-In</h2>
       <p class="selector-desc">Enter your Neo Tokyo credentials to continue.</p>
@@ -127,54 +133,11 @@
     <div class="glass-slab login-card">
       <div class="brand-header">
         <div class="hanko-stamp">ネオ東京</div>
-        <p class="logo-subtitle" style="margin-top:8px;">QUALITY CONTROL LAB SYSTEM</p>
+        <p class="logo-subtitle" style="margin-top:8px;">NEO OS</p>
       </div>
       <h2>Welcome, <span id="tier-notice-name">staff</span></h2>
       <p class="selector-desc" id="tier-notice-msg">Your Neo Tokyo workspace is on the web portal. Please sign in at <strong>neoqctracker.netlify.app</strong> to manage your work.</p>
       <button id="btn-tier-logout" class="secondary-btn" style="margin-top:18px;">Sign out</button>
-    </div>
-  </div>
-
-  <div id="mode-selector-screen" class="screen">
-    <!-- Ambient glow backdrops -->
-    <div class="ambient-glow pink-glow"></div>
-    <div class="ambient-glow blue-glow"></div>
-    <div class="glass-slab mode-selector-card">
-      <div class="brand-header">
-        <div class="hanko-stamp">ネオ東京</div>
-        <div class="brand-logo-wrapper">
-          <svg class="brand-logo-svg" viewBox="0 0 100 100">
-            <defs>
-              <linearGradient id="logo-grad" x1="0%" y1="0%" x2="100%" y2="100%">
-                <stop offset="0%" stop-color="#ff1a75" />
-                <stop offset="50%" stop-color="#e7014e" />
-                <stop offset="100%" stop-color="#b3003b" />
-              </linearGradient>
-            </defs>
-            <circle cx="50" cy="50" r="40" stroke="url(#logo-grad)" stroke-width="10" fill="none" stroke-dasharray="78.776 5" stroke-dashoffset="60.332" />
-            <path d="M 50,23 L 72,70 C 58,58 50,56 50,56 C 50,56 42,58 28,70 Z" fill="url(#logo-grad)" />
-          </svg>
-          <div class="brand-text-col">
-            <h1 class="logo-title">NEO TOKYO</h1>
-            <p class="logo-tagline">ACCELERATING YOUR INFRA</p>
-          </div>
-        </div>
-        <p class="logo-subtitle">QUALITY CONTROL LAB SYSTEM</p>
-      </div>
-      <h2>Select Application Mode</h2>
-      <p class="selector-desc">Choose how you want to run this instance of Neo QC.</p>
-      <div class="mode-buttons-row">
-        <button id="btn-launch-staff" class="mode-btn primary-pink">
-          <div class="mode-icon">🖥️</div>
-          <div class="mode-title">Admin Dashboard</div>
-          <div class="mode-text">Full dashboard, manage tickets, technicians & print reports.</div>
-        </button>
-        <button id="btn-launch-client" class="mode-btn dark-slate">
-          <div class="mode-icon">🧪</div>
-          <div class="mode-title">Testing Client</div>
-          <div class="mode-text">Install on built PC. Auto-detect hardware, verify activation, and pull benchmark scores.</div>
-        </button>
-      </div>
     </div>
   </div>
 
@@ -187,7 +150,8 @@
         <span class="nav-title">NEO TOKYO // TESTING CLIENT</span>
       </div>
       <div class="nav-controls">
-        <button id="btn-welcome-exit" class="secondary-btn text-crimson">🚪 Switch Mode</button>
+        <button type="button" id="btn-welcome-service" class="secondary-btn hidden" title="Open the service queue">🔧 Service queue</button>
+        <button type="button" id="btn-welcome-exit" class="secondary-btn hidden" title="Back to your home screen">← Back</button>
       </div>
     </header>
 
@@ -238,7 +202,6 @@
         <span class="nav-title">NEO TOKYO // ADMIN DASHBOARD</span>
       </div>
       <div class="nav-controls">
-        <button id="btn-staff-exit" class="secondary-btn text-crimson" style="margin-right: 10px;">🚪 Switch Mode</button>
         <!-- Notification bell — open flags raised on any build segment -->
         <div class="notif-wrap">
           <button id="btn-notif-bell" class="icon-btn notif-bell" title="Flags &amp; notifications">
@@ -356,24 +319,9 @@
        meant re-testing all seven. Screens that belong to the office get
        `.has-rail`, which is nothing but a left inset. Nothing else moved.
        ══════════════════════════════════════════════════════════════════════ -->
-  <nav id="app-rail" class="app-rail hidden" aria-label="Sections">
-    <button class="rail-item" data-section="overview" title="Overview">
-      <span class="rail-ic">◎</span><span class="rail-label">Overview</span>
-    </button>
-    <button class="rail-item" data-section="builds" title="Builds">
-      <span class="rail-ic">🖥</span><span class="rail-label">Builds</span>
-    </button>
-    <button class="rail-item" data-section="service" title="Service">
-      <span class="rail-ic">🔧</span><span class="rail-label">Service</span>
-    </button>
-    <div class="rail-spacer"></div>
-    <button class="rail-item" data-section="bench" title="Open the Testing Client">
-      <span class="rail-ic">⚗</span><span class="rail-label">Bench</span>
-    </button>
-    <button class="rail-item" data-section="settings" title="Settings">
-      <span class="rail-ic">⚙</span><span class="rail-label">Settings</span>
-    </button>
-  </nav>
+  <!-- v1.10: the rail's items come from the module registry (modules.js) and
+       are drawn by shell.js, so each person sees only the sections they can open. -->
+  <nav id="app-rail" class="app-rail hidden" aria-label="Sections"></nav>
 
   <!-- ─────────────────────────────── OVERVIEW (builds + service together) ─── -->
   <div id="overview-screen" class="screen has-rail">
@@ -407,70 +355,17 @@
         <span class="nav-title">NEO TOKYO // SERVICE</span>
         <span id="sv-stat" class="sv-stat">0 open</span>
       </div>
-      <div class="nav-controls">
-        <label class="sv-mine"><input type="checkbox" id="sv-mine"> Mine only</label>
-        <input type="text" id="sv-search" class="sv-search" placeholder="Customer, device, code or phone…" autocomplete="off">
-        <button id="sv-new" class="primary-pink-btn">+ New Service Job</button>
-      </div>
+      <div id="sv-toolbar" class="sv2-toolbar"></div>
     </header>
 
     <main class="dashboard-container">
-      <p class="sv-lead">Columns are <strong>who we are waiting on</strong>, not what stage the work is at — a service job loops, and most of its life is spent waiting on somebody who isn't us. The big number on each card is how long it has sat where it is.</p>
-      <div id="sv-board" class="sv-board"></div>
+      <div id="sv-root"></div>
     </main>
   </div>
 
   <!-- ── Intake ───────────────────────────────────────────────────────────── -->
   <div id="sv-intake-modal" class="modal-overlay">
-    <div class="glass-slab modal-card sv-modal">
-      <div class="modal-header">
-        <h2>Take in a job</h2>
-        <button type="button" id="sv-in-close" class="close-btn">&times;</button>
-      </div>
-      <div class="modal-body" id="sv-intake-form">
-        <div class="sv-grid">
-          <label class="sv-field sv-span2"><span>Job type</span>
-            <select id="sv-in-kind" class="settings-select"></select></label>
-          <label class="sv-field"><span>Customer name *</span>
-            <input type="text" id="sv-in-name" autocomplete="off"></label>
-          <label class="sv-field"><span>Phone *</span>
-            <input type="text" id="sv-in-phone" autocomplete="off" placeholder="10-digit mobile"></label>
-          <label class="sv-field"><span>Email</span>
-            <input type="text" id="sv-in-email" autocomplete="off"></label>
-          <label class="sv-field"><span>Device</span>
-            <input type="text" id="sv-in-device" autocomplete="off" placeholder="e.g. Gaming PC, ASUS TUF A15"></label>
-          <label class="sv-field"><span>Serial / service tag</span>
-            <input type="text" id="sv-in-serial" autocomplete="off" spellcheck="false" placeholder="Scan or type"></label>
-          <label class="sv-field sv-span2"><span>Reported fault *</span>
-            <textarea id="sv-in-fault" rows="2" placeholder="In the customer's own words"></textarea></label>
-        </div>
-
-        <div id="sv-in-buildrow" class="sv-sub hidden">
-          <label class="sv-field sv-span2"><span>Original build ticket ID</span>
-            <input type="text" id="sv-in-build" autocomplete="off" placeholder="t_… (leave blank if you'll link it later)"></label>
-          <p class="sv-hint">Linking brings across the serials, specs and QC baseline we already hold, so “is this under warranty, and is this the card we sold you” is answerable at a glance.</p>
-        </div>
-
-        <div id="sv-in-outside" class="sv-sub">
-          <h4 class="sv-sub-title">Intake record</h4>
-          <p class="sv-hint">This is the shop's protection against “it wasn't scratched when I brought it in”. Fill it in with the customer standing there.</p>
-          <div class="sv-grid">
-            <label class="sv-field sv-span2"><span>Came in with</span>
-              <input type="text" id="sv-in-accessories" autocomplete="off" placeholder="Charger, bag, drive, keys…"></label>
-            <label class="sv-field sv-span2"><span>Condition on arrival</span>
-              <textarea id="sv-in-condition" rows="2" placeholder="Existing scratches, dents, missing screws, cracked panel…"></textarea></label>
-          </div>
-          <label class="sv-check"><input type="checkbox" id="sv-in-powers"> Powers on at the counter</label>
-        </div>
-
-        <label class="sv-check"><input type="checkbox" id="sv-in-hasdata"> Customer data on board — back up before working</label>
-        <div id="sv-in-status" class="sv-status"></div>
-      </div>
-      <div class="modal-footer">
-        <button type="button" id="sv-in-cancel" class="secondary-btn">Cancel</button>
-        <button type="button" id="sv-in-create" class="primary-pink-btn">Create job</button>
-      </div>
-    </div>
+    <div class="glass-slab modal-card sv-modal sv2-intake-card"><div id="sv-intake-root"></div></div>
   </div>
 
   <!-- ── Job panel ────────────────────────────────────────────────────────── -->
@@ -485,15 +380,52 @@
       </div>
       <div class="modal-body">
         <div id="sv-job-ball" class="sv-job-ball"></div>
-        <div id="sv-job-tabs" class="sv-tabs">
-          <button type="button" class="sv-tab active" data-tab="details">Details</button>
-          <button type="button" class="sv-tab" data-tab="notes">Notes</button>
-          <button type="button" class="sv-tab" data-tab="photos">Photos</button>
-          <button type="button" class="sv-tab" data-tab="history">History</button>
-        </div>
+        <div id="sv-job-actions" class="sv2-job-actions"></div>
+        <div id="sv-job-tabs" class="sv-tabs"></div>
         <div id="sv-job-body" class="sv-job-body"></div>
       </div>
     </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       RMA — parts on warranty claims (v1.10). One row per physical part;
+       rma.js renders the toolbar, board and panels. An office screen like
+       Service: it joins the shell with .has-rail and nothing else.
+       ══════════════════════════════════════════════════════════════════════ -->
+  <div id="rma-screen" class="screen has-rail">
+    <header class="glass-slab navbar">
+      <div class="nav-brand">
+        <svg class="brand-logo-svg" viewBox="0 0 100 100" style="width:22px;height:22px;vertical-align:middle;margin-right:6px;color:var(--primary-pink);"><circle cx="50" cy="50" r="40" stroke="currentColor" stroke-width="10" fill="none" stroke-dasharray="78.776 5" stroke-dashoffset="60.332" /><path d="M 50,23 L 72,70 C 58,58 50,56 50,56 C 50,56 42,58 28,70 Z" fill="currentColor" /></svg>
+        <span class="nav-title">NEO TOKYO // RMA</span>
+        <span id="rma-stat" class="sv-stat">—</span>
+      </div>
+      <div id="rma-toolbar" class="rma-toolbar"></div>
+    </header>
+
+    <main class="dashboard-container">
+      <div id="rma-root"></div>
+    </main>
+  </div>
+
+  <!-- ── RMA unit panel ───────────────────────────────────────────────────── -->
+  <div id="rma-unit-modal" class="modal-overlay">
+    <div class="glass-slab modal-card sv-modal rma-unit-card">
+      <div class="modal-header">
+        <div>
+          <h2 id="rma-unit-title">—</h2>
+          <div id="rma-unit-sub" class="sv-job-sub"></div>
+        </div>
+        <button type="button" id="rma-unit-close" class="close-btn" aria-label="Close" title="Close">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div id="rma-unit-root"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── New RMA ──────────────────────────────────────────────────────────── -->
+  <div id="rma-intake-modal" class="modal-overlay">
+    <div class="glass-slab modal-card sv-modal rma-intake-card"><div id="rma-intake-root"></div></div>
   </div>
 
   <div id="client-screen" class="screen">
@@ -506,7 +438,7 @@
       </div>
       <div class="nav-controls">
         <button id="btn-client-refresh" class="secondary-btn">🔄 Refresh Tickets</button>
-        <button id="btn-client-exit" class="secondary-btn text-crimson">🚪 Switch Mode</button>
+        <button type="button" id="btn-client-exit" class="secondary-btn" title="Back to the bench board">← My Bench</button>
       </div>
     </header>
 
@@ -1648,7 +1580,7 @@
       <!-- Settings Header -->
       <div class="settings-header">
         <div class="settings-header-left">
-          <span class="settings-header-eyebrow">NEO QC</span>
+          <span class="settings-header-eyebrow">NEO OS</span>
           <h2 class="settings-header-title">Application Settings</h2>
         </div>
         <div class="settings-header-right">
@@ -1665,6 +1597,10 @@
           <button class="settings-tab-btn active" data-tab="tab-general" type="button">
             <svg class="stb-icon" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 012.287.947c.379 1.561 2.6 1.561 2.978 0a1.533 1.533 0 012.287-.947c1.372.836 2.942-.734 2.106-2.106a1.533 1.533 0 01.947-2.287c1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.287-.947zM10 13a3 3 0 100-6 3 3 0 000 6z" clip-rule="evenodd"/></svg>
             <span class="stb-label">General</span>
+          </button>
+          <button class="settings-tab-btn" data-tab="tab-appearance" type="button">
+            <svg class="stb-icon" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M4 2a2 2 0 00-2 2v11a3 3 0 106 0V4a2 2 0 00-2-2H4zm1 14a1 1 0 100-2 1 1 0 000 2zm5-1.757l4.9-4.9a2 2 0 000-2.828L13.485 5.1a2 2 0 00-2.828 0L10 5.757v8.486zM16 18H9.071l6-6H16a2 2 0 012 2v2a2 2 0 01-2 2z" clip-rule="evenodd"/></svg>
+            <span class="stb-label">Appearance</span>
           </button>
           <button class="settings-tab-btn" data-tab="tab-thresholds" type="button">
             <svg class="stb-icon" viewBox="0 0 20 20" fill="currentColor"><path d="M2 11a1 1 0 011-1h2a1 1 0 011 1v5a1 1 0 01-1 1H3a1 1 0 01-1-1v-5zM8 7a1 1 0 011-1h2a1 1 0 011 1v9a1 1 0 01-1 1H9a1 1 0 01-1-1V7zM14 4a1 1 0 011-1h2a1 1 0 011 1v12a1 1 0 01-1 1h-2a1 1 0 01-1-1V4z"/></svg>
@@ -1688,6 +1624,9 @@
 
           <!-- ══ TAB: GENERAL ══ -->
           <div id="tab-general" class="settings-tab-content">
+
+            <!-- v1.10 — Operations: demo data switch + module access (tier 4+). Filled by app.js renderOpsSettings(); hidden for anyone with no Service or RMA access. -->
+            <div class="settings-section hidden" id="settings-ops"></div>
 
             <!-- v1.8.1 — Catalogue editor: edit / add / remove components + prices -->
             <div class="settings-section">
@@ -1714,18 +1653,7 @@
             </div>
 
             <div class="settings-section">
-              <div class="settings-section-title">Appearance</div>
-              <div class="settings-field">
-                <label class="settings-label" for="settings-accent-color">Theme Accent Color</label>
-                <select id="settings-accent-color" class="settings-select">
-                  <option value="pink">Pink (Default)</option>
-                  <option value="red">Red</option>
-                  <option value="purple">Purple</option>
-                  <option value="cyan">Cyan</option>
-                  <option value="gold">Gold</option>
-                  <option value="green">Green</option>
-                </select>
-              </div>
+              <div class="settings-section-title">Builds dashboard</div>
               <div class="settings-field">
                 <label class="settings-label" for="settings-sort-by">Dashboard Sort Order</label>
                 <select id="settings-sort-by" class="settings-select">
@@ -1777,6 +1705,34 @@
               </label>
             </div>
 
+          </div>
+
+          <!-- ══ TAB: APPEARANCE (v1.10) ══ — theme + accent colour. Applied the
+               moment you click and remembered on this PC (app.js setThemeChoice /
+               setAccentChoice); no Save needed. -->
+          <div id="tab-appearance" class="settings-tab-content hidden">
+            <div class="settings-section">
+              <div class="settings-section-title">Theme</div>
+              <p class="settings-section-desc">Changes every screen straight away and is remembered on this PC.</p>
+              <div class="appearance-theme-row" role="radiogroup" aria-label="Theme">
+                <button type="button" class="appearance-theme-btn" data-theme-choice="light" role="radio" aria-checked="false"><span class="atb-preview atb-light" aria-hidden="true"></span><span class="atb-label">Light</span></button>
+                <button type="button" class="appearance-theme-btn" data-theme-choice="dark" role="radio" aria-checked="false"><span class="atb-preview atb-dark" aria-hidden="true"></span><span class="atb-label">Dark</span></button>
+                <button type="button" class="appearance-theme-btn" data-theme-choice="system" role="radio" aria-checked="false"><span class="atb-preview atb-system" aria-hidden="true"></span><span class="atb-label">Match Windows</span></button>
+              </div>
+            </div>
+            <div class="settings-section">
+              <div class="settings-section-title">Accent colour</div>
+              <p class="settings-section-desc">Buttons, highlights and the Neo Tokyo mark follow this colour.</p>
+              <div class="appearance-swatches" role="radiogroup" aria-label="Accent colour">
+                <button type="button" class="appearance-swatch" data-accent="pink" role="radio" aria-checked="false" style="--sw:#e7014e"><span class="sw-dot" aria-hidden="true"></span><span class="sw-label">Neo pink</span></button>
+                <button type="button" class="appearance-swatch" data-accent="red" role="radio" aria-checked="false" style="--sw:#ef4444"><span class="sw-dot" aria-hidden="true"></span><span class="sw-label">Red</span></button>
+                <button type="button" class="appearance-swatch" data-accent="purple" role="radio" aria-checked="false" style="--sw:#8b5cf6"><span class="sw-dot" aria-hidden="true"></span><span class="sw-label">Purple</span></button>
+                <button type="button" class="appearance-swatch" data-accent="blue" role="radio" aria-checked="false" style="--sw:#3b82f6"><span class="sw-dot" aria-hidden="true"></span><span class="sw-label">Blue</span></button>
+                <button type="button" class="appearance-swatch" data-accent="cyan" role="radio" aria-checked="false" style="--sw:#06b6d4"><span class="sw-dot" aria-hidden="true"></span><span class="sw-label">Cyan</span></button>
+                <button type="button" class="appearance-swatch" data-accent="green" role="radio" aria-checked="false" style="--sw:#10b981"><span class="sw-dot" aria-hidden="true"></span><span class="sw-label">Green</span></button>
+                <button type="button" class="appearance-swatch" data-accent="gold" role="radio" aria-checked="false" style="--sw:#f59e0b"><span class="sw-dot" aria-hidden="true"></span><span class="sw-label">Gold</span></button>
+              </div>
+            </div>
           </div>
 
           <!-- ══ TAB: QC & TESTING ══ -->
@@ -1968,29 +1924,6 @@
                   <button type="button" id="btn-test-db-connection" class="secondary-btn" disabled>Check Supabase Connection</button>
                   <span id="db-connection-status" class="status-msg"></span>
                 </div>
-                <div class="settings-subsection-divider">
-                  <span class="settings-subsection-label">App Mode Lock</span>
-                </div>
-                <label class="settings-toggle-row">
-                  <div class="settings-toggle-info">
-                    <span class="settings-toggle-label">Master Application Mode</span>
-                    <span class="settings-toggle-desc">Show full staff dashboards. When off, boots directly into Client Testing mode.</span>
-                  </div>
-                  <div class="toggle-switch">
-                    <input type="checkbox" id="settings-is-master" disabled>
-                    <span class="toggle-track"><span class="toggle-thumb"></span></span>
-                  </div>
-                </label>
-                <label class="settings-toggle-row">
-                  <div class="settings-toggle-info">
-                    <span class="settings-toggle-label">Lock to Admin Mode on Startup</span>
-                    <span class="settings-toggle-desc">Boots directly to the Staff Portal and disables the Mode Selector (for dedicated admin terminals).</span>
-                  </div>
-                  <div class="toggle-switch">
-                    <input type="checkbox" id="settings-lock-admin" disabled>
-                    <span class="toggle-track"><span class="toggle-thumb"></span></span>
-                  </div>
-                </label>
               </div>
             </div>
 
@@ -2630,37 +2563,37 @@
   <div id="changelog-modal" class="modal-overlay">
     <div class="glass-slab modal-card" style="max-width: 650px; width: 100%; padding: 30px; border-radius: 20px;">
       <div class="modal-header" style="border-bottom: 1px solid var(--glass-border); padding-bottom: 15px; margin-bottom: 20px;">
-        <h2 style="font-family: 'Syncopate', sans-serif; font-size: 1.3rem; color: var(--primary-pink); letter-spacing: 0.05em; margin: 0;">NEO QC UPDATED</h2>
-        <span data-app-version style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; font-weight: 700; background: rgba(var(--primary-pink-rgb), 0.1); color: var(--primary-pink); padding: 4px 8px; border-radius: 4px;">v1.8.4</span>
+        <h2 style="font-family: 'Syncopate', sans-serif; font-size: 1.3rem; color: var(--primary-pink); letter-spacing: 0.05em; margin: 0;">NEO OS UPDATED</h2>
+        <span data-app-version style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; font-weight: 700; background: rgba(var(--primary-pink-rgb), 0.1); color: var(--primary-pink); padding: 4px 8px; border-radius: 4px;">v1.10.0</span>
       </div>
       <div class="modal-body" style="font-size: 0.92rem; line-height: 1.6; color: var(--text-dark); max-height: 420px; overflow-y: auto; padding-right: 5px;">
-        <p style="margin-top: 0;">A major update has been installed. Here's what's new in NeoQC <strong data-app-version>v1.9.3</strong>:</p>
+        <p style="margin-top: 0;"><strong>Neo QC is now Neo OS.</strong> Same app, same sign-in, same tickets — just a name that fits everything it does now: builds, QC, service and RMA. The installer and the desktop shortcut still say NeoQC for now. Here's what's new in <strong data-app-version>v1.10.0</strong>:</p>
         <ul style="padding-left: 20px; display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px;">
-                    <li><strong>One app instead of several portals.</strong> A bar down the left — Overview, Builds, Service — so moving between them is a click, and each remembers where you were. The app is <strong>Neo Tokyo Operations</strong> now; it outgrew “QC &amp; Diagnostics Lab Portal” a while ago.</li>
-          <li><strong>Overview: builds and repairs in one list.</strong> Late work first, with five counts across the top — late, waiting on a customer, waiting on a supplier, ready to collect, open altogether. Signing in lands you here, because that is the question you actually have.</li>
-          <li><strong>You can now take in more than one service job per session.</strong> The create button stayed disabled after the first job and nothing re-enabled it, so the second customer of the day could not be logged without restarting. Fixed.</li>
-          <li><strong>Service jobs are properly editable.</strong> Assign a technician, correct a phone number, record the diagnosis and the work done, set a promised date. Moving a job on now asks only what that step needs — which vendor, when it is expected back, what the outcome was.</li>
-          <li><strong>Notes and photos on a job.</strong> Notes are internal unless you tick the box to share one with the customer. Photos are stored privately — never public — and tagged intake, during or after. Intake photos are what settle “it wasn’t scratched when I brought it in”.</li>
-          <li><strong>A job can no longer be closed without saying what happened</strong>, and the outcome no longer defaults to “repaired” — an unrepaired machine used to be reported as repaired.</li>
-          <li><strong>Customers can track a repair on the website</strong>, the same way they track a build: their code plus the last four digits of their phone. They see whose turn it is, how long it has been, and a plain-language history of only what you chose to share.</li>
-          <li><strong>Fixes found before release.</strong> Photos could land on the wrong customer’s job if you switched jobs mid-upload, and a stage change could be filed on the wrong customer’s tracking page. A note could be lost while reporting that it saved. Editing one field could silently revert a colleague’s change. All corrected.</li>
-<li><strong>Scanning a serial really cannot save the ticket now — whatever your scanner is set to.</strong> The last update guarded the Enter key, and scanners set to send <em>Tab</em> still slipped through: Tab walked the cursor along until it was sitting on Save, and the next scan pressed it. The ticket now saves only when somebody actually clicks Save, and scanning steps you from one serial box to the next. It still will not jump between Procurement and Component Verification, so a goods-in scan can never land in the technician's own check.</li>
-          <li><strong>New: a Service section</strong> — the 🔧 button on the dashboard. Take in repairs, warranty claims and upgrades, and see every open job grouped by <em>who we are waiting on</em>: us, the customer, or a supplier. The big number on each card is how long it has sat where it is, so a machine quietly rotting on a shelf is the loudest thing on the screen. An outside machine gets a condition record at the counter — what came in with it, and what was already scratched.</li>
-          <li><strong>Graphics card memory is read correctly.</strong> Windows caps the value it reports at 4 GB, which is why an 8 GB card was recorded as a 4 GB one. The real size now comes from the driver — verified against a 12 GB card that used to read as 4 GB.</li>
-          <li><strong>No more fake serial numbers.</strong> Most motherboards ship without their serial set and report placeholder text like “System Serial Number” or “MB-1234567890”. Those were being recorded as if they were real. They now show as not set, so you know to read the sticker.</li>
-          <li><strong>Overdue builds stay red.</strong> A late build used to lose its red tint and drop out of the Urgent count at the exact moment it went late. The pill is now <strong>At Risk</strong> and counts overdue builds too.</li>
-          <li><strong>The QC checklist can no longer be ticked early.</strong> The lock blocked the mouse but not the Tab key, so the checks could be completed before assembly was finished.</li>
-          <li><strong>QC now shows a live count</strong> (“7 / 11”), and every checkbox is a full-width row that fills green when ticked — you can read progress across the room instead of counting boxes.</li>
-          <li><strong>The stage rail at the top of a ticket is clickable</strong>, and opening a ticket now takes you straight to the stage the build is actually at instead of the top of the form.</li>
-          <li><strong>Bigger targets at the bench.</strong> Serial boxes, temperature fields, the timer and the flag button are all larger, and there is now a visible outline showing which field your scanner will fill.</li>
-          <li><strong>The customer's certificate no longer prints the full Windows product key</strong> — it is masked, with the full key kept on file at the shop.</li>
-          <li><strong>Theme accent colour actually works.</strong> Choosing a colour other than pink used to leave half the app pink.</li>
+          <li><strong>Service tickets, rebuilt.</strong> A ticket is in-store, on-site or remote, and records how it reached us — walk-in, phone, WhatsApp or courier. Items can come from anywhere: our build, bought elsewhere, or “not sure”. Condition photos at intake each carry their own remark.</li>
+          <li><strong>Customer data and passwords.</strong> We do not back up customer data and are not responsible for it — the customer is asked to back up their own drives before handing the device over. If they give us a device password, it goes in its own field, stays hidden, and is deleted when the ticket closes.</li>
+          <li><strong>The technician queue.</strong> New tickets wait in a queue until a technician claims one. On-site visits and remote sessions get booked times, and on a visit the technician checks in and out as they go. Technicians get first pick of on-site work: a lead can assign one only after it has waited, or straight away if it is urgent.</li>
+          <li><strong>New: an RMA section for parts on warranty claims.</strong> Log a part that arrives by courier, comes in over the counter, or comes out of a service ticket — each one gets its own RM- code. A ticket follows its parts automatically, so you can see when it is waiting on one. Dispatch parts to vendors together, charge a handling fee for parts bought elsewhere, and a drive cannot go out until you record what happens to the data on it.</li>
+          <li><strong>Access by role.</strong> Service and RMA each have Desk, Tech and Lead roles, set in Settings → Operations. Help Desk staff can now sign in and use the app.</li>
+          <li><strong>Straight to your work, your colours.</strong> The “Select Application Mode” page is gone — Neo OS opens on the screen your role works in, and the Testing Client is one click away under Bench. Settings has a new Appearance tab: light, dark or match Windows, and seven accent colours.</li>
+          <li><strong>Demo data for training.</strong> Turn on “Show demo service and RMA data” in Settings → Operations to fill Service and RMA with practice tickets. It is read-only, and your real tickets come back when you turn it off.</li>
+          <li><strong>On the website.</strong> Staff can raise a new service request or RMA from the web portal, and customers can track a part with its RM- code and the last four digits of their phone, the same way as a repair.</li>
         </ul>
       </div>
       <div class="modal-footer" style="border-top: 1px solid var(--glass-border); padding-top: 15px; display: flex; justify-content: flex-end; margin-top: 20px;">
-        <button id="btn-close-changelog" data-app-version-label class="primary-pink-btn" style="padding: 10px 24px; font-weight: 700; font-size: 0.95rem;">Launch NeoQC v1.9.3</button>
+        <button id="btn-close-changelog" data-app-version-label class="primary-pink-btn" style="padding: 10px 24px; font-weight: 700; font-size: 0.95rem;">Launch Neo OS v1.10.0</button>
       </div>
     </div>
+  </div>
+
+  <!-- ── Shared ops dialog and photo lightbox (ops-ui.js) ─────────────────────
+       Last in the page AND lifted above the other modals (1000): a dialog or a
+       photo is opened FROM a ticket or RMA panel and must sit on top of it.
+       The confirm box and the toasts (100000+) still sit above both. -->
+  <div id="ops-dialog-modal" class="modal-overlay ops-dialog-overlay" style="z-index: 1200;">
+    <div id="ops-dialog-root" class="glass-slab modal-card ops-dialog-card" role="dialog" aria-modal="true"></div>
+  </div>
+  <div id="ops-lightbox" class="modal-overlay ops-lightbox-overlay" style="z-index: 1300;">
+    <div id="ops-lightbox-root"></div>
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -2677,8 +2610,16 @@
   <script src="compat-check.js"></script>
   <script src="tech-assign.js"></script>
   <script src="shared/service-status.js"></script>
+  <script src="shared/service-catalog.js"></script>
+  <script src="shared/service-demo.js"></script>
   <script src="app.js"></script>
+  <script src="modules.js"></script>
+  <script src="ops-ui.js"></script>
+  <script src="ops-data.js"></script>
+  <script src="photo-tray.js"></script>
+  <script src="service-intake.js"></script>
   <script src="service.js"></script>
+  <script src="rma.js"></script>
   <script src="shell.js"></script>
 </body>
 </html>
