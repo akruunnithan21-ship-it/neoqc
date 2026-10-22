@@ -21,14 +21,31 @@
     re-read when an RPC returns less than a row), never from what we sent.
   - In demo mode every write rejects with Error('DEMO_READONLY') before
     anything leaves the PC. Fixture data is never written to Supabase.
+    Build tickets are the one exception: demo mode only fills the Service and
+    RMA screens with practice tickets, and builds are always real, so the
+    work-queue calls that act on a build (and buildQueueSend) still go to the
+    server — see liveWritable() and THE WORK QUEUE below.
   - Failures reject with an Error whose message the UI turns into a sentence
     with NeoQcUI.errText(). Nothing here swallows a failed write.
 
   HOW READS STAY FRESH
   - One load of everything on first use (ensureLoaded), then realtime on
-    service_jobs, service_items, rma_cases and rma_intakes — one channel per
-    table, so a table missing on a not-yet-migrated database cannot take the
-    others down with it.
+    service_jobs, service_items, rma_cases, rma_intakes and work_alerts — one
+    channel per table, so a table missing on a not-yet-migrated database
+    cannot take the others down with it.
+
+  THE WORK QUEUE (v1.11, sql/work-queue.sql)
+  - workQueue() is the source of truth for the queue screen; nothing of it is
+    cached here. Every work_* write emits 'work'; a service result also
+    refreshes that job in the cache. workTick() never throws.
+  - Demo mode: the service side is practice data (read-only, built from the
+    demo jobs); the build side stays live. workQueue() merges the real build
+    items and build alerts into the demo feed, and build claims, offers,
+    answers, hand-backs, queue history, queue sends and build-alert dismissals
+    work as normal. A real build made on a demo PC must still reach the floor
+    (owner decisions §0.1 / §0.3).
+  - The server clock: workOffsetMs() is (server now − this PC's now) from the
+    last work_queue / work_team answer, for every offer countdown.
   - A local write is protected for the length of any snapshot that was
     already in flight when it happened, so a slow reload cannot snap a ticket
     back to where it was before the user moved it.
@@ -205,6 +222,13 @@
   // Every write starts here.
   function writable() {
     if (demoFlag) throw new Error('DEMO_READONLY');
+    return liveWritable();
+  }
+  // A write on a REAL build ticket. Demo mode is practice data for the
+  // Service and RMA screens only — build tickets are never demo data — so
+  // these skip the demo gate (and only these: every service / RMA / people
+  // write goes through writable()).
+  function liveWritable() {
     var c = client();
     if (!c) throw new Error('NEO_OFFLINE: Not connected to the cloud. Try again once you are online.');
     if (!profile()) throw new Error('NEO_DENIED: Sign in first.');
@@ -376,7 +400,9 @@
   var listeners = {};
   var pending = {};
   var emitTimer = null;
-  var ALL_EVENTS = ['jobs', 'items', 'units', 'intakes', 'vendors', 'staff', 'techs', 'access'];
+  // 'work': the work queue changed (any successful work_* write, a work_alerts
+  // realtime row, a tick that moved something). Screens refetch workQueue().
+  var ALL_EVENTS = ['jobs', 'items', 'units', 'intakes', 'vendors', 'staff', 'techs', 'access', 'work'];
 
   function emit(ev) {
     pending[ev] = true;
@@ -536,6 +562,7 @@
     loadPromise = null;
     loadSettled = false;
     loadedFor = null;
+    demoBuildAlerts = {};
     emitAll();
   }
 
@@ -892,12 +919,16 @@
     emit('intakes');
     emit('units');
   }
+  // sql/work-queue.sql publishes work_alerts (RLS: leads of that item's kind
+  // only). Nothing is cached here: a row is a nudge to refetch workQueue().
+  function onWorkAlertChange() { emit('work'); }
 
   var REALTIME = [
     ['service_jobs', onJobChange],
     ['service_items', onItemChange],
     ['rma_cases', onUnitChange],
-    ['rma_intakes', onIntakeChange]
+    ['rma_intakes', onIntakeChange],
+    ['work_alerts', onWorkAlertChange]
   ];
 
   function subscribe() {
@@ -1027,13 +1058,18 @@
     var t = Number(s.tier) || 0;
     return t >= 3 ? 'lead' : t === 2 ? 'tech' : null;
   }
-  // Shape of service_tech_list(), computed from the fixtures.
+  // Shape of service_tech_list() (v2.2: + pools, level, load and capacity),
+  // computed from the fixtures. Only service-pool members are listed, as on
+  // the server.
   function demoTechs(staff, jobs, now) {
     return asArray(staff).filter(function (s) {
-      return s && s.email && s.active !== false && ['tech', 'lead'].indexOf(demoRoleOf(s)) !== -1;
+      return s && s.email && s.active !== false && ['tech', 'lead'].indexOf(demoRoleOf(s)) !== -1 && s.service_pool !== false;
     }).map(function (s) {
       var email = s.email;
       var mine = jobs.filter(function (j) { return j.assignee_email === email && j.stage !== 'closed'; });
+      var level = WORK_LEVELS.indexOf(s.build_level) !== -1 ? s.build_level : null;
+      var cap = workDefaults(level);
+      var load = demoLoad(email, jobs, now);
       return {
         email: email,
         name: s.full_name || s.name || email,
@@ -1043,7 +1079,14 @@
         visits_today: mine.filter(function (j) { return sameLocalDay(j.visit_start, now); }).length,
         in_queue_requested: jobs.filter(function (j) {
           return !j.assignee_email && j.stage !== 'closed' && j.suggested_tech_email === email;
-        }).length
+        }).length,
+        service_pool: true,
+        build_pool: s.build_pool === true,
+        build_level: level,
+        points: load.points,
+        jobs: load.jobs,
+        capacity_points: s.capacity_points || cap.capacity_points,
+        max_jobs: s.max_jobs || cap.max_jobs
       };
     }).sort(function (a, b) { return String(a.name).localeCompare(String(b.name)); });
   }
@@ -2160,6 +2203,455 @@
     return rpc('module_access_set', { p_email: e, p_module: module, p_role: r });
   }
 
+  // ── the work queue (sql/work-queue.sql, v2.2) ─────────────────────────────
+  // Thin wrappers: the server decides everything (eligibility, offers, the
+  // 4-hour clock). The checks below only say a missing reason sooner.
+  var WORK_KINDS = ['build', 'service'];
+  var WORK_LEVELS = ['junior', 'senior'];
+  var WORK_REASON_MAX = 300;
+  var CLAIM_MS = 4 * 3600000;
+  var STAFF_PATCH_KEYS = {
+    full_name: 1, designation: 1, department: 1, active: 1, is_staff: 1, tier: 1, build_pool: 1, service_pool: 1,
+    build_level: 1, capacity_points: 1, max_jobs: 1, roles: 1, apply_preset: 1
+  };
+  var workOffset = 0;                  // server now − this PC's now, from the last work_queue / work_team answer
+  // Demo mode: ids of the REAL build alerts the last live read showed. Only
+  // those may be dismissed while demo is on (an alert id alone does not say
+  // its kind). Cleared by resetCaches (sign-in change, demo switch).
+  var demoBuildAlerts = {};
+
+  function Work() { return window.NeoQcWork || null; }
+  function lowerS(s) { return String(s == null ? '' : s).trim().toLowerCase(); }
+  function tsMs(v) { var t = v ? Date.parse(v) : NaN; return isFinite(t) ? t : null; }
+  // _work_defaults: senior 8 points / 5 jobs, junior 5 / 3, no level 6 / 4.
+  function workDefaults(level) {
+    if (level === 'senior') return { capacity_points: 8, max_jobs: 5 };
+    if (level === 'junior') return { capacity_points: 5, max_jobs: 3 };
+    return { capacity_points: 6, max_jobs: 4 };
+  }
+  function serviceCostOf(type) {
+    var W = Work();
+    if (W && typeof W.serviceCost === 'function') return W.serviceCost(type);
+    return type === 'on_site' ? 2 : 1;
+  }
+  function offerLiveRow(j, now) {
+    var t = tsMs(j && j.offer_expires_at);
+    return !!(j && j.offered_to_email && t != null && t > now);
+  }
+  // Load points and jobs of one person over the cached service jobs: what
+  // they hold plus live offers to them (§1 "load").
+  function demoLoad(email, jobs, now) {
+    var e = lowerS(email), points = 0, n = 0;
+    if (!e) return { points: 0, jobs: 0 };
+    (jobs || []).forEach(function (j) {
+      if (!j || j.stage === 'closed') return;
+      var holds = lowerS(j.assignee_email) === e;
+      var offered = !j.assignee_email && offerLiveRow(j, now) && lowerS(j.offered_to_email) === e;
+      if (holds || offered) { points += serviceCostOf(j.service_type); n++; }
+    });
+    return { points: points, jobs: n };
+  }
+
+  function workKind(kind) {
+    if (WORK_KINDS.indexOf(kind) === -1) throw new Error('NEO_GATE: Say whether it is a build or a service ticket.');
+    return kind;
+  }
+  function workId(kind, id) {
+    return requireId(id == null ? id : String(id), kind === 'build' ? 'build' : 'ticket');
+  }
+  function workReason(reason, msg) {
+    var r = need(reason, msg);
+    if (r.length > WORK_REASON_MAX) throw new Error('NEO_GATE: The reason is too long — keep it under 300 characters.');
+    return r;
+  }
+  function noteOffset(res, receivedAt) {
+    if (!res || typeof res !== 'object' || !res.now) return;
+    var W = Work();
+    var off = (W && typeof W.serverOffsetMs === 'function') ? W.serverOffsetMs(res.now, receivedAt)
+                                                           : ((tsMs(res.now) || receivedAt) - receivedAt);
+    if (isFinite(off)) workOffset = off;
+  }
+  function workOffsetMs() { return workOffset; }
+
+  // The demo gate for one work call: a build is real data, so it always goes
+  // to the server; a service job in demo mode is practice data (read-only).
+  function workWritable(kind) { return kind === 'build' ? liveWritable() : writable(); }
+  function buildsOnly(list) {
+    return (Array.isArray(list) ? list : []).filter(function (x) { return !!x && x.kind === 'build'; });
+  }
+  function buildAlertsOnly(list) {
+    return (Array.isArray(list) ? list : []).filter(function (a) { return !!a && a.item_kind === 'build'; });
+  }
+  function rememberDemoAlerts(alerts) {
+    (alerts || []).forEach(function (a) { if (a && a.id != null) demoBuildAlerts[String(a.id)] = true; });
+  }
+
+  // After any work_* write: a service answer refreshes that job (the row it
+  // carries, else a re-read — an {ok:false} answer always re-reads, because
+  // it means somebody else changed it), then everyone hears 'work'.
+  async function afterWork(kind, id, res) {
+    if (kind === 'service') {
+      await applyJobResult(id, res && typeof res === 'object' && res.ok !== false ? res : null);
+      refreshTechsQuietly();
+    }
+    emit('work');
+    return res;
+  }
+
+  // The feed. In demo mode: the practice feed built from the demo service
+  // jobs, plus the REAL builds and build alerts (builds are never demo data).
+  // An answer that lands after a sign-out, a change of user or a demo switch
+  // comes back empty and marked `superseded`.
+  async function workQueue() {
+    if (demoFlag) {
+      await ensureLoaded();
+      return demoFeedWithBuilds();
+    }
+    readable();
+    if (!profile()) throw new Error('NEO_DENIED: Sign in first.');
+    var asker = who(), gen = generation;
+    var res = await rpc('work_queue', {}, READ_MS);
+    var at = Date.now();
+    if (gen !== generation || who() !== asker) {
+      return { now: null, claim_hours: 4, offer_minutes: 30, me: null, items: [], alerts: [], superseded: true };
+    }
+    noteOffset(res, at);
+    var f = (res && typeof res === 'object' && !Array.isArray(res)) ? res : {};
+    if (!Array.isArray(f.items)) f.items = [];
+    if (!Array.isArray(f.alerts)) f.alerts = [];
+    return f;
+  }
+
+  // Demo mode's feed: the practice service items from demoWorkFeed, merged
+  // with the real build items and build alerts from work_queue (read only for
+  // someone with a Builds role — nobody else gets builds from the server). If
+  // the live part cannot be read (offline, a database without v2.2) the
+  // practice feed still shows, and builds_error says why.
+  async function demoFeedWithBuilds() {
+    var gen = generation, asker = uidOf(profile());
+    var live = null, liveErr = null;
+    if (asker && role('qc')) {
+      try {
+        readable();
+        live = await rpc('work_queue', {}, READ_MS);
+      } catch (e) { liveErr = e; }
+    }
+    var at = Date.now();
+    if (gen !== generation || !demoFlag || uidOf(profile()) !== asker) {
+      return { now: null, claim_hours: 4, offer_minutes: 30, me: null, items: [], alerts: [], superseded: true };
+    }
+    if (!live || typeof live !== 'object' || Array.isArray(live)) live = null;
+    if (live) noteOffset(live, at);
+    var feed = demoWorkFeed(at);
+    if (live) {
+      var W = Work();
+      var items = feed.items.concat(buildsOnly(live.items));
+      feed.items = (W && typeof W.sortItems === 'function') ? W.sortItems(items, at + workOffset) : items;
+      if (live.now) feed.now = live.now;
+      feed.alerts = buildAlertsOnly(live.alerts);
+      rememberDemoAlerts(feed.alerts);
+    }
+    feed.live_builds = !!live;
+    if (liveErr) {
+      feed.builds_error = errText(liveErr);
+      console.warn('[ops-data] demo mode: the real builds could not be read:', liveErr && liveErr.message);
+    }
+    return feed;
+  }
+
+  // claim → the item, or {ok:false, reason:'offered'|'taken'|…}. For service it
+  // is service_claim behind the pool check (a live offer TO the caller is an
+  // accept).
+  async function workClaim(kind, id, visitStart, visitEnd) {
+    var k = workKind(kind);
+    workWritable(k);
+    var i = workId(k, id);
+    var res = await rpc('work_claim', {
+      p_kind: k, p_id: i,
+      p_visit_start: normTs('visit_start', visitStart),
+      p_visit_end: normTs('visit_end', visitEnd)
+    });
+    return afterWork(k, i, res);
+  }
+
+  // A lead offers an item to one person (30 minutes to accept), or withdraws
+  // the live offer (email null / ''). expected = the assignee email the
+  // screen showed (null = "it was unassigned"; WQ-C8 compare-and-set). Left
+  // out, a service job uses its cached assignee; a build sends null, so
+  // build callers always pass what they displayed.
+  async function workOffer(kind, id, email, reason, expected) {
+    var k = workKind(kind);
+    workWritable(k);
+    var i = workId(k, id);
+    var to = clean(email);
+    var why = to ? workReason(reason, "Say why you're offering it to them.") : clean(reason);
+    var exp;
+    if (arguments.length >= 5) exp = clean(expected);
+    else if (k === 'service') { var cj = jobsById[i]; exp = (cj && cj.assignee_email) || null; }
+    else exp = null;
+    var res = await rpc('work_offer', { p_kind: k, p_id: i, p_email: to, p_reason: why, p_expected: exp });
+    return afterWork(k, i, res);
+  }
+
+  // The offered person answers. Accept may carry a visit (on-site / remote);
+  // a decline needs a reason, which the leads read.
+  async function workRespond(kind, id, accept, reason, visitStart, visitEnd) {
+    var k = workKind(kind);
+    workWritable(k);
+    var i = workId(k, id);
+    var yes = accept === true;
+    var why = yes ? clean(reason) : workReason(reason, "Say why you can't take it.");
+    var res = await rpc('work_respond', {
+      p_kind: k, p_id: i, p_accept: yes, p_reason: why,
+      p_visit_start: yes ? normTs('visit_start', visitStart) : null,
+      p_visit_end: yes ? normTs('visit_end', visitEnd) : null
+    });
+    return afterWork(k, i, res);
+  }
+
+  async function workRelease(kind, id, reason) {
+    var k = workKind(kind);
+    workWritable(k);
+    var i = workId(k, id);
+    var why = workReason(reason, "Say why you're handing it back.");
+    var res = await rpc('work_release', { p_kind: k, p_id: i, p_reason: why });
+    return afterWork(k, i, res);
+  }
+
+  // Expires offers and auto-offers overdue items. Called every 60 s by the
+  // desktop. NEVER throws: resolves null on any failure (and in demo mode, or
+  // signed out).
+  async function workTick() {
+    try {
+      if (demoFlag || !client() || !profile()) return null;
+      var res = await rpc('work_tick', {}, READ_MS);
+      if (res && typeof res === 'object' && ((Number(res.expired) || 0) + (Number(res.offered) || 0)) > 0) emit('work');
+      return res && typeof res === 'object' ? res : null;
+    } catch (e) {
+      console.warn('[ops-data] work_tick failed:', e && e.message);
+      return null;
+    }
+  }
+
+  // Leads: everyone's load. In demo mode the team is still the real one (an
+  // offer of a real build needs it), but only its build side is shown: the
+  // Service screens hold practice tickets, so real service items, offers and
+  // alerts are left out. points / jobs stay the real totals — the load the
+  // server judges an offer by.
+  async function workTeam() {
+    readable();
+    if (!profile()) throw new Error('NEO_DENIED: Sign in first.');
+    var demo = demoFlag, gen = generation, asker = uidOf(profile());
+    var res = await rpc('work_team', {}, READ_MS);
+    noteOffset(res, Date.now());
+    var f = (res && typeof res === 'object' && !Array.isArray(res)) ? res : {};
+    if (!Array.isArray(f.people)) f.people = [];
+    if (!Array.isArray(f.alerts)) f.alerts = [];
+    if (demo || demoFlag) {
+      if (gen !== generation || uidOf(profile()) !== asker) return { now: null, people: [], alerts: [], superseded: true };
+      f.people = f.people.map(function (p) {
+        if (!p || typeof p !== 'object') return p;
+        return Object.assign({}, p, { items: buildsOnly(p.items), offers: buildsOnly(p.offers) });
+      });
+      f.alerts = buildAlertsOnly(f.alerts);
+      rememberDemoAlerts(f.alerts);
+      f.demo = true;
+    }
+    return f;
+  }
+
+  // The queue history of one item, newest first (at most 100). A build's
+  // history is real in demo mode too; a demo service job has none.
+  async function workEvents(kind, id) {
+    var k = workKind(kind), i = workId(k, id);
+    if (demoFlag && k !== 'build') throw new Error('DEMO_READONLY');
+    readable();
+    var res = await rpc('work_events_for', { p_kind: k, p_id: i }, READ_MS);
+    if (Array.isArray(res)) return res;
+    return (res && Array.isArray(res.events)) ? res.events : [];
+  }
+
+  // In demo mode only a real BUILD alert this PC was shown may be dismissed
+  // (the id alone does not say the alert's kind).
+  async function workAlertResolve(alertId) {
+    var n = toInt(alertId);
+    if (n == null || n <= 0) throw new Error('NEO_GATE: That alert is not valid. Refresh and try again.');
+    if (demoFlag && !demoBuildAlerts[String(n)]) throw new Error('DEMO_READONLY');
+    liveWritable();
+    var res = await rpc('work_alert_resolve', { p_id: n });
+    emit('work');
+    return res;
+  }
+
+  // A new desktop build goes to the floor: the 4-hour claim clock starts.
+  // {ok:true} | {ok:true, already:true} | {ok:false, reason:'assigned'|'closed'|'not_found'}.
+  // Builds are real in demo mode too, so this skips the demo gate.
+  async function buildQueueSend(ticketId) {
+    liveWritable();
+    var i = requireId(ticketId == null ? ticketId : String(ticketId), 'build');
+    var res = await rpc('build_queue_send', { p_ticket_id: i });
+    if (!(res && res.ok === false)) emit('work');
+    return res;
+  }
+
+  async function myWorkProfile() {
+    readable();
+    if (!profile()) throw new Error('NEO_DENIED: Sign in first.');
+    return rpc('my_work_profile', {}, READ_MS);
+  }
+
+  // ── people and designation presets (tier 4+, Settings → People) ──────────
+  // Reads work in demo mode (the people are real); writes do not.
+  function listOf(res, key) {
+    if (Array.isArray(res)) return res;
+    return (res && Array.isArray(res[key])) ? res[key] : [];
+  }
+  // Someone's pools, roles or status changed: the cached staff and technician
+  // lists follow, and if it was me, my own module access too.
+  function afterPeople(email) {
+    emit('staff');
+    emit('work');
+    if (!demoFlag && client()) {
+      runKind('staff', generation);
+      runKind('techs', generation);
+    }
+    if (email && lowerS(email) === lowerS(myEmail())) {
+      var M = window.NeoQcModules;
+      if (M && typeof M.refreshAccess === 'function') { try { M.refreshAccess(); } catch (e) { /* the next sign-in reads it */ } }
+    }
+  }
+
+  async function staffListRpc() {
+    readable();
+    return listOf(await rpc('staff_list', {}, READ_MS), 'people');
+  }
+
+  // patch keys (all optional): full_name, designation, department, active,
+  // is_staff, tier, build_pool, service_pool, build_level, capacity_points,
+  // max_jobs, roles {service, rma, qc}, apply_preset. The server checks who
+  // may change what. Returns the staff_list entry.
+  async function staffUpdate(email, patch) {
+    writable();
+    var e = need(email, 'Choose a person.');
+    if (!patch || typeof patch !== 'object' || Array.isArray(patch)) throw new Error('NEO_GATE: Nothing to save.');
+    var p = {};
+    Object.keys(patch).forEach(function (k) {
+      if (patch[k] === undefined) return;
+      if (!STAFF_PATCH_KEYS[k]) throw new Error('NEO_GATE: ' + k + " can't be changed here.");
+      p[k] = patch[k];
+    });
+    if (!Object.keys(p).length) throw new Error('NEO_GATE: Nothing to save.');
+    var res = await rpc('staff_update', { p_email: e, p: p });
+    afterPeople(e);
+    return res;
+  }
+
+  async function staffApplyPreset(email) {
+    writable();
+    var e = need(email, 'Choose a person.');
+    var res = await rpc('staff_apply_preset', { p_email: e });
+    afterPeople(e);
+    return res;
+  }
+
+  async function presetList() {
+    readable();
+    return listOf(await rpc('preset_list', {}, READ_MS), 'presets');
+  }
+
+  async function presetUpsert(p) {
+    writable();
+    if (!p || typeof p !== 'object' || Array.isArray(p)) throw new Error('NEO_GATE: Nothing to save.');
+    need(p.designation, 'Enter the designation.');
+    return rpc('preset_upsert', { p: p });
+  }
+
+  async function presetDelete(key) {
+    writable();
+    var k = need(key, 'Choose a preset.');
+    return rpc('preset_delete', { p_key: k });
+  }
+
+  // ── the demo feed: work_queue() answered from the demo service jobs ───────
+  function demoClock(iso) {
+    var W = Work();
+    if (W && typeof W.fmtClock === 'function') return W.fmtClock(iso);
+    var t = tsMs(iso);
+    if (t == null) return '';
+    var d = new Date(t);
+    return (d.getHours() < 10 ? '0' : '') + d.getHours() + ':' + (d.getMinutes() < 10 ? '0' : '') + d.getMinutes();
+  }
+  function demoWorkFeed(now) {
+    var W = Work();
+    var S = window.NeoQcService || null;
+    var M = window.NeoQcModules;
+    var RANK = { desk: 1, tech: 2, lead: 3 };
+    var p = profile() || {};
+    var me = lowerS(p.email);
+    var pl = (M && typeof M.pools === 'function') ? M.pools() : { build: false, service: false, level: null };
+    var svcRole = role('service'), qcRole = role('qc');
+    var deskService = (RANK[svcRole] || 0) >= 1, leadService = (RANK[svcRole] || 0) >= 3;
+    var jobs = Object.keys(jobsById).map(function (k) { return jobsById[k]; }).filter(function (j) { return j && j.stage !== 'closed'; });
+    var load = demoLoad(me, jobs, now);
+    var cap = workDefaults(pl.level);
+    var person = { tier: Number(p.tier) || 0, active: p.active !== false, service_role: svcRole, qc_role: qcRole,
+                   service_pool: pl.service === true, build_pool: pl.build === true, build_level: pl.level };
+    var whyCode = (W && typeof W.whyNot === 'function') ? W.whyNot(person, 'service', null) : (pl.service ? null : 'no_pool');
+    var mySentence = whyCode ? ((W && typeof W.whySentence === 'function') ? W.whySentence(whyCode, 'service', true) : "You aren't in the service pool.") : null;
+    function label(fn, v) { try { return (S && typeof S[fn] === 'function') ? (S[fn](v) || '') : (v || ''); } catch (e) { return v || ''; } }
+    function firstWord(n) { return String(n || '').trim().split(/\s+/)[0] || ''; }
+
+    var items = [];
+    if (deskService) jobs.forEach(function (j) {
+      var live = offerLiveRow(j, now);
+      var toMe = live && !!me && lowerS(j.offered_to_email) === me;
+      var mine = !!me && lowerS(j.assignee_email) === me;
+      var open = !j.assignee_email;
+      if (!(open || toMe || mine || (leadService && live))) return;
+      var type = j.service_type || 'in_store';
+      var cat = label('categoryLabel', j.category);
+      var other = live && !toMe;
+      var q = open ? tsMs(j.queued_at) : null;
+      items.push({
+        kind: 'service', id: j.id, code: j.public_code || '', title: j.device_label || cat || 'Service',
+        sub: [label('typeLabel', type), cat].filter(Boolean).join(' · '),
+        customer: (mine || svcRole === 'desk' || svcRole === 'lead') ? (j.customer_name || '') : firstWord(j.customer_name),
+        area: j.site_area || null, service_type: type, stage: j.stage, priority: j.priority || 'normal',
+        build_tier: null, needs_senior: false,
+        deadline: j.visit_start || j.needed_by || null,
+        queued_at: open ? (j.queued_at || null) : null,
+        claim_due: q != null ? new Date(q + CLAIM_MS).toISOString() : null,
+        cost: serviceCostOf(type),
+        assignee_email: j.assignee_email || null, assignee_name: j.assignee || null,
+        assigned_via: j.assigned_via || null, assigned_at: j.assigned_at || null,
+        offer: live ? {
+          to_email: j.offered_to_email, to_name: j.offered_to_name || j.offered_to_email, kind: j.offer_kind || null,
+          by_name: j.offer_by_name || null, reason: j.offer_reason || null, offered_at: j.offered_at || null,
+          expires_at: j.offer_expires_at
+        } : null,
+        declined_count: Array.isArray(j.declined_emails) ? j.declined_emails.length : 0,
+        mine: mine, offered_to_me: toMe,
+        can_claim: open && !other && !whyCode,
+        why_not: other ? 'Offered to ' + (j.offered_to_name || 'someone else') + ' until ' + demoClock(j.offer_expires_at) + '.'
+                       : (open ? mySentence : null)
+      });
+    });
+    var sorted = (W && typeof W.sortItems === 'function') ? W.sortItems(items, now) : items;
+    return {
+      now: new Date(now).toISOString(), claim_hours: 4, offer_minutes: 30,
+      me: {
+        email: p.email || null, name: p.full_name || p.email || null, designation: p.designation || null,
+        tier: Number(p.tier) || 0, build_pool: pl.build === true, service_pool: pl.service === true, build_level: pl.level || null,
+        capacity_points: cap.capacity_points, max_jobs: cap.max_jobs, points: load.points, jobs: load.jobs,
+        lead_builds: (RANK[qcRole] || 0) >= 3, lead_service: leadService,
+        desk_builds: (RANK[qcRole] || 0) >= 1, desk_service: deskService
+      },
+      items: sorted,
+      alerts: [],
+      demo: true
+    };
+  }
+
   var api = {
     // state
     isDemo: isDemo,
@@ -2241,6 +2733,28 @@
     // module access
     moduleAccessList: moduleAccessList,
     moduleAccessSet: moduleAccessSet,
+
+    // the work queue (sql/work-queue.sql)
+    workQueue: workQueue,
+    workClaim: workClaim,
+    workOffer: workOffer,
+    workRespond: workRespond,
+    workRelease: workRelease,
+    workTick: workTick,
+    workTeam: workTeam,
+    workEvents: workEvents,
+    workAlertResolve: workAlertResolve,
+    workOffsetMs: workOffsetMs,
+    buildQueueSend: buildQueueSend,
+    myWorkProfile: myWorkProfile,
+
+    // people and designation presets (tier 4+)
+    staffList: staffListRpc,
+    staffUpdate: staffUpdate,
+    staffApplyPreset: staffApplyPreset,
+    presetList: presetList,
+    presetUpsert: presetUpsert,
+    presetDelete: presetDelete,
 
     // helpers other modules may want
     newRequestId: uuid,

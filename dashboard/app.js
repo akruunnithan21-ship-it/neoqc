@@ -85,6 +85,101 @@ function technicianMatchesProfile(techName, profile) {
   return a.every(w => b.includes(w));
 }
 
+// ── Work queue (Neo OS 1.11, WQ-SPEC §5) ──────────────────────────────────
+// Who has a build, and where an unassigned one stands, are SERVER-OWNED
+// columns: the tickets guard keeps them through any app or website write, and
+// only the work_* RPCs change them. The website only reads them, and sends a
+// quote to the floor through build_queue_send.
+//   assigned  = technician_email set OR a technician name (a legacy name-only
+//               assignment counts, WQ-SPEC §1)
+//   queued    = unassigned, not completed, queued_at set (waiting on the floor)
+//   quote     = unassigned, not completed, no queued_at (still on the sales desk)
+const BUILD_CLAIM_HOURS = 4;   // owner decision 2026-10-22: one 4-hour claim window
+
+// The display name of whoever has the build, or '' when nobody does. The RPCs
+// keep `technician` as the short display name; an email-only row (should not
+// happen) falls back to the person's name, else the email's local part.
+function ticketAssignee(t) {
+  if (!t) return '';
+  const name = String(t.technician || '').trim();
+  if (name) return name;
+  const em = String(t.technician_email || '').trim();
+  if (!em) return '';
+  const known = (typeof salesNameByEmail === 'object' && salesNameByEmail) ? salesNameByEmail[em.toLowerCase()] : '';
+  return known || em.split('@')[0];
+}
+
+// HH:MM in India time, the clock every server sentence uses (WQ-SPEC §9.1 IST).
+function fmtClockIst(ms) {
+  try {
+    return new Date(ms).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Kolkata' });
+  } catch (e) {
+    const d = new Date(ms);
+    return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+  }
+}
+
+// A live offer ({name, until}) or null. Live = offer_expires_at in the future;
+// an offer the server has not expired yet but whose time is up is NOT shown.
+function ticketLiveOffer(t, nowMs) {
+  if (!t || !t.offer_expires_at || t.status === 'completed') return null;
+  const exp = Date.parse(t.offer_expires_at);
+  if (!Number.isFinite(exp) || exp <= (nowMs || Date.now())) return null;
+  return { name: String(t.offered_to_name || '').trim() || 'a technician', until: fmtClockIst(exp) };
+}
+
+function ticketInBuildQueue(t) {
+  return !!t && t.status !== 'completed' && !ticketAssignee(t) && !!t.queued_at;
+}
+
+function ticketIsQuote(t) {
+  return !!t && t.status !== 'completed' && !ticketAssignee(t) && !t.queued_at;
+}
+
+// The technician cell / card line: the assignee (plus a reassignment offer),
+// "Offered to X · until HH:MM", "In the build queue", or `fallback`.
+function ticketTechText(t, fallback, nowMs) {
+  const now = nowMs || Date.now();
+  const who = ticketAssignee(t);
+  const offer = ticketLiveOffer(t, now);
+  if (who) return offer ? who + ' · offered to ' + offer.name + ' until ' + offer.until : who;
+  if (offer) return 'Offered to ' + offer.name + ' · until ' + offer.until;
+  if (ticketInBuildQueue(t)) return 'In the build queue';
+  return fallback;
+}
+
+// My Builds: the build's technician_email is mine (case-insensitive). The
+// fuzzy name match is only the fallback for a row with NO technician_email
+// (a legacy name-only assignment the backfill could not map).
+function isMyBuild(t, profile) {
+  if (!t || !profile) return false;
+  const te = String(t.technician_email || '').trim().toLowerCase();
+  if (te) return te === String(profile.email || '').trim().toLowerCase();
+  return technicianMatchesProfile(t.technician, profile);
+}
+
+// A server refusal in plain words: NEO_<KIND>: prefixes are stripped (the
+// sentence after the colon is written for people); the rest is mapped to
+// something actionable, keeping the raw text when nothing fits.
+function neoErrorText(e) {
+  if (!e) return 'Something went wrong.';
+  const msg = String(e.message || e.error_description || e.msg || (typeof e === 'string' ? e : '') || '');
+  const all = msg + ' ' + String(e.details || '') + ' ' + String(e.hint || '');
+  const m = all.match(/NEO_[A-Z_]+:\s*([^\n]+)/);
+  if (m) return m[1].trim();
+  if (e.code === 'PGRST202' || /could not find the function|schema cache/i.test(msg)) {
+    return "The build queue isn't switched on yet: the database update hasn't been applied. Tell the admin.";
+  }
+  if (e.code === '42501' || /permission denied/i.test(msg)) return "Your account can't do this, or your sign-in has expired.";
+  if (/^PGRST30\d$/.test(String(e.code || '')) || (/jwt|token/i.test(msg) && /expired|invalid/i.test(msg))) {
+    return 'Your sign-in has expired. Sign out and sign in again.';
+  }
+  if (/failed to fetch|networkerror|network request failed|load failed|timed? ?out/i.test(msg)) {
+    return "Couldn't reach the server. Check the connection and try again.";
+  }
+  return msg.replace(/^\s*NEO_[A-Z_]+:\s*/, '') || 'Something went wrong.';
+}
+
 function activateView(name) {
   if (name === 'sales') name = currentProfile ? 'dashboard' : 'login';           // legacy deep-link
   if (STAFF_VIEWS.includes(name) && !currentProfile) {
@@ -393,7 +488,9 @@ async function webSignIn(email, pin) {
   if (error || !data || !data.user) return { ok: false, msg: 'Incorrect email or PIN.' };
   const ok = await loadWebProfile();
   if (!ok) {
-    try { await db.auth.signOut(); } catch (e) {}
+    // 'local': end only the session this page just opened. The supabase-js v2
+    // default ('global') would also sign this person out of NeoHR and Neo OS.
+    try { await db.auth.signOut({ scope: 'local' }); } catch (e) {}
     return { ok: false, msg: 'Your account isn’t set up yet or has been deactivated. Contact the admin.' };
   }
   return { ok: true };
@@ -408,6 +505,8 @@ function clearStaffState() {
   if (staffChannel)    { try { db.removeChannel(staffChannel);    } catch (e) {} staffChannel = null; }
   allTickets = [];
   viewAfterLogin = null;
+  boardQueueSending = {};
+  setBoardStatus('', '');
   if (window.NeoQcWebOps) { try { window.NeoQcWebOps.reset(); } catch (e) { console.warn('request forms reset failed', e); } }
 }
 
@@ -415,7 +514,11 @@ async function webSignOut() {
   // Sign out wipes the request forms, so say so before losing someone's work.
   if (window.NeoQcWebOps && typeof window.NeoQcWebOps.hasUnsent === 'function' && window.NeoQcWebOps.hasUnsent() &&
       !confirm('A request you started has not been sent yet. Signing out clears it from this page. Sign out anyway?')) return;
-  try { await db.auth.signOut(); } catch (e) {}
+  // 'local' = this browser only. The supabase-js v2 default is 'global', which
+  // revokes every session the person has: signing out at a shared counter PC
+  // would then also sign them out of NeoHR on their phone (and stop its work
+  // offers) and out of Neo OS on their desk.
+  try { await db.auth.signOut({ scope: 'local' }); } catch (e) {}
   currentProfile = null;
   clearStaffState();
   showReauthNote(false);
@@ -507,9 +610,11 @@ async function ensureTicketStatusLoaded() {
 }
 function renderTicketStatus() {
   const tier = currentProfile ? Number(currentProfile.tier) : 0;
-  // Technicians (T2) see only builds assigned to them; T1 sees the whole list.
+  // Technicians (T2) see only builds assigned to them (by technician_email;
+  // the name match only for rows that have none); T1 sees the whole list.
   let base = allTickets;
-  if (tier === 2) base = base.filter(t => technicianMatchesProfile(t.technician, currentProfile));
+  if (tier === 2) base = base.filter(t => isMyBuild(t, currentProfile));
+  const nowMs = Date.now();
   const titleEl = document.getElementById('ts-title');
   if (titleEl) titleEl.textContent = tier === 2 ? 'My Builds' : 'Ticket Status';
   const hintEl = document.getElementById('ts-hint');
@@ -526,7 +631,7 @@ function renderTicketStatus() {
     <td>${escHtml(t.customer_name || '')}</td>
     <td>${t.type === 'build' ? 'Build' : 'Repair'}</td>
     <td>${escHtml(STATUS_LABELS[t.status] || t.status || '')}</td>
-    <td>${escHtml(t.technician || '—')}</td>
+    <td>${escHtml(ticketTechText(t, '—', nowMs))}</td>
     <td>${t.deadline ? fmtDateTime(t.deadline) : '—'}</td>
   </tr>`).join('');
 }
@@ -599,18 +704,39 @@ function initProfileUI() {
   });
 }
 
+// specs / build_checks / qc_checks are what let boardColumn() tell
+// Procurement from Assembly and QC from Stress — without them three of the
+// seven board columns are undecidable. They must also match the shape the
+// realtime handler writes (payload.new is the FULL row), or a card would
+// jump columns on its first update: an apparent transition nobody made.
+// The work-queue columns (1.11) are what My Builds, the queue/offer labels and
+// the Quote → Procurement rule read, so they are part of the same shape.
+const TICKET_COLS_BASE = 'id, customer_name, status, type, technician, created_at, deadline, completed_at, diagnostics, specs, build_checks, qc_checks, missing_components_toggle, handed_over_at, handed_over_by, updated_at';
+const TICKET_COLS_QUEUE = TICKET_COLS_BASE + ', technician_email, queued_at, offered_to_name, offer_expires_at';
+// False only when the database does not have the work-queue columns yet (the
+// website deployed before the SQL): the lists still load, and the
+// [Send to build queue] button stays hidden because its RPC is not there either.
+let ticketQueueLive = true;
+
+function isMissingColumnError(e) {
+  return !!e && (e.code === '42703' || /column .* does not exist/i.test(String(e.message || '')));
+}
+
 async function loadAllTickets() {
   showLoading(true);
   try {
-    const { data, error } = await db
+    let { data, error } = await db
       .from('tickets')
-      // specs / build_checks / qc_checks are what let boardColumn() tell
-      // Procurement from Assembly and QC from Stress — without them three of the
-      // seven board columns are undecidable. They must also match the shape the
-      // realtime handler writes (payload.new is the FULL row), or a card would
-      // jump columns on its first update: an apparent transition nobody made.
-      .select('id, customer_name, status, type, technician, created_at, deadline, completed_at, diagnostics, specs, build_checks, qc_checks, missing_components_toggle, handed_over_at, handed_over_by, updated_at')
+      .select(ticketQueueLive ? TICKET_COLS_QUEUE : TICKET_COLS_BASE)
       .order('created_at', { ascending: false });
+    if (error && ticketQueueLive && isMissingColumnError(error)) {
+      console.warn('tickets: the work-queue columns are not in the database yet — loading without them.');
+      ticketQueueLive = false;
+      ({ data, error } = await db
+        .from('tickets')
+        .select(TICKET_COLS_BASE)
+        .order('created_at', { ascending: false }));
+    }
 
     if (error) throw error;
     allTickets = data || [];
@@ -689,6 +815,7 @@ function renderTable() {
   }
   noMsg.classList.add('hidden');
 
+  const nowMs = Date.now();
   tbody.innerHTML = rows.map(t => {
     const shortId     = t.id.slice(-6).toUpperCase();
     const statusLabel = STATUS_LABELS[t.status] || t.status || '—';
@@ -700,7 +827,7 @@ function renderTable() {
       <td class="cell-customer">${escHtml(t.customer_name || '—')}</td>
       <td class="cell-type">${t.type === 'build' ? 'Build' : t.type === 'repair' ? 'Repair' : escHtml(t.type || '—')}</td>
       <td><span class="status-badge ${statusClass(t.status)}">${escHtml(statusLabel)}</span></td>
-      <td class="cell-tech">${escHtml(t.technician || 'Unassigned')}</td>
+      <td class="cell-tech">${escHtml(ticketTechText(t, 'Unassigned', nowMs))}</td>
       <td class="cell-deadline ${deadlineCls}">${fmtDate(t.status === 'completed' ? t.completed_at : t.deadline)}</td>
       <td>${qcHtml}</td>
       <td class="cell-query">${queryBtnHtml(t, shortId)}</td>
@@ -1700,12 +1827,13 @@ function boardColumn(t) {
   // 5. Assembly has actually begun — a box ticked or the build timer started.
   if (buildAny || t.status === 'building' || ver.buildStartedAt) return 'assembly';
 
-  // 6. The floor has accepted it: parts being checked in, or a technician
-  //    assigned. The app assigns one by workload on create (app.js:3930); a
-  //    website quote has none. missing_components_toggle is deliberately NOT a
-  //    signal — the create payload sets it true, and using it here would empty
-  //    the Quote column entirely.
-  if (procAny || (t.technician && String(t.technician).trim())) return 'procurement';
+  // 6. The floor has accepted it: parts being checked in, a technician
+  //    assigned (by name or by email), or it is waiting in the build queue
+  //    (1.11: queued but not claimed yet still counts as on the floor). A
+  //    website quote has none of these until it is sent to the build queue.
+  //    missing_components_toggle is deliberately NOT a signal — the create
+  //    payload sets it true, and using it here would empty the Quote column.
+  if (procAny || ticketAssignee(t) || ticketInBuildQueue(t)) return 'procurement';
 
   // 7. Still a quote on the sales desk.
   return 'quote';
@@ -1857,7 +1985,27 @@ function boardCard(t, col) {
   } else if (col === 'handed') {
     actions = '<div class="bc-actions"><button type="button" class="bc-btn" ' +
       'data-act="undo-handover" data-id="' + escHtml(t.id) + '">Undo</button></div>';
+  } else if (col === 'quote' && canSendToBuildQueue(t)) {
+    const sending = !!boardQueueSending['build:' + t.id];
+    actions = '<div class="bc-actions"><button type="button" class="bc-btn bc-queue-send" ' +
+      'data-act="queue-send" data-id="' + escHtml(t.id) + '"' + (sending ? ' disabled' : '') + '>' +
+      (sending ? 'Sending…' : 'Send to build queue') + '</button></div>';
   }
+
+  // Who has it — or, while nobody does, where it stands on the floor. A live
+  // offer on a build someone already has (a reassignment) gets its own line.
+  const nowMs = Date.now();
+  const assignee = ticketAssignee(t);
+  const offer = ticketLiveOffer(t, nowMs);
+  const offerText = offer ? 'Offered to ' + offer.name + ' · until ' + offer.until : '';
+  let techHtml;
+  if (assignee) techHtml = escHtml(assignee);
+  else if (offer) techHtml = '<span class="bc-offer">' + escHtml(offerText) + '</span>';
+  else if (ticketInBuildQueue(t)) techHtml = '<span class="bc-queue">In the build queue</span>';
+  else techHtml = 'Unassigned';
+  const offerLine = (assignee && offer)
+    ? '<div class="bc-line bc-offer">' + escHtml(offerText) + '</div>'
+    : '';
 
   const dateLine = col === 'handed'
     ? '<div class="bc-deadline">Handed over ' + escHtml(fmtDate(t.handed_over_at)) +
@@ -1875,7 +2023,8 @@ function boardCard(t, col) {
       '<span class="bc-cust">' + escHtml(t.customer_name || '—') + '</span>' +
       '<span class="bc-code">#' + escHtml(shortId) + '</span>' +
     '</div>' +
-    '<div class="bc-line"><span class="bc-k">Tech</span> ' + escHtml(t.technician || 'Unassigned') + '</div>' +
+    '<div class="bc-line"><span class="bc-k">Tech</span> ' + techHtml + '</div>' +
+    offerLine +
     '<div class="bc-line"><span class="bc-k">Sales</span> ' + owner + '</div>' +
     dateLine +
     actions +
@@ -1900,7 +2049,106 @@ async function onBoardClick(e) {
   } else if (act === 'undo-handover') {
     if (!confirm('Undo the handover? The build goes back to Ready.')) return;
     await setHandover(btn, id, false);
+  } else if (act === 'queue-send') {
+    await sendToBuildQueue(btn, id);
   }
+}
+
+// ── Send a quote to the build queue (1.11, WQ-SPEC §5 / §2.7.6) ──────────────
+// Tier 3+ only on the website (the server's rule is qc desk+, which every
+// tier-3+ account passes). The RPC sets queued_at — the start of the 4-hour
+// claim window — and nothing else; the website never writes those columns.
+let boardQueueSending = {};   // 'build:<id>' → true while build_queue_send is in flight
+
+function canSendToBuildQueue(t) {
+  return ticketQueueLive && !!currentProfile && Number(currentProfile.tier) >= 3 &&
+    (t.type || 'build') === 'build' && ticketIsQuote(t);
+}
+
+// The board's one status line: answers from the server, in plain words.
+function setBoardStatus(msg, kind) {
+  const el = document.getElementById('board-status');
+  if (!el) return;
+  el.textContent = msg || '';
+  el.className = 'board-status' + (kind ? ' ' + kind : '') + (msg ? '' : ' hidden');
+}
+
+// Re-read one ticket so the board shows the server's answer even if the
+// realtime event is late or was missed. Same column list as the full load.
+async function refreshTicketRow(id) {
+  try {
+    const { data, error } = await db.from('tickets')
+      .select(ticketQueueLive ? TICKET_COLS_QUEUE : TICKET_COLS_BASE)
+      .eq('id', id).maybeSingle();
+    if (error || !data) return;
+    const idx = allTickets.findIndex(x => x.id === id);
+    if (idx !== -1) allTickets[idx] = Object.assign({}, allTickets[idx], data);
+  } catch (e) { /* realtime will still deliver the row */ }
+}
+
+async function sendToBuildQueue(btn, id) {
+  const key = 'build:' + id;
+  if (boardQueueSending[key]) return;
+  const me = currentProfile;
+  if (!me || !db) return;
+  const t = allTickets.find(x => x.id === id);
+  if (!t || !canSendToBuildQueue(t)) { renderBoard(); return; }
+  const code = '#' + String(id).slice(-6).toUpperCase();
+  const cust = t.customer_name ? ' (' + t.customer_name + ')' : '';
+  if (!confirm('Send ' + code + cust + ' to the build queue?\n\nTechnicians then have ' + BUILD_CLAIM_HOURS +
+      ' hours to claim it. After that Neo OS offers it to the best free technician.')) return;
+
+  boardQueueSending[key] = true;
+  btn.disabled = true;
+  btn.textContent = 'Sending…';
+  setBoardStatus('', '');
+
+  let msg, kind = 'err';
+  try {
+    const { data, error } = await db.rpc('build_queue_send', { p_ticket_id: id });
+    if (error) throw error;
+    const r = data || {};
+    if (r.ok) {
+      kind = 'ok';
+      msg = r.already
+        ? code + ' was already in the build queue.'
+        : code + ' is in the build queue. Technicians have ' + BUILD_CLAIM_HOURS + ' hours to claim it.';
+    } else if (r.reason === 'assigned') {
+      kind = '';   // not a failure: it is on the floor already
+      msg = code + ' already has a technician, so it is on the floor already.';
+    } else if (r.reason === 'closed') {
+      kind = '';
+      msg = code + ' is finished, so there is nothing to send.';
+    } else if (r.reason === 'not_found') {
+      msg = code + ' is not on the server any more. Refresh the page.';
+    } else {
+      msg = 'Could not send ' + code + ' to the build queue.';
+    }
+  } catch (e) {
+    msg = 'Could not send ' + code + ' to the build queue: ' + neoErrorText(e);
+  }
+
+  // Identity-race binding: an answer for someone who has since signed out (or
+  // a page now signed in as someone else) is dropped — clearStaffState already
+  // reset the board.
+  if (!currentProfile || currentProfile.id !== me.id) return;
+
+  // Show the move at once; the re-read (and the realtime event) bring the
+  // server's own values.
+  if (kind === 'ok') {
+    const i = allTickets.findIndex(x => x.id === id);
+    if (i !== -1 && !allTickets[i].queued_at) {
+      allTickets[i] = Object.assign({}, allTickets[i], { queued_at: new Date().toISOString() });
+    }
+  }
+  await refreshTicketRow(id);
+  if (!currentProfile || currentProfile.id !== me.id) return;
+
+  delete boardQueueSending[key];
+  setBoardStatus(msg, kind);
+  renderBoard();
+  try { renderTable(); } catch (e) {}
+  if (tsLoaded) { try { renderTicketStatus(); } catch (e) {} }
 }
 
 // The website's ONLY update to an existing ticket. Exactly three columns:
@@ -2035,7 +2283,7 @@ async function qbCreateTicket() {
       type: 'build',
       customer_name: name,
       deadline: deadline,
-      technician: null,               // the floor assigns; null keeps it in Quote
+      technician: null,               // server-owned since 1.11; no queued_at keeps it in Quote until it is sent to the build queue
       // 'awaiting' + toggle true is the ONE combination the app recomputes to
       // itself (app.js:4020), so the technician's first save produces no
       // spurious "Status changed" line in the ticket's event log.
@@ -2097,7 +2345,7 @@ async function qbCreateTicket() {
     qbResetDraft();
     qbCreateStatus('<strong>Ticket created.</strong> Customer receipt code <strong>' + escHtml(code) +
       '</strong> — they can track it on this site. It is now in the Pipeline under <strong>Quote</strong>, ' +
-      'and moves to Procurement as soon as the floor assigns a technician.', 'ok');
+      'and moves to Procurement once it is sent to the build queue.', 'ok');
     // Stays disabled: a second click would create a duplicate ticket.
     if (btn) btn.textContent = 'Ticket ' + code + ' created';
   } catch (err) {

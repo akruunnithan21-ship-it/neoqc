@@ -219,7 +219,14 @@
     return p && Number(p.tier) >= 3 ? 'lead' : null;
   }
   function isLead() { return serviceRole() === 'lead'; }
-  function canTakeSelf() { var r = serviceRole(); return r === 'tech' || r === 'lead'; }
+  // "I'll take it myself" is for service-pool members only (v1.11, WQ-A1/C3):
+  // the server drops assign_self for anyone else, so the box is not offered
+  // to them. Being a lead does not put anyone in the pool.
+  function canTakeSelf() {
+    var M = window.NeoQcModules;
+    if (!M || typeof M.pools !== 'function') return false;
+    try { return M.pools().service === true; } catch (e) { return false; }
+  }
   function isDemo() {
     var d = D();
     try { return !!(d && typeof d.isDemo === 'function' && d.isDemo()); } catch (e) { return false; }

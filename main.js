@@ -113,7 +113,8 @@ const initDb = () => {
   if (!fs.existsSync(dbPath)) {
     const defaultData = {
       tickets: [],
-      technicians: ["Adhil", "Amal", "Ananthakrishnan", "Athul"],
+      // v1.11: no per-PC technician list (technicians claim from the work queue).
+      pendingQueueSends: [],
       rivalBenchmarks: [
         { id: "1", name: "Ryzen 5 7600 + RTX 4060", cpu: "Ryzen 5 7600", gpu: "RTX 4060", cinebenchR23: 13800, readSpeed: 5000, writeSpeed: 4000, price: "₹18,500 (~$210)" },
         { id: "2", name: "Intel i7-14700K + RTX 4070 Ti", cpu: "Core i7-14700K", gpu: "RTX 4070 Ti Super", cinebenchR23: 35000, readSpeed: 7000, writeSpeed: 6000, price: "₹68,000 (~$820)" }

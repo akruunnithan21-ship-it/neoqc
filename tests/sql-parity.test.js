@@ -23,10 +23,17 @@
                                    tests/sql-eval.js)
 
   The database is sql/service-v2.sql with every follow-up migration applied
-  on top (sql/service-v2.1.sql, …), so by default this reads them as ONE
-  text, in version order: a later create or replace / ALTER wins, exactly as
-  in the database (v2.1 widens _vocab_list('data_consent') and the column
-  CHECK; the last definition is the one compared).
+  on top (sql/service-v2.1.sql, then sql/work-queue.sql = v2.2, …), so by
+  default this reads them as ONE text, in version order: a later create or
+  replace / ALTER wins, exactly as in the database (v2.1 widens
+  _vocab_list('data_consent') and the column CHECK; v2.2 widens
+  service_jobs.assigned_via and redefines my_modules / service_tech_list /
+  service_claim / service_create; the last definition is the one compared).
+
+  v2.2 (the work queue) adds its own invariants: the redefined v2 functions
+  keep their signatures and every key; no new function reaches anon; every
+  new table is select-only for clients; the eligibility sentences, costs and
+  the 4 h / 30 min clock match shared/work-queue.js.
 
   Pass paths to check other copies: node tests/sql-parity.test.js v2.sql v2.1.sql
   (those files, in that order, nothing else appended).
@@ -41,15 +48,21 @@ var C = require(path.join(__dirname, '..', 'shared', 'service-catalog.js'));
 var Demo = require(path.join(__dirname, '..', 'shared', 'service-demo.js'));
 
 var SQL_PATH = process.argv[2] ? path.resolve(process.argv[2]) : path.join(__dirname, '..', 'sql', 'service-v2.sql');
-// The follow-ups, oldest first: service-v2.1.sql, service-v2.2.sql, … (never
-// a .tests.sql). Versions sort as numbers, so 2.10 comes after 2.9.
+// The follow-ups, oldest first: service-v2.1.sql, work-queue.sql (which is
+// v2.2), service-v2.3.sql, … (never a .tests.sql or the optional
+// work-queue-cron.sql). Versions sort as numbers, so 2.10 comes after 2.9.
+var NAMED_FOLLOW_UPS = { 'work-queue.sql': 2 };
 function followUps() {
   if (process.argv[2]) return [];
   var dir = path.dirname(SQL_PATH);
   return fs.readdirSync(dir)
-    .map(function (f) { var m = /^service-v2\.(\d+)\.sql$/.exec(f); return m ? { f: f, n: Number(m[1]) } : null; })
+    .map(function (f) {
+      var m = /^service-v2\.(\d+)\.sql$/.exec(f);
+      if (m) return { f: f, n: Number(m[1]) };
+      return Object.prototype.hasOwnProperty.call(NAMED_FOLLOW_UPS, f) ? { f: f, n: NAMED_FOLLOW_UPS[f] } : null;
+    })
     .filter(Boolean)
-    .sort(function (a, b) { return a.n - b.n; })
+    .sort(function (a, b) { return a.n - b.n || (a.f < b.f ? -1 : 1); })
     .map(function (x) { return path.join(dir, x.f); });
 }
 var SQL_PATHS = process.argv.length > 3
@@ -622,6 +635,260 @@ test('the SQL evaluator itself: reads a plpgsql copy of the rule and catches a w
   // A shape it cannot read fails loudly instead of passing.
   var odd = E.compile("create function norm_phone(p text) returns text language sql as $$ select p from t $$;");
   assert.throws(function () { odd('norm_phone', ['1']); }, /sql-eval/);
+});
+
+// ═══ v2.2 — the work queue (sql/work-queue.sql) ═══════════════════════════
+
+var WQ_PATH = SQL_PATHS.filter(function (p) { return path.basename(p) === 'work-queue.sql'; })[0] || null;
+var WQ = WQ_PATH ? stripComments(fs.readFileSync(WQ_PATH, 'utf8')) : null;
+var V2 = stripComments(fs.readFileSync(SQL_PATH, 'utf8'));
+var WQJS = null;
+try { WQJS = require(path.join(__dirname, '..', 'shared', 'work-queue.js')); } catch (e) { WQJS = null; }
+function wqTest(name, fn) {
+  test(name, function () {
+    if (!WQ) { warn('sql/work-queue.sql is not among the files read; "' + name + '" skipped'); return; }
+    fn();
+  });
+}
+
+// The top-level keys of the first jsonb_build_object( … ) in a body.
+function objKeys(body) {
+  if (body == null) return null;
+  var i = body.search(/jsonb_build_object\s*\(/i);
+  if (i === -1) return null;
+  var open = body.indexOf('(', i);
+  var close = closeParen(body, open);
+  if (close === -1) return null;
+  return splitTop(body.slice(open + 1, close)).filter(function (x, k) { return k % 2 === 0; })
+    .map(function (x) { var m = /^\s*'([^']*)'\s*$/.exec(x); return m ? m[1] : null; }).filter(Boolean);
+}
+// The parameter list of the LAST definition of a function, normalised.
+function fnParams(name, text) {
+  var src = text == null ? SQL : text;
+  var re = new RegExp('create\\s+(?:or\\s+replace\\s+)?function\\s+(?:public\\.)?' + name + '\\s*\\(', 'gi');
+  var m, last = -1, lastEnd = -1;
+  while ((m = re.exec(src)) !== null) { last = m.index; lastEnd = re.lastIndex - 1; }
+  if (last === -1) return null;
+  var close = closeParen(src, lastEnd);
+  var head = src.slice(close + 1, src.indexOf('$$', close));
+  return { params: src.slice(lastEnd + 1, close).replace(/\s+/g, ' ').trim().toLowerCase(),
+           returns: (/\breturns\s+([a-z_.]+)/i.exec(head) || [])[1], head: head.replace(/\s+/g, ' ').toLowerCase() };
+}
+// Every function a text creates.
+function createdFunctions(text) {
+  var re = /create\s+(?:or\s+replace\s+)?function\s+(?:public\.)?([a-z_][a-z0-9_]*)\s*\(/gi, m, out = [];
+  while ((m = re.exec(text)) !== null) if (out.indexOf(m[1].toLowerCase()) === -1) out.push(m[1].toLowerCase());
+  return out;
+}
+// A text[] literal assigned in a DO block: v_name text[] := array[ … ];
+function arrayVar(text, name) {
+  var m = new RegExp('\\b' + name + '\\s+text\\[\\]\\s*:=\\s*array\\s*\\[([^\\]]*)\\]', 'i').exec(text);
+  return m ? strings(m[1]) : null;
+}
+var WQ_API = ['work_queue', 'work_claim', 'work_offer', 'work_respond', 'work_release', 'build_queue_send', 'work_team',
+              'work_events_for', 'work_tick', 'work_alert_resolve', 'my_work_profile', 'my_modules', 'service_tech_list',
+              'service_claim', 'service_create', 'staff_list', 'staff_update', 'staff_apply_preset', 'preset_list',
+              'preset_upsert', 'preset_delete', 'work_log_push', 'work_log_pull', 'work_log_team'];
+var WQ_TABLES = ['staff_work', 'designation_presets', 'work_alerts', 'work_events', 'work_logs'];
+
+wqTest('v2.2: my_modules keeps every v2 key and adds build_pool / service_pool / build_level', function () {
+  var old = objKeys(fnBody('my_modules', V2)), now = objKeys(fnBody('my_modules'));
+  assert.ok(old && old.length >= 5 && now, 'my_modules keys not found');
+  old.forEach(function (k) { assert.ok(now.indexOf(k) !== -1, "my_modules lost v2's key '" + k + "'"); });
+  ['build_pool', 'service_pool', 'build_level'].forEach(function (k) { assert.ok(now.indexOf(k) !== -1, 'my_modules lacks ' + k); });
+  assert.ok(/p\.active\s+and\s+coalesce\(\s*p\.is_staff\s*,\s*false\s*\)/i.test(fnBody('my_modules')),
+            'A14: my_modules reports pools only for active staff');
+});
+
+wqTest('v2.2: service_tech_list keeps every v2 key and adds pools, level, load and capacity', function () {
+  var old = objKeys(fnBody('service_tech_list', V2)), now = objKeys(fnBody('service_tech_list'));
+  assert.ok(old && old.length >= 7 && now, 'service_tech_list keys not found');
+  old.forEach(function (k) { assert.ok(now.indexOf(k) !== -1, "service_tech_list lost v2's key '" + k + "'"); });
+  ['service_pool', 'build_pool', 'build_level', 'points', 'jobs', 'capacity_points', 'max_jobs'].forEach(function (k) {
+    assert.ok(now.indexOf(k) !== -1, 'service_tech_list lacks ' + k);
+  });
+  assert.ok(/\bservice_pool\b/.test(fnBody('service_tech_list').split(/\bwhere\b/i).slice(-1)[0]),
+            '§2.7.13: membership is the service pool');
+});
+
+wqTest('v2.2: the redefined v2 functions keep their exact signatures (A14)', function () {
+  ['my_modules', 'service_tech_list', 'service_claim', 'service_create'].forEach(function (f) {
+    var a = fnParams(f, V2), b = fnParams(f);
+    assert.ok(a && b, f + ' not found');
+    assert.strictEqual(b.params, a.params, f + ' parameters changed');
+    assert.strictEqual(b.returns, a.returns, f + ' return type changed');
+    assert.ok(/security definer/.test(b.head) && /set search_path = public/.test(b.head), f + ' is still security definer');
+  });
+  assert.ok(!/drop\s+function[^;]*\b(my_modules|service_tech_list|service_claim|service_create)\b/i.test(WQ), 'v2.2 never drops them');
+});
+
+wqTest('v2.2: function privileges — nothing for anon, the API for authenticated, internals for nobody', function () {
+  var all = arrayVar(WQ, 'v_all'), auth = arrayVar(WQ, 'v_authenticated');
+  assert.ok(all && auth, 'the v_all / v_authenticated lists of the grant block were not found');
+  assert.ok(!arrayVar(WQ, 'v_anon'), 'v2.2 has no anon list');
+  assert.ok(!/grant\s+[^;]*\bto\s+[^;]*\banon\b/i.test(WQ), 'no grant to anon anywhere in work-queue.sql');
+  assert.ok(/revoke\s+all\s+on\s+function\s+%s\s+from\s+public\s*,\s*anon\s*,\s*authenticated/i.test(WQ),
+            'every listed function is revoked from public, anon and authenticated');
+  createdFunctions(WQ).forEach(function (f) { assert.ok(all.indexOf(f) !== -1, f + ' is created but missing from the grant block'); });
+  auth.forEach(function (f) {
+    assert.ok(all.indexOf(f) !== -1, f + ' is granted but not revoked first');
+    assert.ok(!/^(_|tg_)/.test(f), 'internal ' + f + ' must not be granted to authenticated');
+  });
+  sameSet(auth, WQ_API, 'the functions authenticated may execute');
+});
+
+wqTest('v2.2: every API RPC is security definer, starts from _neo_me(); triggers are definer and ungranted', function () {
+  WQ_API.forEach(function (f) {
+    var p = fnParams(f), body = fnBody(f);
+    assert.ok(p && body, f + ' not found');
+    assert.ok(/security definer/.test(p.head) && /set search_path = public/.test(p.head), f + ' is security definer, search_path = public');
+    if (f === 'my_modules') return;                              // sql, reads auth.uid() like v2's
+    if (f === 'work_tick') {
+      assert.ok(/if\s+auth\.uid\(\)\s+is\s+not\s+null\s+then\s+perform\s+public\._neo_me\(\)/i.test(body), 'work_tick: _neo_me when a JWT is present');
+      assert.ok(/pg_try_advisory_xact_lock\(\s*hashtext\(\s*'neo_work_tick'\s*\)\s*\)/i.test(body), 'work_tick: one at a time');
+      assert.ok((body.match(/for\s+update\s+skip\s+locked/gi) || []).length === 4, 'work_tick: 4 batches, each FOR UPDATE SKIP LOCKED');
+      return;
+    }
+    assert.ok(/v_me\s+public\.profiles\s*:=\s*public\._neo_me\(\)/i.test(body), f + ' starts with v_me := public._neo_me()');
+  });
+  var auth = arrayVar(WQ, 'v_authenticated');
+  var re = /create\s+or\s+replace\s+function\s+public\.([a-z_0-9]+)\s*\(\s*\)\s*returns\s+trigger\s+language\s+plpgsql\s+security\s+definer\s+set\s+search_path\s*=\s*public/gi;
+  var defs = [], m;
+  while ((m = re.exec(WQ)) !== null) defs.push(m[1]);
+  var triggers = (WQ.match(/\breturns\s+trigger\b/gi) || []).length;
+  assert.ok(triggers >= 6 && defs.length === triggers, 'every v2.2 trigger function is security definer with search_path = public');
+  defs.forEach(function (f) { assert.ok(auth.indexOf(f) === -1, 'trigger ' + f + ' has no authenticated grant'); });
+  assert.ok(/pg_advisory_xact_lock\(\s*hashtext\(\s*'neo_work_pick'\s*\)\s*\)/i.test(fnBody('_work_auto_offer')),
+            '9.1: _work_auto_offer takes the pick lock');
+  ['staff_update', 'staff_apply_preset'].forEach(function (f) {
+    assert.ok(/pg_advisory_xact_lock\(\s*hashtext\(\s*'neo_staff_admin'\s*\)\s*\)/i.test(fnBody(f)), f + ' takes the staff-admin lock');
+  });
+});
+
+wqTest('v2.2: every new table is select-only for clients, RLS on, never anon (A7)', function () {
+  WQ_TABLES.forEach(function (t) {
+    assert.ok(COLUMNS[t], 'create table ' + t + ' not found');
+    var esc = t.replace(/_/g, '_');
+    assert.ok(new RegExp('alter\\s+table\\s+public\\.' + esc + '\\s+enable\\s+row\\s+level\\s+security', 'i').test(WQ), t + ': RLS on');
+    assert.ok(new RegExp('revoke\\s+all\\s+on\\s+table\\s+public\\.' + esc + '\\s+from\\s+anon\\s*,\\s*authenticated', 'i').test(WQ),
+              t + ': revoked from anon and authenticated');
+    var g = new RegExp('grant\\s+([^;]*?)\\s+on\\s+(?:table\\s+)?public\\.' + esc + '\\b([^;]*);', 'gi'), x, grants = [];
+    while ((x = g.exec(WQ)) !== null) grants.push(x[1].trim().toLowerCase() + ' →' + x[2].trim().toLowerCase());
+    assert.deepStrictEqual(grants, ['select →to authenticated'], t + ': the only grant is select to authenticated (' + grants.join('; ') + ')');
+    var p = new RegExp('create\\s+policy\\s+\\w+\\s+on\\s+public\\.' + esc + '\\s+for\\s+(\\w+)', 'gi'), y, n = 0;
+    while ((y = p.exec(WQ)) !== null) { n++; assert.strictEqual(y[1].toLowerCase(), 'select', t + ': policies are select only'); }
+    assert.ok(n >= 1, t + ': has a select policy');
+  });
+  assert.ok(/add\s+table\s+public\.%I',\s*'work_alerts'/i.test(WQ), 'work_alerts is published to realtime');
+  assert.ok(!/add\s+table[^;]*work_logs/i.test(WQ) && !/'work_logs'\s*\)/.test(WQ.split(/supabase_realtime/i).slice(1).join('')),
+            'work_logs is never published');
+  // per-kind read rules (A7 / C14)
+  var we = /create\s+policy\s+we_select[^;]*;/i.exec(WQ)[0], wa = /create\s+policy\s+wa_select[^;]*;/i.exec(WQ)[0];
+  assert.ok(/item_kind\s*=\s*'build'[^;]*has_module\('qc',\s*'desk'\)/i.test(we) && /item_kind\s*=\s*'service'[^;]*has_module\('service',\s*'desk'\)/i.test(we),
+            'work_events: build rows need qc desk, service rows service desk');
+  assert.ok(/item_kind\s*=\s*'build'[^;]*has_module\('qc',\s*'lead'\)/i.test(wa) && /item_kind\s*=\s*'service'[^;]*has_module\('service',\s*'lead'\)/i.test(wa)
+            && /my_tier\(\)\)\s*>=\s*3/i.test(wa), 'work_alerts: tier 3+, or the lead of that kind');
+  assert.ok(/on\s+delete\s+set\s+null/i.test(/create\s+table\s+if\s+not\s+exists\s+public\.work_logs\s*\(([\s\S]*?)\);/i.exec(WQ)[1]),
+            'A9: work_logs.profile_id is on delete set null');
+});
+
+wqTest('v2.2: the tickets guard keeps every server-owned column on a non-RPC update', function () {
+  var g = fnBody('tg_tickets_work_guard');
+  assert.ok(g, 'tg_tickets_work_guard not found');
+  ['technician', 'technician_email', 'assigned_via', 'assigned_at', 'assign_reason', 'queued_at', 'offered_to_email',
+   'offered_to_name', 'offer_kind', 'offer_by_email', 'offer_by_name', 'offer_reason', 'offered_at', 'offer_expires_at',
+   'declined_emails', 'auto_tried_at'].forEach(function (c) {
+    assert.ok(new RegExp('new\\.' + c + '\\s*:=\\s*old\\.' + c + '\\s*;', 'i').test(g), 'the guard keeps OLD.' + c);
+  });
+  assert.ok(/now\(\)\s*\+\s*interval\s*'2 minutes'/i.test(g) && /'-infinity'::timestamptz\)\s*\+\s*interval\s*'1 millisecond'/i.test(g),
+            '9.1: updated_at clamped to now() + 2 min and never backwards');
+  var z = fnBody('tg_service_jobs_zy_offer_guard');
+  ['offered_to_email', 'offer_expires_at', 'declined_emails', 'auto_tried_at'].forEach(function (c) {
+    assert.ok(new RegExp('new\\.' + c + '\\s*:=\\s*old\\.' + c + '\\s*;', 'i').test(z), 'the service offer guard keeps OLD.' + c);
+  });
+  assert.ok('trg_service_jobs_guard' < 'trg_service_jobs_zy_offer_guard' && 'trg_service_jobs_zy_offer_guard' < 'trg_service_jobs_zz_secret_purge',
+            'the offer guard sorts between v2\'s guard and v2.1\'s purge');
+  assert.ok(/'NEO_GATE: Neo OS needs at least one active tier-5 account\.'/.test(fnBody('staff_update')),
+            'staff_update keeps the last tier-5 guard');
+  assert.ok(/'NEO_DENIED: Only the owner can change a tier 4 or 5 account\.'/.test(fnBody('staff_update'))
+            && /'NEO_DENIED: Only the owner can change a tier 4 or 5 account\.'/.test(fnBody('staff_apply_preset')),
+            'C4: the tier-4 hierarchy sentence');
+});
+
+wqTest('v2.2: CHECKs — assigned_via gains auto (both tables), offers, the service_events kind fold', function () {
+  sameSet(CHECKS['service_jobs.assigned_via'].list, ['claim', 'manager', 'legacy', 'self', 'auto'], 'service_jobs.assigned_via');
+  sameSet(CHECKS['tickets.assigned_via'].list, ['claim', 'manager', 'auto', 'legacy'], 'tickets.assigned_via');
+  sameSet(CHECKS['tickets.offer_kind'].list, ['manager', 'auto'], 'tickets.offer_kind');
+  sameSet(CHECKS['service_jobs.offer_kind'].list, ['manager', 'auto'], 'service_jobs.offer_kind');
+  assert.ok(CHECKS['service_events.kind'].list.indexOf('offer') !== -1, "service_events kind fold includes 'offer'");
+  sameSet(CHECKS['work_events.kind'].list, ['queued', 'claim', 'offer', 'offer_withdrawn', 'accept', 'decline', 'offer_expired',
+                                             'auto_offer', 'release', 'reassigned', 'legacy', 'no_candidate'], 'work_events.kind');
+  sameSet(CHECKS['work_alerts.kind'].list, ['declined', 'expired', 'no_candidate'], 'work_alerts.kind');
+  ['tickets', 'service_jobs'].forEach(function (t) {
+    ['offered_to_email', 'offered_to_name', 'offer_kind', 'offer_by_email', 'offer_by_name', 'offer_reason', 'offered_at',
+     'offer_expires_at', 'declined_emails', 'auto_tried_at'].concat(t === 'tickets'
+       ? ['technician_email', 'assigned_via', 'assigned_at', 'assign_reason', 'queued_at'] : []).forEach(function (c) {
+      assert.ok((ADDED[t] || []).indexOf(c) !== -1, t + '.' + c + ' is added');
+    });
+  });
+});
+
+wqTest('v2.2: the presets seed holds the 16 live designations, each once', function () {
+  var m = /insert\s+into\s+public\.designation_presets[\s\S]*?\(values([\s\S]*?)\)\s*as\s+v\s*\(/i.exec(WQ);
+  assert.ok(m, 'the presets seed was not found');
+  var rows = m[1].split(/\)\s*,\s*\(/).map(function (r) { return strings(r)[0]; });
+  assert.strictEqual(rows.length, 16, 'presets seeded');
+  var keys = rows.map(function (d) { return d.toLowerCase().replace(/\s+/g, ' ').trim(); });
+  keys.forEach(function (k, i) { assert.strictEqual(keys.indexOf(k), i, 'preset "' + rows[i] + '" twice'); });
+  assert.ok(/on\s+conflict\s*\(\s*key\s*\)\s*do\s+nothing/i.test(WQ.slice(m.index, m.index + m[0].length + 200)), 'seed: on conflict do nothing');
+});
+
+wqTest('v2.2: a re-run changes nothing People edited (seed, backfill, People rows)', function () {
+  // One marker decides the first install: staff_work is empty until the first backfill.
+  assert.ok(/v_first\s+boolean\s*:=\s*not\s+exists\s*\(\s*select\s+1\s+from\s+public\.staff_work\s*\)/i.test(WQ),
+            'the backfill computes v_first from an empty staff_work');
+  var seed = WQ.search(/insert\s+into\s+public\.designation_presets\s*\(\s*key\b/i);
+  assert.ok(seed !== -1 && /if\s+v_first\s+then\s*$/i.test(WQ.slice(Math.max(0, seed - 80), seed).trimEnd()),
+            'the presets are seeded only on the first install (a deleted / renamed preset stays so)');
+  assert.ok(/if\s+v_first\s+or\s+not\s+exists\s*\(\s*select\s+1\s+from\s+public\.module_access\s+ma\s+where\s+ma\.profile_id\s*=\s*r\.profile_id\s+and\s+ma\.module\s+in\s*\(\s*'service'\s*,\s*'rma'\s*,\s*'qc'\s*\)\s*\)\s+then\s+perform\s+public\._preset_apply\(/i.test(WQ),
+            'a re-run applies a preset only to someone with no service / rma / qc role');
+  ['staff_update', 'staff_apply_preset'].forEach(function (f) {
+    assert.ok(/insert\s+into\s+public\.staff_work\s*\(\s*profile_id\s*,\s*updated_by\s*\)\s*values\s*\(\s*v_t\.id\s*,\s*lower\(\s*v_me\.email\s*\)\s*\)\s*on\s+conflict\s*\(\s*profile_id\s*\)\s*do\s+nothing/i.test(fnBody(f)),
+              f + ' always leaves a staff_work row');
+  });
+  // A lead's withdrawal: the app's own pick is skipped, and the tick waits 10 minutes.
+  var w = fnBody('work_offer');
+  var i = w.search(/_work_offer_clear\(\s*v_kind\s*,\s*p_id\s*,\s*case\s+when\s+v_okind\s*=\s*'auto'\s+then\s+v_to\s+end\s*\)/i);
+  assert.ok(i !== -1, 'work_offer: withdrawing an auto offer puts that person in declined_emails');
+  var after = w.slice(i, i + 700);
+  assert.ok(/update\s+public\.tickets\s+set\s+auto_tried_at\s*=\s*now\(\)/i.test(after)
+            && /update\s+public\.service_jobs\s+set\s+auto_tried_at\s*=\s*now\(\)/i.test(after),
+            'work_offer: a withdrawal stamps auto_tried_at on both kinds');
+});
+
+wqTest('v2.2 ↔ shared/work-queue.js: eligibility sentences, costs, the 4 h / 30 min clock', function () {
+  assert.ok(WQJS, 'shared/work-queue.js could not be loaded');
+  assert.ok(SQLFN && SQLFN.has('_work_why_text'), '_work_why_text not found');
+  ['not_staff', 'no_role', 'no_pool', 'senior'].forEach(function (code) {
+    ['build', 'service'].forEach(function (kind) {
+      [true, false].forEach(function (self) {
+        var sql = SQLFN('_work_why_text', [kind, code, self]);
+        assert.strictEqual(WQJS.whySentence(code, kind, self), sql,
+                           'whySentence(' + code + ', ' + kind + ', ' + self + ') — SQL says ' + JSON.stringify(sql));
+      });
+    });
+  });
+  assert.strictEqual(SQLFN('_work_why_text', ['build', 'bogus', true]), null, '_work_why_text: an unknown code is null');
+  [['on_site', 2], ['in_store', 1], ['remote', 1]].forEach(function (c) {
+    assert.strictEqual(SQLFN('_work_cost_service', [c[0]]), c[1], '_work_cost_service(' + c[0] + ')');
+    assert.strictEqual(WQJS.serviceCost(c[0]), c[1], 'NeoQcWork.serviceCost(' + c[0] + ')');
+  });
+  var q = fnBody('work_queue');
+  assert.strictEqual(Number((/'claim_hours'\s*,\s*(\d+)/.exec(q) || [])[1]), WQJS.CLAIM_HOURS, 'claim_hours = CLAIM_HOURS');
+  assert.strictEqual(Number((/'offer_minutes'\s*,\s*(\d+)/.exec(q) || [])[1]), WQJS.OFFER_MINUTES, 'offer_minutes = OFFER_MINUTES');
+  assert.ok(new RegExp("interval\\s+'" + WQJS.OFFER_MINUTES + " minutes'").test(fnBody('_work_offer_set')), 'offers last OFFER_MINUTES');
+  assert.ok(new RegExp("interval\\s+'" + WQJS.CLAIM_HOURS + " hours'").test(fnBody('work_tick')), 'the tick uses CLAIM_HOURS');
+  labelsMatch('_svc_category_label', S.CATEGORIES);
 });
 
 // ═══ The demo rows are `select *` rows ═══════════════════════════════════

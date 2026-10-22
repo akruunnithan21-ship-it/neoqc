@@ -205,6 +205,25 @@ body.dark-mode .sv2-qage.late { color: #fca5a5; }
 .sv2-claim { padding: 6px 16px; font-size: 0.8rem; }
 .sv2-waiting { font-size: 0.72rem; font-style: italic; color: var(--text-muted); }
 
+/* The work queue (v1.11): a live offer — 30 minutes to accept — and the
+   offered person's Accept / Decline. Amber for anyone else's offer, the brand
+   pink when it is yours to answer; the countdown is text, never only colour. */
+.sv2-offer {
+  display: inline-flex; align-items: baseline; gap: 3px; flex-wrap: wrap;
+  font-size: 0.7rem; font-weight: 700; line-height: 1.35;
+  padding: 2px 8px; border-radius: 999px;
+  color: #b45309; background: rgba(245, 158, 11, 0.13); border: 1px solid rgba(245, 158, 11, 0.4);
+}
+.sv2-offer.mine {
+  color: var(--primary-pink); background: rgba(var(--primary-pink-rgb), 0.1);
+  border-color: rgba(var(--primary-pink-rgb), 0.55);
+}
+.sv2-offer-left { font-family: 'JetBrains Mono', monospace; font-variant-numeric: tabular-nums; }
+body.dark-mode .sv2-offer { color: #fbbf24; }
+body.dark-mode .sv2-offer.mine { color: var(--primary-pink); }
+.sv2-offer-acts { display: inline-flex; gap: 6px; flex-wrap: wrap; margin-left: auto; }
+.sv2-act-who .sv2-offer { margin-left: 4px; }
+
 .sv2-needs { margin-top: 16px; border-top: 3px solid var(--status-urgent); }
 .sv2-needs-list { display: flex; flex-direction: column; gap: 6px; padding: 0 8px 8px; }
 .sv2-needs-row {
@@ -433,6 +452,8 @@ body.dark-mode .sv2-holds { color: #b4a9ff; }
 .sv2-ev-kind.k-stage   { color: #0f766e; background: rgba(20, 184, 166, 0.13); }
 .sv2-ev-kind.k-note    { color: #1d4ed8; background: rgba(59, 130, 246, 0.12); }
 .sv2-ev-kind.k-claim, .sv2-ev-kind.k-assign, .sv2-ev-kind.k-release { color: var(--primary-pink); background: rgba(var(--primary-pink-rgb), 0.1); }
+.sv2-ev-kind.k-offer   { color: #b45309; background: rgba(245, 158, 11, 0.14); }
+body.dark-mode .sv2-ev-kind.k-offer { color: #fbbf24; }
 .sv2-ev-kind.k-field   { color: #b45309; background: rgba(245, 158, 11, 0.14); }
 .sv2-ev-kind.k-rma     { color: #6d5ce6; background: rgba(139, 124, 246, 0.14); }
 body.dark-mode .sv2-ev-kind.k-stage { color: #2dd4bf; }

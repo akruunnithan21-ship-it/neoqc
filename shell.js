@@ -46,6 +46,7 @@
   var currentSection = null;
   var railSig = null;         // what the rail currently shows, so it is rebuilt only on change
   var lastProfileKey = null;  // a different person signing in starts with a clean rail
+  var railAlerts = {};        // section id -> true: the "look here" dot (v1.11, the Queue)
 
   function S() { return window.NeoQcService || null; }
   function Mods() { return window.NeoQcModules || null; }
@@ -173,6 +174,7 @@
       scrollMemory = {};
       currentSection = null;
       railSig = null;
+      railAlerts = {};
     }
   }
 
@@ -217,6 +219,29 @@
     return e.label || e.id;
   }
 
+  // v1.11 — the red dot on a rail item ("look here": an offer waiting for
+  // you on the Queue, or something that needs a lead). Kept in railAlerts and
+  // re-applied after every renderRail() rebuild, so a rebuilt rail never
+  // loses it. The title says it too: colour is never the only signal.
+  function applyRailAlerts() {
+    document.querySelectorAll('#app-rail .rail-item').forEach(function (b) {
+      var id = b.dataset.section;
+      var on = !!(id && railAlerts[id]);
+      b.classList.toggle('has-alert', on);
+      var e = entryById(id);
+      var base = e ? railTitle(e) : (b.getAttribute('aria-label') || '');
+      b.title = on ? base + ' — something needs you' : base;
+    });
+  }
+
+  function setRailAlert(id, on) {
+    if (!id) return;
+    noteProfile();
+    if (on) railAlerts[String(id)] = true;
+    else delete railAlerts[String(id)];
+    applyRailAlerts();
+  }
+
   // Builds the rail from the registry. Only items this person can open are
   // drawn; hidden placeholders (NeoHR) never are. The registry may mark the
   // gap above Bench/Settings with a spacer entry; if it does not, the spacer
@@ -251,10 +276,11 @@
       );
     });
     var s = sig.join(',');
-    if (s === railSig) return;
+    if (s === railSig) { applyRailAlerts(); return; }
     railSig = s;
     rail.innerHTML = parts.join('');
     setRailActive(currentSection);
+    applyRailAlerts();
   }
 
   function activeScreenHasRail() {
@@ -439,6 +465,18 @@
     };
   }
 
+  // app.js buildTechInfo() (which uses NeoQcWork.buildAssignText), else
+  // the stored name, as before.
+  function buildTechText(t) {
+    var info = appGlobal(function () { return typeof buildTechInfo === 'function' ? buildTechInfo(t) : null; });
+    if (info && info.label) return String(info.label);
+    var w = window.NeoQcWork;
+    if (w && typeof w.buildAssignText === 'function') {
+      try { var r = w.buildAssignText(t, Date.now()); if (r && r.label) return String(r.label); } catch (e) { /* the name below */ }
+    }
+    return t.technician || 'Unassigned';
+  }
+
   // Builds, service tickets and RMA parts are normalised to ONE row shape
   // here, and nowhere else. Each side keeps its own stage vocabulary; what
   // they share is "who is this for", "what state", "whose turn", "how long".
@@ -469,7 +507,9 @@
           stage: stage,
           ball: done ? 'nobody' : 'shop',
           ballText: done ? 'Finished' : 'With us',
-          tech: t.technician || 'Unassigned',
+          // v1.11 — the work queue's wording (claimed / offered / in the
+          // build queue / not sent to the floor), the same as the Builds card.
+          tech: buildTechText(t),
           code: String(t.id || '').slice(-6).toUpperCase(),
           ageMs: now - since,
           late: !!(late || overdue),
@@ -866,6 +906,9 @@
     watchScreens();
     bindData();
     window.addEventListener('neo-modules-changed', onAccessChanged);
+    // v1.11 — app.js says when the builds changed (realtime, the poll, a
+    // claim); the Overview's build rows repaint without waiting a minute.
+    window.addEventListener('neo-builds-changed', scheduleOverviewRender);
     applyRailVisibility();
   }
 
@@ -879,6 +922,7 @@
     renderOverview: renderOverview,
     applyRailVisibility: applyRailVisibility,
     refreshRail: refreshRail,
+    setRailAlert: setRailAlert,
     // exposed for the dev harness and tests
     _railSections: railSections,
     _buildRows: buildRows

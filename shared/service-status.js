@@ -250,8 +250,11 @@
     other:         'Other'
   };
 
+  // v2.2 (sql/work-queue.sql) adds 'auto': the technician accepted an offer
+  // the app made after the 4-hour claim window ran out.
   var ASSIGNED_VIA = {
-    claim: 'Claimed', manager: 'Assigned by a lead', legacy: 'Assigned', self: 'Took it at intake'
+    claim: 'Claimed', manager: 'Assigned by a lead', auto: 'Offered by Neo OS', legacy: 'Assigned',
+    self: 'Took it at intake'
   };
 
   // Photo / document roles on service_media (and RMA media). The three private
@@ -575,15 +578,13 @@
     return !!job && job.stage !== 'closed' && !job.assignee_email;
   }
 
-  // How many hours a ticket may wait for somebody to take it.
+  // How many hours a ticket may wait for somebody to take it. Owner decision
+  // 2026-10-22: one 4-hour limit for every job — every service type, every
+  // priority, and new builds too (shared/work-queue.js CLAIM_HOURS). After 4
+  // hours the server offers it to the best free technician (sql/work-queue.sql
+  // work_tick). The job argument stays so callers need not change.
   function queueBudgetHours(job) {
-    var p = job && job.priority;
-    if (p === 'urgent') return 1;
-    if (p === 'high') return 4;
-    if (p === 'low') return 24;
-    // normal (and anything unrecognised): an on-site request needs a visit
-    // planned, not an immediate pair of hands, so it gets a working day.
-    return typeOf(job) === 'on_site' ? 8 : 4;
+    return 4;
   }
 
   function queueRisk(job, now) {

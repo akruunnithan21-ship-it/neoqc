@@ -1,6 +1,6 @@
 # NeoHR data contract
 
-**Contract version:** 2. It comes from the database migration `service_v2_rma` (`sql/service-v2.sql`). Version 2 replaces the `v_tech_activity` view with the `tech_activity` RPC and changes phone normalisation, check-out handling, claim retries and re-timed claims; see §10 for the list.
+**Contract version:** 3. It comes from the database migrations `service_v2_rma` (`sql/service-v2.sql`), `service_v2_1_secrets` (`sql/service-v2.1.sql`) and `work_queue_v2_2` (`sql/work-queue.sql`). Version 3 adds the work queue for builds and service (§8), synced work logs (§9) and sign-in over plain REST (§8.1); version 2 replaced the `v_tech_activity` view with the `tech_activity` RPC and changed phone normalisation, check-out handling, claim retries and re-timed claims. See §12 for the lists.
 **Audience:** the Android (Kotlin) developer turning *Daily Logger* (today a local-only Room/SQLite app) into **NeoHR**. NeoHR talks to the same Supabase project as the Neo Tokyo desktop app and website.
 
 This file is the only promise the server makes to NeoHR. Everything listed here exists in the database once `service_v2_rma` is applied. Anything not listed (tables, columns, other RPCs) may change without notice, so NeoHR must not read or write it.
@@ -11,14 +11,17 @@ This file is the only promise the server makes to NeoHR. Everything listed here 
 
 | NeoHR feature | Server surface |
 |---|---|
-| Sign in as a staff member | Supabase Auth (email + PIN), then `my_modules()` |
+| Sign in as a staff member | Supabase Auth (email + PIN) over REST (§8.1), then `my_work_profile()` (§8.2) |
+| The work queue: offers to me, open builds and service jobs, my work | RPCs `work_queue`, `work_tick` (§8.3, §8.4) |
+| Claim, accept or decline an offer, hand back | RPCs `work_claim`, `work_respond`, `work_release` (§8.5–§8.7) |
+| Leads: offer work to someone, see the team, dismiss alerts | RPCs `work_offer`, `work_team`, `work_alert_resolve` (§8.8, §8.9) |
 | "Open jobs near me" (the queue) | view `v_service_queue` |
 | Take a job, optionally with a visit time | RPC `service_claim` |
 | Hand a job back | RPC `service_release` |
 | "My day" (claimed jobs with address and phone) | view `v_tech_day` |
 | Left shop / Checked in / Checked out | RPC `record_field_activity` (kinds `left_base`, `arrived`, `departed`) |
 | Attendance punch in / out | RPC `record_field_activity` (kinds `punch_in`, `punch_out`) |
-| Daily work-log entries (the Daily Logger feature) | RPC `record_field_activity` (kind `note`, `ref_type` `work_log`) |
+| Daily work-log entries (the Daily Logger feature) | RPCs `work_log_push`, `work_log_pull`; tier 3+ `work_log_team` (§9). (Version 2's `record_field_activity` with `ref_type` `work_log` still records, but is no longer how logs sync.) |
 | Notes on a job | RPC `service_add_note` |
 | Photos on a job | Storage bucket `service-media` + table `service_media` |
 | HR / manager activity report | RPC `tech_activity`, table `field_activity` |
@@ -36,6 +39,8 @@ Daily Logger's local Room database stays the source of truth for the person's ow
 - **Never** put the `service_role` / `sb_secret_…` key in the app or in any NeoHR backend that acts for a user. It bypasses every rule in this document.
 
 ### Sign-in
+NeoHR 2.1 (contract version 3) signs in over plain REST with OkHttp — the exact requests and answers, refresh and sign-out are in §8.1. The SDK example below is kept for reference.
+
 Staff accounts are the same accounts as the desktop app and the website. The password is the person's PIN: 6 digits for tiers 1–3, 8 digits for tiers 4–5.
 
 ```
@@ -76,7 +81,7 @@ The person's row in `profiles` must have `active = true` and `is_staff = true`. 
 Each person has a **tier** (1–5) and, per module, an optional **role**: `desk` < `tech` < `lead`.
 
 - Tier 3 and above is automatically `lead` in every module.
-- Everyone else gets roles from the `module_access` table. Tier 4+ set these in the desktop app under Settings → Module access.
+- Everyone else gets roles from the `module_access` table. Tier 4+ set the `service`, `rma` and `qc` roles in the desktop app under Settings → General → People (in the Operations section; it saves through the desktop-only RPC `staff_update`). People does not set the `neohr` role: `staff_update` answers `NEO_GATE: "neohr" is not a module you can set here.` Tier 4+ grant it with the RPC `module_access_set({"p_email": "…", "p_module": "neohr", "p_role": "lead"})` (no 1.11 screen calls it) or in SQL.
 - Modules: `service`, `rma`, `qc`, `neohr`. The server checks the `neohr` role in one place: a `neohr` lead sees everyone's activity (`tech_activity`, `field_activity`). Other `neohr` uses are reserved for NeoHR's own features.
 
 ### `my_modules()` — call once after sign-in, then cache
@@ -85,8 +90,10 @@ POST {URL}/rest/v1/rpc/my_modules
 {}
 ```
 ```json
-{"service": "tech", "rma": "tech", "qc": null, "neohr": null, "tier": 2}
+{"service": "tech", "rma": "tech", "qc": "tech", "neohr": null, "tier": 2,
+ "build_pool": true, "service_pool": true, "build_level": "junior"}
 ```
+Version 3 added `build_pool`, `service_pool` (booleans) and `build_level` (`"junior"`, `"senior"` or `null`): the person's work pools (§8). They are `false` / `null` for anyone who is not active staff. NeoHR mostly needs `my_work_profile()` (§8.2), which carries all of this.
 
 | Capability | Needs |
 |---|---|
@@ -382,6 +389,7 @@ Responses:
 ```
 - `"already": true` means the job is already yours: an earlier tap got through but its answer was lost, or a lead assigned it to you. Treat it as success. A retry after a timeout is therefore safe.
 - "Taken" is a normal answer, not an error: two people tapped at once and the other was first. Remove the card and say "Taken by Athul Sudheer". **Never queue a claim offline**: by the time it syncs, someone else has the job.
+- **Version 3:** the caller must be in the service pool (`NEO_GATE: You aren't in the service pool.`). A job with a live offer to someone else answers `{"ok": false, "reason": "offered", "by": "Adhil M", "by_email": "adhil.m@neotokyo.in", "to_name": "Adhil M", "expires_at": "…"}` and changes nothing; a job offered to the caller is accepted (§8.6, with `job`). New NeoHR builds use `work_claim` (§8.5), which answers the same plus `item`.
 
 ### 6.3 `service_release(p_job_id, p_reason)` — online only
 ```json
@@ -423,8 +431,10 @@ Photos are never public. The customer sees one only when desk staff tick "show c
 `{}` →
 ```json
 [{"email": "...", "name": "Athul Sudheer", "designation": "Technician", "role": "tech",
-  "open_count": 3, "visits_today": 1, "in_queue_requested": 1}]
+  "open_count": 3, "visits_today": 1, "in_queue_requested": 1,
+  "service_pool": true, "build_pool": true, "build_level": "junior", "points": 2, "jobs": 1, "capacity_points": 5, "max_jobs": 3}]
 ```
+Version 3: only active staff with a service role of `tech` or `lead` **and** the service pool are listed (tier 3+ are no longer listed just for being leads). `points` / `jobs` are what they hold now (open items plus live offers), against `capacity_points` / `max_jobs`.
 
 ### 6.7 Other RPCs NeoHR may call
 - `service_my_requests()` returns `{"jobs": [...], "rma_units": [...]}`: the jobs and parts the signed-in person raised in the last 60 days.
@@ -502,6 +512,8 @@ From `sql/service-v2.1.sql`. A customer leaving a device may give its password o
 | Reading `v_tech_day` | cache allowed | the only customer data NeoHR may keep on the device; delete a job's cache once it leaves `v_tech_day` (closed or released) |
 | `service_get_password` / `service_set_password` | **No**, and never cache the answer | every read is recorded; the password is deleted at close, so a cached copy would outlive it (§6.10) |
 
+The work-queue actions (§8) follow the same rule: only `record_field_activity` is queued; `work_claim`, `work_respond`, `work_release` and `work_offer` are online only (§8.11). Work logs sync by their own rules (§9).
+
 Suggested Room table for the outbox:
 
 ```kotlin
@@ -523,18 +535,360 @@ A job reassigned while the technician was offline is not an error. Their queued 
 
 ---
 
-## 8. Privacy
+## 8. Work queue (contract version 3, `sql/work-queue.sql`)
+
+One queue holds every PC build that is waiting for a builder and every service ticket that is waiting for a technician. People in the pool claim what suits them. An item that nobody claims within **4 hours** is offered by the server to the best free person; an offer — from the app or from a lead — must be accepted within **30 minutes**. Declining (with a reason) or not answering ends the offer, skips that person for this item and alerts the leads; once the 4 hours are up, the next best person gets the offer. Builds of tier 4–5 are for senior builders only.
+
+The phone talks to the server with plain HTTPS (OkHttp): Supabase Auth for the session, PostgREST for everything else. Every example below is a real answer of the RPC, shortened only where it says `…`.
+
+### 8.1 Sign-in, refresh, sign-out (Supabase Auth over REST)
+
+```
+POST {URL}/auth/v1/token?grant_type=password
+apikey: <anon key>
+Content-Type: application/json
+
+{"email": "athul.sudheer@neotokyo.in", "password": "<PIN>"}
+```
+`200`:
+```json
+{"access_token": "eyJhbGciOi…", "token_type": "bearer", "expires_in": 3600, "expires_at": 1761126000,
+ "refresh_token": "v1.MjAyNi…", "user": {"id": "b115a7bf-7d5f-4c9e-9f2a-165aea55159a", "email": "athul.sudheer@neotokyo.in", "…": "…"}}
+```
+- Keep `access_token`, `refresh_token`, `expires_at` (Unix seconds), `user.id` and `user.email` in the `neo_auth` DataStore (never in Room). Ignore every other key.
+- A wrong email or PIN answers `400`. Depending on the Auth version the body is `{"error": "invalid_grant", "error_description": "Invalid login credentials"}` or `{"code": 400, "error_code": "invalid_credentials", "msg": "Invalid login credentials"}`: read `error_code` / `error`, then `msg` / `error_description`, and show **"Wrong email or PIN."** for any `400` from this call.
+
+Refresh (when fewer than 60 s are left, or once after a `401`):
+```
+POST {URL}/auth/v1/token?grant_type=refresh_token
+apikey: <anon key>
+Content-Type: application/json
+
+{"refresh_token": "v1.MjAyNi…"}
+```
+The answer has the same shape as sign-in, with a **new** `refresh_token` (each refresh token works once). A `400` / `401` here means the session is over — but only if the token you sent is still the stored one (another caller may have refreshed a moment ago; re-read `neo_auth` first). A network failure is "offline", never "signed out".
+
+Sign-out of this phone only:
+```
+POST {URL}/auth/v1/logout?scope=local
+apikey: <anon key>
+Authorization: Bearer <access_token>
+```
+`204` with no body. A `401` means the session had already ended: treat it as signed out.
+
+Every RPC is then:
+```
+POST {URL}/rest/v1/rpc/<name>
+apikey: <anon key>
+Authorization: Bearer <access_token>
+Content-Type: application/json
+
+{ named arguments, or {} }
+```
+The answer body is the function's JSON value itself. Errors are PostgREST's body (§4): `{"code": "P0001", "message": "NEO_GATE: Say why you can't take it.", "details": null, "hint": null}` with HTTP `400`; strip the `NEO_…: ` prefix for display.
+
+### 8.2 `my_work_profile()` — right after sign-in, cached for offline start
+`{}` →
+```json
+{"id": "b115a7bf-7d5f-4c9e-9f2a-165aea55159a", "email": "athul.sudheer@neotokyo.in", "full_name": "Athul Sudheer",
+ "designation": "Service Engineer", "department": "service", "tier": 2,
+ "modules": {"service": "tech", "rma": "tech", "qc": "tech", "neohr": null, "tier": 2,
+             "build_pool": true, "service_pool": true, "build_level": "junior"},
+ "build_pool": true, "service_pool": true, "build_level": "junior", "capacity_points": 5, "max_jobs": 3,
+ "team_view": false, "lead_builds": false, "lead_service": false, "desk_builds": true, "desk_service": true,
+ "home": "work"}
+```
+| Key | Use |
+|---|---|
+| `home` | `"work"` exactly when `work_queue()` will answer (Builds or Service desk and up); otherwise `"logs"`. A pool flag never selects `work` on its own. |
+| `team_view` | tier 3+: show the Team tab and everyone's logs (`work_log_team`). |
+| `lead_builds` / `lead_service` | may offer items of that kind (`work_offer`) and sees that kind's alerts. |
+| `desk_builds` / `desk_service` | reads items of that kind in the queue. |
+| `build_pool`, `service_pool`, `build_level` | the person's own work settings (`build_level`: `"junior"`, `"senior"` or `null`). |
+| `capacity_points`, `max_jobs` | how much they may hold (defaults applied). |
+
+`NEO_DENIED: Sign in with an active staff account to do this.` means the login exists but is not (or no longer) active staff: show "This account isn't set up as staff yet. Ask the owner.", keep the app in logs-only mode and do not sync.
+
+`my_modules()` (§3) also carries `build_pool`, `service_pool` and `build_level` now.
+
+### 8.3 `work_queue()` — the feed
+`{}` →
+```json
+{"now": "2026-10-22T08:58:18.347+00:00", "claim_hours": 4, "offer_minutes": 30,
+ "me": {"email": "athul.sudheer@neotokyo.in", "name": "Athul Sudheer", "designation": "Service Engineer", "tier": 2,
+        "build_pool": true, "service_pool": true, "build_level": "junior", "capacity_points": 5, "max_jobs": 3,
+        "points": 2, "jobs": 1, "lead_builds": false, "lead_service": false, "desk_builds": true, "desk_service": true},
+ "items": [
+  {"kind": "service", "id": "s_mvjb6hjraugjf", "code": "NT-6V6KTW7J", "title": "Networking", "sub": "On-site · Networking",
+   "customer": "Ravi", "area": "Kakkanad", "service_type": "on_site", "stage": "logged", "priority": "normal",
+   "build_tier": null, "needs_senior": false, "deadline": null,
+   "queued_at": "2026-10-22T08:58:18.318+00:00", "claim_due": "2026-10-22T12:58:18.318+00:00", "cost": 2,
+   "assignee_email": null, "assignee_name": null, "assigned_via": null, "assigned_at": null,
+   "offer": {"to_email": "athul.sudheer@neotokyo.in", "to_name": "Athul Sudheer", "kind": "manager", "by_name": "Jophy Joseph",
+             "reason": "Closest to Kakkanad", "offered_at": "2026-10-22T08:58:18.337+00:00", "expires_at": "2026-10-22T09:28:18.337+00:00"},
+   "declined_count": 0, "mine": false, "offered_to_me": true, "can_claim": true, "why_not": null},
+  {"kind": "build", "id": "t_wqlegacy_queued", "code": "QUEUED", "title": "Legacy Waiting Build", "sub": "Ryzen 5 7600 · RTX 4060",
+   "customer": "Legacy Waiting Build", "area": null, "service_type": null, "stage": "awaiting", "priority": "normal",
+   "build_tier": 1, "needs_senior": false, "deadline": null,
+   "queued_at": "2026-10-22T03:58:18.309+00:00", "claim_due": "2026-10-22T07:58:18.309+00:00", "cost": 1,
+   "assignee_email": null, "assignee_name": null, "assigned_via": null, "assigned_at": null,
+   "offer": null, "declined_count": 0, "mine": false, "offered_to_me": false, "can_claim": true, "why_not": null}],
+ "alerts": []}
+```
+`NEO_DENIED: The work queue is for the build and service teams.` when the caller is neither Builds nor Service desk+ (then `home` was `"logs"`).
+
+**Which items:** every open item of the kinds the caller may read (builds need Builds desk+, service needs Service desk+), every item with a live offer to the caller, every open item assigned to the caller, and — for a lead of that kind — every item with a live offer to anyone. **Order** (keep it): offered to me (soonest expiry first), then open (`claim_due` ascending), then mine (`deadline` ascending), then the rest.
+
+| ITEM key | Meaning |
+|---|---|
+| `kind` | `"build"` or `"service"` — pass it back as `p_kind` |
+| `id` | `t_…` (build) or `s_…` (service ticket) — pass it back as `p_id` |
+| `code` | what people say: the build's last 6 characters, or the `NT-` code |
+| `title`, `sub` | build: customer name, `cpu · gpu`; service: device (or category), `type · category` |
+| `customer` | a **first name only** for a pure technician until the job is theirs; desk and leads see the whole name. Never a phone or an address (`area` only) — after a claim, read the job from `v_tech_day` (§8.10). |
+| `stage` | build `status` (`awaiting`, `building`, `waiting_qc`, `qc_testing`) or service `stage` (§11) |
+| `priority` | builds: `urgent` when the deadline is less than 48 h away, else `normal`; service: the ticket's priority |
+| `build_tier`, `needs_senior` | builds: 1–5; `true` for tier 4–5 |
+| `deadline` | builds: the deadline; service: the visit start, else the needed-by date |
+| `queued_at`, `claim_due` | when it entered the queue; `queued_at + 4 h` (only while it is open) |
+| `cost` | load points: a build's tier; an on-site visit 2; other service 1 |
+| `assignee_email`, `assignee_name`, `assigned_via`, `assigned_at` | who has it (`assigned_via`: `claim`, `manager`, `auto`, `legacy`, `self`) |
+| `offer` | `null`, or the live offer (`kind`: `manager` = a lead, `auto` = the app). An expired offer reads `null`. |
+| `declined_count` | how many people declined or ignored it this cycle |
+| `mine`, `offered_to_me` | it is mine / it is offered to me now |
+| `can_claim` | show **Claim** (an item offered to me is claimable: claiming = accepting) |
+| `why_not` | otherwise, the sentence to show instead (below), or `null` |
+
+`why_not` sentences (exact): "You don't have the Builds technician role." · "You don't have the Service technician role." · "You aren't in the build pool." · "You aren't in the service pool." · "This is a high-value build — only senior builders can take it." · "Offered to Athul Sudheer until 14:58." (India time).
+
+`alerts` (leads only, of the kinds they lead, newest first, at most 50):
+```json
+[{"id": 1, "kind": "declined", "item_kind": "service", "item_id": "s_mvjb6hjraugjf", "item_code": "NT-6V6KTW7J",
+  "title": "Networking", "body": "Adhil M declined NT-6V6KTW7J: Two visits already today", "person_name": "Adhil M",
+  "created_at": "2026-10-22T08:58:18.404+00:00"}]
+```
+`kind`: `declined` (also "Offer to X ended — …" when the person was no longer eligible), `expired` ("No answer from X on CODE in 30 minutes."), `no_candidate` ("Nobody free can take CODE — offer it to someone or wait for room.").
+
+**Clock skew.** Count down from the server's clock, not the phone's: `offsetMs = Date.parse(now) − (device time when the answer arrived)`; every countdown uses `device now + offsetMs`. Never print "30 minutes": say "accept by HH:MM (Xm left)" from `offer.expires_at`.
+
+### 8.4 `work_tick()` — run the clock
+`{}` → `{"ok": true, "expired": 0, "offered": 0, "stuck": 0}` (or `{"ok": true, "skipped": true}` when another tick is running). Call it, fire-and-forget, before each `work_queue()` refresh; it ends overdue offers and offers overdue items. Any active staff member may call it; ignore its errors.
+
+### 8.5 `work_claim(p_kind, p_id, p_visit_start, p_visit_end)` — online only
+```json
+{"p_kind": "build", "p_id": "t_wqlegacy_queued", "p_visit_start": null, "p_visit_end": null}
+```
+Visit times are for service tickets only (as `service_claim`, §6.2); they are ignored for builds. Answers:
+```json
+{"ok": true, "item": {"kind": "build", "id": "t_wqlegacy_queued", "mine": true, "assigned_via": "claim", "assignee_name": "Adhil", "…": "…"}}
+{"ok": true, "already": true, "item": {…}}
+{"ok": false, "reason": "taken", "by": "Adhil", "by_email": "adhil.m@neotokyo.in", "at": "2026-10-22T08:58:18.383+00:00"}
+{"ok": false, "reason": "offered", "by": "Athul Sudheer", "to_name": "Athul Sudheer", "expires_at": "2026-10-22T09:28:18.337+00:00"}
+{"ok": false, "reason": "not_queued"}
+{"ok": false, "reason": "closed"}
+{"ok": false, "reason": "not_found"}
+```
+- Service: the answer is `service_claim`'s (§6.2, including `"job"` on success) plus `"item"` (on every answer about a ticket that exists). Its `offered` also carries `"by_email"`.
+- `taken` / `offered` are normal answers: refresh and say "Taken by X" / "Offered to X until HH:MM".
+- `not_queued`: a build not sent to the floor (a quote) — refresh.
+- If an offer to the caller is live, claiming accepts it (the answer is §8.6's).
+- Errors: `NEO_GATE:` + one of the `why_not` sentences when the caller may not take it (e.g. "NEO_GATE: You aren't in the service pool.").
+
+### 8.6 `work_respond(p_kind, p_id, p_accept, p_reason, p_visit_start, p_visit_end)` — online only
+Accept (on-site / remote: an optional visit time, as §6.2):
+```json
+{"p_kind": "service", "p_id": "s_mvjb6hjraugjf", "p_accept": true, "p_reason": null,
+ "p_visit_start": "2026-10-23T14:30:00+05:30", "p_visit_end": "2026-10-23T16:30:00+05:30"}
+```
+```json
+{"ok": true, "item": {"kind": "service", "id": "s_mvjb6hjraugjf", "mine": true, "stage": "scheduled", "assigned_via": "manager", "customer": "Ravi Kumar", "…": "…"},
+ "job": { "...": "the full ticket row (service only)" }}
+```
+Decline (a reason is required, at most 300 characters):
+```json
+{"p_kind": "service", "p_id": "s_mvjb6hjraugjf", "p_accept": false, "p_reason": "Two visits already today"}
+```
+```json
+{"ok": true, "declined": true, "next": null, "item": {…}}
+```
+`next` is the app's next offer when the item was already past its 4 hours (`{"offered": true, "to_email": …, "to_name": …, "expires_at": …}` or `{"offered": false, "stuck": true, "alerted": true|false}`), else `null`.
+
+Other answers:
+```json
+{"ok": false, "reason": "expired"}
+{"ok": false, "reason": "not_offered"}
+{"ok": false, "reason": "not_eligible", "why": "This is a high-value build — only senior builders can take it.", "next": null}
+{"ok": false, "reason": "not_found"}
+```
+`expired`: the offer to you ended (you are on this item's declined list) — remove the card. `not_offered`: nothing is offered to you here. `not_eligible`: you can no longer take it (the build became tier 4–5, or your pool or role changed); the offer has ended — show `why`. Errors: `NEO_GATE: Say why you can't take it.`, `NEO_GATE: The visit ends before it starts.`
+
+### 8.7 `work_release(p_kind, p_id, p_reason)` — online only
+```json
+{"p_kind": "build", "p_id": "t_wqlegacy_queued", "p_reason": "Parts not here yet"}
+```
+```json
+{"ok": true, "item": {"kind": "build", "id": "t_wqlegacy_queued", "mine": false, "claim_due": "2026-10-22T12:58:18.391+00:00", "declined_count": 1, "…": "…"}}
+```
+Service: every rule of `service_release` (§6.3) applies and its `"job"` is in the answer too. The person handing it back is not offered it again in this cycle. Errors: `NEO_GATE: Say why you're handing it back.`, `NEO_GATE: The reason is too long — keep it under 300 characters.`, `NEO_STALE: Nobody has this build now — refresh.`, `NEO_DENIED: Only the technician who has this build, or a lead, can hand it back.`, `NEO_GATE: This build is finished.`, and §6.3's for service (for example `NEO_GATE: You're on the way or on site. Check out first, or ask a lead to reassign it.`).
+
+### 8.8 `work_offer(p_kind, p_id, p_email, p_reason, p_expected)` — leads, online only
+`p_expected` is the assignee email the lead's screen showed (`null` = it showed the item unassigned). An empty `p_email` withdraws the live offer. After a withdrawal the server waits at least 10 minutes before it offers the item again by itself, so "withdraw, then offer to someone else" is never beaten by the clock. Withdrawing the app's own offer (`kind` `auto`) also skips that person for the item; a lead can still offer it to them by name.
+```json
+{"p_kind": "service", "p_id": "s_mvjb6hjraugjf", "p_email": "athul.sudheer@neotokyo.in", "p_reason": "Closest to Kakkanad", "p_expected": null}
+```
+```json
+{"ok": true, "item": {"offer": {"to_email": "athul.sudheer@neotokyo.in", "kind": "manager", "expires_at": "…", "…": "…"}, "…": "…"}}
+{"ok": true, "unchanged": true, "item": {…}}
+{"ok": true, "withdrawn": true, "item": {…}}
+{"ok": true, "withdrawn": false, "item": {…}}
+{"ok": false, "reason": "changed", "by": "Athul Sudheer", "by_email": "athul.sudheer@neotokyo.in", "at": "2026-10-22T08:58:18.374+00:00"}
+{"ok": false, "reason": "offered", "to_name": "Adhil M", "expires_at": "2026-10-22T09:28:18.398+00:00"}
+```
+`changed`: someone took or changed it since the screen loaded — refresh. `offered`: someone else holds a live offer — withdraw it first. An item that someone holds can be offered to someone else (a reassignment): the holder keeps it until the target accepts. Errors: `NEO_DENIED: Only a lead can offer work to a technician.`, `NEO_GATE: Say why you're offering it to them.`, `NEO_GATE: This one is finished.`, `NEO_GATE: No active staff account with that email.`, `NEO_GATE: Adhil M can't take this — they aren't in the build pool.` (and the other `why_not` reasons, said of them).
+
+### 8.9 `work_team()` — leads and tier 3+
+`{}` →
+```json
+{"now": "2026-10-22T08:58:18.413+00:00",
+ "people": [{"email": "adhil.m@neotokyo.in", "name": "Adhil M", "designation": "Senior System Integrator / Service Engineer", "tier": 2,
+             "build_pool": true, "service_pool": true, "build_level": "senior", "capacity_points": 8, "max_jobs": 5,
+             "points": 2, "jobs": 1, "qc_role": "tech", "service_role": "tech",
+             "items": [{"kind": "build", "id": "t_wqlegacy_adhil1", "code": "ADHIL1", "title": "Legacy Adhil Build", "stage": "building",
+                        "deadline": null, "assigned_at": "2026-10-21T08:58:18.054+00:00", "cost": 2}],
+             "offers": [{"kind": "service", "id": "s_…", "code": "NT-…", "title": "…", "expires_at": "…", "offer_kind": "auto"}],
+             "last_seen_at": "2026-10-22T08:40:02+00:00", "logs_today": 3}],
+ "alerts": [ "…as in work_queue…" ]}
+```
+People: everyone active who is in a pool or holds work or a live offer, by name. `items`, `offers` and `alerts` list only the kinds the caller leads. `last_seen_at` (the latest field activity or work log) and `logs_today` (India day) are `null` unless the caller is tier 3+. `NEO_DENIED: Only leads can see the team.` otherwise. To dismiss an alert: `work_alert_resolve({"p_id": 1})` → `{"ok": true}` (or `{"ok": true, "already": true}`).
+
+### 8.10 My work on site — `v_tech_day` and `record_field_activity`
+For each of the caller's own **service** items, read the contact and site details from the view (§5.2), in memory only — never in Room:
+```
+GET {URL}/rest/v1/v_tech_day?id=eq.s_mvjb6hjraugjf&select=*
+```
+```json
+[{"id": "s_mvjb6hjraugjf", "public_code": "NT-6V6KTW7J", "service_type": "on_site", "stage": "scheduled", "category": "networking",
+  "customer_name": "Ravi Kumar", "customer_phone": "9000000501", "site_address": "12 MG Road", "site_area": "Kakkanad",
+  "site_landmark": null, "site_maps_url": null, "site_lat": null, "site_lng": null, "site_contact": null,
+  "visit_start": "2026-10-23T08:58:18.374+00:00", "visit_end": "2026-10-23T10:58:18.374+00:00", "visit_count": 0,
+  "reported_fault": "No internet", "assigned_via": "manager", "assigned_at": "2026-10-22T08:58:18.374+00:00", "…": "…"}]
+```
+**Left shop / Arrived / Finished** are `record_field_activity` (§6.1) with `kind` `left_base`, `arrived`, `departed` (+ `outcome` `done`, `revisit_needed`, `parts_needed` or `customer_absent`):
+```json
+{"p": {"client_request_id": "9a1b2c3d-4e5f-4a6b-8c7d-0e1f2a3b4c5d", "kind": "left_base", "ref_type": "service_job",
+       "ref_id": "s_mvjb6hjraugjf", "module": "service", "at": "2026-10-24T08:30:00.000Z",
+       "lat": 10.0159, "lng": 76.3419, "accuracy_m": 12.5, "source": "neohr"}}
+```
+```json
+{"id": "63a2386a-8d89-495b-b9ce-86a7e86b0403", "applied": true, "applied_note": "Moved to Technician en route.", "stage": "en_route", "duplicate": false}
+```
+Generate `client_request_id` once per tap, keep it (with the payload, **including `at` = the time of the tap**) in `pending_field_actions` until the server answers, and retry with the same id. This is the only queue-related write that may be queued offline.
+
+### 8.11 Offline rules for the queue
+| Action | Queue offline? |
+|---|---|
+| `work_claim`, `work_respond`, `work_release`, `work_offer`, `work_alert_resolve` | **No** — online only; show the server's answer |
+| `record_field_activity` | Yes (idempotent on `client_request_id`, carries `at`) |
+| `work_tick` | No — skip it when offline |
+| `work_queue`, `work_team`, `my_work_profile` | Cache the last answer for display only, marked "as of HH:MM" |
+
+`service_claim` from older apps now also needs the service pool and refuses an item offered to someone else (§6.2); the phone uses `work_claim`.
+
+---
+
+## 9. Work logs (contract version 3)
+
+Daily Logger entries sync to `public.work_logs`. Room stays the source of truth on the phone; the server keeps a copy per person, so the logs survive a new phone and tier 3+ can read everyone's. Photos are **not** synced in this release (they stay on the phone).
+
+### 9.1 Shapes and timestamps
+- Timestamps are ISO-8601 **UTC with milliseconds**, made from the phone's epoch millis: `2026-10-21T04:01:12.000Z`. The server answers in `+00:00` form.
+- `id` is the log's `remoteId`: a UUID v4 the phone creates once per log and never changes.
+- An **upsert row**: `{"id", "title", "description", "category", "location_name", "latitude", "longitude", "created_at", "updated_at", "deleted": false}`.
+- A **delete row**: `{"id", "updated_at", "deleted": true}` — nothing else is read.
+
+| Field | Rule |
+|---|---|
+| `title` | trimmed, 1–300 characters |
+| `description` | up to 5000 characters, or `null` |
+| `category` | 1–60 characters; blank or missing reads `"Work"` |
+| `location_name` | up to 200 characters, or `null` |
+| `latitude`, `longitude` | both or neither; a value out of range drops both (the row is kept) |
+| `created_at`, `updated_at` | required, between 2020-01-01 and the server's now + 10 minutes, else the row is rejected with `clock` |
+
+### 9.2 `work_log_push(p_rows)` — any active staff member
+At most 200 rows per call (send in batches of 100).
+```json
+{"p_rows": [
+  {"id": "0b7d6a52-1f3e-4c1a-9d2e-5a6b7c8d9e0f", "title": "Re-cabled the office switch", "description": "Two ports dead",
+   "category": "Networking", "location_name": "Kakkanad", "latitude": 10.0159, "longitude": 76.3419,
+   "created_at": "2026-10-21T04:01:12.000Z", "updated_at": "2026-10-21T04:01:12.000Z", "deleted": false},
+  {"id": "1c8e7b63-2a4f-4d2b-8e3f-6b7c8d9e0f1a", "updated_at": "2026-10-21T05:00:00.000Z", "deleted": true},
+  {"id": "not-a-uuid", "title": "x", "created_at": "2026-10-21T04:01:12.000Z", "updated_at": "2026-10-21T04:01:12.000Z"}]}
+```
+```json
+{"ok": true, "accepted": ["0b7d6a52-1f3e-4c1a-9d2e-5a6b7c8d9e0f", "1c8e7b63-2a4f-4d2b-8e3f-6b7c8d9e0f1a"], "stale": [],
+ "rejected": [{"id": "not-a-uuid", "reason": "invalid"}]}
+```
+The ids come back exactly as sent. Per row:
+| Case | Answer |
+|---|---|
+| new id | inserted for the caller → `accepted` |
+| own row, incoming `updated_at` newer | updated (a non-deleted row also clears an earlier delete) → `accepted` |
+| own row, incoming `updated_at` equal or older | nothing changes → `stale` |
+| delete of an own row, newer | tombstoned (`deleted_at` = that time) → `accepted`; older → `stale` |
+| delete of an id the server never saw | nothing to do → `accepted` |
+| an id that belongs to someone else (or to a login that was deleted) | `rejected`, `"not_yours"` |
+| a bad row (not an object, no/invalid uuid, title, lengths, types) | `rejected`, `"invalid"` |
+| `created_at` / `updated_at` outside the window | `rejected`, `"clock"` |
+
+Only these raise (the whole call): `NEO_GATE: Send the logs as a list.`, `NEO_GATE: Send at most 200 logs at a time.`, and `NEO_DENIED` for someone who is not active staff.
+
+**Phone side:** `accepted` and `stale` → `dirty = 0` / remove the `pending_deletes` row. `rejected` → the same, plus `Log.w` with the reason; never retry a rejected row. Push only rows whose `ownerEmail` is the signed-in email.
+
+### 9.3 `work_log_pull(p_since, p_after)` — my own rows
+First sign-in: `{"p_since": null, "p_after": null}`. Then send back the cursor of the previous answer while `more` is true.
+```json
+{"rows": [{"id": "0b7d6a52-1f3e-4c1a-9d2e-5a6b7c8d9e0f", "title": "Re-cabled the office switch", "description": "Two ports dead",
+           "category": "Networking", "location_name": "Kakkanad", "latitude": 10.0159, "longitude": 76.3419,
+           "created_at": "2026-10-21T04:01:12+00:00", "updated_at": "2026-10-21T04:01:12+00:00",
+           "deleted": false, "deleted_at": null, "received_at": "2026-10-22T08:58:30.533+00:00"}],
+ "next_since": "2026-10-22T08:58:30.533+00:00", "next_after": "0b7d6a52-1f3e-4c1a-9d2e-5a6b7c8d9e0f", "more": false}
+```
+- Rows are the caller's own (tombstones included), in the push shape plus `deleted`, ordered by `(received_at, id)`, at most 1000 per call.
+- **Keep `next_since` and `next_after` as the exact strings returned** and send them back unchanged (`next_since` can carry microseconds; reformatting it can repeat or skip rows).
+- Import: insert rows whose `id` is not a local `remoteId`; skip tombstones, and delete (through the repository, so search stays in step) any local row whose `remoteId` has a tombstone.
+
+### 9.4 `work_log_team(p_from, p_to, p_email)` — tier 3+
+Shop days (India), inclusive, at most 62 days per call; `p_email` optional (one person).
+```json
+{"p_from": "2026-10-21", "p_to": "2026-10-21", "p_email": null}
+```
+```json
+{"from": "2026-10-21", "to": "2026-10-21", "more": false,
+ "rows": [{"id": "0b7d6a52-1f3e-4c1a-9d2e-5a6b7c8d9e0f", "employee_email": "athul.sudheer@neotokyo.in", "employee_name": "Athul Sudheer",
+           "day": "2026-10-21", "title": "Re-cabled the office switch", "description": "Two ports dead", "category": "Networking",
+           "location_name": "Kakkanad", "latitude": 10.0159, "longitude": 76.3419,
+           "created_at": "2026-10-21T04:01:12+00:00", "updated_at": "2026-10-21T04:01:12+00:00"}]}
+```
+Deleted logs are left out; newest first; at most 2000 rows (`more: true` when there are more — ask for fewer days or one person). A log whose login was deleted is labelled with its stored email. A day is India time: `2026-10-21T18:30:00Z` is already the 22nd. Errors: `NEO_DENIED: Only tier 3 and above can see the team's logs.`, `NEO_GATE: The end date is before the start date.`, `NEO_GATE: Ask for at most 62 days at a time.`
+
+### 9.5 Who reads what
+`work_logs` is readable directly (`GET /rest/v1/work_logs`) only for your own rows, or everyone's for tier 3+; nobody writes it except through `work_log_push`. It is not in realtime.
+
+---
+
+## 10. Privacy
 
 - The queue (`v_service_queue`) never exposes phone, surname or address, and its location is rounded to about 1 km. Full contact details arrive only after a claim, via `v_tech_day`.
 - Location is recorded only on the explicit events a technician posts (check-in, check-out, punch). There is no continuous tracking, and NeoHR must not add any.
 - Technicians' home addresses belong in NeoHR's own storage, never in these tables.
 - What the database allows is wider than what NeoHR should show. Row-level security lets any `service` desk+ member read every ticket, because the desktop board needs that. NeoHR should still read only the views above, so a phone app never holds more customer data than the person's own day needs.
-- Who can read the activity log: the person, any `service` lead, any `neohr` lead, and tier 3+ (owner, founders, department heads). HR staff below tier 3 need a `neohr` lead role (Settings → Module access).
+- Who can read the activity log: the person, any `service` lead, any `neohr` lead, and tier 3+ (owner, founders, department heads). HR staff below tier 3 need a `neohr` lead role. Settings → General → People cannot grant it (it sets only `service`, `rma` and `qc`); a tier 4+ account grants it with `module_access_set` (`p_module` `neohr`) or in SQL — see §3.
 - A customer's tracking page never shows a distributor's name: it names the part's brand (or the vendor's public name).
 
 ---
 
-## 9. Stage vocabulary NeoHR will meet
+## 11. Stage vocabulary NeoHR will meet
 
 On-site jobs: `logged` → `scheduled` → `en_route` → `on_site` → `work_done`, with `revisit_needed`, `parts_to_order`, `parts_on_order`, `quoted`, `approved` and `closed` along the way. While a part is away under warranty claim, the server alone sets `rma_raised`, `at_vendor` or `back_from_vendor`; when the desk releases the part from an on-site job (§6.9), the job jumps from there to `work_done` or `revisit_needed`. Remote jobs use `logged` → `session_booked` → `in_session` → `resolved` → `closed`.
 
@@ -566,20 +920,29 @@ RMA parts (`rma_cases.stage`, returned by `rma_create`): a field pull starts at 
 
 ---
 
-## 10. Changes to this contract
+## 12. Changes to this contract
 
 Additive changes (a new column, a new optional field, a new RPC) can ship at any time, so NeoHR must ignore unknown JSON keys. Removing or renaming anything here means a new contract version and a note in this file first.
+
+### Version 3 (`sql/work-queue.sql`, Neo OS 1.11.0)
+- New: the work queue (§8): `my_work_profile`, `work_queue`, `work_tick`, `work_claim`, `work_respond`, `work_release`, `work_offer`, `work_team`, `work_alert_resolve`, `work_events_for`. Builds and service tickets wait in one queue: 4 hours to claim, then the server offers the item; an offer lasts 30 minutes.
+- New: work logs sync (§9): `work_log_push`, `work_log_pull`, `work_log_team`; table `work_logs` (read-only for clients).
+- New: sign-in, refresh and sign-out over plain REST (§8.1) — no Supabase SDK needed.
+- Changed: `service_claim` needs the service pool, refuses (without writing) a job offered to someone else (`reason: "offered"`), and accepts a job offered to the caller (§6.2).
+- Changed: `service_tech_list` lists service-pool members only and adds pools, level, load and capacity (§6.6); `my_modules` adds pools and level (§3).
+- Changed: `service_create` ignores "take it myself" (`assign_self`) for someone outside the service pool.
+- Unchanged: `v_service_queue`, `v_tech_day`, `record_field_activity`, `service_release`, `service_assign`, `tech_activity`. New `service_events` rows of kind `offer` (internal) record offers; accepting an offer writes an `assign` row, which `tech_activity` counts like a lead's assignment.
 
 ### Version 2.1 (additive, `sql/service-v2.1.sql`)
 - The shop never backs up customer data. `service_jobs.data_consent` now records what the customer did: `customer_backed_up` ("Customer backed up their data"), `no_important_data` ("No important data on it") or `customer_accepts_risk` ("Customer accepts the risk — no backup"). The older `backup_ok` / `no_backup` stay valid on old jobs; show them as "Back up first (old option)" / "No backup needed (old option)" and never offer them. `has_customer_data` is true unless the answer is `no_important_data`.
 - New: `service_jobs.has_device_password` and the device-password RPCs `service_get_password` / `service_set_password` (§6.10). Every read is recorded on the job's internal timeline; the password is deleted when the job closes.
 - Unchanged: `v_service_queue`, `v_tech_day`, `get_service_public` (the customer's page never mentions a password).
 
-### Version 2 (this file)
+### Version 2
 - The view `v_tech_activity` is gone. Use the RPC `tech_activity(p_from, p_to)` (§5.3); same keys, plus a date range. A `neohr` lead now sees everyone's activity, in `tech_activity` and in `field_activity`.
 - Phone numbers keep their country code (`919847012345`, `971501234567`) instead of being cut to 10 digits; a leading `00` is dropped, and 11-digit Kuwait / Oman / Bahrain / Qatar numbers are valid (§4).
 - `service_claim` at a different time than the one already booked tells the customer the visit moved (§6.2).
-- `rma_release_hold` on an on-site job goes to `work_done` or `revisit_needed` (§6.9, §9).
+- `rma_release_hold` on an on-site job goes to `work_done` or `revisit_needed` (§6.9, §11).
 - `record_field_activity`: a check-out from `scheduled` / `en_route` finishes the visit and counts it (§6.1).
 - `record_field_activity`: `departed` + `customer_absent` moves the job to `revisit_needed` (not `scheduled`), clears the spent visit time and tells the customer we will call to rebook (§6.1).
 - Who has a job changes only through `service_claim` / `service_release` (and a lead's `service_assign`); a direct write of `assignee` / `assignee_email` is refused for anyone but a lead. Timeline rows written directly (not through an RPC) may only be kinds `stage`, `note`, `edit`, `media`, with no `meta`, in the signed-in person's own name — claim, release and assign rows (which `tech_activity` counts) come only from the RPCs.

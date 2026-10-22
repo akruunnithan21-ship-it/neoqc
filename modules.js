@@ -13,6 +13,10 @@
     - their module roles from the server (rpc my_modules()), e.g. a tier-1
       counter clerk with service 'desk'. Cached on this PC per user id so a
       network blip at sign-in never strands anyone on the login screen.
+    - their work pools (v1.11, sql/work-queue.sql): my_modules() also says
+      whether they are in the build pool / the service pool and their build
+      level. pools() reads them. Tier 3+ is a lead everywhere but is NOT in a
+      pool unless the People screen put them in one.
 
   NOTHING HERE IS A SECURITY BOUNDARY. The server's RLS (svc_reader /
   rma_reader) decides what rows anyone can read; this keeps the UI honest so
@@ -26,23 +30,37 @@
   var REFRESH_TIMEOUT_MS = 4000;
   var MODULE_KEYS = ['service', 'rma', 'qc', 'neohr'];
   var ROLE_RANK = { desk: 1, tech: 2, lead: 3 };
-  var OFFICE_MODES = ['overview', 'staff', 'service', 'rma'];
+  var LEVELS = ['junior', 'senior'];
+  var OFFICE_MODES = ['overview', 'queue', 'staff', 'service', 'rma'];
 
   // Rail order. `needs` is read only by canOpen() below; the rail never
-  // interprets it itself, so the rule lives in one function.
+  // interprets it itself, so the rule lives in one function. Shapes:
+  //   { any: true }                      anyone signed in (overview: see canOpen)
+  //   { tier: n }                        tier n or above
+  //   { module: m, role: r }             role r or above in module m
+  //   { anyOf: [ {module, role} | {tier}, … ] }   any ONE of them
   var REGISTRY = [
     { id: 'overview', label: 'Overview', icon: '◎', screenId: 'overview-screen', mode: 'overview', needs: { any: true } },
-    { id: 'builds',   label: 'Builds',   icon: '🖥', screenId: 'staff-screen',    mode: 'staff',    needs: { tier: 3 } },
+    // The one work queue (builds + service). Shows customer first names and
+    // areas, so never { any: true }: build desk or service desk and up.
+    { id: 'queue',    label: 'Queue',    icon: '⏱', screenId: 'queue-screen',    mode: 'queue',
+      needs: { anyOf: [{ module: 'qc', role: 'desk' }, { module: 'service', role: 'desk' }] } },
+    { id: 'builds',   label: 'Builds',   icon: '🖥', screenId: 'staff-screen',    mode: 'staff',    needs: { module: 'qc', role: 'desk' } },
     { id: 'service',  label: 'Service',  icon: '🔧', screenId: 'service-screen',  mode: 'service',  needs: { module: 'service', role: 'desk' } },
     { id: 'rma',      label: 'RMA',      icon: '📦', screenId: 'rma-screen',      mode: 'rma',      needs: { module: 'rma', role: 'desk' } },
     // Placeholder so the id is reserved; nothing can open it yet.
     { id: 'neohr',    label: 'NeoHR',    icon: '👥', screenId: null, mode: null, hidden: true },
     // The gap above Bench / Settings. shell.js recognises { spacer: true }.
     { id: 'spacer',   spacer: true },
-    { id: 'bench',    label: 'Bench',    icon: '⚗', action: 'bench',    needs: { tier: 2 }, group: 'end' },
+    { id: 'bench',    label: 'Bench',    icon: '⚗', action: 'bench',
+      needs: { anyOf: [{ module: 'qc', role: 'tech' }, { tier: 2 }] }, group: 'end' },
     { id: 'settings', label: 'Settings', icon: '⚙', action: 'settings', needs: { any: true }, group: 'end' }
   ];
   REGISTRY.forEach(function (e) {
+    if (e.needs && Array.isArray(e.needs.anyOf)) {
+      e.needs.anyOf.forEach(function (x) { Object.freeze(x); });
+      Object.freeze(e.needs.anyOf);
+    }
     if (e.needs) Object.freeze(e.needs);
     if (!e.group && !e.spacer) e.group = 'main';
     Object.freeze(e);
@@ -64,7 +82,8 @@
   function roleRank(r) { return ROLE_RANK[r] || 0; }
 
   // Only the keys we know, only roles we know. A malformed answer must never
-  // widen access: an unknown role string ranks 0, the same as no role.
+  // widen access: an unknown role string ranks 0, the same as no role, and a
+  // pool is on only when the server said exactly `true`.
   function normalise(data) {
     if (typeof data === 'string') { try { data = JSON.parse(data); } catch (e) { data = null; } }
     if (Array.isArray(data)) data = data[0];
@@ -74,6 +93,9 @@
       var r = data[k];
       out[k] = (typeof r === 'string' && ROLE_RANK[r]) ? r : null;
     });
+    out.build_pool = data.build_pool === true;
+    out.service_pool = data.service_pool === true;
+    out.build_level = LEVELS.indexOf(data.build_level) !== -1 ? data.build_level : null;
     return out;
   }
 
@@ -197,6 +219,22 @@
     return roleRank(roleFor(module, prof)) >= roleRank(min || 'desk');
   }
 
+  // { build, service, level } from my_modules(). Being a lead (tier 3+) does
+  // NOT put anyone in a pool: the CEO is a lead everywhere and builds nothing.
+  // Nobody signed in, or inactive → all off.
+  function pools(prof) {
+    var p = prof === undefined ? profile() : prof;
+    var none = { build: false, service: false, level: null };
+    if (!p || p.active === false) return none;
+    var a = accessFor(p);
+    if (!a) return none;
+    return {
+      build: a.build_pool === true,
+      service: a.service_pool === true,
+      level: LEVELS.indexOf(a.build_level) !== -1 ? a.build_level : null
+    };
+  }
+
   // ── registry lookups ───────────────────────────────────────────────────────
   function list() { return REGISTRY.slice(); }
 
@@ -241,23 +279,37 @@
     if (e.id === 'overview') return t >= 3 || !!roleFor('service', p) || !!roleFor('rma', p);
 
     if (n.any === true) return true;
+    // { anyOf: [...] } — any ONE of the listed needs (OR). An empty or
+    // malformed list opens nothing. Combined with tier/module below (AND).
+    if (n.anyOf != null) {
+      if (!Array.isArray(n.anyOf) || !n.anyOf.some(function (x) { return meets(x, p, t); })) return false;
+      if (n.tier == null && !n.module) return true;
+    }
     if (n.tier != null && t < Number(n.tier)) return false;
     if (n.module && roleRank(roleFor(n.module, p)) < roleRank(n.role || 'desk')) return false;
     return n.tier != null || !!n.module;
   }
+  // One alternative of an anyOf list: { tier } or { module, role }.
+  function meets(x, p, t) {
+    if (!x || typeof x !== 'object') return false;
+    if (x.module) return MODULE_KEYS.indexOf(x.module) !== -1 && roleRank(roleFor(x.module, p)) >= roleRank(x.role || 'desk');
+    if (x.tier != null) { var need = Number(x.tier); return isFinite(need) && t >= need; }
+    return false;
+  }
 
   // Where to land after sign-in. null = the tier notice ("use the web portal").
+  // WQ-C13: a pool flag alone never picks the queue — only when the queue
+  // also opens for them (a pool left on after the role was removed falls
+  // through to their next screen instead of the tier notice).
   function firstHome(prof) {
     var p = prof === undefined ? profile() : prof;
     if (!p || p.active === false) return null;
     var t = tierOf(p);
     if (t >= 3) return 'overview';
-    var svc = roleFor('service', p);
-    if (svc) {
-      // A tier-2 bench technician keeps landing on the bench, as before; the
-      // "Service queue" button there is one click away.
-      return (t === 2 && svc === 'tech') ? 'client' : 'service';
-    }
+    var pl = pools(p);
+    if ((pl.build || pl.service) && canOpen('queue', p)) return 'queue';
+    if (roleFor('service', p)) return 'service';
+    if (roleFor('qc', p)) return 'staff';
     if (roleFor('rma', p)) return 'rma';
     if (t === 2) return 'client';
     return null;
@@ -278,6 +330,7 @@
     canOpen: canOpen,
     roleFor: roleFor,
     hasRole: hasRole,
+    pools: pools,
     roleRank: roleRank,
     refreshAccess: refreshAccess,
     firstHome: firstHome,

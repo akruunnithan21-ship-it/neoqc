@@ -155,17 +155,29 @@ async function populateSalesExecs(selected) {
   const sel = document.getElementById('form-sales-exec');
   if (!sel) return;
   try {
+    // v1.11 — people who have left (active = false) are no longer offered.
+    // The cache is per sign-in (cleared at sign-in and sign-out), so a new or
+    // renamed sales executive shows up without restarting the app.
     if (!salesExecsCache && supabaseClient) {
       const { data } = await supabaseClient.from('profiles')
-        .select('full_name,email,designation').ilike('designation', '%Sales Executive%');
+        .select('full_name,email,designation').ilike('designation', '%Sales Executive%').eq('active', true);
       salesExecsCache = (data || []).filter(p => p.full_name).sort((a, b) => a.full_name.localeCompare(b.full_name));
     }
   } catch (e) { console.warn('sales execs load failed:', e && e.message); }
-  const list = salesExecsCache || [];
+  const list = (salesExecsCache || []).slice();
   const cur = selected != null ? selected : sel.value;
+  // The build's existing owner is always an option, even when they are not in
+  // the list (left, re-designated, or stamped by the website's quote builder),
+  // so it is shown and saving never silently changes it.
+  if (cur && !list.some(p => String(p.email || '').toLowerCase() === String(cur).toLowerCase())) {
+    list.push({ email: cur, full_name: cur + ' (not in the list)' });
+  }
   sel.innerHTML = '<option value="">— Select who closed this sale —</option>' +
     list.map(p => `<option value="${escapeHtmlLite(p.email)}">${escapeHtmlLite(p.full_name)}</option>`).join('');
-  if (cur) sel.value = cur;
+  if (cur) {
+    const match = list.find(p => String(p.email || '').toLowerCase() === String(cur).toLowerCase());
+    sel.value = match ? match.email : cur;
+  }
 }
 
 // ══ COMPONENT VERIFICATION (v2.0.0 Chunk B) ═══════════════════════════════
@@ -640,62 +652,109 @@ function setupBuildTimer() {
   }
 }
 
-// Sentinel for "let the app choose" in the technician dropdown.
-const AUTO_ASSIGN_VALUE = '__auto__';
+// ══════════════════════════════════════════════════════════════════════════
+//  WHO BUILDS IT — the work queue (v1.11)
+//  The app no longer picks technicians. A new build goes to the build queue
+//  (rpc build_queue_send) and a technician claims it; anything not claimed in
+//  4 hours is offered by the server to whoever has the most room. A build's
+//  technician, technician_email, assigned_*, queued_at, offer_* and
+//  declined_emails are SERVER-OWNED: written only by the work_* RPCs, never by
+//  syncTicketToCloud (the tickets guard ignores them from a plain upsert), and
+//  carried unchanged through every local save. These helpers read them.
+// ══════════════════════════════════════════════════════════════════════════
+const SERVER_OWNED_TICKET_FIELDS = ['technician', 'technicianEmail', 'assignedVia', 'assignedAt', 'queuedAt', 'offer', 'declinedEmails'];
 
-/*
-  resolveTechnician(buildTier, existingTicket) — decide who builds this PC.
-
-  Auto is the default: the engine picks by live workload so nobody has to track
-  who is free. An explicit name always wins (the coordinator overrode on
-  purpose). When every technician is at capacity the ticket is QUEUED rather
-  than forced onto someone — it is picked up automatically the moment a build
-  is delivered (see drainAssignmentQueue).
-*/
-function resolveTechnician(buildTier, existingTicket) {
-  const chosen = (document.getElementById('form-technician') || {}).value || '';
-  if (chosen && chosen !== AUTO_ASSIGN_VALUE) {
-    return { technician: chosen, queued: false, reason: 'Manually assigned to ' + chosen + '.' };
-  }
-  // Keep an already-assigned technician on an edit unless the coordinator changes it.
-  if (existingTicket && existingTicket.technician && !existingTicket.queued) {
-    return { technician: existingTicket.technician, queued: false, reason: 'Kept with ' + existingTicket.technician + '.' };
-  }
-  if (!window.NeoQcTechAssign) {
-    const fallback = (appState.technicians && appState.technicians[0]) || '';
-    return { technician: fallback, queued: false, reason: 'Assignment engine unavailable — defaulted.' };
-  }
-  // Exclude this ticket from the load calculation so re-saving doesn't
-  // double-count the build against its own technician.
-  const others = (appState.tickets || []).filter(t => !existingTicket || t.id !== existingTicket.id);
-  return window.NeoQcTechAssign.pickTechnician(buildTier, others);
+function queueNowMs() {
+  const Q = window.NeoQcQueue;
+  if (Q && typeof Q.nowMs === 'function') { try { const n = Number(Q.nowMs()); if (Number.isFinite(n)) return n; } catch (e) {} }
+  return Date.now();
 }
 
-/*
-  drainAssignmentQueue() — called after a save. If a build was just delivered,
-  capacity opened up, so pull the longest-waiting queued ticket onto the free
-  technician. Repeats while tickets keep fitting.
-*/
-async function drainAssignmentQueue() {
-  if (!window.NeoQcTechAssign) return;
-  let moved = 0;
-  for (let guard = 0; guard < 10; guard++) {
-    const next = window.NeoQcTechAssign.nextFromQueue(appState.tickets || []);
-    if (!next) break;
-    const t = appState.tickets.find(x => x.id === next.ticket.id);
-    if (!t) break;
-    t.technician = next.technician;
-    t.queued = false;
-    t.updatedAt = new Date().toISOString();
-    addEventLog(t, `Released from the waiting queue — assigned to ${next.technician}.`, 'Neo OS');
-    try { await syncTicketToCloud(t); } catch (e) { console.warn('queue sync failed:', e && e.message); }
-    moved++;
+function workFmtLeft(ms) {
+  const W = window.NeoQcWork;
+  if (W && typeof W.fmtLeft === 'function') { try { return W.fmtLeft(ms); } catch (e) {} }
+  ms = Math.floor(Number(ms) || 0);
+  if (ms <= 0) return '0s';
+  const s = Math.floor(ms / 1000);
+  if (s < 60) return s + 's';
+  const m = Math.floor(s / 60);
+  if (m < 60) return m + 'm';
+  return Math.floor(m / 60) + 'h ' + String(m % 60).padStart(2, '0') + 'm';
+}
+
+function ticketIsAssigned(t) {
+  return !!(t && (t.technicianEmail || String(t.technician || '').trim()));
+}
+
+// In the build queue: nobody has it, it was sent to the floor, not finished.
+function isQueuedBuildTicket(t) {
+  const W = window.NeoQcWork;
+  if (W && typeof W.isQueuedBuild === 'function') { try { return !!W.isQueuedBuild(t); } catch (e) {} }
+  return !!t && !ticketIsAssigned(t) && !!t.queuedAt && t.status !== 'completed';
+}
+
+// A quote: nobody has it and it was never sent to the floor.
+function isQuoteBuildTicket(t) {
+  const W = window.NeoQcWork;
+  if (W && typeof W.isQuoteBuild === 'function') { try { return !!W.isQuoteBuild(t); } catch (e) {} }
+  return !!t && !ticketIsAssigned(t) && !t.queuedAt && t.status !== 'completed';
+}
+
+function ticketOfferLive(t, now) {
+  if (!t || !t.offer || !t.offer.expiresAt) return false;
+  const exp = Date.parse(t.offer.expiresAt);
+  return Number.isFinite(exp) && exp > (now == null ? queueNowMs() : now);
+}
+
+// {label, tone} for the ticket modal, the Builds card chip, the hover peek
+// and the Overview row. tone: 'ok' | 'warn' | 'late' | 'muted'.
+function buildTechInfo(t) {
+  if (!t) return { label: 'Not sent to the floor yet', tone: 'muted' };
+  const now = queueNowMs();
+  const W = window.NeoQcWork;
+  if (W && typeof W.buildAssignText === 'function') {
+    try {
+      const r = W.buildAssignText(t, now);
+      if (r && r.label) return { label: String(r.label), tone: ['ok', 'warn', 'late', 'muted'].includes(r.tone) ? r.tone : 'muted' };
+    } catch (e) { console.warn('buildAssignText failed:', e && e.message); }
   }
-  if (moved) {
-    await saveDatabase();
-    renderDashboard();
-    showToast(`${moved} queued build(s) started — a technician became free.`, 'success');
+  const first = (s) => String(s || '').trim().split(/\s+/)[0] || '';
+  const name = first(t.technician);
+  if (t.status === 'completed') return { label: name ? name : 'Finished', tone: 'muted' };
+  if (ticketOfferLive(t, now)) {
+    return { label: `Offered to ${first(t.offer.toName) || t.offer.toEmail || 'someone'} · ${workFmtLeft(Date.parse(t.offer.expiresAt) - now)} left`, tone: 'warn' };
   }
+  if (ticketIsAssigned(t)) {
+    if (t.assignedVia === 'legacy' || !t.technicianEmail) return { label: `${name || t.technician} (old assignment)`, tone: 'muted' };
+    let ago = '';
+    if (t.assignedAt && window.NeoQcUI && typeof window.NeoQcUI.fmtRelative === 'function') {
+      try { ago = ' · ' + window.NeoQcUI.fmtRelative(t.assignedAt, now); } catch (e) { ago = ''; }
+    }
+    return { label: `Claimed by ${name || t.technicianEmail}${ago}`, tone: 'ok' };
+  }
+  if (t.queuedAt) {
+    const q = Date.parse(t.queuedAt);
+    const due = Number.isFinite(q) ? q + 4 * 3600000 : NaN;
+    if (Number.isFinite(due) && now >= due) return { label: 'In the build queue · overdue — the app is offering it', tone: 'late' };
+    if (Number.isFinite(due)) return { label: `In the build queue · claim within ${workFmtLeft(due - now)}`, tone: due - now <= 3600000 ? 'warn' : 'ok' };
+    return { label: 'In the build queue', tone: 'ok' };
+  }
+  return { label: 'Not sent to the floor yet', tone: 'muted' };
+}
+
+function hasQcRole(min) {
+  const M = window.NeoQcModules;
+  if (!currentProfile) return false;
+  if (M && typeof M.hasRole === 'function') { try { return !!M.hasRole('qc', min); } catch (e) { return false; } }
+  return Number(currentProfile.tier) >= 3;   // no registry: the v1.9.6 rule, never wider
+}
+
+function myWorkPools() {
+  const M = window.NeoQcModules;
+  if (M && typeof M.pools === 'function') {
+    try { const p = M.pools(); if (p) return { build: !!p.build, service: !!p.service, level: p.level || null }; } catch (e) {}
+  }
+  return { build: false, service: false, level: null };
 }
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -1848,7 +1907,7 @@ function setupPpiTuningHandlers() {
 // App Global State
 let appState = {
   tickets: [],
-  technicians: ["Adhil", "Amal", "Ananthakrishnan", "Athul"],
+  pendingQueueSends: [],
   settings: {
     supabaseUrl: "",
     supabaseAnonKey: "",
@@ -1934,7 +1993,12 @@ async function loadDatabase() {
 
   // Securely initialize missing properties to prevent runtime script crashes
   if (!appState.tickets) appState.tickets = [];
-  if (!appState.technicians) appState.technicians = ["Adhil", "Amal", "Ananthakrishnan", "Athul"];
+  // v1.11 — builds this PC created whose build_queue_send has not landed yet
+  // (WQ-C1). Kept OUTSIDE the ticket objects, so no merge or mapper can drop it.
+  if (!Array.isArray(appState.pendingQueueSends)) appState.pendingQueueSends = [];
+  // v1.11 — the per-PC technician list is gone (technicians claim from the
+  // queue; people are managed in Settings → People). An old db.json may still
+  // carry it; nothing reads it.
 
   // Database migration & normalization for new build checks
   let databaseNeedsSaving = false;
@@ -1978,7 +2042,6 @@ async function loadDatabase() {
       autoPdf: false,
       soundEnabled: true,
       disableQcLock: false,
-      defaultTech: "",
       sortBy: "deadline",
       shopName: "Neo Tokyo Kochi",
       contactInfo: "kochi@neotokyo.in"
@@ -2005,7 +2068,6 @@ async function loadDatabase() {
     if (appState.settings.autoPdf === undefined) appState.settings.autoPdf = false;
     if (appState.settings.soundEnabled === undefined) appState.settings.soundEnabled = true;
     if (appState.settings.disableQcLock === undefined) appState.settings.disableQcLock = false;
-    if (appState.settings.defaultTech === undefined) appState.settings.defaultTech = "";
     if (appState.settings.sortBy === undefined) appState.settings.sortBy = "deadline";
     if (!appState.settings.shopName) appState.settings.shopName = "Neo Tokyo Kochi";
     if (!appState.settings.contactInfo) appState.settings.contactInfo = "kochi@neotokyo.in";
@@ -2148,13 +2210,19 @@ function switchScreen(mode, selectedId = null) {
 
   if (mode === 'staff') {
     document.getElementById('staff-screen').classList.add('active');
-    populateTechnicianDropdowns();
+    // v1.11 — no auto-assign drain any more: technicians claim builds from
+    // the Queue, and the server offers what nobody claims.
     renderDashboard();
-    // A build may have been delivered — here or on another machine — since this
-    // dashboard was last shown, freeing capacity. Pull anything waiting in the
-    // queue onto the freed technician NOW, not only after the next manual save.
-    // (Closes loophole #2: the queue previously drained on ticket-save only.)
-    drainAssignmentQueue().catch(e => console.warn('queue drain failed:', e && e.message));
+
+  } else if (mode === 'queue') {
+    // v1.11 — the one work queue for builds and service. queue.js owns it;
+    // the registry gate above has already decided this person may open it.
+    document.getElementById('queue-screen').classList.add('active');
+    if (window.NeoQcQueue && typeof window.NeoQcQueue.ensureLoaded === 'function') {
+      Promise.resolve()
+        .then(() => window.NeoQcQueue.ensureLoaded())
+        .catch(e => console.warn('queue load failed:', e && e.message));
+    }
 
   } else if (mode === 'overview') {
     // Builds and service in one list. Reads both caches; owns neither.
@@ -2286,7 +2354,8 @@ async function routeAfterAuth() {
         const ok = await loadCurrentProfile();
         if (ok) { routeByTier(); return; }
         // Session exists but no usable profile → sign out and fall through.
-        try { await supabaseClient.auth.signOut(); } catch (e) {}
+        // scope 'local': this PC only (see neoLogout).
+        try { await supabaseClient.auth.signOut({ scope: 'local' }); } catch (e) {}
       }
     }
   } catch (e) {
@@ -2436,6 +2505,10 @@ async function routeByTier() {
       return;
     }
     switchScreen(home);
+    // v1.11 — the work queue's background pass (work_tick every minute, and
+    // "new work for you" offers on any screen). Idempotent; it stops itself at
+    // sign-out.
+    startWorkQueueBackground();
     // Landing on your home screen is a natural pause point — re-check for OTA
     // updates (main rate-limits to once per 10 min). Until v1.10 this ran when
     // the mode selector was shown.
@@ -2484,11 +2557,31 @@ async function neoLogout() {
   // First, not after signOut(): that can take seconds on a slow line, and an
   // open ticket (or a webcam) must not wait for it.
   closeSessionOverlays();
-  try { if (supabaseClient && supabaseClient.auth) await supabaseClient.auth.signOut(); }
+  resetSessionCaches();
+  // v1.11 — scope 'local' ends THIS PC's session only. supabase-js@2's
+  // signOut() defaults to 'global', which revokes every refresh token of the
+  // account: the same person's NeoHR phone (which now signs in with this
+  // login and is how work offers reach them), the website and other PCs would
+  // all be signed out at their next refresh. A shared PC signs in and out all
+  // day.
+  try { if (supabaseClient && supabaseClient.auth) await supabaseClient.auth.signOut({ scope: 'local' }); }
   catch (e) { console.error('signOut failed:', e); }
   currentUser = null;
   currentProfile = null;
   showLoginScreen();
+}
+
+// v1.11 — per-person state that must not outlive a sign-in on a shared PC:
+// the bench's "Show all" escape hatch and the sales-executive list.
+function resetSessionCaches() {
+  benchShowAll = false;
+  salesExecsCache = null;
+}
+
+function startWorkQueueBackground() {
+  const Q = window.NeoQcQueue;
+  if (!currentProfile || !Q || typeof Q.startBackground !== 'function') return;
+  try { Q.startBackground(); } catch (e) { console.warn('work queue background failed to start:', e && e.message); }
 }
 
 // ── Sign-out closes the session's overlays (v1.10) ────────────────────────────
@@ -2568,6 +2661,12 @@ function closeSessionOverlays() {
   const R = window.NeoQcRmaUI;
   if (R && typeof R.closeIntake === 'function') run('The RMA form', () => R.closeIntake(true));
   if (R && typeof R.closeUnit === 'function') run('The RMA part', () => R.closeUnit(true));
+  // v1.11 — the work queue: its timers (the 1 s countdowns, the 30 s poll,
+  // the 60 s background pass), its "new work for you" toasts and the last
+  // person's feed all go. Its dialogs are ops dialogs, closed above.
+  const Q = window.NeoQcQueue;
+  if (Q && typeof Q.reset === 'function') run('The work queue', () => Q.reset());
+  if (techAreaTimer) { clearInterval(techAreaTimer); techAreaTimer = null; }
 
   // The build ticket form, closed the way requestCloseTicketModal does after
   // "Discard".
@@ -2615,10 +2714,12 @@ function setupAuthListeners() {
         const ok = await loadCurrentProfile();
         if (!ok) {
           showErr('Your account isn’t set up yet or has been deactivated. Contact the admin.');
-          try { await supabaseClient.auth.signOut(); } catch (e) {}
+          // scope 'local': this PC only (see neoLogout).
+          try { await supabaseClient.auth.signOut({ scope: 'local' }); } catch (e) {}
           if (btn) { btn.disabled = false; btn.textContent = old; }
           return;
         }
+        resetSessionCaches();
         if (pinEl) pinEl.value = '';
         if (btn) { btn.disabled = false; btn.textContent = old; }
         routeByTier();
@@ -2645,47 +2746,42 @@ function setupAuthListeners() {
 // ==========================================================================
 // DROPDOWN POPULATORS & RENDERING
 // ==========================================================================
-function populateTechnicianDropdowns() {
-  const staffFilter = document.getElementById('filter-tech');
-  const formTech = document.getElementById('form-technician');
+// v1.11 — the Builds technician filter is built from the tickets themselves
+// (no per-PC technician list): every technician name on a build, plus the two
+// unassigned states. Rebuilt only when the options change, and the current
+// choice is kept.
+const TECH_FILTER_QUEUE = '__queue__';
+const TECH_FILTER_QUOTE = '__quote__';
 
-  // Preserve select elements
-  if (staffFilter && formTech) {
-    staffFilter.innerHTML = '<option value="all">All Technicians</option>';
-    formTech.innerHTML = '';
-
-    // v2.0.0 — the app picks the technician by live workload; the coordinator
-    // only overrides deliberately. Each name carries a "free / busy" hint so an
-    // override is an informed one.
-    const loadByName = {};
-    try {
-      if (window.NeoQcTechAssign) {
-        window.NeoQcTechAssign.workloadSummary(appState.tickets || []).forEach(s => { loadByName[s.name] = s; });
-      }
-    } catch (e) { console.warn('workload summary failed:', e && e.message); }
-
-    const autoOpt = document.createElement('option');
-    autoOpt.value = AUTO_ASSIGN_VALUE;
-    autoOpt.textContent = '⚡ Auto-assign (recommended)';
-    formTech.appendChild(autoOpt);
-
-    appState.technicians.forEach(tech => {
-      const opt1 = document.createElement('option');
-      opt1.value = tech;
-      opt1.textContent = tech;
-      staffFilter.appendChild(opt1);
-
-      const opt2 = document.createElement('option');
-      opt2.value = tech;
-      const s = loadByName[tech];
-      opt2.textContent = s
-        ? `${tech} — ${s.full ? 'at capacity' : s.jobs + ' build(s), room free'}`
-        : tech;
-      formTech.appendChild(opt2);
+function populateTechFilter() {
+  const sel = document.getElementById('filter-tech');
+  if (!sel) return;
+  const names = Array.from(new Set((appState.tickets || [])
+    .map(t => String((t && t.technician) || '').trim())
+    .filter(Boolean)))
+    .sort((a, b) => a.localeCompare(b));
+  const opts = [['all', 'All Technicians']].concat(names.map(n => [n, n]),
+    [[TECH_FILTER_QUEUE, 'In the queue'], [TECH_FILTER_QUOTE, 'Not sent to the floor']]);
+  const sig = opts.map(o => o[0]).join('\u0001');
+  const cur = sel.value || 'all';
+  if (sel.dataset.sig !== sig) {
+    sel.dataset.sig = sig;
+    sel.textContent = '';
+    opts.forEach(([value, label]) => {
+      const o = document.createElement('option');
+      o.value = value;
+      o.textContent = label;
+      sel.appendChild(o);
     });
   }
-  
+  sel.value = opts.some(o => o[0] === cur) ? cur : 'all';
+}
 
+function ticketMatchesTechFilter(t, f) {
+  if (!f || f === 'all') return true;
+  if (f === TECH_FILTER_QUEUE) return isQueuedBuildTicket(t);
+  if (f === TECH_FILTER_QUOTE) return isQuoteBuildTicket(t);
+  return String((t && t.technician) || '').trim() === f;
 }
 
 function populateClientTicketSelect(selectedId = null) {
@@ -2737,12 +2833,27 @@ function technicianMatchesProfile(techName, profile) {
   return a.some(w => b.includes(w));
 }
 
+// v1.11 — a build is on someone's bench when its technician_email is theirs
+// (set by the server when they claim it or accept an offer). Old builds that
+// carry only a name fall back to the name match. Builds leads (tier 3+ are
+// leads) see the whole floor; "Show all" is theirs alone.
+function benchIsLead(profile) {
+  if (!profile) return false;
+  if (Number(profile.tier) >= 3) return true;
+  return profile === currentProfile && hasQcRole('lead');
+}
+
 function benchTicketsFor(profile) {
   const active = (appState.tickets || []).filter(t => t && t.status !== 'completed');
-  const tier = profile ? Number(profile.tier) : 0;
-  // Supervisors (T3+) and the "show all" escape hatch see the whole floor.
-  if (benchShowAll || tier >= 3 || !profile) return active;
-  return active.filter(t => technicianMatchesProfile(t.technician, profile));
+  if (!profile) return active;
+  const lead = benchIsLead(profile);
+  if (lead) return active;   // leads see the floor (benchShowAll only ever widens a lead's view)
+  const me = String(profile.email || '').trim().toLowerCase();
+  return active.filter(t => {
+    const e = String(t.technicianEmail || '').trim().toLowerCase();
+    if (e) return !!me && e === me;
+    return technicianMatchesProfile(t.technician, profile);
+  });
 }
 
 function renderBenchBoard() {
@@ -2761,12 +2872,14 @@ function renderBenchBoard() {
   });
   list = list.sort((a, b) => new Date(a.deadline || 0) - new Date(b.deadline || 0));
   if (countEl) countEl.textContent = String(list.length);
+  const benchLead = benchIsLead(currentProfile);
   if (subEl) {
-    const tier = currentProfile ? Number(currentProfile.tier) : 0;
-    subEl.textContent = (benchShowAll || tier >= 3)
+    subEl.textContent = (benchLead || !currentProfile)
       ? 'All active builds on the floor.'
-      : (currentProfile ? `Builds assigned to ${(currentProfile.full_name || '').split(' ')[0]}.` : 'Builds assigned to you.');
+      : `Builds ${(currentProfile.full_name || '').split(' ')[0] || 'you'} has claimed.`;
   }
+  const showAllBtn = document.getElementById('btn-bench-showall');
+  if (showAllBtn) showAllBtn.classList.toggle('hidden', !(benchLead && hasQcRole('lead')));
 
   empty.classList.toggle('hidden', list.length > 0);
   grid.innerHTML = list.map(t => {
@@ -2776,7 +2889,7 @@ function renderBenchBoard() {
     const qcPct = Math.round(calculateQcPercentage(t) || 0);
     const urgent = checkIsUrgent(t.deadline);
     const dRisk = t.status === 'completed' ? '' : deadlineRisk(t.deadline);
-    const stage = t.queued ? 'Queued'
+    const stage = isQueuedBuildTicket(t) ? 'Queued'
       : buildPct < 100 ? 'Assembly'
       : qcPct < 100 ? 'QC & Testing' : 'Ready';
     return `<button type="button" class="bench-card ${urgent ? 'urgent' : ''}" data-ticket="${escapeHtmlLite(t.id)}">
@@ -2818,7 +2931,12 @@ function setupBenchBoard() {
     refresh.disabled = false;
   });
   const showAll = document.getElementById('btn-bench-showall');
-  if (showAll) showAll.addEventListener('click', () => { benchShowAll = true; renderBenchBoard(); });
+  if (showAll) showAll.addEventListener('click', () => {
+    // Builds leads only (the button is hidden for everyone else); reset at sign-out.
+    if (!hasQcRole('lead')) return;
+    benchShowAll = true;
+    renderBenchBoard();
+  });
   const search = document.getElementById('bench-search');
   if (search) search.addEventListener('input', renderBenchBoard);
 }
@@ -2840,6 +2958,7 @@ function renderDashboard() {
 
   const searchQuery = document.getElementById('search-input').value.toLowerCase();
   const filterStatus = document.getElementById('filter-status').value;
+  populateTechFilter();
   const filterTech = document.getElementById('filter-tech').value;
 
   grid.innerHTML = '';
@@ -2895,7 +3014,7 @@ function renderDashboard() {
                           (t.serials && Object.values(t.serials).some(v => v && v.toLowerCase().includes(searchQuery)));
     
     const matchesStatus = filterStatus === 'all' || t.status === filterStatus;
-    const matchesTech = filterTech === 'all' || t.technician === filterTech;
+    const matchesTech = ticketMatchesTechFilter(t, filterTech);
 
     return matchesSearch && matchesStatus && matchesTech;
   });
@@ -2942,6 +3061,7 @@ function renderDashboard() {
 
       const damaged = hasDamagedComponents(t);
       const damagedCount = damaged ? (t.damagedComponents || (t.specs && t.specs.__damaged) || []).length : 0;
+      const techInfo = buildTechInfo(t);
 
       const card = document.createElement('div');
       card.className = `glass-slab ticket-card ${t.status} ${isUrgent ? "urgent" : ""} ${dRisk ? "risk-" + dRisk : ""} ${damaged ? "has-damage" : ""}`;
@@ -2957,9 +3077,9 @@ function renderDashboard() {
         ${ticketQueryCounts[t.id] ? `<div class="card-query-banner"><span>💬 ${ticketQueryCounts[t.id]} sales quer${ticketQueryCounts[t.id] > 1 ? 'ies' : 'y'} awaiting reply</span><span class="cqb-cta">Reply ›</span></div>` : ''}
         <h3 class="card-cust-name">${escapeHtmlLite(t.customerName)}</h3>
         <div style="margin-bottom:14px;">
-          <span class="tech-chip">
+          <span class="tech-chip q-tone-${techInfo.tone}">
             <span class="tech-chip-dot"></span>
-            ${t.queued ? '⏳ Waiting for a technician' : escapeHtmlLite(t.technician || 'Unassigned')}
+            ${escapeHtmlLite(techInfo.label)}
           </span>
         </div>
         
@@ -3017,7 +3137,7 @@ function renderDashboard() {
     const matchesSearch = t.customerName.toLowerCase().includes(searchQuery) ||
                           t.id.toLowerCase().includes(searchQuery) ||
                           (t.technician && t.technician.toLowerCase().includes(searchQuery));
-    const matchesTech = filterTech === 'all' || t.technician === filterTech;
+    const matchesTech = ticketMatchesTechFilter(t, filterTech);
     return matchesSearch && matchesTech;
   });
 
@@ -3141,7 +3261,7 @@ function showTicketPeek(card, t) {
        ${row('Storage', specs.storage)}
      </div>
      <div class="peek-foot">
-       ${row('Technician', t.queued ? 'Waiting for a technician' : t.technician)}
+       ${row('Technician', buildTechInfo(t).label)}
        ${row('Sales', b.salesExec)}
        ${row('Deadline', formatDateShort(t.deadline) + ' · ' + deadlineCountdown(t.deadline))}
        ${v.summary && v.summary.scanned ? row('Serials verified', v.summary.matched + ' / ' + v.summary.scanned) : ''}
@@ -3343,11 +3463,10 @@ function openTicketModal(ticketId = null) {
   }
   populateSalesExecs('');
 
-  // Refresh the technician list so its live "free / at capacity" hints are
-  // current, and default a NEW ticket to auto-assign.
-  populateTechnicianDropdowns();
-  const _techSel = document.getElementById('form-technician');
-  if (_techSel && !ticketId) _techSel.value = AUTO_ASSIGN_VALUE;
+  // v1.11 — who builds it is the work queue's business: the box shows where
+  // the build stands and offers the actions this person may take on it.
+  renderTicketTechArea(ticketId);
+  loadTicketQueueHistory(ticketId);
 
   if (ticketId) {
     title.textContent = "Edit Service Ticket";
@@ -3359,10 +3478,6 @@ function openTicketModal(ticketId = null) {
       document.getElementById('form-deadline').value = formatDateTimeLocal(ticket.deadline);
       document.getElementById('form-deadline').disabled = true;
       document.getElementById('btn-change-deadline').style.display = 'block';
-      // A queued ticket has no technician yet — show it as auto so saving
-      // re-runs the assignment instead of blanking the field.
-      document.getElementById('form-technician').value =
-        (ticket.queued || !ticket.technician) ? AUTO_ASSIGN_VALUE : ticket.technician;
       document.getElementById('form-ticket-type').value = ticket.type;
 
       // v2.0.0 — load saved sales-exec owner + build priority (keep the saved
@@ -3531,7 +3646,8 @@ function openTicketModal(ticketId = null) {
 
       printBtn.classList.remove('hidden');
       document.getElementById('btn-save-pdf').classList.remove('hidden');
-      deleteBtn.classList.remove('hidden');
+      // v1.11 — deleting a build is for Builds leads only (tier 3+ are leads).
+      deleteBtn.classList.toggle('hidden', !hasQcRole('lead'));
       updateModalDiagnosticsStatus();
 
       // Populate Client Telemetry elements removed (redundant telemetry sections deleted in v1.0.9)
@@ -3591,13 +3707,6 @@ function openTicketModal(ticketId = null) {
     document.getElementById('btn-save-pdf').classList.add('hidden');
     deleteBtn.classList.add('hidden');
     updateModalDiagnosticsStatus();
-
-    // Default the technician. Auto-assign is the intended default (the engine
-    // picks by live workload); only fall back to a configured default tech if
-    // the shop has explicitly set one in Settings.
-    populateTechnicianDropdowns();
-    document.getElementById('form-technician').value =
-      appState.settings.defaultTech || AUTO_ASSIGN_VALUE;
 
     // Auto-detect system specs if option is enabled
     if (appState.settings.autoDetectHw) {
@@ -3701,6 +3810,230 @@ function updateTicketModalChrome(ticketId) {
     el.classList.toggle('idle', !t);
   });
   _tmjReachedIdx = reachedIdx;
+}
+
+// ══ The ticket's technician box (v1.11) ════════════════════════════════════
+// Replaces the old "Assigned Technician" dropdown. It says where the build
+// stands (claimed, offered, in the queue, not sent to the floor) and offers
+// the actions this person may take. Every action is an RPC on the SAVED
+// ticket (NeoQcQueue.buildAction → NeoQcData.work*), never part of Save, and
+// the server re-checks it; the box refreshes from the server afterwards.
+let techAreaTimer = null;
+let techActionBusy = false;
+let techHistorySeq = 0;
+const TECH_BTN_ACT = {
+  'btn-tech-claim': 'claim', 'btn-tech-offer': 'offer', 'btn-tech-withdraw': 'withdraw',
+  'btn-tech-release': 'release', 'btn-tech-send': 'send'
+};
+const TECH_SAVE_FIRST = 'Save first — new builds go to the build queue automatically.';
+// When this PC itself just changed a build through the queue, the realtime
+// echo of that change is not "another device" (no conflict banner).
+const ownQueueActionAt = {};
+const WORK_WHY_SELF = {
+  not_staff: "You don't have an active staff account.",
+  no_role: "You don't have the Builds technician role.",
+  no_pool: "You aren't in the build pool.",
+  senior: 'This is a high-value build — only senior builders can take it.'
+};
+
+function workWhySentence(code, self) {
+  const W = window.NeoQcWork;
+  if (W && typeof W.whySentence === 'function') { try { const s = W.whySentence(code, 'build', self); if (s) return s; } catch (e) {} }
+  return WORK_WHY_SELF[code] || '';
+}
+
+function buildTierOfTicket(t) {
+  const W = window.NeoQcWork;
+  if (W && typeof W.buildTier === 'function') { try { return Number(W.buildTier((t && t.specs) || {})) || 1; } catch (e) {} }
+  const n = Math.round(Number(t && t.specs && t.specs.__build && t.specs.__build.tier) || 1);
+  return Math.min(5, Math.max(1, n));
+}
+
+// The server's _work_why_not for the signed-in person (the server decides;
+// this only greys the button out with the reason).
+function myBuildWhyNot(tier) {
+  if (!currentProfile) return 'not_staff';
+  const M = window.NeoQcModules;
+  let qcRole = null;
+  try { qcRole = M && typeof M.roleFor === 'function' ? M.roleFor('qc') : null; } catch (e) { qcRole = null; }
+  const pools = myWorkPools();
+  const person = {
+    email: currentProfile.email, name: currentProfile.full_name, tier: Number(currentProfile.tier) || 0,
+    active: currentProfile.active !== false, is_staff: currentProfile.is_staff !== false,
+    qc_role: qcRole, build_pool: pools.build, service_pool: pools.service, build_level: pools.level
+  };
+  const W = window.NeoQcWork;
+  if (W && typeof W.whyNot === 'function') { try { return W.whyNot(person, 'build', tier) || null; } catch (e) {} }
+  if (!person.active || !person.is_staff) return 'not_staff';
+  if (!['tech', 'lead'].includes(person.tier >= 3 ? 'lead' : qcRole)) return 'no_role';
+  if (!person.build_pool) return 'no_pool';
+  if (tier >= 4 && person.build_level !== 'senior') return 'senior';
+  return null;
+}
+
+function techBtn(id, show, opts) {
+  const b = document.getElementById(id);
+  if (!b) return;
+  opts = opts || {};
+  b.classList.toggle('hidden', !show);
+  b.disabled = !!opts.disabled || techActionBusy;
+  b.title = opts.title || '';
+  if (opts.label) b.textContent = opts.label;
+}
+
+function techClock(iso) {
+  const ms = Date.parse(iso);
+  if (!Number.isFinite(ms)) return '—';
+  const d = new Date(ms);
+  return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+}
+
+function renderTicketTechArea(ticketId) {
+  const statusEl = document.getElementById('form-tech-status');
+  if (!statusEl) return;
+  const noteEl = document.getElementById('form-tech-note');
+  const say = (text) => { if (noteEl) { noteEl.textContent = text || ''; noteEl.classList.toggle('hidden', !text); } };
+  ensureTechAreaTimer();
+  const t = ticketId ? (appState.tickets || []).find(x => x.id === ticketId) : null;
+  const pools = myWorkPools();
+  if (!t) {
+    statusEl.textContent = ticketId ? 'This build is no longer on this PC.' : 'New build — it goes to the build queue when you save.';
+    statusEl.dataset.tone = 'muted';
+    Object.keys(TECH_BTN_ACT).forEach(id => techBtn(id, false));
+    if (!ticketId) {
+      techBtn('btn-tech-claim', pools.build, { label: 'Claim', disabled: true, title: TECH_SAVE_FIRST });
+      techBtn('btn-tech-offer', hasQcRole('lead'), { label: 'Offer to…', disabled: true, title: TECH_SAVE_FIRST });
+      say(TECH_SAVE_FIRST);
+    } else {
+      say('');
+    }
+    return;
+  }
+  const info = buildTechInfo(t);
+  statusEl.textContent = info.label;
+  statusEl.dataset.tone = info.tone;
+
+  const now = queueNowMs();
+  const me = String((currentProfile && currentProfile.email) || '').trim().toLowerCase();
+  const done = t.status === 'completed';
+  const live = ticketOfferLive(t, now);
+  const toMe = live && String(t.offer.toEmail || '').trim().toLowerCase() === me;
+  const queued = isQueuedBuildTicket(t);
+  const quote = isQuoteBuildTicket(t);
+  const assigned = ticketIsAssigned(t);
+  const mine = !!t.technicianEmail && String(t.technicianEmail).trim().toLowerCase() === me;
+  const lead = hasQcRole('lead');
+  const desk = hasQcRole('desk');
+  const why = myBuildWhyNot(buildTierOfTicket(t));
+  const claimable = !done && queued && pools.build && (!live || toMe);
+
+  techBtn('btn-tech-claim', claimable, {
+    label: toMe ? 'Accept offer' : 'Claim', disabled: !!why, title: why ? workWhySentence(why, true) : ''
+  });
+  techBtn('btn-tech-offer', lead && !done && !live, { label: assigned ? 'Offer to someone else…' : 'Offer to…' });
+  techBtn('btn-tech-withdraw', lead && !done && live, { label: 'Withdraw offer' });
+  techBtn('btn-tech-release', !done && assigned && (mine || lead), { label: mine ? 'Hand back…' : 'Back to the queue…' });
+  techBtn('btn-tech-send', desk && quote, { label: 'Send to build queue' });
+
+  let note = '';
+  if (toMe) note = `Offered to you — accept by ${techClock(t.offer.expiresAt)}, or decline it from the Queue.`;
+  else if (claimable && why) note = workWhySentence(why, true);
+  else if (quote && !desk) note = 'Someone on the Builds desk sends it to the build queue.';
+  else if (live && t.offer.reason && lead) note = `Offer reason: ${t.offer.reason}`;
+  say(note);
+}
+
+// While the ticket is open its countdown text stays current; the timer stops
+// itself when the modal closes (and at sign-out).
+function ensureTechAreaTimer() {
+  if (techAreaTimer) return;
+  techAreaTimer = setInterval(() => {
+    const m = document.getElementById('ticket-modal');
+    if (!m || !m.classList.contains('active') || !currentProfile) {
+      clearInterval(techAreaTimer);
+      techAreaTimer = null;
+      return;
+    }
+    renderTicketTechArea(editingTicketId);
+  }, 30000);
+}
+
+async function onTechButton(act) {
+  const id = editingTicketId;            // the ticket this click is about — bound before any await
+  if (!id) { showToast(TECH_SAVE_FIRST, 'info'); return; }
+  if (techActionBusy) return;
+  const Q = window.NeoQcQueue;
+  if (!Q || typeof Q.buildAction !== 'function') {
+    showToast('The work queue is not available on this PC — restart Neo OS.', 'error');
+    return;
+  }
+  techActionBusy = true;
+  Object.keys(TECH_BTN_ACT).forEach(bid => { const b = document.getElementById(bid); if (b) b.disabled = true; });
+  ownQueueActionAt[id] = Date.now();
+  let ok = false;
+  try {
+    ok = !!(await Q.buildAction(act, id));
+  } catch (e) {
+    showToast('That did not work: ' + opsErrText(e), 'error', 8000);
+  }
+  techActionBusy = false;
+  if (ok) {
+    ownQueueActionAt[id] = Date.now();
+    try { await refreshTicketFromCloud(id); } catch (e) {}
+  }
+  if (editingTicketId !== id) return;    // another ticket (or none) is open now
+  renderTicketTechArea(id);
+  if (ok) loadTicketQueueHistory(id);
+}
+
+function setupTechAreaButtons() {
+  Object.keys(TECH_BTN_ACT).forEach(bid => {
+    const b = document.getElementById(bid);
+    if (!b || b.dataset.bound) return;
+    b.dataset.bound = '1';
+    b.addEventListener('click', (e) => { e.preventDefault(); onTechButton(TECH_BTN_ACT[bid]); });
+  });
+}
+
+// "Queue history" — the build's work_events, newest first. Builds desk+ only
+// (the server's rule for work_events_for builds).
+async function loadTicketQueueHistory(ticketId) {
+  const box = document.getElementById('form-tech-history');
+  const list = document.getElementById('form-tech-history-list');
+  if (!box || !list) return;
+  const seq = ++techHistorySeq;
+  const id = ticketId;
+  list.textContent = '';
+  const D = window.NeoQcData;
+  if (!id || !hasQcRole('desk') || !D || typeof D.workEvents !== 'function') { box.classList.add('hidden'); return; }
+  box.classList.remove('hidden');
+  const line = (text) => { const li = document.createElement('li'); li.textContent = text; list.appendChild(li); };
+  line('Loading…');
+  let res;
+  try {
+    res = await D.workEvents('build', id);
+  } catch (e) {
+    if (seq !== techHistorySeq || editingTicketId !== id) return;
+    list.textContent = '';
+    line(e && e.message === 'DEMO_READONLY' ? 'Not shown while demo data is on.' : 'Could not load the queue history: ' + opsErrText(e));
+    return;
+  }
+  if (seq !== techHistorySeq || editingTicketId !== id) return;
+  const rows = Array.isArray(res) ? res
+    : (res && Array.isArray(res.events)) ? res.events
+    : (res && Array.isArray(res.rows)) ? res.rows : [];
+  list.textContent = '';
+  if (!rows.length) { line('Nothing yet.'); return; }
+  const UI = window.NeoQcUI;
+  rows.forEach(r => {
+    if (!r) return;
+    const li = document.createElement('li');
+    const tm = document.createElement('time');
+    tm.textContent = (UI && typeof UI.fmtDateTime === 'function') ? UI.fmtDateTime(r.at) : String(r.at || '');
+    li.appendChild(tm);
+    li.appendChild(document.createTextNode(String(r.body || r.kind || '')));
+    list.appendChild(li);
+  });
 }
 
 // The journey rail sits in the modal's non-scrolling header, so it is the one
@@ -4319,14 +4652,11 @@ async function handleTicketFormSubmit(e) {
   } else {
     deadline = new Date().toISOString();
   }
-  // v2.0.0 — the technician is chosen by workload (or kept/overridden). The
-  // build tier is read first because it decides who is capable and who is free.
-  const _existingForAssign = editingTicketId ? appState.tickets.find(t => t.id === editingTicketId) : null;
-  const _impNow = (document.getElementById('form-build-importance') || {}).value || 'light';
-  const _tierNow = BUILD_TIER_BY_IMPORTANCE[_impNow] || 1;
-  const _assign = resolveTechnician(_tierNow, _existingForAssign);
-  const technician = _assign.technician || '';
-  const isQueued = !!_assign.queued;
+  // v1.11 — who builds it is SERVER-OWNED (the work queue). Saving the form
+  // never changes it: technician and the queue/offer fields are carried from
+  // the ticket as it stands (refreshed from the server), and a new build has
+  // none yet — it goes to the build queue right after its first upload.
+  const isNewTicket = !editingTicketId;
 
   const missingComponentsToggle = document.getElementById('form-missing-components-toggle').checked;
   // Serialize the multi-part array. Store as JSON string so the existing
@@ -4420,7 +4750,6 @@ async function handleTicketFormSubmit(e) {
     type: ticketType,
     customerName,
     deadline,
-    technician,
     missingComponentsToggle,
     missingComponents,
     buildChecks,
@@ -4428,9 +4757,19 @@ async function handleTicketFormSubmit(e) {
     diagnostics,
     serials,
     status,
-    queued: isQueued,          // true = waiting for a technician to free up
-    completedAt: status === 'completed' ? new Date().toISOString() : null
+    // v1.11 — a re-save of a finished build keeps its completion date (the
+    // warranty runs from it); it used to be re-stamped on every save.
+    completedAt: status === 'completed'
+      ? ((existingTicket && existingTicket.status === 'completed' && existingTicket.completedAt) || new Date().toISOString())
+      : null
   };
+  // Server-owned (the work queue): carried as they stand, never set here.
+  SERVER_OWNED_TICKET_FIELDS.forEach(k => {
+    updatedTicket[k] = existingTicket && existingTicket[k] !== undefined ? existingTicket[k] : null;
+  });
+  if (!updatedTicket.technician) updatedTicket.technician = existingTicket ? (existingTicket.technician || '') : '';
+  if (!Array.isArray(updatedTicket.declinedEmails)) updatedTicket.declinedEmails = [];
+  if (existingTicket && existingTicket.cloudSynced) updatedTicket.cloudSynced = true;
 
   const specMobo = document.getElementById('form-spec-mobo').value;
   const specCpu = document.getElementById('form-spec-cpu').value;
@@ -4621,9 +4960,8 @@ async function handleTicketFormSubmit(e) {
         const newLabel = getStatusLabelText(updatedTicket.status);
         addEventLog(updatedTicket, `Status changed: "${oldLabel}" → "${newLabel}"`, techName);
       }
-      if (existingTicket.technician !== updatedTicket.technician) {
-        addEventLog(updatedTicket, `Technician reassigned: "${existingTicket.technician || 'Unassigned'}" → "${updatedTicket.technician}"`, techName);
-      }
+      // v1.11 — technician changes are the work queue's (its history is in
+      // the ticket's "Queue history"); a save never changes the technician.
       if (existingTicket.deadline !== updatedTicket.deadline) {
         const oldDate = formatDateShort(existingTicket.deadline);
         const newDate = formatDateShort(updatedTicket.deadline);
@@ -4643,18 +4981,6 @@ async function handleTicketFormSubmit(e) {
     }
   }
 
-  // Record how this build got its technician (or that it queued) — the
-  // coordinator can always see why the app chose who it chose. The author is
-  // the app's display name (Neo OS since 1.10); entries written before the
-  // rename still say 'NeoQC', and nothing reads this field back but the log.
-  if (!_existingForAssign) {
-    addEventLog(updatedTicket, isQueued
-      ? 'Waiting queue — all technicians at capacity.'
-      : (_assign.reason || ('Assigned to ' + technician + '.')), 'Neo OS');
-  } else if (_existingForAssign.technician !== technician && technician) {
-    addEventLog(updatedTicket, `Technician changed to ${technician}.`, 'Neo OS');
-  }
-
   // v1.9.8 DATA-LOSS FIX — carry stress-test state across an admin save. This
   // handler REPLACES the ticket object wholesale (appState.tickets[index] =
   // updatedTicket below) and the form owns none of these fields, so every
@@ -4666,35 +4992,47 @@ async function handleTicketFormSubmit(e) {
     updatedTicket.stressRuns = existingTicket.stressRuns || 0;
     updatedTicket.stressSignedOff = !!existingTicket.stressSignedOff;
     updatedTicket.stressSignedOffAt = existingTicket.stressSignedOffAt || null;
+    // v1.11 — the rest of what the form does not own. Without these, the
+    // upload's `else delete diagPayload.__reportOverrides` wiped God-Mode
+    // report overrides on every admin save, and the stress time/log were
+    // dropped until the next pull.
+    updatedTicket.stressTotalSec = existingTicket.stressTotalSec || 0;
+    updatedTicket.stressLog = Array.isArray(existingTicket.stressLog) ? existingTicket.stressLog : [];
+    updatedTicket.reportOverrides = existingTicket.reportOverrides || null;
   }
 
   updatedTicket.updatedAt = new Date().toISOString();
 
   if (editingTicketId) {
     const index = appState.tickets.findIndex(t => t.id === editingTicketId);
-    appState.tickets[index] = updatedTicket;
+    if (index === -1) appState.tickets.push(updatedTicket);
+    else appState.tickets[index] = updatedTicket;
   } else {
     appState.tickets.push(updatedTicket);
+    // WQ-C1 — queued for build_queue_send BEFORE its first upload, outside
+    // the ticket object, so neither a failed upload nor the realtime echo of
+    // our own insert can lose it. drainPendingQueueSends() retries it.
+    if (!Array.isArray(appState.pendingQueueSends)) appState.pendingQueueSends = [];
+    if (!appState.pendingQueueSends.includes(id)) appState.pendingQueueSends.push(id);
   }
 
   await saveDatabase();
-  await syncTicketToCloud(updatedTicket);
+  const uploaded = await syncTicketToCloud(updatedTicket);
   document.getElementById('ticket-modal').classList.remove('active');
   editingTicketId = null;
   ticketFormDirty = false;
   hideConflictBanner();
   renderDashboard();
+  notifyBuildsChanged();
 
-  // Tell the coordinator who picked it up (or that it's waiting), then see if a
-  // just-completed build frees capacity for anything in the queue.
-  if (isQueued) {
-    showToast('All technicians are at capacity — this build is in the waiting queue and starts automatically when one frees up.', 'warning', 9000);
-  } else if (_assign && _assign.reason && !_existingForAssign) {
-    showToast(_assign.reason, 'success');
+  if (isNewTicket) {
+    showToast(uploaded
+      ? '✓ Ticket created — it goes to the build queue for a technician to claim.'
+      : '✓ Ticket created on this PC. It goes to the build queue once it reaches the cloud.', uploaded ? 'success' : 'warning', uploaded ? 5000 : 9000);
+    drainPendingQueueSends().catch(e => console.warn('build queue send failed:', e && e.message));
   } else {
-    showToast(_existingForAssign ? '✓ Ticket saved.' : '✓ Ticket created.', 'success');
+    showToast(uploaded ? '✓ Ticket saved.' : '✓ Saved on this PC, but it could not reach the cloud. Save it again once the connection is back.', uploaded ? 'success' : 'warning', uploaded ? 5000 : 9000);
   }
-  drainAssignmentQueue().catch(e => console.warn('queue drain failed:', e && e.message));
   } catch (err) {
     // Never fail silently — surface the reason so a save problem is visible.
     console.error('Ticket save failed:', err);
@@ -5353,19 +5691,8 @@ function unlockAdminSettings() {
 function openSettingsModal() {
   const modal = document.getElementById('settings-modal');
   resetAdminLockState();
-  
-  // Render technicians
-  const techList = document.getElementById('settings-tech-list');
-  techList.innerHTML = '';
-  appState.technicians.forEach(tech => {
-    const li = document.createElement('li');
-    li.innerHTML = `<span>${tech}</span><button class="text-btn text-crimson remove-tech-btn">Remove</button>`;
-    li.querySelector('.remove-tech-btn').addEventListener('click', () => {
-      appState.technicians = appState.technicians.filter(t => t !== tech);
-      openSettingsModal(); // Refresh
-    });
-    techList.appendChild(li);
-  });
+  // v1.11 — the per-PC "Technicians" list is gone: technicians claim builds
+  // from the Queue, and people are managed in Settings → General → People.
 
   // Render PPI Engine use-case tuning table (replaces the old rival DB).
   renderPpiConfigTable();
@@ -5386,16 +5713,6 @@ function openSettingsModal() {
   document.getElementById('settings-sound-enabled').checked = !!appState.settings.soundEnabled;
   document.getElementById('settings-disable-qc-lock').checked = !!appState.settings.disableQcLock;
 
-  // Populate default technician select list inside settings
-  const techSelect = document.getElementById('settings-default-tech');
-  techSelect.innerHTML = '<option value="">-- None (Unassigned) --</option>';
-  appState.technicians.forEach(tech => {
-    const opt = document.createElement('option');
-    opt.value = tech;
-    opt.textContent = tech;
-    techSelect.appendChild(opt);
-  });
-  techSelect.value = appState.settings.defaultTech || '';
   document.getElementById('settings-sort-by').value = appState.settings.sortBy || 'deadline';
 
   // Populate thresholds
@@ -5448,21 +5765,29 @@ function openSettingsModal() {
   modal.classList.add('active');
 }
 
-// ── Settings → Operations (v1.10) ─────────────────────────────────────────────
-// Two things live here, and both act straight away (not on Save):
+// ── Settings → Operations (v1.10, People in v1.11) ────────────────────────────
+// Three things live here, and all act straight away (not on Save):
 //   (a) "Show demo service and RMA data" — a training aid for anyone who can
 //       open Service or RMA. Demo data is read-only and never written to
 //       Supabase (NeoQcData enforces that); this only flips the switch.
-//   (b) "Module access" — tier 4+ only: who holds which Service / RMA role.
-//       Writes go through NeoQcData → RPC module_access_set, which checks
-//       tier 4 on the server too. A change reaches that person at their next
-//       sign-in or app restart, because roles are read once, at sign-in.
-// Every name below is staff-typed text, so the table is built with
+//   (b) "People" — tier 4+ only: everyone with a login, their designation,
+//       tier, Active/Staff state, module roles (Service / RMA / Builds), work
+//       pools, build level and capacity. Writes go through NeoQcData → RPC
+//       staff_update / staff_apply_preset, which check the same rules on the
+//       server (tier 4 changes tier ≤ 3 accounts only; only tier 5 sets tiers;
+//       nobody changes their own tier, Active, Staff or roles). A change
+//       reaches that person at their next sign-in or app restart, because
+//       roles are read once, at sign-in.
+//   (c) "Designation presets" — tier 4+: what each designation gets.
+// Every name below is staff-typed text, so the lists are built with
 // textContent — never innerHTML with a value in it.
 let opsSettingsSeq = 0;
 const OPS_ROLE_OPTIONS = [['', '—'], ['desk', 'Desk'], ['tech', 'Tech'], ['lead', 'Lead']];
-const OPS_MODULE_LABELS = { service: 'Service', rma: 'RMA' };
+const OPS_MODULE_LABELS = { service: 'Service', rma: 'RMA', qc: 'Builds' };
 const OPS_MODAL_IDS = ['sv-job-modal', 'sv-intake-modal', 'rma-unit-modal', 'rma-intake-modal', 'ops-dialog-modal'];
+const OPS_OWNER_ONLY = 'Only the owner can change a tier 4 or 5 account.';
+const OPS_PEOPLE_HELP = "Create their login in Supabase → Authentication → Add user (auto-confirm; the PIN is the password). They then appear here as 'New — not staff yet'. Open them, set the designation and turn on Staff.";
+let opsPeople = { rows: [], presets: [] };
 
 function opsErrText(e) {
   if (e && e.message === 'DEMO_READONLY') return 'Demo data is on. Turn it off above to change this.';
@@ -5485,16 +5810,17 @@ function renderOpsSettings() {
   const canDemo = !!(currentProfile && D && typeof D.setDemo === 'function' && typeof D.isDemo === 'function' &&
     (opsCanOpen('service') || opsCanOpen('rma')));
   const canAdmin = !!(currentProfile && D && tier >= 4 &&
-    typeof D.moduleAccessList === 'function' && typeof D.moduleAccessSet === 'function');
+    typeof D.staffList === 'function' && typeof D.staffUpdate === 'function');
+  const canPresets = !!(canAdmin && typeof D.presetList === 'function');
 
   host.textContent = '';
   if (!canDemo && !canAdmin) { host.classList.add('hidden'); return; }
   host.classList.remove('hidden');
 
-  // Static markup only; the staff rows are added with DOM calls below.
+  // Static markup only; every person and preset is added with DOM calls below.
   host.innerHTML =
     '<div class="settings-section-title">Operations</div>' +
-    '<p class="settings-section-desc">Service and RMA. These take effect straight away — no need to press Save.</p>' +
+    '<p class="settings-section-desc">Service, RMA, builds and the work queue. These take effect straight away — no need to press Save.</p>' +
     (canDemo
       ? '<label class="settings-toggle-row">' +
           '<div class="settings-toggle-info">' +
@@ -5508,19 +5834,29 @@ function renderOpsSettings() {
         '</label>'
       : '') +
     (canAdmin
-      ? '<div class="settings-field" id="settings-ops-access" style="margin-top:14px;">' +
-          '<div class="settings-label">Module access</div>' +
-          '<p class="settings-field-note" style="margin:0 0 8px;">Who can open Service and RMA, and at what level. <strong>Desk</strong> takes tickets in and moves them on; <strong>Tech</strong> can also claim work; <strong>Lead</strong> can also assign, set priority and waive fees. Everyone at tier 3 and above is a lead in every module automatically. A change takes effect for that person at their next sign-in or app restart.</p>' +
-          '<input type="text" id="settings-ops-access-search" class="settings-input" placeholder="Search staff by name or email…" autocomplete="off" spellcheck="false" style="margin-bottom:8px;">' +
-          '<div class="table-container" style="max-height:340px;overflow-y:auto;">' +
-            '<table class="settings-table">' +
-              '<thead><tr><th style="text-align:left;">Person</th><th style="width:130px;">Service</th><th style="width:130px;">RMA</th></tr></thead>' +
-              '<tbody id="settings-ops-access-body"></tbody>' +
-            '</table>' +
+      ? '<div class="settings-field" id="settings-ops-people" style="margin-top:14px;">' +
+          '<div class="settings-label">People</div>' +
+          '<p class="q-people-help">Who works here and what they can do. A person’s <strong>designation</strong> picks a preset of roles and pools; anything you set by hand for them wins. <strong>Desk</strong> takes work in and moves it on; <strong>Tech</strong> can also claim work; <strong>Lead</strong> can also offer work to people, set priority and waive fees. Tier 3 and above are leads everywhere automatically. The <strong>pools</strong> decide who claims builds and service jobs from the Queue. A change takes effect for that person at their next sign-in or app restart.</p>' +
+          '<p class="q-people-help" id="settings-ops-people-add"><strong>Adding someone:</strong> </p>' +
+          '<div class="q-people-bar">' +
+            '<input type="text" id="settings-ops-people-search" class="settings-input" placeholder="Search people by name, email or designation…" autocomplete="off" spellcheck="false">' +
+            '<button type="button" id="settings-ops-people-reload" class="secondary-btn">↻ Reload</button>' +
           '</div>' +
-          '<div id="settings-ops-access-status" class="settings-field-note" role="status" aria-live="polite"></div>' +
-        '</div>'
+          '<div id="settings-ops-people-list" class="q-people-list"></div>' +
+          '<div id="settings-ops-people-status" class="settings-field-note" role="status" aria-live="polite"></div>' +
+        '</div>' +
+        (canPresets
+          ? '<div class="settings-field" id="settings-ops-presets" style="margin-top:14px;">' +
+              '<div class="settings-label">Designation presets</div>' +
+              '<p class="q-people-help">What each designation gets: its Service, RMA and Builds roles, the work pools, the build level and capacity. A preset is applied when you set or change someone’s designation, or press <strong>Apply preset</strong>; anything set by hand for a person wins. Removing a role in a preset removes it from people when the preset is applied.</p>' +
+              '<div class="q-people-bar"><button type="button" id="settings-ops-preset-add" class="secondary-btn">+ Add preset</button></div>' +
+              '<div id="settings-ops-presets-list" class="q-people-list"></div>' +
+            '</div>'
+          : '')
       : '');
+
+  const addHelp = document.getElementById('settings-ops-people-add');
+  if (addHelp) addHelp.appendChild(document.createTextNode(OPS_PEOPLE_HELP));
 
   // Scanner rule: Enter in an input here must never do anything. The host
   // outlives each render, so the guard is bound once.
@@ -5535,7 +5871,15 @@ function renderOpsSettings() {
   }
 
   if (canDemo) bindOpsDemoToggle(D);
-  if (canAdmin) loadOpsModuleAccess(seq, D);
+  if (canAdmin) {
+    const reload = document.getElementById('settings-ops-people-reload');
+    if (reload) reload.addEventListener('click', () => loadOpsPeople(opsSettingsSeq, D));
+    const search = document.getElementById('settings-ops-people-search');
+    if (search) search.addEventListener('input', () => filterOpsPeople());
+    const addPreset = document.getElementById('settings-ops-preset-add');
+    if (addPreset) addPreset.addEventListener('click', () => editOpsPreset(null, D));
+    loadOpsPeople(seq, D);
+  }
 }
 
 function bindOpsDemoToggle(D) {
@@ -5588,128 +5932,540 @@ function rerenderOpsScreen() {
   }
 }
 
-async function loadOpsModuleAccess(seq, D) {
-  const body = document.getElementById('settings-ops-access-body');
-  if (!body) return;
-  const message = (text) => {
-    body.textContent = '';
-    const tr = document.createElement('tr');
-    const td = document.createElement('td');
-    td.colSpan = 3;
-    td.textContent = text;
-    tr.appendChild(td);
-    body.appendChild(tr);
-  };
-  message('Loading staff…');
-  let res;
+// ── People (tier 4+) ──────────────────────────────────────────────────────────
+function opsNorm(res, key) {
+  if (typeof res === 'string') { try { res = JSON.parse(res); } catch (e) { res = null; } }
+  if (Array.isArray(res)) return res;
+  if (res && Array.isArray(res[key])) return res[key];
+  if (res && Array.isArray(res.data)) return res.data;
+  return [];
+}
+
+function opsSay(text, isError) {
+  const status = document.getElementById('settings-ops-people-status');
+  if (!status) return;
+  status.textContent = text || '';
+  status.style.color = isError ? 'var(--status-urgent)' : '';
+}
+
+function opsListMessage(listEl, text) {
+  if (!listEl) return;
+  listEl.textContent = '';
+  const d = document.createElement('div');
+  d.className = 'q-empty';
+  d.textContent = text;
+  listEl.appendChild(d);
+}
+
+function opsNode(tag, cls, text) {
+  const n = document.createElement(tag);
+  if (cls) n.className = cls;
+  if (text != null) n.textContent = text;
+  return n;
+}
+
+function opsTag(text, cls) { return opsNode('span', 'q-role' + (cls ? ' ' + cls : ''), text); }
+
+function opsField(label, control, opts) {
+  opts = opts || {};
+  const lab = opsNode('label', 'ops-field' + (opts.wide ? ' ops-span2' : ''));
+  lab.appendChild(opsNode('span', null, label));
+  lab.appendChild(control);
+  if (opts.hint) lab.appendChild(opsNode('p', 'ops-hint', opts.hint));
+  return lab;
+}
+
+function opsInput(type, value, max) {
+  const i = document.createElement('input');
+  i.type = type;
+  if (value != null) i.value = String(value);
+  if (max && type === 'text') i.maxLength = max;
+  i.autocomplete = 'off';
+  i.spellcheck = false;
+  return i;
+}
+
+function opsCheck(label, checked, disabled, title) {
+  const lab = opsNode('label', 'ops-check');
+  const c = document.createElement('input');
+  c.type = 'checkbox';
+  c.checked = !!checked;
+  c.disabled = !!disabled;
+  if (title) lab.title = title;
+  lab.appendChild(c);
+  lab.appendChild(opsNode('span', null, label));
+  return { label: lab, input: c };
+}
+
+function opsSelect(options, value, disabled) {
+  const s = document.createElement('select');
+  options.forEach(([v, l]) => {
+    const o = document.createElement('option');
+    o.value = v;
+    o.textContent = l;
+    s.appendChild(o);
+  });
+  s.value = value == null ? '' : String(value);
+  s.disabled = !!disabled;
+  return s;
+}
+
+function opsViewerTier() { return currentProfile ? Number(currentProfile.tier) || 0 : 0; }
+function opsIsSelf(r) {
+  return !!currentProfile && String(r.email || '').trim().toLowerCase() === String(currentProfile.email || '').trim().toLowerCase();
+}
+// '' when this viewer may change this person; otherwise the reason (the
+// server's own rule: a tier-4 caller changes tier ≤ 3 accounts only — new
+// sign-ups included — and anyone may change their own few fields).
+function opsChangeBlock(r) {
+  const vt = opsViewerTier();
+  if (vt < 4) return 'Only tier 4 and above can manage people.';
+  if (opsIsSelf(r) || vt >= 5) return '';
+  return Number(r.tier) >= 4 ? OPS_OWNER_ONLY : '';
+}
+
+function opsRoleLabel(role) {
+  const o = OPS_ROLE_OPTIONS.find(x => x[0] === role);
+  return o && role ? o[1] : '—';
+}
+function opsLevelLabel(l) { return l === 'senior' ? 'Senior' : l === 'junior' ? 'Junior' : ''; }
+
+async function loadOpsPeople(seq, D) {
+  const list = document.getElementById('settings-ops-people-list');
+  if (!list) return;
+  const presetsList = document.getElementById('settings-ops-presets-list');
+  opsListMessage(list, 'Loading people…');
+  if (presetsList) opsListMessage(presetsList, 'Loading presets…');
+  let rows;
   try {
-    res = await D.moduleAccessList();
+    rows = opsNorm(await D.staffList(), 'people');
   } catch (e) {
-    if (seq !== opsSettingsSeq) return;
-    message('Could not load staff: ' + opsErrText(e));
+    if (seq !== opsSettingsSeq) return;   // Settings was reopened meanwhile
+    opsListMessage(list, 'Could not load people: ' + opsErrText(e));
+    if (presetsList) opsListMessage(presetsList, 'Could not load the presets either.');
     return;
   }
-  if (seq !== opsSettingsSeq) return;   // Settings was reopened meanwhile
-  const rows = (Array.isArray(res) ? res : (res && Array.isArray(res.data) ? res.data : []))
-    .filter(r => r && r.email)
-    .map(r => Object.assign({}, r));
-  // Active people first, then by name — the list is for granting, and nobody
-  // grants a role to someone who has left.
-  rows.sort((a, b) => {
-    const ia = a.active === false ? 1 : 0, ib = b.active === false ? 1 : 0;
-    if (ia !== ib) return ia - ib;
-    return String(a.full_name || a.email).localeCompare(String(b.full_name || b.email));
+  if (seq !== opsSettingsSeq) return;
+  let presets = null;
+  if (typeof D.presetList === 'function') {
+    try { presets = opsNorm(await D.presetList(), 'presets'); }
+    catch (e) {
+      if (seq !== opsSettingsSeq) return;
+      if (presetsList) opsListMessage(presetsList, 'Could not load the presets: ' + opsErrText(e));
+    }
+  }
+  if (seq !== opsSettingsSeq) return;
+  opsPeople.rows = rows.filter(r => r && r.email).map(r => Object.assign({}, r));
+  if (presets) opsPeople.presets = presets.filter(p => p && p.designation).map(p => Object.assign({}, p));
+  renderOpsPeople(D);
+  if (presets) renderOpsPresets(D);
+}
+
+function opsPeopleSorted() {
+  // "New — not staff yet" first (they are waiting for someone to set them
+  // up), then active people by name, then the ones who have left.
+  const rank = r => (r.is_staff === false ? 0 : r.active === false ? 2 : 1);
+  return opsPeople.rows.slice().sort((a, b) =>
+    rank(a) - rank(b) || String(a.full_name || a.email).localeCompare(String(b.full_name || b.email)));
+}
+
+function renderOpsPeople(D) {
+  const list = document.getElementById('settings-ops-people-list');
+  if (!list) return;
+  list.textContent = '';
+  const rows = opsPeopleSorted();
+  if (!rows.length) { opsListMessage(list, 'Nobody has a login yet.'); return; }
+  rows.forEach(r => list.appendChild(buildOpsPersonRow(r, D)));
+  filterOpsPeople();
+}
+
+function filterOpsPeople() {
+  const list = document.getElementById('settings-ops-people-list');
+  const search = document.getElementById('settings-ops-people-search');
+  if (!list) return;
+  const q = search ? search.value.trim().toLowerCase() : '';
+  list.querySelectorAll('[data-hay]').forEach(row => {
+    row.classList.toggle('hidden', !!q && row.dataset.hay.indexOf(q) === -1);
   });
-  if (!rows.length) { message('No staff found.'); return; }
+}
 
-  body.textContent = '';
-  rows.forEach(r => body.appendChild(buildOpsAccessRow(r, D)));
+function buildOpsPersonRow(r, D) {
+  const row = opsNode('div', 'q-prow' + (r.is_staff === false ? ' is-new' : '') + (r.active === false ? ' is-inactive' : ''));
+  row.dataset.hay = [r.full_name, r.email, r.designation, r.department].filter(Boolean).join(' ').toLowerCase();
+  const tier = Number(r.tier) || 1;
+  const auto = tier >= 3 || !!r.auto_lead;
 
-  const search = document.getElementById('settings-ops-access-search');
-  if (search) {
-    search.addEventListener('input', () => {
-      const q = search.value.trim().toLowerCase();
-      body.querySelectorAll('tr[data-hay]').forEach(tr => {
-        tr.classList.toggle('hidden', !!q && tr.dataset.hay.indexOf(q) === -1);
-      });
-    });
+  const who = opsNode('div');
+  who.appendChild(opsNode('div', 'q-prow-name', r.full_name || r.email));
+  who.appendChild(opsNode('div', 'q-prow-sub', [r.email, r.designation, 'Tier ' + tier, r.department].filter(Boolean).join(' · ')));
+  row.appendChild(who);
+
+  const tags = opsNode('div', 'q-prow-tags');
+  if (r.is_staff === false) tags.appendChild(opsTag('New — not staff yet', 'is-new'));
+  else if (r.active === false) tags.appendChild(opsTag('Inactive', 'is-off'));
+  ['service', 'rma', 'qc'].forEach(m => {
+    const role = auto ? 'Lead (auto)' : opsRoleLabel(r.roles && r.roles[m]);
+    tags.appendChild(opsTag(OPS_MODULE_LABELS[m] + ': ' + role, auto ? 'is-auto' : ''));
+  });
+  if (r.build_pool) tags.appendChild(opsTag('Builds pool' + (opsLevelLabel(r.build_level) ? ' · ' + opsLevelLabel(r.build_level) : ''), 'is-pool'));
+  if (r.service_pool) tags.appendChild(opsTag('Service pool', 'is-pool'));
+  if (r.build_pool || r.service_pool) {
+    tags.appendChild(opsTag((Number(r.capacity_points) || 0) + ' pts · ' + (Number(r.max_jobs) || 0) + ' jobs'));
+  }
+  if (Number(r.open_items) > 0) tags.appendChild(opsTag(Number(r.open_items) + ' open'));
+  row.appendChild(tags);
+
+  const acts = opsNode('div', 'q-prow-acts');
+  const block = opsChangeBlock(r);
+  const edit = opsNode('button', 'secondary-btn', 'Edit…');
+  edit.type = 'button';
+  edit.disabled = !!block;
+  edit.title = block || ('Edit ' + (r.full_name || r.email));
+  edit.addEventListener('click', () => editOpsPerson(r, D));
+  acts.appendChild(edit);
+  if (typeof D.staffApplyPreset === 'function') {
+    const ap = opsNode('button', 'secondary-btn', 'Apply preset');
+    ap.type = 'button';
+    ap.disabled = !!block || !r.designation;
+    ap.title = block || (r.designation ? 'Set roles and pools from the “' + r.designation + '” preset' : 'Set a designation first');
+    ap.addEventListener('click', () => applyOpsPreset(r, D));
+    acts.appendChild(ap);
+  }
+  row.appendChild(acts);
+  return row;
+}
+
+async function editOpsPerson(r, D) {
+  const email = r.email;                     // bound before any await
+  const who = r.full_name || r.email;
+  const seq = opsSettingsSeq;
+  const UI = window.NeoQcUI;
+  if (!UI || typeof UI.dialog !== 'function') { showToast('Dialogs are not available — restart Neo OS.', 'error'); return; }
+  const block = opsChangeBlock(r);
+  if (block) { showToast(block, 'warning'); return; }
+  const self = opsIsSelf(r);
+  const vt = opsViewerTier();
+  const tier = Number(r.tier) || 1;
+  const auto = tier >= 3 || !!r.auto_lead;
+  const selfNote = 'You can’t change this on your own account.';
+
+  const body = opsNode('div', 'q-dlg');
+  const grid = opsNode('div', 'ops-grid');
+  const inName = opsInput('text', r.full_name || '', 120);
+  const inDesig = opsInput('text', r.designation || '', 120);
+  const listId = 'q-desig-list-' + Date.now().toString(36);
+  inDesig.setAttribute('list', listId);
+  const dl = document.createElement('datalist');
+  dl.id = listId;
+  (opsPeople.presets || []).forEach(p => { const o = document.createElement('option'); o.value = p.designation; dl.appendChild(o); });
+  const inDept = opsInput('text', r.department || '', 60);
+  grid.appendChild(opsField('Full name', inName, { wide: true }));
+  grid.appendChild(opsField('Designation', inDesig, { hint: 'Pick a preset’s designation to give them its roles and pools.' }));
+  grid.appendChild(opsField('Department', inDept));
+  let tierSel = null;
+  if (vt >= 5) {
+    const opts = [1, 2, 3, 4, 5].filter(n => n <= vt).map(n => [String(n), 'Tier ' + n + (n >= 3 ? ' — lead everywhere' : '')]);
+    tierSel = opsSelect(opts, String(tier), self);
+    if (self) tierSel.title = selfNote;
+    grid.appendChild(opsField('Tier', tierSel, { hint: self ? selfNote : 'Tier 3 and above are leads in every module; tier 4 and above manage people.' }));
+  } else {
+    const ro = opsInput('text', 'Tier ' + tier);
+    ro.readOnly = true;
+    grid.appendChild(opsField('Tier', ro, { hint: 'Only the owner (tier 5) changes tiers.' }));
+  }
+  body.appendChild(grid);
+  body.appendChild(dl);
+
+  const chkActive = opsCheck('Active — can sign in', r.active !== false, self, self ? selfNote : '');
+  const chkStaff = opsCheck('Staff — works in Neo OS (off for a new sign-up until set up)', !!r.is_staff, self, self ? selfNote : '');
+  body.appendChild(chkActive.label);
+  body.appendChild(chkStaff.label);
+
+  body.appendChild(opsNode('div', 'ops-section-title', 'Roles'));
+  const roleSel = {};
+  const roles = opsNode('div', 'q-dlg-grid3');
+  ['service', 'rma', 'qc'].forEach(m => {
+    if (auto) {
+      const ro = opsInput('text', 'Lead (automatic)');
+      ro.readOnly = true;
+      roles.appendChild(opsField(OPS_MODULE_LABELS[m], ro));
+    } else {
+      roleSel[m] = opsSelect(OPS_ROLE_OPTIONS, (r.roles && r.roles[m]) || '', self);
+      if (self) roleSel[m].title = selfNote;
+      roles.appendChild(opsField(OPS_MODULE_LABELS[m], roleSel[m]));
+    }
+  });
+  body.appendChild(roles);
+  if (auto) body.appendChild(opsNode('p', 'ops-hint', 'Tier 3 and above are leads in every module automatically.'));
+  else if (self) body.appendChild(opsNode('p', 'ops-hint', 'Your own roles are changed by someone senior to you.'));
+
+  body.appendChild(opsNode('div', 'ops-section-title', 'Work queue'));
+  const chkBP = opsCheck('Build pool — can claim builds from the Queue', !!r.build_pool);
+  const chkSP = opsCheck('Service pool — can claim service jobs from the Queue', !!r.service_pool);
+  body.appendChild(chkBP.label);
+  body.appendChild(chkSP.label);
+  const wq = opsNode('div', 'q-dlg-grid3');
+  const selLevel = opsSelect([['', '—'], ['junior', 'Junior'], ['senior', 'Senior']], r.build_level || '');
+  const inCap = opsInput('number', r.capacity_points != null ? r.capacity_points : '');
+  inCap.min = '1'; inCap.max = '50'; inCap.step = '1';
+  const inMax = opsInput('number', r.max_jobs != null ? r.max_jobs : '');
+  inMax.min = '1'; inMax.max = '20'; inMax.step = '1';
+  wq.appendChild(opsField('Build level', selLevel, { hint: 'High-value builds (tier 4–5) go to seniors only.' }));
+  wq.appendChild(opsField('Capacity (points)', inCap, { hint: '1–50. A build costs its tier; a service job 1, on-site 2.' }));
+  wq.appendChild(opsField('Most jobs at once', inMax, { hint: '1–20.' }));
+  body.appendChild(wq);
+
+  const chkPreset = opsCheck('Apply the designation preset (its roles, pools, level and capacity; anything you changed above wins)', true);
+  chkPreset.label.classList.add('hidden');
+  body.appendChild(chkPreset.label);
+  const origDesig = String(r.designation || '').trim();
+  inDesig.addEventListener('input', () => {
+    const changed = inDesig.value.trim() !== origDesig;
+    if (changed && chkPreset.label.classList.contains('hidden')) chkPreset.input.checked = true;
+    chkPreset.label.classList.toggle('hidden', !changed);
+  });
+  body.appendChild(opsNode('p', 'ops-hint', 'Changes reach ' + who + ' at their next sign-in or app restart.'));
+
+  await UI.dialog({
+    title: 'Edit ' + who,
+    sub: email,
+    body,
+    wide: true,
+    okText: 'Save',
+    busyText: 'Saving…',
+    onOk: async () => {
+      if (seq !== opsSettingsSeq) return false;
+      const patch = {};
+      const nm = inName.value.trim();
+      if (!nm || nm.length > 120) return 'The name must be 1 to 120 characters.';
+      if (nm !== String(r.full_name || '')) patch.full_name = nm;
+      const dg = inDesig.value.trim();
+      if (dg.length > 120) return 'Keep the designation under 120 characters.';
+      if (dg !== origDesig) patch.designation = dg;
+      const dp = inDept.value.trim();
+      if (dp.length > 60) return 'Keep the department under 60 characters.';
+      if (dp !== String(r.department || '')) patch.department = dp;
+      if (tierSel && !self) {
+        const tv = Number(tierSel.value);
+        if (tv !== tier) patch.tier = tv;
+      }
+      if (!self) {
+        if (chkActive.input.checked !== (r.active !== false)) patch.active = chkActive.input.checked;
+        if (chkStaff.input.checked !== !!r.is_staff) patch.is_staff = chkStaff.input.checked;
+        if (!auto) {
+          const changedRoles = {};
+          ['service', 'rma', 'qc'].forEach(m => {
+            const v = roleSel[m] ? (roleSel[m].value || null) : null;
+            const was = (r.roles && r.roles[m]) || null;
+            if (roleSel[m] && v !== was) changedRoles[m] = v;
+          });
+          if (Object.keys(changedRoles).length) patch.roles = changedRoles;
+        }
+      }
+      if (chkBP.input.checked !== !!r.build_pool) patch.build_pool = chkBP.input.checked;
+      if (chkSP.input.checked !== !!r.service_pool) patch.service_pool = chkSP.input.checked;
+      const lv = selLevel.value || null;
+      if (lv !== (r.build_level || null)) patch.build_level = lv;
+      if (inCap.value !== '' || r.capacity_points != null) {
+        const cp = parseInt(inCap.value, 10);
+        if (!(cp >= 1 && cp <= 50)) return 'Capacity must be 1 to 50 points.';
+        if (cp !== Number(r.capacity_points)) patch.capacity_points = cp;
+      }
+      if (inMax.value !== '' || r.max_jobs != null) {
+        const mj = parseInt(inMax.value, 10);
+        if (!(mj >= 1 && mj <= 20)) return 'Most jobs at once must be 1 to 20.';
+        if (mj !== Number(r.max_jobs)) patch.max_jobs = mj;
+      }
+      if (patch.designation !== undefined && chkPreset.input.checked) patch.apply_preset = true;
+      if (!Object.keys(patch).length) { opsSay('Nothing changed.'); return true; }
+      if (patch.active === false || patch.is_staff === false) {
+        const ok = await showConfirm('Turn off ' + who + '? Everything they hold goes back to the queue, and offers to them end.',
+          { title: 'Turn off ' + who, okText: 'Turn off', danger: true });
+        if (!ok) return false;
+      }
+      const res = await D.staffUpdate(email, patch);
+      if (seq !== opsSettingsSeq) return true;
+      const entry = (res && res.email) ? res : (res && res.person && res.person.email ? res.person : null);
+      if (entry) {
+        const i = opsPeople.rows.findIndex(x => String(x.email).toLowerCase() === String(email).toLowerCase());
+        if (i !== -1) opsPeople.rows[i] = Object.assign({}, entry);
+        renderOpsPeople(D);
+      } else {
+        loadOpsPeople(opsSettingsSeq, D);
+      }
+      opsSay('Saved. ' + (entry && entry.full_name || who) + ' gets the change at their next sign-in or app restart.');
+      return true;
+    }
+  });
+}
+
+async function applyOpsPreset(r, D) {
+  const email = r.email;                     // bound before any await
+  const who = r.full_name || r.email;
+  const seq = opsSettingsSeq;
+  const block = opsChangeBlock(r);
+  if (block) { showToast(block, 'warning'); return; }
+  const ok = await showConfirm('Apply the “' + (r.designation || '') + '” preset to ' + who + '? Their Service, RMA and Builds roles, pools, build level and capacity are set from it.',
+    { title: 'Apply preset', okText: 'Apply' });
+  if (!ok || seq !== opsSettingsSeq) return;
+  opsSay('Applying the preset…');
+  try {
+    const res = await D.staffApplyPreset(email);
+    if (seq !== opsSettingsSeq) return;
+    if (res && res.applied) opsSay('Applied. ' + who + ' gets it at their next sign-in or app restart.');
+    else opsSay('No preset matches ' + who + '’s designation, so nothing changed.', true);
+    loadOpsPeople(opsSettingsSeq, D);
+  } catch (e) {
+    if (seq !== opsSettingsSeq) return;
+    opsSay('Not applied: ' + opsErrText(e), true);
   }
 }
 
-function buildOpsAccessRow(r, D) {
-  const tr = document.createElement('tr');
-  tr.dataset.hay = [r.full_name, r.email, r.designation].filter(Boolean).join(' ').toLowerCase();
-  if (r.active === false) tr.style.opacity = '0.6';
-
-  const who = document.createElement('td');
-  who.style.textAlign = 'left';
-  const name = document.createElement('div');
-  name.style.fontWeight = '600';
-  name.textContent = r.full_name || r.email;
-  const sub = document.createElement('div');
-  sub.style.fontSize = '0.72rem';
-  sub.style.color = 'var(--text-muted)';
-  sub.textContent = [r.designation, r.email, r.active === false ? 'Inactive' : ''].filter(Boolean).join(' · ');
-  who.append(name, sub);
-  tr.appendChild(who);
-
-  const autoLead = Number(r.tier) >= 3;
-  ['service', 'rma'].forEach(module => {
-    const td = document.createElement('td');
-    if (autoLead) {
-      // module_role() answers 'lead' for tier 3+ whatever the table says, so
-      // a select here would be a control that does nothing.
-      td.textContent = 'Lead (automatic)';
-      td.style.fontSize = '0.75rem';
-      td.style.color = 'var(--text-muted)';
-    } else {
-      const sel = document.createElement('select');
-      sel.className = 'settings-select';
-      sel.setAttribute('aria-label', OPS_MODULE_LABELS[module] + ' role for ' + (r.full_name || r.email));
-      OPS_ROLE_OPTIONS.forEach(([value, label]) => {
-        const o = document.createElement('option');
-        o.value = value;
-        o.textContent = label;
-        sel.appendChild(o);
-      });
-      sel.value = r[module] || '';
-      sel.addEventListener('change', () => saveOpsModuleAccess(r, module, sel, D));
-      td.appendChild(sel);
-    }
-    tr.appendChild(td);
-  });
-  return tr;
+// ── Designation presets (tier 4+) ─────────────────────────────────────────────
+function renderOpsPresets(D) {
+  const list = document.getElementById('settings-ops-presets-list');
+  if (!list) return;
+  list.textContent = '';
+  const rows = (opsPeople.presets || []).slice().sort((a, b) => String(a.designation).localeCompare(String(b.designation)));
+  if (!rows.length) { opsListMessage(list, 'No presets yet. Add one for each designation.'); return; }
+  rows.forEach(p => list.appendChild(buildOpsPresetRow(p, D)));
 }
 
-async function saveOpsModuleAccess(r, module, sel, D) {
-  // Bind everything this save is about before the await.
-  const email = r.email;
-  const who = r.full_name || r.email;
-  const prev = r[module] || '';
-  const next = sel.value;
-  if (next === prev) return;
-  const status = document.getElementById('settings-ops-access-status');
-  const say = (text, isError) => {
-    if (!status) return;
-    status.textContent = text;
-    status.style.color = isError ? 'var(--status-urgent)' : '';
-  };
-  sel.disabled = true;
-  say('Saving…');
+function buildOpsPresetRow(p, D) {
+  const row = opsNode('div', 'q-prow');
+  const who = opsNode('div');
+  who.appendChild(opsNode('div', 'q-prow-name', p.designation));
+  const n = (opsPeople.rows || []).filter(r => r.preset_key && r.preset_key === p.key).length;
+  who.appendChild(opsNode('div', 'q-prow-sub', [n + (n === 1 ? ' person' : ' people'), p.note].filter(Boolean).join(' · ')));
+  row.appendChild(who);
+  const tags = opsNode('div', 'q-prow-tags');
+  [['service', 'service_role'], ['rma', 'rma_role'], ['qc', 'qc_role']].forEach(([m, k]) => {
+    tags.appendChild(opsTag(OPS_MODULE_LABELS[m] + ': ' + opsRoleLabel(p[k])));
+  });
+  if (p.build_pool) tags.appendChild(opsTag('Builds pool' + (opsLevelLabel(p.build_level) ? ' · ' + opsLevelLabel(p.build_level) : ''), 'is-pool'));
+  if (p.service_pool) tags.appendChild(opsTag('Service pool', 'is-pool'));
+  if (p.build_pool || p.service_pool) {
+    tags.appendChild(opsTag((p.capacity_points != null ? p.capacity_points + ' pts' : 'level default pts') + ' · ' +
+      (p.max_jobs != null ? p.max_jobs + ' jobs' : 'level default jobs')));
+  }
+  row.appendChild(tags);
+  const acts = opsNode('div', 'q-prow-acts');
+  const edit = opsNode('button', 'secondary-btn', 'Edit…');
+  edit.type = 'button';
+  edit.disabled = typeof D.presetUpsert !== 'function';
+  edit.addEventListener('click', () => editOpsPreset(p, D));
+  const del = opsNode('button', 'secondary-btn text-crimson', 'Delete');
+  del.type = 'button';
+  del.disabled = typeof D.presetDelete !== 'function';
+  del.addEventListener('click', () => deleteOpsPreset(p, D));
+  acts.append(edit, del);
+  row.appendChild(acts);
+  return row;
+}
+
+async function editOpsPreset(p, D) {
+  const key = p ? p.key : null;              // bound before any await
+  const seq = opsSettingsSeq;
+  const UI = window.NeoQcUI;
+  if (!UI || typeof UI.dialog !== 'function') { showToast('Dialogs are not available — restart Neo OS.', 'error'); return; }
+  if (typeof D.presetUpsert !== 'function') { showToast('This needs the Neo OS 1.11 data layer.', 'error'); return; }
+  const cur = p || {};
+  const body = opsNode('div', 'q-dlg');
+  const grid = opsNode('div', 'ops-grid');
+  const inDesig = opsInput('text', cur.designation || '', 120);
+  if (p) inDesig.readOnly = true;
+  grid.appendChild(opsField('Designation', inDesig, {
+    wide: true,
+    hint: p ? 'To rename a designation, add a new preset and delete this one.' : 'Exactly as it is written on people’s profiles.'
+  }));
+  body.appendChild(grid);
+  body.appendChild(opsNode('div', 'ops-section-title', 'Roles'));
+  const roles = opsNode('div', 'q-dlg-grid3');
+  const sel = {};
+  [['service', 'service_role'], ['rma', 'rma_role'], ['qc', 'qc_role']].forEach(([m, k]) => {
+    sel[k] = opsSelect(OPS_ROLE_OPTIONS, cur[k] || '');
+    roles.appendChild(opsField(OPS_MODULE_LABELS[m], sel[k]));
+  });
+  body.appendChild(roles);
+  body.appendChild(opsNode('p', 'ops-hint', '— means no role: applying the preset removes that module from the person. Tier 3 and above stay leads everywhere.'));
+  body.appendChild(opsNode('div', 'ops-section-title', 'Work queue'));
+  const chkBP = opsCheck('Build pool', !!cur.build_pool);
+  const chkSP = opsCheck('Service pool', !!cur.service_pool);
+  body.appendChild(chkBP.label);
+  body.appendChild(chkSP.label);
+  const wq = opsNode('div', 'q-dlg-grid3');
+  const selLevel = opsSelect([['', '—'], ['junior', 'Junior'], ['senior', 'Senior']], cur.build_level || '');
+  const inCap = opsInput('number', cur.capacity_points != null ? cur.capacity_points : '');
+  inCap.min = '1'; inCap.max = '50'; inCap.placeholder = 'level default';
+  const inMax = opsInput('number', cur.max_jobs != null ? cur.max_jobs : '');
+  inMax.min = '1'; inMax.max = '20'; inMax.placeholder = 'level default';
+  wq.appendChild(opsField('Build level', selLevel));
+  wq.appendChild(opsField('Capacity (points)', inCap, { hint: 'Blank: senior 8, junior 5, otherwise 6.' }));
+  wq.appendChild(opsField('Most jobs at once', inMax, { hint: 'Blank: senior 5, junior 3, otherwise 4.' }));
+  body.appendChild(wq);
+  const inNote = opsInput('text', cur.note || '', 300);
+  body.appendChild(opsField('Note', inNote, { hint: 'Optional — for whoever edits presets next.' }));
+
+  await UI.dialog({
+    title: p ? 'Edit preset' : 'Add a designation preset',
+    sub: p ? p.designation : '',
+    body,
+    wide: true,
+    okText: 'Save preset',
+    busyText: 'Saving…',
+    onOk: async () => {
+      if (seq !== opsSettingsSeq) return false;
+      const designation = inDesig.value.trim();
+      if (!designation) return 'Type the designation.';
+      if (designation.length > 120) return 'Keep the designation under 120 characters.';
+      const num = (el, lo, hi, what) => {
+        if (el.value === '') return { v: null };
+        const n = parseInt(el.value, 10);
+        if (!(n >= lo && n <= hi)) return { err: what + ' must be ' + lo + ' to ' + hi + ', or blank.' };
+        return { v: n };
+      };
+      const cap = num(inCap, 1, 50, 'Capacity');
+      if (cap.err) return cap.err;
+      const mx = num(inMax, 1, 20, 'Most jobs at once');
+      if (mx.err) return mx.err;
+      const payload = {
+        designation,
+        service_role: sel.service_role.value || null,
+        rma_role: sel.rma_role.value || null,
+        qc_role: sel.qc_role.value || null,
+        build_pool: chkBP.input.checked,
+        service_pool: chkSP.input.checked,
+        build_level: selLevel.value || null,
+        capacity_points: cap.v,
+        max_jobs: mx.v,
+        note: inNote.value.trim() || null
+      };
+      if (key) payload.key = key;
+      await D.presetUpsert(payload);
+      if (seq !== opsSettingsSeq) return true;
+      opsSay('Preset saved. It is used the next time someone is given “' + designation + '”, or when you press Apply preset.');
+      loadOpsPeople(opsSettingsSeq, D);
+      return true;
+    }
+  });
+}
+
+async function deleteOpsPreset(p, D) {
+  const key = p.key;                         // bound before any await
+  const seq = opsSettingsSeq;
+  if (typeof D.presetDelete !== 'function') return;
+  const ok = await showConfirm('Delete the “' + p.designation + '” preset? People who have it keep their roles and pools; it just stops being applied.',
+    { title: 'Delete preset', okText: 'Delete', danger: true });
+  if (!ok || seq !== opsSettingsSeq) return;
   try {
-    await D.moduleAccessSet(email, module, next || null);
-    r[module] = next || null;
-    const label = (OPS_ROLE_OPTIONS.find(o => o[0] === next) || ['', ''])[1];
-    say(next
-      ? `Saved. ${who} is ${label} in ${OPS_MODULE_LABELS[module]} from their next sign-in or app restart.`
-      : `Saved. ${who} loses ${OPS_MODULE_LABELS[module]} at their next sign-in or app restart.`);
+    await D.presetDelete(key);
+    if (seq !== opsSettingsSeq) return;
+    opsSay('Preset deleted.');
+    loadOpsPeople(opsSettingsSeq, D);
   } catch (e) {
-    sel.value = prev;   // put the select back to what is really stored
-    const msg = opsErrText(e);
-    say('Not saved: ' + msg, true);
-    showToast('Could not change module access: ' + msg, 'error');
-  } finally {
-    sel.disabled = false;
+    if (seq !== opsSettingsSeq) return;
+    opsSay('Not deleted: ' + opsErrText(e), true);
+    showToast('Could not delete the preset: ' + opsErrText(e), 'error');
   }
 }
 
@@ -5728,7 +6484,6 @@ async function handleSaveSettings() {
   appState.settings.contactInfo = document.getElementById('settings-contact-info').value.trim();
   appState.settings.soundEnabled = document.getElementById('settings-sound-enabled').checked;
   appState.settings.disableQcLock = document.getElementById('settings-disable-qc-lock').checked;
-  appState.settings.defaultTech = document.getElementById('settings-default-tech').value;
   appState.settings.sortBy = document.getElementById('settings-sort-by').value;
 
   appState.settings.cpuMaxTemp = parseInt(document.getElementById('settings-cpu-max-temp').value) || 85;
@@ -5981,16 +6736,9 @@ function setupEventListeners() {
     });
   }
 
-  // Add technician
-  document.getElementById('btn-settings-add-tech').addEventListener('click', () => {
-    const input = document.getElementById('settings-add-tech-name');
-    const name = input.value.trim();
-    if (name && !appState.technicians.includes(name)) {
-      appState.technicians.push(name);
-      input.value = '';
-      openSettingsModal();
-    }
-  });
+  // v1.11 — the ticket's technician box (Claim / Offer / Withdraw / Hand back /
+  // Send to build queue); the per-PC "Add technician" control is gone.
+  setupTechAreaButtons();
 
   // PPI tuning panel handlers (add use-case / save / reset).
   setupPpiTuningHandlers();
@@ -6009,9 +6757,12 @@ function setupEventListeners() {
   });
   document.getElementById('btn-dismiss-conflict-banner').addEventListener('click', hideConflictBanner);
   document.getElementById('btn-delete-ticket').addEventListener('click', async () => {
+    // v1.11 — Builds leads only (the button is hidden for everyone else).
+    if (!hasQcRole('lead')) { showToast('Only a Builds lead can delete a build.', 'warning'); return; }
     if (editingTicketId && await showConfirm("Are you sure you want to delete this ticket?", { title: 'Delete ticket', okText: 'Delete', danger: true })) {
       const idToDelete = editingTicketId;
       appState.tickets = appState.tickets.filter(t => t.id !== idToDelete);
+      removePendingQueueSend(idToDelete, true);   // a deleted build is never sent to the floor
       await saveDatabase();
       await deleteTicketFromCloud(idToDelete);
       document.getElementById('ticket-modal').classList.remove('active');
@@ -6664,7 +7415,7 @@ function setupEventListeners() {
             if (await showConfirm("Are you sure you want to restore this backup? This will overwrite your current local database data.", { title: 'Restore backup', okText: 'Restore', danger: true })) {
               // Ensure critical fields exist
               if (!parsed.tickets) parsed.tickets = [];
-              if (!parsed.technicians) parsed.technicians = ["Adhil", "Amal", "Ananthakrishnan", "Athul"];
+              if (!Array.isArray(parsed.pendingQueueSends)) parsed.pendingQueueSends = [];
               if (!parsed.settings) parsed.settings = appState.settings;
 
               appState = parsed;
@@ -6690,10 +7441,10 @@ function setupEventListeners() {
   const btnWipe = document.getElementById('btn-settings-wipe');
   if (btnWipe) {
     btnWipe.addEventListener('click', async () => {
-      if (await showConfirm("This will delete ALL tickets, custom technicians, and settings. This cannot be undone. Are you absolutely sure?", { title: '🚨 Factory reset', okText: 'Delete everything', danger: true })) {
+      if (await showConfirm("This will delete ALL tickets and settings on this PC. This cannot be undone. Are you absolutely sure?", { title: '🚨 Factory reset', okText: 'Delete everything', danger: true })) {
         appState = {
           tickets: [],
-          technicians: ["Adhil", "Amal", "Ananthakrishnan", "Athul"],
+          pendingQueueSends: [],
           settings: {
             supabaseUrl: "https://ggsxkhenzdhaachubrsc.supabase.co", 
             supabaseAnonKey: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imdnc3hraGVuemRoYWFjaHVicnNjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE3MTEwNjEsImV4cCI6MjA5NzI4NzA2MX0.bDhUK-qJSgcBEcNdEdOaZGg5vsUF6jH2gbSRQaMhjBo", 
@@ -6715,7 +7466,6 @@ function setupEventListeners() {
             autoPdf: false,
             soundEnabled: true,
             disableQcLock: false,
-            defaultTech: "",
             sortBy: "deadline",
             shopName: "Neo Tokyo Kochi",
             contactInfo: "kochi@neotokyo.in"
@@ -6775,8 +7525,9 @@ function setupEventListeners() {
     // Secret technician shortcut to jump to the staff portal (Ctrl + Alt + P).
     // v2.0.0: must be signed in as T3+ — it can no longer bypass the login gate.
     if (e.ctrlKey && e.altKey && e.key.toLowerCase() === 'p') {
-      if (currentProfile && Number(currentProfile.tier) >= 3) switchScreen('staff');
-      else showToast('Sign in as Service Head or above to open the staff portal.', 'warning');
+      // v1.11 — the same gate as the rail: whoever may open Builds.
+      if (currentProfile && canOpenOfficeMode('staff')) switchScreen('staff');
+      else showToast('Sign in with Builds access to open the staff portal.', 'warning');
     }
   });
 }
@@ -6829,6 +7580,9 @@ function startCloudPolling() {
   if (cloudPollTimer) clearInterval(cloudPollTimer);
   cloudPollTimer = setInterval(async () => {
     if (!supabaseClient) return;
+    // WQ-C1 — builds waiting for build_queue_send are retried on every tick,
+    // including while the ticket modal is open (it touches no form state).
+    drainPendingQueueSends().catch(e => console.warn('build queue send retry failed:', e && e.message));
     // Don't clobber a technician mid-edit: skip the pull while the ticket
     // modal is open (the realtime path shows a conflict banner for that case).
     const modal = document.getElementById('ticket-modal');
@@ -6843,6 +7597,7 @@ function startCloudPolling() {
         populateClientTicketSelect(keep);
       } else if (currentMode === 'client') {
         populateWelcomeTicketSelect();
+        renderBenchBoard();
       }
     } catch (e) {
       console.error('Cloud poll failed:', e);
@@ -6850,9 +7605,10 @@ function startCloudPolling() {
   }, 15000);
 }
 
-// Upload a single ticket to Supabase
+// Upload a single ticket to Supabase. Resolves true when the row reached the
+// cloud, false otherwise (no client, an error, an exception) — never throws.
 async function syncTicketToCloud(ticket) {
-  if (!supabaseClient) return;
+  if (!supabaseClient || !ticket) return false;
   try {
     // The tickets table has no detected_specs column, but specs is JSONB and
     // already syncs — so nest the client-detected hardware inside specs.__detected
@@ -6862,9 +7618,10 @@ async function syncTicketToCloud(ticket) {
     const specsPayload = Object.assign({}, ticket.specs || {});
     if (ticket.detectedSpecs) specsPayload.__detected = ticket.detectedSpecs;
     if (ticket.customerSupplied) specsPayload.__customerSupplied = ticket.customerSupplied;
-    // The waiting-queue flag has no column of its own; carry it in specs (JSONB)
-    // like __prices/__detected, or it would be lost on every cloud round-trip.
-    specsPayload.__queued = !!ticket.queued;
+    // v1.11 — the old client-side "waiting queue" flag is retired: the build
+    // queue is server-side (tickets.queued_at, set by build_queue_send). Always
+    // false, so the server's insert guard never reads a stale flag as a send.
+    specsPayload.__queued = false;
 
     // Stress-test progress has no dedicated columns; diagnostics is JSONB and
     // already syncs, so carry it there (same pattern as specs.__detected).
@@ -6879,6 +7636,9 @@ async function syncTicketToCloud(ticket) {
     if (ticket.reportOverrides) diagPayload.__reportOverrides = ticket.reportOverrides;
     else delete diagPayload.__reportOverrides;
 
+    // v1.11 — `technician` is NOT sent (nor any queue/offer column): who builds
+    // it is server-owned, written only by the work_* RPCs. Leaving it out of
+    // the upsert means a stale copy on this PC can never undo a claim.
     const { error } = await supabaseClient
       .from('tickets')
       .upsert({
@@ -6888,7 +7648,6 @@ async function syncTicketToCloud(ticket) {
         type: ticket.type,
         customer_name: ticket.customerName,
         deadline: ticket.deadline,
-        technician: ticket.technician,
         missing_components_toggle: ticket.missingComponentsToggle,
         missing_components: ticket.missingComponents,
         build_checks: ticket.buildChecks,
@@ -6901,16 +7660,148 @@ async function syncTicketToCloud(ticket) {
       });
     if (error) {
       console.error("Supabase upsert failed:", error.message);
-    } else {
-      // Mark that this ticket has reached the cloud at least once. syncFromCloud()
-      // uses this to tell "deleted remotely" (cloudSynced && absent from cloud →
-      // prune) apart from "created locally, not yet uploaded" (never synced → keep),
-      // so an offline-created ticket is never destroyed before it uploads.
-      ticket.cloudSynced = true;
-      console.log(`Synced ticket ${ticket.id} to cloud.`);
+      return false;
     }
+    // Mark that this ticket has reached the cloud at least once. syncFromCloud()
+    // uses this to tell "deleted remotely" (cloudSynced && absent from cloud →
+    // prune) apart from "created locally, not yet uploaded" (never synced → keep),
+    // so an offline-created ticket is never destroyed before it uploads.
+    ticket.cloudSynced = true;
+    console.log(`Synced ticket ${ticket.id} to cloud.`);
+    return true;
   } catch (err) {
     console.error("Exception during ticket sync:", err);
+    return false;
+  }
+}
+
+// ── Builds waiting for build_queue_send (WQ-C1) ─────────────────────────────
+// appState.pendingQueueSends holds ticket ids, outside the ticket objects
+// (persisted with the local db; no mapper or merge touches it). Drained right
+// after a new build's first upload and on every 15 s poll tick. Never toasts:
+// it is a background retry. Drop on ok / already / assigned / closed; keep on
+// not_found, NEO_DENIED or any error (the next tick tries again).
+// A build MISSING from this PC is not proof that it was deleted (a signed-out
+// poll, or one tick's drain running before its own sync, can leave it out for
+// a while), so it is still sent; only the server's not_found for a build this
+// PC no longer has drops it (gone on both sides). Deleting a build here drops
+// its id at once.
+let pendingQueueDrain = null;
+function drainPendingQueueSends() {
+  if (pendingQueueDrain) return pendingQueueDrain;   // one drain at a time
+  const run = runPendingQueueDrain();
+  pendingQueueDrain = run;
+  // Cleared when THIS run settles — never from inside it: a run with nothing
+  // to do finishes synchronously, before the assignment above.
+  const done = () => { if (pendingQueueDrain === run) pendingQueueDrain = null; };
+  run.then(done, done);
+  return run;
+}
+
+async function runPendingQueueDrain() {
+  const list = Array.isArray(appState.pendingQueueSends) ? appState.pendingQueueSends.slice() : [];
+  if (!list.length || !supabaseClient || !currentProfile) return;
+  const D = window.NeoQcData;
+  let changed = false;
+  const localTicket = (id) => (appState.tickets || []).find(x => x && x.id === id) || null;
+  for (const id of list) {
+    const t = localTicket(id);
+    if (t && !t.cloudSynced) {
+      const up = await syncTicketToCloud(t);
+      if (!up) continue;
+      changed = true;
+    }
+    if (!D || typeof D.buildQueueSend !== 'function') continue;
+    let res = null;
+    try { res = await D.buildQueueSend(id); }
+    catch (e) { console.warn('build_queue_send for ' + id + ' will be retried:', e && e.message); continue; }
+    const settled = !!res && (res.ok === true || (res.ok === false && (
+      res.reason === 'assigned' || res.reason === 'closed' ||
+      // not on the server and not on this PC → it was deleted
+      (res.reason === 'not_found' && !localTicket(id)))));
+    if (settled) changed = removePendingQueueSend(id, true) || changed;
+  }
+  if (changed) {
+    await saveDatabase();
+    notifyBuildsChanged();
+  }
+}
+
+// Returns true when the id was in the list. `quiet` = the caller saves.
+function removePendingQueueSend(id, quiet) {
+  const list = appState.pendingQueueSends;
+  if (!Array.isArray(list)) return false;
+  const i = list.indexOf(id);
+  if (i === -1) return false;
+  list.splice(i, 1);
+  if (!quiet) saveDatabase().catch(() => {});
+  return true;
+}
+
+function notifyBuildsChanged() {
+  try { window.dispatchEvent(new CustomEvent('neo-builds-changed')); } catch (e) {}
+}
+
+// ── One merge rule for a server row (WQ-C2 / §9.1) ──────────────────────────
+// Used by realtime and syncFromCloud. When the server copy is newer or equal
+// (Date.parse, never string compare: the server writes '+00:00', this PC 'Z')
+// it replaces the local one. Otherwise local unsynced edits win — but the
+// SERVER-OWNED fields (who builds it, the queue, the offer) always come from
+// the server, because nothing on this PC may set them.
+function tsMs(v) {
+  const n = Date.parse(v);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function mergeServerTicket(local, row) {
+  const server = mapDbRowToTicket(row);
+  if (!local) return server;
+  if (tsMs(server.updatedAt) >= tsMs(local.updatedAt)) return server;
+  SERVER_OWNED_TICKET_FIELDS.forEach(k => { local[k] = server[k]; });
+  local.cloudSynced = true;
+  return local;
+}
+
+// What a merge is judged by: did anything a screen shows change?
+function ticketSyncSig(t) {
+  if (!t) return '';
+  const owned = {};
+  SERVER_OWNED_TICKET_FIELDS.forEach(k => { owned[k] = t[k] === undefined ? null : t[k]; });
+  return [t.updatedAt || '', t.status || '', JSON.stringify(owned)].join('|');
+}
+
+// Pull ONE build from the server and merge it (after a queue action, so the
+// modal, the bench and the Builds card show the claim at once).
+async function refreshTicketFromCloud(id) {
+  if (!supabaseClient || !id) return false;
+  try {
+    const { data, error } = await supabaseClient.from('tickets').select('*').eq('id', id).maybeSingle();
+    if (error || !data) return false;
+    const index = appState.tickets.findIndex(t => t.id === id);
+    const before = index === -1 ? null : ticketSyncSig(appState.tickets[index]);
+    const merged = mergeServerTicket(index === -1 ? null : appState.tickets[index], data);
+    if (index === -1) appState.tickets.push(merged);
+    else appState.tickets[index] = merged;
+    if (before !== ticketSyncSig(merged)) {
+      await saveDatabase();
+      notifyBuildsChanged();
+      rerenderBuildViews(id);
+    }
+    return true;
+  } catch (e) {
+    console.warn('ticket refresh failed:', e && e.message);
+    return false;
+  }
+}
+
+function rerenderBuildViews(ticketId) {
+  try {
+    if (currentMode === 'staff') renderDashboard();
+    else if (currentMode === 'client') { populateWelcomeTicketSelect(); renderBenchBoard(); }
+  } catch (e) { console.warn('build views refresh failed:', e && e.message); }
+  const modal = document.getElementById('ticket-modal');
+  if (ticketId && editingTicketId === ticketId && modal && modal.classList.contains('active')) {
+    renderTicketTechArea(ticketId);
   }
 }
 
@@ -6970,16 +7861,50 @@ function mapDbRowToTicket(dbRow) {
     detectedSpecs: dbRow.detectedSpecs || specs.__detected || null,
     customerSupplied: specs.__customerSupplied || [],
     damagedComponents: dbRow.damagedComponents || specs.__damaged || null,
-    queued: !!specs.__queued,
+    // v1.11 — the work queue (server-owned; null on a server without v2.2).
+    technicianEmail: dbRow.technician_email || null,
+    assignedVia: dbRow.assigned_via || null,
+    assignedAt: dbRow.assigned_at || null,
+    queuedAt: dbRow.queued_at || null,
+    offer: (dbRow.offered_to_email || dbRow.offer_expires_at) ? {
+      toEmail: dbRow.offered_to_email || null,
+      toName: dbRow.offered_to_name || null,
+      kind: dbRow.offer_kind || null,
+      byName: dbRow.offer_by_name || null,
+      reason: dbRow.offer_reason || null,
+      offeredAt: dbRow.offered_at || null,
+      expiresAt: dbRow.offer_expires_at || null
+    } : null,
+    declinedEmails: Array.isArray(dbRow.declined_emails) ? dbRow.declined_emails : [],
     status: dbRow.status,
     completedAt: dbRow.completed_at,
     cloudSynced: true // came from the cloud, so it is known-synced (see prune in syncFromCloud)
   };
 }
 
+// Who a tickets SELECT runs as: the signed-in user's id, or null when nobody
+// is signed in on this PC (no profile, or no Supabase session).
+async function ticketReaderId() {
+  if (!currentProfile || !supabaseClient || !supabaseClient.auth || typeof supabaseClient.auth.getSession !== 'function') return null;
+  try {
+    const { data } = await supabaseClient.auth.getSession();
+    const u = data && data.session && data.session.user;
+    return (u && u.id) || null;
+  } catch (e) {
+    return null;
+  }
+}
+
 async function syncFromCloud() {
   if (!supabaseClient) return;
   try {
+    // v1.11 — the 15 s poll also runs while nobody is signed in, and tickets
+    // RLS answers an anon SELECT with [] (not an error). A build missing from
+    // the answer is proof of a remote delete only when the SAME person was
+    // signed in for the whole request; otherwise this pull merges but never
+    // prunes (a signed-out PC used to wipe its whole local cache here).
+    const profileAtStart = currentProfile;
+    const readerAtStart = await ticketReaderId();
     const { data, error } = await supabaseClient
       .from('tickets')
       .select('*');
@@ -6991,32 +7916,39 @@ async function syncFromCloud() {
 
     if (data) {
       const cloudIds = new Set(data.map(dbRow => dbRow.id));
+      let changed = false;
 
       data.forEach(dbRow => {
-        const ticket = mapDbRowToTicket(dbRow);
-
-        const index = appState.tickets.findIndex(t => t.id === ticket.id);
+        if (!dbRow || !dbRow.id) return;
+        const index = appState.tickets.findIndex(t => t.id === dbRow.id);
         if (index === -1) {
-          appState.tickets.push(ticket);
+          appState.tickets.push(mapDbRowToTicket(dbRow));
+          changed = true;
         } else {
-          // Only overwrite local if cloud version is same age or newer
-          const localTs = appState.tickets[index].updatedAt || appState.tickets[index].createdAt || '';
-          const cloudTs = ticket.updatedAt || ticket.createdAt || '';
-          if (cloudTs >= localTs) {
-            appState.tickets[index] = ticket;
-          }
+          // v1.11 — one merge rule (mergeServerTicket): the server copy wins
+          // when newer or equal by Date.parse; otherwise local edits stay but
+          // the server-owned queue fields are always taken.
+          const before = ticketSyncSig(appState.tickets[index]);
+          appState.tickets[index] = mergeServerTicket(appState.tickets[index], dbRow);
+          if (before !== ticketSyncSig(appState.tickets[index])) changed = true;
         }
       });
-      
+
       const oldLength = appState.tickets.length;
       // Remove tickets that were DELETED remotely — but ONLY ones we know reached the
       // cloud before (cloudSynced). A ticket created locally while offline has no
       // cloudSynced flag and must be KEPT, or we would permanently destroy it before
       // it ever uploaded. (Previously this pruned every local-only ticket.)
-      appState.tickets = appState.tickets.filter(t => cloudIds.has(t.id) || !t.cloudSynced);
+      // And only when signed in throughout (see above).
+      const readerAtEnd = await ticketReaderId();
+      const mayPrune = !!readerAtStart && readerAtEnd === readerAtStart &&
+        !!currentProfile && currentProfile === profileAtStart;
+      if (mayPrune) appState.tickets = appState.tickets.filter(t => cloudIds.has(t.id) || !t.cloudSynced);
+      if (appState.tickets.length !== oldLength) changed = true;
 
       await saveDatabase(); // Persist merged dataset locally
       console.log(`Pulled ${data.length} tickets, removed ${oldLength - appState.tickets.length} remotely-deleted tickets from Supabase cloud.`);
+      if (changed) notifyBuildsChanged();
     }
   } catch (err) {
     console.error("Exception during database sync:", err);
@@ -7034,47 +7966,60 @@ function setupRealtimeListener() {
         console.log(`Realtime event: ${payload.eventType} ${(payload.new && payload.new.id) || (payload.old && payload.old.id) || ''}`);
 
         if (payload.eventType === 'DELETE') {
-          const deletedId = payload.old.id;
+          const deletedId = payload.old && payload.old.id;
           if (deletedId) {
             appState.tickets = appState.tickets.filter(t => t.id !== deletedId);
+            removePendingQueueSend(deletedId, true);   // deleted on the server: nothing to send
             await saveDatabase();
+            // The open ticket is gone, whichever screen it was opened from.
+            if (editingTicketId === deletedId) {
+              document.getElementById('ticket-modal').classList.remove('active');
+              editingTicketId = null;
+            }
             if (currentMode === 'staff') {
               renderDashboard();
-              if (editingTicketId === deletedId) {
-                document.getElementById('ticket-modal').classList.remove('active');
-                editingTicketId = null;
-              }
             } else if (currentMode === 'client') {
-              populateClientTicketSelect();
+              populateWelcomeTicketSelect();
+              renderBenchBoard();
+            } else if (currentMode === 'client-console') {
+              populateClientTicketSelect(document.getElementById('client-ticket-select').value);
             }
+            notifyBuildsChanged();
           }
           return;
         }
 
         const dbRow = payload.new;
-        if (dbRow) {
-          // Use the SHARED mapper — an inline copy here is what silently
-          // dropped detectedSpecs/specPrices/damagedComponents on every
-          // realtime update (see mapDbRowToTicket).
-          const ticket = mapDbRowToTicket(dbRow);
-
-          const index = appState.tickets.findIndex(t => t.id === ticket.id);
-          if (index === -1) {
-            appState.tickets.push(ticket);
-          } else {
-            appState.tickets[index] = ticket;
-          }
+        if (dbRow && dbRow.id) {
+          // Use the SHARED mapper (inside mergeServerTicket) — an inline copy
+          // here is what silently dropped detectedSpecs/specPrices/
+          // damagedComponents on every realtime update (see mapDbRowToTicket).
+          // v1.11 — and the one merge rule: the server row replaces the local
+          // ticket only when newer or equal (local unsynced edits win
+          // otherwise), but the server-owned queue fields are always taken.
+          const index = appState.tickets.findIndex(t => t.id === dbRow.id);
+          const before = index === -1 ? null : ticketSyncSig(appState.tickets[index]);
+          const replaced = index !== -1 && tsMs(dbRow.updated_at || dbRow.created_at) >= tsMs(appState.tickets[index].updatedAt);
+          const ticket = mergeServerTicket(index === -1 ? null : appState.tickets[index], dbRow);
+          if (index === -1) appState.tickets.push(ticket);
+          else appState.tickets[index] = ticket;
           await saveDatabase();
+          if (before !== ticketSyncSig(ticket)) notifyBuildsChanged();
 
+          const modalOpen = editingTicketId === ticket.id && document.getElementById('ticket-modal').classList.contains('active');
+          if (modalOpen) renderTicketTechArea(ticket.id);
           if (currentMode === 'staff') {
             renderDashboard();
             // If this ticket is currently open in the modal, show a banner instead of
-            // clobbering whatever the technician is typing right now.
-            if (editingTicketId === ticket.id && document.getElementById('ticket-modal').classList.contains('active')) {
+            // clobbering whatever the technician is typing right now — unless
+            // this PC itself just changed it through the queue (its own echo).
+            const own = ownQueueActionAt[ticket.id] && (Date.now() - ownQueueActionAt[ticket.id] < 15000);
+            if (modalOpen && replaced && !own) {
               showConflictBanner();
             }
           } else if (currentMode === 'client') {
             populateWelcomeTicketSelect();
+            renderBenchBoard();
           } else if (currentMode === 'client-console') {
             populateClientTicketSelect(document.getElementById('client-ticket-select').value);
             const clientSelect = document.getElementById('client-ticket-select');
@@ -7179,9 +8124,9 @@ function seedMockTickets() {
       id: "t_mock1",
       createdAt: now.toISOString(),
       type: "build",
-      customerName: "Ananthakrishnan (Test Build)",
+      customerName: "Demo customer (Test Build)",
       deadline: getDeadline(0.4), // Urgent (within 24 hrs!)
-      technician: "Ananthakrishnan",
+      technician: "",
       missingComponentsToggle: false,
       missingComponents: "",
       buildChecks: {
@@ -7213,7 +8158,7 @@ function seedMockTickets() {
       type: "build",
       customerName: "Adithya Nair",
       deadline: getDeadline(1.8),
-      technician: "Adhil",
+      technician: "",
       missingComponentsToggle: false,
       missingComponents: "",
       buildChecks: {
@@ -7245,7 +8190,7 @@ function seedMockTickets() {
       type: "build",
       customerName: "Kochi VR Studio",
       deadline: getDeadline(3),
-      technician: "Amal",
+      technician: "",
       missingComponentsToggle: true,
       missingComponents: "Gigabyte RTX 4080 Super",
       buildChecks: {
@@ -7277,7 +8222,7 @@ function seedMockTickets() {
       type: "build",
       customerName: "Rahul Krishna",
       deadline: getDeadline(0.9),
-      technician: "Athul",
+      technician: "",
       missingComponentsToggle: false,
       missingComponents: "",
       buildChecks: {
@@ -7318,7 +8263,7 @@ function seedMockTickets() {
       type: "build",
       customerName: "Aswin Jose",
       deadline: getDeadline(-2), // Completed in the past
-      technician: "Amal",
+      technician: "",
       missingComponentsToggle: false,
       missingComponents: "",
       buildChecks: {

@@ -4,12 +4,18 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <!--
-    OPS HARNESS — review the Overview, Service and RMA screens in a normal browser.
+    OPS HARNESS — review the Overview, Queue, Service and RMA screens in a normal browser.
 
       npx serve -p 4321 -n .        (from the repo root)
       http://localhost:4321/dev/ops-harness.html
-        ?screen=overview | service | rma | client       first screen
-        ?role=lead | tech | desk | sales                 who is "signed in"
+        ?screen=overview | queue | service | rma | client   first screen
+        ?role=lead | tech | desk | sales                     who is "signed in"
+
+    The Queue (v1.11) reads a STUBBED work_queue feed built below from the
+    demo service tickets plus a few harness builds (an offer to you, an open
+    build, a senior-only build, an overdue one, your own), and leads get two
+    "Needs a lead" alerts and a stub team. Writes still go to the data layer,
+    which refuses them in demo mode (DEMO_READONLY), exactly as in the app.
 
     It loads the REAL stylesheets and EVERY script the app loads for these
     screens (shared/service-status, service-catalog, service-demo, modules,
@@ -36,7 +42,7 @@
       node -e "const c=require('crypto'),h=require('fs').readFileSync('dev/ops-harness.html','utf8').replace(/\r\n/g,'\n');for(const m of h.matchAll(/<(script)>([\s\S]*?)<\/\1>/g))console.log('sha256-'+c.createHash('sha256').update(m[2]).digest('base64'))"
     This folder is excluded from the packaged app (electron-builder.json).
   -->
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-LYqDQzXzNPs05czXtWXboscLnLXvqWqELd37PPwDZ+g=' 'sha256-3rIgZyrDjlQZrLzShG9icXTixYnfFlxThGOsforOX2M=' 'sha256-izIwlu3+GUnp43p+TP9yYzcco5WHYJJ1cXy0xGHNMk4='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: blob: https:; font-src 'self' https://fonts.gstatic.com data:; connect-src 'self' https: wss: data: blob:; worker-src 'self' blob:; child-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-De6glN05yNmowHQA+/nPKV/awdtBExnjy8AsnbjJAdo=' 'sha256-ov3z9cuxol5f/5CcGbnFxkZyC/rgtciWhkbpilNLoFc=' 'sha256-8rEAnJmvf0LGkxn7pMQmOquADuu6xOquef7FdWjEqkU='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: blob: https:; font-src 'self' https://fonts.gstatic.com data:; connect-src 'self' https: wss: data: blob:; worker-src 'self' blob:; child-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'">
   <link rel="icon" href="data:,">
   <title>Ops harness — Overview, Service and RMA (demo data)</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -50,6 +56,7 @@
   <link rel="stylesheet" href="../service-v2.css">
   <link rel="stylesheet" href="../intake.css">
   <link rel="stylesheet" href="../rma.css">
+  <link rel="stylesheet" href="../queue.css">
   <style>
     /* Harness chrome only. The bar sits where the app's titlebar sits (32 px),
        so the rail and every screen are offset exactly as in the app. */
@@ -114,6 +121,7 @@
         <option value="sales">Sales — tier 1, RMA only</option>
       </select>
       <button type="button" class="hx-btn" data-hx="overview">Overview</button>
+      <button type="button" class="hx-btn" data-hx="queue">Queue</button>
       <button type="button" class="hx-btn" data-hx="service">Service</button>
       <button type="button" class="hx-btn" data-hx="rma">RMA</button>
       <button type="button" class="hx-btn" data-hx="theme" title="Switch light / dark">Light / dark</button>
@@ -144,6 +152,19 @@
       <div id="ov-tiles" class="ov-tiles"></div>
       <p class="sv-lead">Everything the shop has open.</p>
       <div id="ov-list" class="ov-list"></div>
+    </main>
+  </div>
+
+  <div id="queue-screen" class="screen has-rail">
+    <header class="glass-slab navbar">
+      <div class="nav-brand">
+        <span class="nav-title">NEO TOKYO // WORK QUEUE</span>
+        <span id="q-stat" class="sv-stat">—</span>
+      </div>
+      <div id="q-toolbar" class="q-toolbar"></div>
+    </header>
+    <main class="dashboard-container">
+      <div id="q-root"></div>
     </main>
   </div>
 
@@ -294,6 +315,7 @@
   <script src="../shared/service-status.js"></script>
   <script src="../shared/service-catalog.js"></script>
   <script src="../shared/service-demo.js"></script>
+  <script src="../shared/work-queue.js"></script>
   <script>
 // ── Stubs for what app.js provides in the real app ──────────────────────────
 // Kept deliberately small: just enough of each for the ops scripts to run.
@@ -334,9 +356,11 @@ hxStore('neo_demo_ops', '1');
 // The technician and the desk clerk are people from the demo staff, so the
 // demo tickets assigned to them really are theirs ("Mine", claimed jobs).
 var HX_PEOPLE = {
-  lead:  { tag: 'LEAD · TIER 5', tier: 5, id: 'harness-owner', email: 'owner@harness.invalid', full_name: 'Harness Owner', designation: 'Owner', modules: null },
-  tech:  { tag: 'TECH · TIER 2 · SERVICE TECH · RMA TECH', tier: 2, demoId: 'demo_p_athul', designation: 'Technician', modules: { service: 'tech', rma: 'tech' } },
-  desk:  { tag: 'DESK · TIER 1 · SERVICE DESK · RMA DESK', tier: 1, demoId: 'demo_p_anagha', designation: 'Service desk', modules: { service: 'desk', rma: 'desk' } },
+  lead:  { tag: 'LEAD · TIER 5 · BOTH POOLS', tier: 5, id: 'harness-owner', email: 'owner@harness.invalid', full_name: 'Harness Owner', designation: 'Owner',
+           modules: { service: null, rma: null, qc: null, build_pool: true, service_pool: true, build_level: 'senior' } },
+  tech:  { tag: 'TECH · TIER 2 · SERVICE/RMA/BUILDS TECH · BOTH POOLS', tier: 2, demoId: 'demo_p_athul', designation: 'Technician',
+           modules: { service: 'tech', rma: 'tech', qc: 'tech', build_pool: true, service_pool: true, build_level: 'junior' } },
+  desk:  { tag: 'DESK · TIER 1 · SERVICE/RMA/BUILDS DESK', tier: 1, demoId: 'demo_p_anagha', designation: 'Service desk', modules: { service: 'desk', rma: 'desk', qc: 'desk' } },
   sales: { tag: 'SALES · TIER 1 · RMA DESK ONLY', tier: 1, id: 'harness-sales', email: 'sales@harness.invalid', full_name: 'Harness Sales', designation: 'Sales', modules: { service: null, rma: 'desk' } }
 };
 var hxRole = 'lead';
@@ -367,7 +391,8 @@ function hxWriteRoles(profile, modules) {
     var all = {};
     try { all = JSON.parse(localStorage.getItem('neo_modules') || '{}') || {}; } catch (e) { all = {}; }
     all[profile.id] = { at: new Date().toISOString(), data: {
-      tier: profile.tier, service: modules.service || null, rma: modules.rma || null, qc: null, neohr: null
+      tier: profile.tier, service: modules.service || null, rma: modules.rma || null, qc: modules.qc || null, neohr: null,
+      build_pool: !!modules.build_pool, service_pool: !!modules.service_pool, build_level: modules.build_level || null
     } };
     localStorage.setItem('neo_modules', JSON.stringify(all));
     return true;
@@ -521,7 +546,7 @@ function switchScreen(mode) {
     routeByTier();
     return;
   }
-  var screens = { overview: 'overview-screen', staff: 'staff-screen', service: 'service-screen', rma: 'rma-screen', client: 'client-welcome-screen' };
+  var screens = { overview: 'overview-screen', queue: 'queue-screen', staff: 'staff-screen', service: 'service-screen', rma: 'rma-screen', client: 'client-welcome-screen' };
   var target = document.getElementById(screens[mode] || 'overview-screen');
   currentMode = screens[mode] ? mode : 'overview';
   document.querySelectorAll('.screen').forEach(function (s) { s.classList.remove('active'); });
@@ -530,6 +555,7 @@ function switchScreen(mode) {
   var p = null;
   try {
     if (currentMode === 'overview' && window.NeoQcShell) p = window.NeoQcShell.ensureOverviewLoaded();
+    else if (currentMode === 'queue' && window.NeoQcQueue) p = window.NeoQcQueue.ensureLoaded();
     else if (currentMode === 'service' && window.NeoQcServiceUI) p = window.NeoQcServiceUI.ensureServiceLoaded();
     else if (currentMode === 'rma' && window.NeoQcRmaUI) p = window.NeoQcRmaUI.ensureLoaded();
     else if (currentMode === 'client') {
@@ -559,12 +585,114 @@ function switchScreen(mode) {
   try {
     Promise.resolve(window.NeoQcData.setDemo(true)).catch(function (e) { console.error('[harness] setDemo failed:', e); });
   } catch (e) { console.error('[harness] setDemo failed:', e); }
+
+  // The Queue's feed, stubbed (v1.11): the demo service tickets plus a few
+  // harness builds, shaped like rpc work_queue / work_team. Reads only; every
+  // write still goes to the data layer, which refuses it in demo mode.
+  var D = window.NeoQcData;
+  var low = function (s) { return String(s == null ? '' : s).trim().toLowerCase(); };
+  var iso = function (ms) { return new Date(ms).toISOString(); };
+  function role(m) { try { return window.NeoQcModules ? window.NeoQcModules.roleFor(m) : null; } catch (e) { return null; } }
+  function rank(r) { return ({ desk: 1, tech: 2, lead: 3 })[r] || 0; }
+  function myPools() {
+    var M = window.NeoQcModules;
+    try { if (M && typeof M.pools === 'function') return M.pools() || {}; } catch (e) { /* none */ }
+    var p = HX_PEOPLE[hxRole] && HX_PEOPLE[hxRole].modules || {};
+    return { build: !!p.build_pool, service: !!p.service_pool, level: p.build_level || null };
+  }
+  function buildItem(now, o) {
+    var pools = myPools();
+    var tier = o.tier || 1;
+    var why = !pools.build ? "You aren't in the build pool." : (tier >= 4 && pools.level !== 'senior' ? 'This is a high-value build — only senior builders can take it.' : null);
+    var other = o.offer && low(o.offer.to_email) !== low(currentProfile && currentProfile.email);
+    if (!why && other) why = 'Offered to ' + o.offer.to_name + ' until ' + new Date(Date.parse(o.offer.expires_at)).toTimeString().slice(0, 5) + '.';
+    var queued = o.queuedAgoMin != null ? now - o.queuedAgoMin * 60000 : null;
+    return {
+      kind: 'build', id: o.id, code: o.id.slice(-6).toUpperCase(), title: o.title, sub: o.sub, customer: o.title, area: null,
+      service_type: null, stage: o.stage || 'awaiting', priority: o.urgent ? 'urgent' : 'normal', build_tier: tier, needs_senior: tier >= 4,
+      deadline: iso(now + (o.dueH || 72) * 3600000), queued_at: queued != null ? iso(queued) : null,
+      claim_due: queued != null ? iso(queued + 4 * 3600000) : null, cost: tier,
+      assignee_email: o.mine ? low(currentProfile && currentProfile.email) : null, assignee_name: o.mine ? (currentProfile && currentProfile.full_name) : null,
+      assigned_via: o.mine ? 'claim' : null, assigned_at: o.mine ? iso(now - 2 * 3600000) : null,
+      offer: o.offer || null, declined_count: 0, mine: !!o.mine,
+      offered_to_me: !!(o.offer && !other), can_claim: !o.mine && !why && queued != null, why_not: o.mine ? null : why
+    };
+  }
+  function hxFeed() {
+    var now = Date.now();
+    var me = currentProfile || {};
+    var items = [];
+    var leadB = role('qc') === 'lead', leadS = role('service') === 'lead';
+    if (rank(role('qc')) >= 1) {
+      // Offered to you when you are in the build pool (an offer only ever
+      // goes to someone who can take it); otherwise to a demo technician.
+      var toMe = !!myPools().build;
+      items.push(buildItem(now, { id: 't_hxdemo05', title: 'Demo build — Arjun V', sub: 'Core i7-14700K · RTX 4070 Ti Super', tier: 3, queuedAgoMin: 40,
+        offer: { to_email: toMe ? low(me.email) : 'demo.tech@harness.invalid', to_name: toMe ? me.full_name : 'Demo Tech', kind: 'manager', by_name: 'Harness Lead',
+                 reason: 'Did the last build for this customer.', offered_at: iso(now - 6 * 60000), expires_at: iso(now + 24 * 60000) } }));
+      items.push(buildItem(now, { id: 't_hxdemo03', title: 'Demo build — Meera S', sub: 'Ryzen 5 7600 · RTX 4060', tier: 2, queuedAgoMin: 50 }));
+      items.push(buildItem(now, { id: 't_hxdemo04', title: 'Demo build — Studio rig', sub: 'Threadripper 7960X · RTX 4090', tier: 5, queuedAgoMin: 200, urgent: true, dueH: 30 }));
+      items.push(buildItem(now, { id: 't_hxdemo06', title: 'Demo build — Nikhil R', sub: 'Ryzen 7 7700 · RX 7800 XT', tier: 2, queuedAgoMin: 300,
+        offer: { to_email: 'demo.tech@harness.invalid', to_name: 'Demo Tech', kind: 'auto', by_name: 'Neo OS', reason: 'Not claimed in 4 hours — you have the most room.', offered_at: iso(now - 10 * 60000), expires_at: iso(now + 20 * 60000) } }));
+      if (myPools().build) items.push(buildItem(now, { id: 't_hxdemo01', title: 'Demo build — Rahul P', sub: 'Ryzen 7 7800X3D · RTX 4070 Super', tier: 2, mine: true, stage: 'building' }));
+    }
+    if (rank(role('service')) >= 1 && D && typeof D.jobs === 'function') {
+      var S = window.NeoQcService;
+      (D.jobs() || []).forEach(function (j) {
+        if (!j || j.stage === 'closed') return;
+        var mine = !!j.assignee_email && low(j.assignee_email) === low(me.email);
+        if (j.assignee_email && !mine) return;
+        var type = j.service_type || 'in_store';
+        var q = Date.parse(j.queued_at || j.created_at);
+        var poolOk = myPools().service && rank(role('service')) >= 2;
+        items.push({
+          kind: 'service', id: j.id, code: j.public_code, title: j.device_label || 'Service ticket',
+          sub: [S && S.TYPES && S.TYPES[type] ? S.TYPES[type].label : type, j.category].filter(Boolean).join(' · '),
+          customer: String(j.customer_name || '').split(' ')[0], area: j.site_area || null, service_type: type,
+          stage: j.stage, priority: j.priority || 'normal', build_tier: null, needs_senior: false,
+          deadline: j.visit_start || j.needed_by || null, queued_at: isFinite(q) ? iso(q) : null,
+          claim_due: isFinite(q) ? iso(q + 4 * 3600000) : null, cost: type === 'on_site' ? 2 : 1,
+          assignee_email: j.assignee_email || null, assignee_name: j.assignee || null, assigned_via: null, assigned_at: null,
+          offer: null, declined_count: 0, mine: mine, offered_to_me: false,
+          can_claim: !mine && poolOk, why_not: mine || poolOk ? null : (rank(role('service')) < 2 ? "You don't have the Service technician role." : "You aren't in the service pool.")
+        });
+      });
+    }
+    var alerts = [];
+    if (leadB) alerts.push({ id: 9001, kind: 'declined', item_kind: 'build', item_id: 't_hxdemo03', item_code: 'HXDE03', title: 'Demo build — Meera S',
+      body: 'Demo Tech declined HXDE03: already on two builds due today.', person_name: 'Demo Tech', created_at: iso(now - 15 * 60000) });
+    if (leadB) alerts.push({ id: 9002, kind: 'no_candidate', item_kind: 'build', item_id: 't_hxdemo04', item_code: 'HXDE04', title: 'Demo build — Studio rig',
+      body: 'Nobody free can take HXDE04 — offer it to someone or wait for room.', person_name: null, created_at: iso(now - 4 * 60000) });
+    var p = myPools();
+    return { now: iso(now), claim_hours: 4, offer_minutes: 30,
+      me: { email: low(me.email), name: me.full_name, tier: me.tier, build_pool: !!p.build, service_pool: !!p.service, build_level: p.level || null },
+      items: items, alerts: alerts };
+  }
+  function hxTeam() {
+    var now = Date.now();
+    var people = [
+      { email: 'demo.senior@harness.invalid', name: 'Demo Senior', designation: 'Senior System Integrator', tier: 2, build_pool: true, service_pool: true,
+        build_level: 'senior', capacity_points: 8, max_jobs: 5, points: 5, jobs: 2, qc_role: 'tech', service_role: 'tech',
+        items: [{ kind: 'build', id: 't_hxdemo02', code: 'HXDE02', title: 'Demo build — Priya N', stage: 'waiting_qc', cost: 2 }], offers: [], last_seen_at: iso(now - 20 * 60000), logs_today: 3 },
+      { email: 'demo.tech@harness.invalid', name: 'Demo Tech', designation: 'Service Engineer', tier: 2, build_pool: true, service_pool: true,
+        build_level: 'junior', capacity_points: 5, max_jobs: 3, points: 2, jobs: 0, qc_role: 'tech', service_role: 'tech',
+        items: [], offers: [{ kind: 'build', id: 't_hxdemo06', code: 'HXDE06', title: 'Demo build — Nikhil R', expires_at: iso(now + 20 * 60000), offer_kind: 'auto' }], last_seen_at: null, logs_today: 0 },
+      { email: 'demo.desk@harness.invalid', name: 'Demo Desk', designation: 'Help Desk Coordinator', tier: 2, build_pool: false, service_pool: false,
+        build_level: null, capacity_points: 6, max_jobs: 4, points: 0, jobs: 0, qc_role: 'desk', service_role: 'desk', items: [], offers: [], last_seen_at: null, logs_today: null }
+    ];
+    return { now: iso(now), people: people, alerts: hxFeed().alerts };
+  }
+  D.workQueue = function () { return Promise.resolve(hxFeed()); };
+  D.workTeam = function () { return Promise.resolve(hxTeam()); };
+  D.workTick = function () { return Promise.resolve(null); };
+  if (typeof D.workEvents !== 'function') D.workEvents = function () { return Promise.resolve([]); };
 })();
   </script>
   <script src="../photo-tray.js"></script>
   <script src="../service-intake.js"></script>
   <script src="../service.js"></script>
   <script src="../rma.js"></script>
+  <script src="../queue.js"></script>
   <script src="../shell.js"></script>
   <script>
 // Harness boot: the role switcher, the dock, then the first screen.
@@ -631,6 +759,7 @@ function switchScreen(mode) {
 
   var ACTIONS = {
     overview: function () { go('overview'); },
+    queue: function () { go('queue'); },
     service: function () { go('service'); },
     rma: function () { go('rma'); },
     'sv-board': function () { go('service', function () { window.NeoQcServiceUI.setView('board'); }); },
@@ -708,7 +837,7 @@ function switchScreen(mode) {
   Promise.resolve(window.NeoQcModules ? window.NeoQcModules.refreshAccess() : null).then(function () {
     // A deep link opens that screen if this person may; otherwise (or with
     // none) the person lands where the app would put them.
-    var linked = first === 'client' || (['overview', 'staff', 'service', 'rma'].indexOf(first) !== -1 && hxCanOpen(first));
+    var linked = first === 'client' || (['overview', 'queue', 'staff', 'service', 'rma'].indexOf(first) !== -1 && hxCanOpen(first));
     if (linked) switchScreen(first); else routeByTier();
   });
 })();

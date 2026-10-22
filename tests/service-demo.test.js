@@ -34,8 +34,11 @@ function unitBy(brand, modelPart) {
 }
 
 // The real table columns (sql/service-v2.sql §2.4–§2.7 plus the v1 columns,
-// plus sql/service-v2.1.sql's has_device_password).
-var JOB_COLS = ['id', 'public_code', 'created_at', 'updated_at', 'job_kind', 'origin', 'stage', 'stage_since', 'received_at',
+// plus sql/service-v2.1.sql's has_device_password, plus sql/work-queue.sql's
+// offer columns, declined_emails and auto_tried_at).
+var OFFER_COLS = ['offered_to_email', 'offered_to_name', 'offer_kind', 'offer_by_email', 'offer_by_name', 'offer_reason',
+  'offered_at', 'offer_expires_at', 'declined_emails', 'auto_tried_at'];
+var JOB_COLS = OFFER_COLS.concat(['id', 'public_code', 'created_at', 'updated_at', 'job_kind', 'origin', 'stage', 'stage_since', 'received_at',
   'customer_name', 'customer_phone', 'customer_email', 'device_label', 'device_serial', 'reported_fault', 'has_customer_data',
   'build_ticket_id', 'intake', 'details', 'subject', 'diagnosis', 'work_done', 'assignee', 'assignee_email', 'promised_at',
   'waiting_party', 'next_chase_at', 'outcome', 'ready_at', 'closed_at', 'closed_by',
@@ -44,8 +47,8 @@ var JOB_COLS = ['id', 'public_code', 'created_at', 'updated_at', 'job_kind', 'or
   'assign_reason', 'queued_at', 'needed_by', 'window_start', 'window_end', 'window_note', 'visit_start', 'visit_end', 'visit_count',
   'site_address', 'site_area', 'site_pincode', 'site_landmark', 'site_maps_url', 'site_lat', 'site_lng', 'site_contact',
   'remote_tool', 'remote_session_ref', 'remote_consent_at', 'converted_from', 'accessories', 'condition_note', 'powers_on',
-  'data_consent', 'est_minutes', 'client_request_id', 'has_device_password'];
-var ITEM_COLS = ['id', 'job_id', 'sort', 'is_primary', 'kind', 'label', 'serial', 'serial_norm', 'purchase_source', 'build_ticket_id',
+  'data_consent', 'est_minutes', 'client_request_id', 'has_device_password']);
+var ITEM_COLS =['id', 'job_id', 'sort', 'is_primary', 'kind', 'label', 'serial', 'serial_norm', 'purchase_source', 'build_ticket_id',
   'invoice_no', 'purchase_date', 'condition_remarks', 'accessories', 'powers_on', 'returned_at', 'created_at', 'created_by'];
 var INTAKE_COLS = ['id', 'source', 'service_job_id', 'sender_kind', 'sender_name', 'sender_phone', 'sender_customer_id',
   'inbound_courier', 'inbound_awb', 'received_at', 'return_method', 'return_address', 'notes', 'created_at', 'created_by_email',
@@ -218,6 +221,42 @@ test('assignment and queue columns agree', function () {
     }
     if (j.suggested_tech_email) assert.ok(staff[j.suggested_tech_email] && j.suggest_reason, j.id + ' suggestion');
     assert.ok(staff[j.created_by_email] && j.created_by_name === staff[j.created_by_email].full_name, j.id + ' creator');
+  });
+});
+
+// sql/work-queue.sql: an offer lives 30 minutes, only on an item nobody holds,
+// to a service-pool technician; declined_emails are lower-case staff emails.
+test('offers: live, unassigned, to a technician, 30 minutes; declined_emails well-formed', function () {
+  var staff = {};
+  d.staff.forEach(function (p) { staff[p.email] = p; });
+  var techEmails = d.techs.map(function (t) { return t.email; });
+  var offered = d.jobs.filter(function (j) { return j.offered_to_email; });
+  assert.ok(offered.length >= 1, 'at least one live offer to show');
+  d.jobs.forEach(function (j) {
+    assert.ok(Array.isArray(j.declined_emails), j.id + ' declined_emails is an array');
+    j.declined_emails.forEach(function (e) {
+      assert.ok(staff[e] && e === e.toLowerCase().trim(), j.id + ' declined ' + e);
+      assert.notStrictEqual(e, j.offered_to_email, j.id + ' the offered person has not declined');
+    });
+    if (!j.offered_to_email) {
+      OFFER_COLS.filter(function (c) { return c !== 'declined_emails' && c !== 'auto_tried_at'; }).forEach(function (c) {
+        assert.strictEqual(j[c], null, j.id + ' ' + c + ' without an offer');
+      });
+      return;
+    }
+    assert.ok(!j.assignee_email && j.stage !== 'closed' && j.queued_at, j.id + ' offers only on open items');
+    assert.ok(techEmails.indexOf(j.offered_to_email) !== -1, j.id + ' offered to a service-pool technician');
+    assert.strictEqual(j.offered_to_name, staff[j.offered_to_email].full_name);
+    assert.ok(j.offer_kind === 'auto' || j.offer_kind === 'manager', j.id + ' offer_kind');
+    assert.strictEqual(ms(j.offer_expires_at) - ms(j.offered_at), 30 * MIN, j.id + ' 30 minutes to accept');
+    assert.ok(ms(j.offer_expires_at) > NOW && ms(j.offered_at) <= NOW, j.id + ' live now');
+    assert.ok(j.offer_reason, j.id + ' reason');
+    if (j.offer_kind === 'auto') {
+      assert.strictEqual(j.offer_by_email, null);
+      assert.strictEqual(j.offer_by_name, 'Neo OS');
+      assert.ok(ms(j.offered_at) - ms(j.queued_at) >= 4 * HOUR, j.id + ' the app offers only after 4 hours');
+      assert.strictEqual(j.auto_tried_at, j.offered_at);
+    }
   });
 });
 
@@ -607,9 +646,25 @@ test('"closed today" stays today at any hour, and the build never throws', funct
 test('techs mirror service_tech_list() and count from the jobs', function () {
   assert.deepStrictEqual(d.techs.map(function (t) { return t.name; }), ['Adhil M', 'Amal C Abi', 'Athul Sudheer', 'Vinayakan S']);
   d.techs.forEach(function (t) {
-    assert.deepStrictEqual(Object.keys(t).sort(), ['designation', 'email', 'in_queue_requested', 'name', 'open_count', 'role', 'visits_today']);
+    // v2.2 (sql/work-queue.sql §2.7.13 + WQ-C12): + pools, level, load and capacity.
+    assert.deepStrictEqual(Object.keys(t).sort(), ['build_level', 'build_pool', 'capacity_points', 'designation', 'email',
+      'in_queue_requested', 'jobs', 'max_jobs', 'name', 'open_count', 'points', 'role', 'service_pool', 'visits_today']);
     assert.strictEqual(t.open_count, d.jobs.filter(function (j) { return j.assignee_email === t.email && j.stage !== 'closed'; }).length);
+    assert.strictEqual(t.service_pool, true, t.name + ': only service-pool members are listed');
+    assert.ok(t.build_level === null || t.build_level === 'junior' || t.build_level === 'senior', t.name + ' level');
+    var cap = { senior: [8, 5], junior: [5, 3] }[t.build_level] || [6, 4];
+    assert.deepStrictEqual([t.capacity_points, t.max_jobs], cap, t.name + ' capacity defaults by level');
+    // Load = what they hold + live offers to them; on-site costs 2.
+    var load = d.jobs.filter(function (j) {
+      if (j.stage === 'closed') return false;
+      if (j.assignee_email === t.email) return true;
+      return !j.assignee_email && j.offered_to_email === t.email && ms(j.offer_expires_at) > NOW;
+    });
+    assert.strictEqual(t.jobs, load.length, t.name + ' jobs');
+    assert.strictEqual(t.points, load.reduce(function (s, j) { return s + (j.service_type === 'on_site' ? 2 : 1); }, 0), t.name + ' points');
   });
+  var amal = d.techs.filter(function (t) { return t.name === 'Amal C Abi'; })[0];
+  assert.strictEqual(amal.jobs, amal.open_count + 1, 'the live offer to Amal counts toward his load');
   var athul = d.techs.filter(function (t) { return t.name === 'Athul Sudheer'; })[0];
   assert.strictEqual(athul.in_queue_requested, 1);
   var vin = d.techs.filter(function (t) { return t.name === 'Vinayakan S'; })[0];

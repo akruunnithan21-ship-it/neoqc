@@ -315,6 +315,9 @@ test('vocabulary keys and labels match the spec', function () {
   assert.deepStrictEqual(S.PURCHASE_SOURCES, { neo_tokyo: 'Neo Tokyo', elsewhere: 'Bought elsewhere', unknown: 'Not sure' });
   assert.deepStrictEqual(S.MIRROR_STAGES, ['rma_raised', 'at_vendor', 'back_from_vendor']);
   assert.deepStrictEqual(S.PRIVATE_MEDIA_ROLES, ['invoice', 'serial_label', 'vendor_doc']);
+  // v2.2 (sql/work-queue.sql) widens service_jobs.assigned_via with 'auto' (an accepted app offer).
+  assert.deepStrictEqual(S.ASSIGNED_VIA, { claim: 'Claimed', manager: 'Assigned by a lead', auto: 'Offered by Neo OS',
+    legacy: 'Assigned', self: 'Took it at intake' });
 });
 
 // ═══ 3. Type tracks ══════════════════════════════════════════════════════
@@ -499,33 +502,34 @@ test('inQueue: open and nobody has it', function () {
   assert.strictEqual(S.inQueue(null), false);
 });
 
-test('queueBudgetHours per priority and type', function () {
+// Owner decision 2026-10-22: one 4-hour limit for every job, whatever its type
+// or priority (the same CLAIM_HOURS as shared/work-queue.js).
+test('queueBudgetHours: 4 hours for every job', function () {
   function q(p, t) { return S.queueBudgetHours({ priority: p, service_type: t }); }
-  ['in_store', 'on_site', 'remote'].forEach(function (t) {
-    assert.strictEqual(q('urgent', t), 1);
-    assert.strictEqual(q('high', t), 4);
-    assert.strictEqual(q('low', t), 24);
+  ['in_store', 'on_site', 'remote', undefined].forEach(function (t) {
+    ['urgent', 'high', 'normal', 'low', undefined, 'nonsense'].forEach(function (p) {
+      assert.strictEqual(q(p, t), 4, p + ' / ' + t);
+    });
   });
-  assert.strictEqual(q('normal', 'in_store'), 4);
-  assert.strictEqual(q('normal', 'on_site'), 8);
-  assert.strictEqual(q('normal', 'remote'), 4);
-  assert.strictEqual(q(undefined, 'on_site'), 8);
-  assert.strictEqual(q('nonsense', 'remote'), 4);
   assert.strictEqual(S.queueBudgetHours(null), 4);
+  assert.strictEqual(S.queueBudgetHours(), 4);
 });
 
-test('queueRisk: 75% soon, 100% late, queued_at falls back to created_at', function () {
+test('queueRisk: 75% (3 h) soon, 100% (4 h) late, queued_at falls back to created_at', function () {
   function q(hours, extra) {
     var o = { stage: 'logged', assignee_email: null, priority: 'normal', service_type: 'on_site', queued_at: iso(NOW - hours * HOUR) };
     Object.keys(extra || {}).forEach(function (k) { o[k] = extra[k]; });
     return S.queueRisk(o, NOW);
   }
-  assert.strictEqual(q(5.9), 0);
-  assert.strictEqual(q(6), 1);
-  assert.strictEqual(q(7.9), 1);
+  assert.strictEqual(q(2.9), 0);
+  assert.strictEqual(q(3), 1);
+  assert.strictEqual(q(3.9), 1);
+  assert.strictEqual(q(4), 2);
   assert.strictEqual(q(8), 2);
-  assert.strictEqual(q(0.8, { priority: 'urgent' }), 1);
-  assert.strictEqual(q(1.2, { priority: 'urgent' }), 2);
+  // Priority no longer changes the limit: urgent waits 4 hours like the rest.
+  assert.strictEqual(q(1.2, { priority: 'urgent' }), 0);
+  assert.strictEqual(q(3.5, { priority: 'urgent' }), 1);
+  assert.strictEqual(q(4, { priority: 'low', service_type: 'remote' }), 2);
   assert.strictEqual(q(30, { assignee_email: 'x@y.z' }), 0, 'claimed');
   assert.strictEqual(q(30, { stage: 'closed' }), 0, 'closed');
   assert.strictEqual(S.queueRisk({ stage: 'logged', priority: 'high', created_at: iso(NOW - 5 * HOUR) }, NOW), 2, 'created_at fallback');

@@ -177,6 +177,19 @@ select u.id, m.module, m.role, 'tests'
                ('tech2', 'service', 'tech'), ('tech2', 'rma', 'tech')) as m(alias, module, role)
     on m.alias = u.alias;
 
+-- v2.2: pool gate — once sql/work-queue.sql is applied, service_claim and
+-- service_tech_list need the caller's service pool. The users who claim here
+-- get one, whatever People says today. Skipped before v2.2 (no such table).
+do $$
+begin
+  if to_regclass('public.staff_work') is not null then
+    execute $x$
+      insert into public.staff_work (profile_id, build_pool, service_pool, updated_by)
+      select u.id, true, true, 'tests' from neo_test.users u where u.alias in ('owner', 'tech1', 'tech2')
+      on conflict (profile_id) do update set service_pool = true$x$;
+  end if;
+end $$;
+
 -- A finished build for the build search (A20). Only the columns the repo's
 -- tickets DDL defines; specs / serials hold what the build checklist records.
 insert into public.tickets (id, type, customer_name, specs, serials, completed_at)

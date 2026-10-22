@@ -95,11 +95,17 @@
     return d.length === 11 && ['965', '968', '973', '974'].indexOf(d.slice(0, 3)) !== -1;
   }
 
+  // service_pool / build_pool / build_level are the work-queue fields
+  // (sql/work-queue.sql staff_work); they feed `techs` only, never `staff`.
   var STAFF = {
-    athul:   { id: 'demo_p_athul',   email: 'athul.sudheer@neotokyo.in', full_name: 'Athul Sudheer', designation: 'Field technician', active: true, tier: 2, role: 'tech' },
-    adhil:   { id: 'demo_p_adhil',   email: 'adhil.m@neotokyo.in',       full_name: 'Adhil M',       designation: 'Technician',       active: true, tier: 2, role: 'tech' },
-    amal:    { id: 'demo_p_amal',    email: 'amal.c@neotokyo.in',        full_name: 'Amal C Abi',    designation: 'Technician',       active: true, tier: 2, role: 'tech' },
-    vinayak: { id: 'demo_p_vinayak', email: 'vinayak.s@neotokyo.in',     full_name: 'Vinayakan S',   designation: 'Field technician', active: true, tier: 2, role: 'tech' },
+    athul:   { id: 'demo_p_athul',   email: 'athul.sudheer@neotokyo.in', full_name: 'Athul Sudheer', designation: 'Field technician', active: true, tier: 2, role: 'tech',
+               service_pool: true, build_pool: true, build_level: 'junior' },
+    adhil:   { id: 'demo_p_adhil',   email: 'adhil.m@neotokyo.in',       full_name: 'Adhil M',       designation: 'Technician',       active: true, tier: 2, role: 'tech',
+               service_pool: true, build_pool: true, build_level: 'senior' },
+    amal:    { id: 'demo_p_amal',    email: 'amal.c@neotokyo.in',        full_name: 'Amal C Abi',    designation: 'Technician',       active: true, tier: 2, role: 'tech',
+               service_pool: true, build_pool: true, build_level: 'senior' },
+    vinayak: { id: 'demo_p_vinayak', email: 'vinayak.s@neotokyo.in',     full_name: 'Vinayakan S',   designation: 'Field technician', active: true, tier: 2, role: 'tech',
+               service_pool: true, build_pool: false, build_level: null },
     anagha:  { id: 'demo_p_anagha',  email: 'anagha.kc@neotokyo.in',     full_name: 'Anagha K C',    designation: 'Service desk',     active: true, tier: 1, role: 'desk' },
     ancy:    { id: 'demo_p_ancy',    email: 'ancybaby@neotokyo.in',      full_name: 'Ancy Baby',     designation: 'Service desk',     active: true, tier: 1, role: 'desk' }
   };
@@ -205,7 +211,11 @@
         // sql/service-v2.1.sql: only whether a device password is on file. The
         // password itself never reaches the demo (or any cache); in demo mode
         // NeoQcData.getDevicePassword answers a placeholder.
-        has_device_password: false
+        has_device_password: false,
+        // sql/work-queue.sql (v2.2): the live offer (30 minutes to accept), who
+        // declined or ignored one in this queue cycle, and the last auto-offer try.
+        offered_to_email: null, offered_to_name: null, offer_kind: null, offer_by_email: null, offer_by_name: null,
+        offer_reason: null, offered_at: null, offer_expires_at: null, declined_emails: [], auto_tried_at: null
       }, o);
       if (!row.updated_at) row.updated_at = row.stage_since || row.created_at;
       // The queue is "open and nobody has it"; queued_at is when it entered it.
@@ -225,6 +235,20 @@
     function creator(row, staffKey) {
       row.created_by_email = STAFF[staffKey].email;
       row.created_by_name = STAFF[staffKey].full_name;
+    }
+    // A live offer (sql/work-queue.sql): `msAgo` since it was made, 30 minutes
+    // to accept. byKey null = the app's own offer after the 4-hour limit.
+    function offer(row, toKey, msAgo, byKey, reason) {
+      var to = STAFF[toKey], by = byKey ? STAFF[byKey] : null;
+      row.offered_to_email = to.email;
+      row.offered_to_name = to.full_name;
+      row.offer_kind = by ? 'manager' : 'auto';
+      row.offer_by_email = by ? by.email : null;
+      row.offer_by_name = by ? by.full_name : 'Neo OS';
+      row.offer_reason = reason;
+      row.offered_at = ago(msAgo);
+      row.offer_expires_at = iso(now - msAgo + 30 * MIN);
+      if (!by) row.auto_tried_at = row.offered_at;
     }
 
     var itemSeq = {};
@@ -464,6 +488,10 @@
       condition_note: 'Crack at the bottom-left of the panel; hinge stiff.'
     }));
     creator(t, 'ancy');
+    // Nobody claimed it in 4 hours: the app offered it. Adhil let an earlier
+    // offer run out; now it waits on Amal's answer.
+    offer(t, 'amal', 12 * MIN, null, 'Not claimed in 4 hours — you have the most room.');
+    t.declined_emails = [STAFF.adhil.email];
     item('anjali', { kind: 'laptop', label: 'HP Pavilion 15 (2022)', serial: '5CD2341K7Q', purchase_source: 'elsewhere',
                      purchase_date: dateAgo(700), condition_remarks: 'Crack at the bottom-left of the panel; hinge stiff.',
                      accessories: ['Charger', 'Bag'], powers_on: true });
@@ -1080,16 +1108,32 @@
       return { id: p.id, email: p.email, full_name: p.full_name, designation: p.designation, active: p.active, tier: p.tier };
     });
     var todayStr = new Date(now).toDateString();
-    var techs = STAFF_ORDER.filter(function (k) { return STAFF[k].role === 'tech'; }).map(function (k) {
+    // service_tech_list() v2.2: service technicians IN the service pool, with
+    // pools, build level, load (points/jobs: what they hold plus live offers
+    // to them; on-site counts 2) and capacity (_work_defaults by level).
+    var CAP = { senior: [8, 5], junior: [5, 3], none: [6, 4] };
+    var techs = STAFF_ORDER.filter(function (k) { return STAFF[k].role === 'tech' && STAFF[k].service_pool; }).map(function (k) {
       var p = STAFF[k];
       var mine = jobs.filter(function (j) { return j.assignee_email === p.email && j.stage !== 'closed'; });
+      var offered = jobs.filter(function (j) {
+        return !j.assignee_email && j.stage !== 'closed' && j.offered_to_email === p.email && Date.parse(j.offer_expires_at) > now;
+      });
+      var load = mine.concat(offered);
+      var cap = CAP[p.build_level || 'none'];
       return {
         email: p.email, name: p.full_name, designation: p.designation, role: p.role,
         open_count: mine.length,
         visits_today: mine.filter(function (j) { return j.visit_start && new Date(j.visit_start).toDateString() === todayStr; }).length,
         in_queue_requested: jobs.filter(function (j) {
           return j.suggested_tech_email === p.email && !j.assignee_email && j.stage !== 'closed';
-        }).length
+        }).length,
+        service_pool: true,
+        build_pool: !!p.build_pool,
+        build_level: p.build_level || null,
+        points: load.reduce(function (s, j) { return s + (j.service_type === 'on_site' ? 2 : 1); }, 0),
+        jobs: load.length,
+        capacity_points: cap[0],
+        max_jobs: cap[1]
       };
     }).sort(function (a, b) { return a.name < b.name ? -1 : a.name > b.name ? 1 : 0; });
 
