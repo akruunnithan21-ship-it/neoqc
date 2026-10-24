@@ -52,6 +52,18 @@
   new table and function, record_field_activity is v2's body plus only the
   punch branch, India time everywhere, neo_dashboard untouched.
 
+  v2.4 (sql/neohr-hr-v2.4.sql, and sql/neohr-hr-v2.4-overview.sql when it is
+  there — field staff, verified punches, selfies, trips, the dashboard
+  numbers): every function is an _hr_ internal or in _hr_lockdown's API list,
+  and nothing reaches anon; the new tables have RLS and no client grant, and
+  authenticated loses attendance_events; R1 — every function v2.4 redefines
+  keeps its v2.3 / v2.2 parameters and return type (hr_punch one signature,
+  _hr_ctx untouched); R2 — hr_punch reads its new keys only through
+  _hr_punch_extras and runs the request / trip in sub-blocks; R5 / R6 — the
+  writers' locks, the caps; every v2.4 NEO_ sentence is asserted by the v2.4
+  tests; tests/fixtures/hr-day-v24.json is pinned by the contract and
+  inlined byte for byte.
+
   Pass paths to check other copies: node tests/sql-parity.test.js v2.sql v2.1.sql
   (those files, in that order, nothing else appended).
 */
@@ -66,10 +78,11 @@ var Demo = require(path.join(__dirname, '..', 'shared', 'service-demo.js'));
 
 var SQL_PATH = process.argv[2] ? path.resolve(process.argv[2]) : path.join(__dirname, '..', 'sql', 'service-v2.sql');
 // The follow-ups, oldest first: service-v2.1.sql, work-queue.sql (which is
-// v2.2), neohr-hr.sql (v2.3), … (never a .tests.sql or the optional
+// v2.2), neohr-hr.sql (v2.3), neohr-hr-v2.4.sql, neohr-hr-v2.4-overview.sql,
+// … (never a .tests.sql or the optional
 // work-queue-cron.sql / neohr-hr-cron.sql). Versions sort as numbers, so 2.10
 // comes after 2.9.
-var NAMED_FOLLOW_UPS = { 'work-queue.sql': 2, 'neohr-hr.sql': 3 };
+var NAMED_FOLLOW_UPS = { 'work-queue.sql': 2, 'neohr-hr.sql': 3, 'neohr-hr-v2.4.sql': 4, 'neohr-hr-v2.4-overview.sql': 5 };
 function followUps() {
   if (process.argv[2]) return [];
   var dir = path.dirname(SQL_PATH);
@@ -1359,6 +1372,185 @@ hrTest('v2.3: India time everywhere (no current_date), neo_dashboard untouched',
   assert.ok(createdFunctions(HR).indexOf('neo_dashboard') === -1, '§9.9.2: neo_dashboard is not redefined (2.1.1 phones)');
   var castRe = /\b(?:at|p_at|v_at|s_start|e\.at|lp\.at|fa\.at)\s*::\s*(?:date|time)\b/gi;
   assert.ok(!castRe.test(HR), 'no timestamp is cast to a date or time without at time zone \'Asia/Kolkata\'');
+});
+
+
+// ═══ v2.4 — field staff, verified punches, selfies, trips (sql/neohr-hr-v2.4.sql) ═══
+
+function readIf(p) { return p && fs.existsSync(p) ? fs.readFileSync(p, 'utf8').replace(/\r\n/g, '\n') : null; }
+var V24_PATH = SQL_PATHS.filter(function (p) { return path.basename(p) === 'neohr-hr-v2.4.sql'; })[0] || null;
+var V24_RAW = readIf(V24_PATH);
+var V24 = V24_RAW ? stripComments(V24_RAW) : null;
+var OV_PATH = SQL_PATHS.filter(function (p) { return path.basename(p) === 'neohr-hr-v2.4-overview.sql'; })[0] || null;
+var OV_RAW = readIf(OV_PATH);
+var OV = OV_RAW ? stripComments(OV_RAW) : null;
+var V24_TESTS = V24_PATH ? readIf(path.join(path.dirname(V24_PATH), 'neohr-hr-v2.4.tests.sql')) : null;
+var OV_TESTS = OV_PATH ? readIf(path.join(path.dirname(OV_PATH), 'neohr-hr-v2.4-overview.tests.sql')) : null;
+var V24_NEW_API = ['hr_selfie_put', 'hr_selfie_get', 'hr_punch_checks', 'hr_punch_request_decide', 'hr_trip_start', 'hr_trip_end',
+                   'neo_overview', 'neo_overview_list', 'my_work_profile'];
+function v24Test(name, fn) {
+  test(name, function () {
+    if (!V24) { warn('sql/neohr-hr-v2.4.sql is not among the files read; "' + name + '" skipped'); return; }
+    fn();
+  });
+}
+// The body of the LAST definition of a function in the v2.4 file.
+function v24Body(name) { return fnBody(name, V24); }
+
+v24Test('v2.4: every function is an _hr_ internal or in the API list; nothing for anon; part 01 is the lockdown', function () {
+  var lock = v24Body('_hr_lockdown');
+  var api = lock && arrayVar(lock.replace(/constant\s+/i, ''), 'v_api');
+  assert.ok(api, '_hr_lockdown lists the API');
+  var old = HR ? arrayVar(hrBody('_hr_lockdown').replace(/constant\s+/i, ''), 'v_api') : [];
+  old.concat(V24_NEW_API).forEach(function (f) { assert.ok(api.indexOf(f) !== -1, f + ' is in the v2.4 API list'); });
+  [V24].concat(OV ? [OV] : []).forEach(function (text) {
+    createdFunctions(text).forEach(function (f) {
+      assert.ok(/^_hr_/.test(f) || api.indexOf(f) !== -1, f + ' is neither an _hr_ internal nor in the API list (its grants would be wrong)');
+    });
+    assert.ok(!/\bto\s+anon\b/i.test(text.replace(/from\s+(?:public,\s*)?anon/gi, '')), 'no v2.4 file grants anything to anon');
+  });
+  assert.strictEqual(createdFunctions(V24)[0], '_hr_lockdown', 'part 01 redefines _hr_lockdown before any new function exists');
+  var blocks = (V24.match(/\bdo \$hr\$/g) || []).length;
+  assert.ok(blocks >= 9 && (V24.match(/perform public\._hr_lockdown\(\);\s*end \$hr\$;/g) || []).length === blocks,
+            'every DO block of the v2.4 file ends by locking down what it defined (' + blocks + ' blocks)');
+  assert.ok(/select public\._hr_lockdown\(\);\s*$/.test(V24.trim()), 'the file ends with the lockdown once more');
+});
+
+v24Test('v2.4: the new tables have RLS and no client grant; attendance_events is no longer readable by clients', function () {
+  var tables = [], re = /create\s+table\s+if\s+not\s+exists\s+public\.([a-z_]+)/gi, m;
+  while ((m = re.exec(V24)) !== null) tables.push(m[1]);
+  sameSet(tables, ['hr_punch_selfies', 'hr_selfie_views', 'hr_trips'], 'v2.4 tables');
+  tables.forEach(function (t) {
+    assert.ok(new RegExp('alter table public\\.' + t + ' enable row level security;').test(V24), t + ': RLS on');
+    assert.ok(new RegExp('revoke all on table public\\.' + t + ' from anon, authenticated;').test(V24), t + ': revoked from clients');
+    assert.ok(!new RegExp('grant [^;]* on (?:table )?public\\.' + t + '\\b').test(V24), t + ': no client grant at all (read through the RPCs)');
+  });
+  assert.ok(/revoke select on table public\.attendance_events from authenticated;/.test(V24), 'authenticated loses its select on attendance_events');
+  assert.ok(/revoke all on sequence %s from anon, authenticated', pg_get_serial_sequence\('public\.hr_selfie_views', 'id'\)/.test(V24),
+            'the hr_selfie_views sequence is revoked');
+  assert.ok(!/alter publication supabase_realtime add/i.test(V24), 'nothing of v2.4 is in realtime');
+  assert.ok(/alter table public\.hr_requests add constraint hr_requests_kind_check check \(kind in \([^)]*'punch_reason', 'away_punch'\)\)/.test(V24),
+            'hr_requests.kind gains punch_reason and away_punch');
+});
+
+v24Test('v2.4: R1 — every redefined function keeps its parameters and return type; one hr_punch; _hr_ctx untouched', function () {
+  var redefined = 0;
+  createdFunctions(V24).forEach(function (f) {
+    var was = (HR && fnParams(f, HR)) || (WQ && fnParams(f, WQ)) || null;
+    if (!was) return;
+    var now = fnParams(f, V24);
+    redefined++;
+    assert.strictEqual(now.params, was.params, f + ': its parameters changed (a second overload, or PGRST203 for old clients)');
+    assert.strictEqual(now.returns, was.returns, f + ': its return type changed');
+    assert.strictEqual(/security definer/.test(now.head), /security definer/.test(was.head), f + ': security definer as before');
+  });
+  assert.ok(redefined >= 25, 'the v2.3 / v2.2 functions v2.4 redefines (' + redefined + ')');
+  assert.ok(createdFunctions(V24).indexOf('_hr_ctx') === -1, '_hr_ctx is not redefined (its row type is fixed)');
+  assert.strictEqual((V24.match(/create\s+or\s+replace\s+function\s+public\.hr_punch\s*\(/gi) || []).length, 1, 'one hr_punch');
+  assert.strictEqual(fnParams('hr_punch', V24).params, 'p jsonb', 'hr_punch(p jsonb)');
+  assert.ok(!/\bdrop\s+function\b/i.test(V24), 'v2.4 drops no function');
+  assert.ok(createdFunctions(V24).indexOf('record_field_activity') === -1 && createdFunctions(V24).indexOf('neo_dashboard') === -1,
+            'record_field_activity and neo_dashboard are not redefined');
+});
+
+v24Test('v2.4: R2 — hr_punch reads the new keys leniently; the request, the trip and the trip ends cannot undo a punch', function () {
+  var hp = v24Body('hr_punch'), core = v24Body('_hr_punch_core'), apply = v24Body('_hr_punch_apply');
+  assert.ok(/public\._hr_punch_extras\(p\)/.test(hp), 'hr_punch reads the v2.4 keys through _hr_punch_extras');
+  assert.ok(!/public\._j(?:txt|ts|bool|num|uuid|date)\(p,\s*'(?:v|fix_age_ms|mock|restored|reason|selfie_skip|flags|trip)'/.test(hp),
+            'no NEO_GATE reader on a v2.4 key');
+  assert.ok(/exception when others then/.test(v24Body('_hr_punch_extras')) && !/raise exception/.test(v24Body('_hr_punch_extras')),
+            '_hr_punch_extras never raises');
+  assert.ok(/begin\s+v_req := public\._hr_punch_request\(v_ev, v_field\);\s+exception when others then/.test(core), 'the request in a sub-block');
+  assert.ok(/public\._hr_trip_begin\([\s\S]*?exception when others then\s+v_trip := jsonb_build_object\('ok', false/.test(core),
+            'p.trip in a sub-block, reported in check.trip');
+  assert.ok(/begin\s+perform public\._hr_trip_sync\([^;]*;\s+exception when others then null;/.test(core), 'trip ends in a sub-block');
+  assert.ok(/return public\._hr_punch_core\(p_email, p_id, p_kind, p_at, p_age_ms, p_lat, p_lng, p_acc, p_note, '\{\}'::jsonb\);/.test(apply),
+            '_hr_punch_apply keeps its 9 arguments and goes through _hr_punch_core (legacy punches get the same checks)');
+  var raises = (core.match(/raise exception '([^']|'')*'/g) || []).map(function (x) { return x.replace(/^raise exception /, ''); });
+  raises.forEach(function (x) {
+    assert.ok(/NEO_GATE: (That punch id is already used\.|Say what you''re punching|The phone''s clock is wrong|%|Too many punches today)/.test(x),
+              "only v2.3's checks and the 30-a-day cap refuse a punch: " + x);
+  });
+});
+
+v24Test('v2.4: R3 / R5 / R6 — NEO_GATE refusals, the person lock in every writer, the caps', function () {
+  var denied = (V24_RAW.match(/'NEO_DENIED: (?:[^']|'')*'/g) || []);
+  denied.forEach(function (d) { assert.ok(HR_RAW && HR_RAW.indexOf(d) !== -1, "R3: no new NEO_DENIED sentence (only v2.3's own): " + d); });
+  assert.ok(!/NEO_DENIED/.test(v24Body('hr_request_decide')) && !/_hr_not_self/.test(v24Body('hr_request_decide')),
+            'R3: hr_request_decide refuses with NEO_GATE only (NeoHR 2.2.0 wipes its queue on NEO_DENIED)');
+  ['_hr_punch_core', 'hr_selfie_put', '_hr_trip_begin', 'hr_trip_end', 'hr_punch_request_decide', 'hr_correct', 'hr_request_decide',
+   'hr_request_cancel'].forEach(function (f) {
+    assert.ok(/pg_advisory_xact_lock\(hashtext\('neo_hr_att:' \|\| /.test(v24Body(f) || ''), 'R5: ' + f + " takes the person's lock");
+  });
+  createdFunctions(V24).forEach(function (f) {
+    var p = fnParams(f, V24);
+    if (!/\b(stable|immutable)\b/.test(p.head)) return;
+    assert.ok(!/\b(insert\s+into|update\s+public\.|delete\s+from)\b/i.test(v24Body(f)), 'R5: the ' + f + ' helper is ' +
+              (/\bstable\b/.test(p.head) ? 'STABLE' : 'IMMUTABLE') + ' and writes nothing');
+  });
+  assert.ok(/>= 30 then\s+raise exception 'NEO_GATE: Too many punches today — ask HR to correct the day\.'/.test(v24Body('_hr_punch_core')),
+            'R6: 30 punches a person a day');
+  var sp = v24Body('hr_selfie_put');
+  assert.ok(/octet_length\(v_jpeg\) < 2000 or octet_length\(v_jpeg\) > 60000/.test(sp) && /\) >= 8 then/.test(sp)
+            && /pg_total_relation_size\('public\.hr_punch_selfies'\) > 200 \* 1024 \* 1024/.test(sp), 'R6: photo size, 8 a day, the 200 MB store');
+  assert.ok(/'selfie_store_bytes', pg_total_relation_size\('public\.hr_punch_selfies'\)/.test(v24Body('hr_settings_get')),
+            'R6: tier 4+ see the store size');
+});
+
+// A sentence v2.4 brings in is asserted by the v2.4 tests; one it keeps from a
+// v2.3 body it redefines may be asserted by v2.3's tests (they run on top of v2.4).
+v24Test('v2.4: every NEO_ sentence is asserted by the v2.4 tests (v2.3 sentences: by either suite)', function () {
+  assert.ok(V24_TESTS, 'sql/neohr-hr-v2.4.tests.sql not found');
+  function check(raw, tests, label) {
+    var re = /'(NEO_(?:GATE|DENIED): (?:[^']|'')*)'/g, m, sentences = [];
+    while ((m = re.exec(raw)) !== null) if (sentences.indexOf(m[1]) === -1) sentences.push(m[1]);
+    var missing = sentences.filter(function (s) {
+      if (/^NEO_(GATE|DENIED): %$/.test(s)) return false;
+      var rx = new RegExp(s.split('%').map(function (p) { return p.replace(/[.*+?^\${}()|[\]\\]/g, '\\$&'); }).join('.+?'));
+      var where = HR_RAW && HR_RAW.indexOf("'" + s + "'") !== -1 ? tests + '\n' + (HR_TESTS || '') : tests;
+      return !rx.test(where);
+    });
+    assert.ok(sentences.length > 0, label + ': sentences found');
+    assert.ok(!missing.length, label + ': sentences no test asserts:\n    ' + missing.join('\n    '));
+  }
+  check(V24_RAW, V24_TESTS, 'neohr-hr-v2.4.sql');
+  if (OV_RAW) {
+    if (!OV_TESTS) warn('sql/neohr-hr-v2.4-overview.tests.sql not found: its NEO_ sentences are checked against the v2.4 tests only');
+    check(OV_RAW, (OV_TESTS || '') + '\n' + V24_TESTS, 'neohr-hr-v2.4-overview.sql');
+  }
+});
+
+v24Test('v2.4: tests/fixtures/hr-day-v24.json is one line, pinned by the contract, inlined byte for byte and run', function () {
+  var fx = fs.readFileSync(path.join(FIXTURES, 'hr-day-v24.json'));
+  assert.ok(fx.indexOf(10) === -1 && fx.indexOf(13) === -1, 'hr-day-v24.json has no newline');
+  var contract = fs.readFileSync(CONTRACT_PATH, 'utf8');
+  var m = /hr-day-v24\.json[^\n]*?SHA-256[^\n]*?\x60([0-9a-f]{64})\x60/i.exec(contract);
+  assert.ok(m && m[1] === sha256(fx), 'the contract publishes the SHA-256 of tests/fixtures/hr-day-v24.json');
+  var t = /values \('hr-day-v24', \$fx\$([^$]*)\$fx\$::jsonb\)/.exec(V24_TESTS || '');
+  assert.ok(t && t[1] === fx.toString('utf8'), 'sql/neohr-hr-v2.4.tests.sql inlines hr-day-v24.json byte for byte');
+  assert.ok(/public\._hr_day_calc\(c -> 'input'\)/.test(V24_TESTS), 'the v2.4 tests run every case through _hr_day_calc');
+  var cases = JSON.parse(fx.toString('utf8')).cases;
+  ['late_excused', 'late_raw_min', 'pending_min', 'away_pending', 'pending_reason'].forEach(function (k) {
+    assert.ok(cases.some(function (c) { return Object.prototype.hasOwnProperty.call(c.expect, k); }), 'the fixture pins ' + k);
+  });
+  assert.ok(/'late_raw_min', v_late_raw, 'late_excused', v_excused, 'pending_min', floor\(v_psum \/ 60\)::int/.test(v24Body('_hr_day_calc')),
+            '_hr_day_calc answers the v2.4 keys');
+});
+
+v24Test('v2.4: India time everywhere (no current_date), the field-staff seed is guarded', function () {
+  [V24].concat(OV ? [OV] : []).forEach(function (text) {
+    assert.ok(!/\bcurrent_date\b/i.test(text), 'no current_date');
+    var castRe = /\b(?:at|p_at|v_at|s_start|e\.at|lp\.at|fa\.at|t\.started_at|x\.started_at)\s*::\s*(?:date|time)\b/gi;
+    assert.ok(!castRe.test(text), 'no timestamp is cast to a date or time without at time zone \'Asia/Kolkata\'');
+  });
+  assert.ok(/coalesce\(sw\.service_pool, false\)\)/.test(V24) && /if v_n <> 5 or not v_owner then\s+raise exception/.test(V24),
+            'D1: the seed takes active staff in the service pool and refuses anything but exactly 5 with the owner');
+  assert.ok(/alter table public\.hr_person alter column track_location set default false;/.test(V24)
+            && /alter table public\.hr_person alter column ta_eligible set default false;/.test(V24), 'D1: new people are not field staff');
+  ['_hr_tracking', 'location_push', 'hr_settings_get', 'hr_my_month', 'hr_ta_report', 'hr_ta_approve'].forEach(function (f) {
+    assert.ok(!/coalesce\(\s*(?:\(select hp\.)?(?:hp\.|v_hp\.)?(?:track_location|ta_eligible)[^)]*\)?\s*,\s*true\)/.test(v24Body(f)),
+              f + ': a missing hr_person row is no longer field staff / allowance');
+  });
 });
 
 warnings.forEach(function (w) { console.warn('WARN ' + w); });

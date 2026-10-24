@@ -2700,7 +2700,10 @@
   // offset (workOffsetMs) like the work queue's do.
   var HR_DUTIES = ['shop', 'field', 'off', 'leave', 'wfh'];
   var HR_EVENT_KINDS = ['punch_in', 'punch_out', 'break_start', 'break_end'];
-  var HR_SCOPES = ['mine', 'pending', 'all'];
+  // pending_v4 / all_v4 (v1.12.1, sql v2.4): the same lists WITH the punch
+  // kinds (punch_reason, away_punch); pending / all leave them out, for the
+  // 1.12 desktops and 2.2 phones that cannot decide them.
+  var HR_SCOPES = ['mine', 'pending', 'all', 'pending_v4', 'all_v4'];
   var HR_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   var HR_NOTE_MAX = 300;
 
@@ -2797,6 +2800,47 @@
     writable();
     var i = hrUuid(id, 'request');
     return afterHr(hrParse(await rpc('hr_request_cancel', { p_id: i, p_note: hrNote(note, false) })));
+  }
+
+  // ── v1.12.1 (sql/neohr-hr-v2.4.sql): punch reasons, away punches, photos ──
+  // A punch reason (punch_reason: Late or a typed reason at punch-in) or an
+  // away punch (away_punch: a punch away from the shop, which counts only
+  // once HR approves) is decided here, never with hr_request_decide (that
+  // one refuses both). Approvers only, never their own. A reject needs a
+  // note. correctAt (rejecting an away punch only): the right time — the
+  // server voids the punch and adds an HR punch of the same kind there when
+  // the day allows it; when it does not, it answers correct: {ok:false,
+  // message} and Correct… does the rest. → {ok, request, day, correct?} or
+  // {ok:false, reason:'decided', status, by, at} when someone was first.
+  async function hrPunchRequestDecide(id, approve, note, correctAt) {
+    writable();
+    var i = hrUuid(id, 'request');
+    var yes = approve === true;
+    var n = hrNote(note, !yes, 'Say why you are rejecting it.');
+    var at = null;
+    if (!yes && correctAt != null && correctAt !== '') {
+      at = normTs('at', correctAt);
+      if (!at || isNaN(Date.parse(at))) throw new Error('NEO_GATE: Choose the right time of the punch.');
+    }
+    return afterHr(hrParse(await rpc('hr_punch_request_decide', { p_id: i, p_approve: yes, p_note: n, p_correct_at: at })));
+  }
+  // One punch's full photo (approvers; the server logs every look, and the
+  // person can see who looked). → {jpeg_b64, taken_at, w, h, late}. Kept in
+  // memory only: never cached, stored or written to disk.
+  async function hrSelfieGet(eventId) {
+    var i = hrUuid(eventId, 'punch');
+    return hrObj(await hrRead('hr_selfie_get', { p_event_id: i }));
+  }
+  // Every punch in and out of one India day with its checks (place, verify,
+  // flags, reason, request) and a small photo next to the person's previous
+  // one (approvers). Flagged and unverified first. → { day, punches: [...] }
+  async function hrPunchChecks(day) {
+    var d = hrDay(day, 'day');
+    var res = await hrRead('hr_punch_checks', { p_day: d });
+    var out = Array.isArray(res) ? { punches: res } : hrObj(res);
+    if (!Array.isArray(out.punches)) out.punches = hrRows(res, 'rows');
+    out.day = out.day || d;
+    return out;
   }
 
   // { from, to, people: [{email, name, self, days: [{day, duty, source
@@ -3210,6 +3254,10 @@
     hrTaReport: hrTaReport,
     hrTaApprove: hrTaApprove,
     hrTaUnapprove: hrTaUnapprove,
+    // v1.12.1 (sql v2.4)
+    hrPunchRequestDecide: hrPunchRequestDecide,
+    hrSelfieGet: hrSelfieGet,
+    hrPunchChecks: hrPunchChecks,
 
     // people and designation presets (tier 4+)
     staffList: staffListRpc,

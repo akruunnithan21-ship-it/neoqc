@@ -1112,6 +1112,15 @@ RMA parts (`rma_cases.stage`, returned by `rma_create`): a field pull starts at 
 
 Additive changes (a new column, a new optional field, a new RPC) can ship at any time, so NeoHR must ignore unknown JSON keys. Removing or renaming anything here means a new contract version and a note in this file first.
 
+### Version 5 (additive, `sql/neohr-hr-v2.4.sql` + `sql/neohr-hr-v2.4-overview.sql`, Neo OS 1.12.1 / NeoHR 2.3)
+- New: field staff — `hr_person.track_location` is the switch; only field staff record a route, take trips and get travel allowance; new people are not field staff (§15.1).
+- New: verified punches — `hr_punch` takes `v`, `fix_age_ms`, `mock`, `restored`, `reason`, `selfie_skip`, `flags`, `trip` (all optional, never a reason to refuse) and answers `check`; the server keeps the place, the distance to the office, verify and flags of every punch (§15.3).
+- New: request kinds `punch_reason` and `away_punch` (made by punches), `hr_punch_request_decide`, the scopes `pending_v4` / `all_v4`, `due_at` / `past_eod` (§15.4). An away punch counts only once HR approves it (§15.5).
+- New: punch photos `hr_selfie_put`, `hr_selfie_get`, `hr_punch_checks` (§15.6); trips `hr_trip_start`, `hr_trip_end`, `trips[]` (§15.7); the dashboard numbers `neo_overview`, `neo_overview_list` (§15.9).
+- Changed: travel allowance is on trip km (`hr_ta_report.km`, `hr_ta_approve`, `hr_my_month.ta`) (§15.8); a tier 4 / 5 account's requests are decided by tier 4+ only; `hr_request_decide` refuses with `NEO_GATE` only; `attendance_events` is no longer readable directly (§15.10).
+- Added keys: `my_work_profile` (`field_staff`, `dash_view`, `hr_approver`), `hr_settings_get` (`me.field_staff`, `me.dash_view`, `me.days`, `selfie_store_bytes`), `hr_dashboard` (`me.field_staff`, `hr.late_today` …), `hr_board` rows, the day record (`late_excused`, `pending_min`, `away_pending` …), `hr_my_day` events (§15.2 – §15.5).
+- Unchanged: every version 4 shape and sentence not named above; `neo_dashboard`; `hr_punch(p jsonb)` and every other signature.
+
 ### Version 4 (additive, `sql/neohr-hr.sql`, Neo OS 1.12.0 / NeoHR 2.2)
 - New: attendance as its own record, `attendance_events`, written by `hr_punch` — punch in / out and breaks, idempotent and safe offline, a sequence check, server-anchored time, sessions closed by the server after 16 hours (§14.1–§14.2).
 - New: route recording only while on duty — `location_push`, `hr_route`, the `tracking` object; one distance rule shared with the phone through `tests/fixtures/hr-km.json` (§14.3, §14.4, §14.11).
@@ -1166,7 +1175,7 @@ NeoHR 2.2 (and Neo OS 1.12.0's HR screen) use everything here. Same session, hea
 - **India time.** "Today" and "this month" are India dates (`Asia/Kolkata`); a day runs from 00:00 to 24:00 India time. Send times as ISO-8601 **with an offset**; answers come back in UTC (`…+00:00`) — show them in local time. Send `p_day` / `p_month` as India dates (`ZoneId.of("Asia/Kolkata")`).
 - **Minutes** are whole minutes, rounded down. **km** are numbers with two decimals (`1.00`). Unknown keys may appear later: ignore them.
 - **Approver** = a `neohr` lead (tier 3 and above are leads automatically; `my_work_profile.team_view` is `true` for them). Nobody approves or changes their own attendance, duty or travel allowance: `NEO_DENIED: Someone else has to approve or change your own attendance, duty or travel allowance.` (a tier 5 may still change their own settings row, §14.9). Show that sentence on the viewer's own row instead of the buttons.
-- **The tables** below are readable directly (`GET /rest/v1/<table>`, select only, row-level security): `attendance_events`, `hr_requests`, `hr_roster`, `hr_person`, `hr_ta_approvals`, `hr_day_km` — your own rows, everyone's for an approver; `hr_settings`, `hr_holidays`, the default rows of `hr_shift_history` — any active staff member; `hr_route_views` — the views of your own route, everyone's for tier 4+. **`location_points` is readable by nobody**: route points come only through `hr_route` / `hr_my_day`. NeoHR should use the RPCs.
+- **The tables** below are readable directly (`GET /rest/v1/<table>`, select only, row-level security): `attendance_events` (until contract version 5 — no longer, §15.10), `hr_requests`, `hr_roster`, `hr_person`, `hr_ta_approvals`, `hr_day_km` — your own rows, everyone's for an approver; `hr_settings`, `hr_holidays`, the default rows of `hr_shift_history` — any active staff member; `hr_route_views` — the views of your own route, everyone's for tier 4+. **`location_points` is readable by nobody**: route points come only through `hr_route` / `hr_my_day`. NeoHR should use the RPCs.
 
 ### 14.1 Words: state, session, day record, duty, live status
 - **State** at a moment: `off_duty` → `punch_in` → `on_duty` ⇄ (`break_start` / `break_end`) `on_break` → `punch_out` → `off_duty`. A `punch_out` during a break also ends the break. Punches are ordered by `(at, received_at, id)`.
@@ -1520,3 +1529,169 @@ SQL note on §9.5.6: a non-final `hr_day_km` row also stores a fingerprint of it
 - Route points exist only while on duty and not on a break or a work-from-home day (§14.4); the phone shows a notification the whole time it records. Nobody reads `location_points` directly; `hr_route` / `hr_my_day` serve them to the person, `neohr` leads and tier 3+, and every view of someone else's route is written to `hr_route_views` and shown to the person (`viewed_by`).
 - After `hr_settings.retention_days` (90 by default) the points are deleted — each past day with a punch_in first gets its final km row (`hr_day_km.final`), which is the record from then on — and punch coordinates that old are cleared: in `attendance_events` and in the pre-version-4 punch rows `field_activity` still holds (`punch_in` / `punch_out`; other field activity keeps its point). `sql/neohr-hr-cron.sql` runs it daily at 03:30 India time; without it `location_push` runs it at most every 6 hours, a bounded share per call (the oldest 5000 expired points, at most 20 of their days made final), so a backlog — say after Retention is lowered — drains over several pushes and never slows one down.
 - The board shows the time of the last point, never coordinates. CSV exports (Neo OS) never carry coordinates, notes, reasons or leave types.
+
+---
+
+## 15. Contract v5 (HR v2.4): field staff, verified punches, punch photos, trips (`sql/neohr-hr-v2.4.sql`)
+
+NeoHR 2.3.0 and Neo OS 1.12.1 use everything here; NeoHR 2.2.0 and Neo OS 1.12 keep working on top of it (§15.12). Everything in §14 still holds unless this section says otherwise. Same calls, errors and time rules as §14. The examples are real answers from the database, shortened where they say `…`. NeoHR must keep ignoring unknown keys.
+
+**Who decides what (D10).** An approver is still a `neohr` lead (tier 3+ always are; People → NeoHR role lead for the HR person). Nobody decides their own request. A **tier 4 or 5 account's requests are decided by tier 4 and above only**: `NEO_GATE: Requests from a tier 4 or 5 account are decided by tier 4 and above.` `can_decide` in the lists and the "waiting" counts follow the same rule.
+
+**Refusals.** Every refusal in anything new is `NEO_GATE:`. `NEO_DENIED:` still comes only from the sign-in check (`Sign in with an active staff account…`) and from the v2.3 reads that had it. Never wipe a queue on a `NEO_GATE`.
+
+### 15.1 Field staff (D1)
+- `hr_person.track_location` is the **field staff** switch: "Field staff (route, trips and travel allowance)". The first v2.4 run set it for every active staff member: on for the active people in the service pool (5 people, the owner among them), off for everyone else. A new person, or anyone without a row, is **not** field staff (the column now defaults to `false`; so does `ta_eligible`).
+- Only field staff record a route (`location_push` answers `disabled` for everyone else, and `tracking.reason` is `disabled`), take trips (§15.7) and get travel allowance (`ta_eligible` AND field staff, §15.8).
+- `hr_person_set(p_email, p)`: switching `track_location` switches `ta_eligible` with it, unless the same `p` sets `ta_eligible` too. `hr_settings_get().people[]` gains `field_staff` (= `track_location`); a person with no row reads `track_location: false`, `ta_eligible: false`.
+
+### 15.2 "Me": `my_work_profile`, `hr_settings_get`, `hr_dashboard`, `hr_board`
+**`my_work_profile()`** (§8.2) gains three keys; each is `null` if it could not be worked out (sign-in never fails because of them):
+
+| Key | Meaning |
+|---|---|
+| `field_staff` | true / false (§15.1) |
+| `dash_view` | the Dashboard this person gets: `head` (tier 3+) · `hr` (a NeoHR lead role) · `field` (field staff) · `desk` (department support / service desk / front desk, or a service, RMA or Builds desk role) · `supply` (procurement, logistics) · `sales` (department sales, or "sales" in the designation) · `basic` — the first that matches, from the person's own tier and roles |
+| `hr_approver` | a NeoHR lead (shows the TEAM tab and the approvals) |
+
+**`hr_settings_get()`**: `me` gains `field_staff`, `dash_view`, and `days` (today and the next 6 India days, so the phone knows the duty and the shift offline); `me.ta_eligible` is now `ta_eligible` AND field staff. Tier 4+ also get `selfie_store_bytes` (the size of the photo store; refused over 200 MB, §15.6).
+```json
+"me": {"shift": {"start": "09:30", "end": "18:30", "grace_min": 10, "weekly_off": [], "half_day_min": 240},
+       "attendance_required": true, "ta_eligible": true, "field_staff": true, "dash_view": "field",
+       "tracking": {"enabled": false, "reason": "off_duty", "…": "…"},
+       "days": [{"day": "2026-10-24", "duty": "shop", "shift_start": "09:30", "shift_end": "18:30", "grace_min": 10,
+                 "holiday": null, "flex_request": false, "half_day_leave": false}, "…6 more…"]}
+```
+**`hr_dashboard()`**: `me` gains `field_staff`. `hr` keeps every v2.3 key with its v2.3 meaning (**`pending_requests` counts only the v2.3 kinds**, never your own) and gains:
+
+| Key | Counts |
+|---|---|
+| `late_today` | people whose record today is late (`late_min` > 0; an excused late is not late) |
+| `away_pending` | pending away punches **you may decide** (§15.4) |
+| `reasons_pending` | pending punch reasons you may decide |
+| `past_eod` | either of those, past its `due_at` (show red) |
+| `unverified_today` | today's phone punches in / out that need a look (§15.6), not your own |
+| `unseen_photos` | today's punch photos no approver has opened yet, not your own |
+| `on_trip` | people with an open trip now |
+
+`{"on_duty": 6, "on_break": 0, "on_site": 0, "absent": 25, "not_in_yet": 0, "pending_requests": 0, "late_today": 8, "away_pending": 8, "reasons_pending": 1, "past_eod": 1, "unverified_today": 13, "unseen_photos": 1, "on_trip": 0}`
+
+**`hr_board()`** rows keep the v2.3 `status` words and `pending_requests` (v2.3 kinds) and gain: `punch_requests` (pending punch reasons + away punches), `field_staff`, `trip` (the open trip `{id, kind, ref_code, ref_title, started_at}` or `null`), `punch_check` (today's first punch_in: `{id, at, place, office_m, verify, flags, selfie}` or `null`), `late_excused`, `away_pending`. `_hr_live` (and so `hr_dashboard` counts) carry the same.
+
+### 15.3 `hr_punch(p)` v2.4 — verified punches (D2, D3, D5, D6, D9)
+Same single signature; every v2.3 key and rule is unchanged. New optional keys (NeoHR 2.3.0 sends them; rows NeoHR 2.2.0 queued are sent without them):
+
+| Key | Value |
+|---|---|
+| `v` | the app's versionCode (`20300`). Present = a 2.3 payload |
+| `fix_age_ms` | tap elapsedRealtime − fix elapsedRealtime (negative = the fix came after the tap). The fix counts only from −30000 to 120000; else it is dropped (`no_fix`). No wall clock is involved |
+| `mock` | `true` = the phone saw a fake location (it refuses such a punch itself; the server records `verify: mock`) |
+| `restored` | `true` = the row came back from a backup (never sent with `age_ms`; the server ignores `age_ms` on it) |
+| `reason` | `{kind: late \| on_site \| rma \| other, text (3–500), ref (NT-… / RM-…)}` |
+| `selfie_skip` | `camera_error` \| `no_front_camera` |
+| `flags` | the device flags object (`dev_options`, `mock_app`, `mock_route_points`, …), ≤ 2000 characters, stored as is |
+| `trip` | `{id, kind, ref_code?, note?}` — start a trip with this punch_in (§15.7) |
+
+**Never refused because of them (R2).** A bad or oversized value is dropped (a text is cut to 500) and named in `check.dropped`; the punch is recorded. Only v2.3's refusals (§14.2) and one new one can refuse a punch: `NEO_GATE: Too many punches today — ask HR to correct the day.` (30 phone punches a person per India day).
+
+**What the server makes of a punch** (stored on it, answered in `check`):
+- **place** (from the fix; `office_lat` / `office_lng` / `office_radius_m`): `unset` (no office point yet — nothing is asked) · `unknown` (no fix, no accuracy, or accuracy over 100 m with the centre outside the radius) · `office` · `away`. `office_m` = metres to the office point.
+- **verify**: `ok` (accuracy ≤ 50 m) · `weak_fix` (50–100 m, or over 100 m inside the radius) · `no_fix` · `mock` · `old_app` (no `v`: NeoHR 2.2.0 and the legacy `record_field_activity` punch) · `restored` · `hr` (an HR punch).
+- **flags** (server-only): `sent_late` (received more than 10 min after its time) · `new_login` (a login less than 12 h old, or another session than the person's last phone punch) · `odd_client` (not the app's HTTP client) · `no_ticket` / `ticket_not_mine` (an On-site / RMA reason without a ticket, or not my service job / RMA part) · `selfie_skip` · `selfie_time` (the photo's time is far from the tap, §15.6).
+- **A request** (one per punch, §15.4):
+  - **Field staff, punch_in with a reason**: On-site / RMA **away from the shop** → no request, and the late mark is excused at once. On-site / RMA elsewhere → a `punch_reason` only when late. Late / typed → a `punch_reason` when late, away or unknown (on time at the shop: kept on the punch only). No reason: nothing (the normal late mark).
+  - **Late at punch time** (the phone uses the same rule): this punch_in starts the day's FIRST session, and floor((at − (shift start + grace)) / 60) > 0, on a day that is not flexible, not a half-day leave, duty not field / leave / off, attendance required. 09:40:30 is not late.
+  - **Everyone else, punch in or out**, once the office point is set, duty not `wfh` / `field`: away or unknown, no fix, fake location, restored, sent late or no camera → an `away_punch`, **whatever the payload says** — the session counts only once HR approves (D6).
+
+`p = {"id": "…", "kind": "punch_in", "at": "2026-10-24T21:38:47+05:30", "age_ms": 30000, "lat": 10.0159, "lng": 76.3528, "accuracy_m": 10, "v": 20300, "fix_age_ms": 3000, "reason": {"kind": "other", "text": "Client office for the shop"}}; returns` the v2.3 answer (§14.2) plus `check`:
+```json
+"check": {"place": "away", "office_m": 1199, "verify": "ok", "flags": [],
+          "request": {"id": "9e609c46-639d-4891-8a07-e7c6456658d2", "kind": "away_punch", "status": "pending"},
+          "trip": null, "needs_selfie": true, "dropped": []}
+```
+`trip` is `{ok: true, id}` or `{ok: false, message}` when the punch carried `p.trip` (a refused trip never refuses the punch). `needs_selfie` = a phone punch in / out, no `selfie_skip`, no photo received yet. **A replay** answers the check stored with the punch (`dropped: []`).
+
+### 15.4 Requests a punch makes: `punch_reason`, `away_punch`
+- Created only by `hr_punch` (`hr_request_create` refuses them with its usual sentence). `reason` is always 3–500 characters (the typed text, else a server sentence: `Late — no reason typed`, `On-site visit`, `RMA trip`, `Away from the shop — no reason given`, `Location not verified — no reason given`, `No reason sent (NeoHR 2.2)`, `The phone reported a fake location`, `Sent from a restored backup`, `Sent 30 min after the punch time`, `Camera not available`). `date_from` = `date_to` = the punch's session day; **`due_at`** = the later of that day's shift end and the punch + 2 h.
+- **Request JSON** (every list, `hr_my_day.requests`, the decide answers) gains: `event_id`, `due_at`, `past_eod` (pending and past `due_at` — red), `punch_at`, `punch_kind`, `place`, `office_m`, `verify`, `flags`, `reason_kind`, and `selfie` (`{thumb_b64, late, taken_at, w, h, seen_by_me, seen_by_any}` or `null`; `thumb_b64` only for someone who may see the photo, §15.6).
+- **`hr_requests_list(p_scope, …)`**: `pending` and `all` keep to the v2.3 kinds (NeoHR 2.2, Neo OS 1.12). New scopes **`pending_v4`** / **`all_v4`** include the punch kinds — pending first, past end of day first, then the oldest. `mine` includes them. An away punch is never `can_cancel`.
+- **`hr_request_decide`** refuses the punch kinds: `NEO_GATE: Update NeoHR / Neo OS to decide punch reasons.` Its refusals are now all `NEO_GATE` (`Only a head or a NeoHR lead can approve requests.` · the own-request sentence · the tier sentence above).
+- **`hr_punch_request_decide(p_id, p_approve, p_note, p_correct_at)`** (new; any other kind is passed on to `hr_request_decide`):
+  - `punch_reason`: approve → the late mark is excused; reject → it stays.
+  - `away_punch`: approve → the punch counts. Reject (a note is required: `NEO_GATE: Say why — the person sees your note.`) → the punch is voided (`void_reason` "HR rejected the away punch: <note>"); with `p_correct_at` an HR punch of the same kind is added at that time when the day's punches allow it, else `correct: {ok: false, message}` — open Correct… then.
+  - Returns `{ok, request, day (the session day's record), correct}` (`correct` null unless `p_correct_at`); a request no longer pending: `{ok: false, reason: "decided", status, by, at}`. Errors: `NEO_GATE: Only a head or a NeoHR lead can approve requests.` · `NEO_GATE: That request no longer exists.` · the own-request and tier sentences · `NEO_GATE: Say approve or reject.` · `NEO_GATE: The note is too long — keep it under 300 characters.` · `NEO_GATE: That time can't be right — check the date.`
+- **`hr_request_cancel`**: an away punch is never cancelled — `NEO_GATE: HR decides an away punch — ask them.` (its owner and approvers alike). A punch reason may be cancelled by its owner while pending (the late mark stays).
+- **`hr_correct`**: voiding a punch cancels its pending punch reason / away punch (`cancel_note` "The punch was corrected by HR"); an added punch_in that replaces a voided punch_in of the same session day keeps its reason and place, and an approved punch reason moves to it (the excuse stays).
+
+### 15.5 The day record v2.4
+New keys (the status words are unchanged):
+
+| Key | Meaning |
+|---|---|
+| `late_raw_min` | what `late_min` would be without an excuse |
+| `late_excused` | the day's first punch_in is excused — a field engineer's On-site / RMA punch-in away from the shop, or an approved punch reason; then `late_min` = 0 and the day is never `late` |
+| `pending_min` | minutes of sessions whose punch_in or punch_out waits for HR (an away punch): they are left out of `worked_min` / `break_min` |
+| `away_pending` | such a session exists on the day; `sessions[].pending` marks it |
+| `pending_reason` | a punch reason of the day is pending |
+
+`hr_my_month` totals and `hr_register` (new per-person `totals`) count an `away_pending` day under `away_pending`, not as present, late or half day. `hr_my_day` events gain `place`, `office_m`, `verify`, `flags`, `reason_kind`, `reason_text`, `reason_ref`, `selfie` (a photo arrived), `selfie_late`, `selfie_skip`, `request_id` — still no coordinates — and the day gains `trips` (§15.7).
+
+The shared fixture (one line, like §14.11's): `tests/fixtures/hr-day-v24.json` — SHA-256 `1b7183eb4768fe4af6779299f115a4088939387c1f2d295853547a22122c8c37` (`_hr_day_calc` with `excused_in`, `pending_ids`, `pending_reason`; `hr-day.json` is unchanged). `sql/neohr-hr-v2.4.tests.sql` inlines it byte for byte (`tests/sql-parity.test.js` checks the copy and this hash); the phone keeps a byte-identical copy for `HrDayLogic.dayRecord`.
+
+### 15.6 Punch photos (D9) and HR's look at the punches
+**`hr_selfie_put(p)`** — `p = {event_id, taken_at, jpeg_b64, thumb_b64?, w, h}`: the photo of one of **my phone punches in / out** (not voided, within `retention_days`). Returns `{ok: true, duplicate: false, late: false}`; the punch has not arrived yet: `{ok: false, wait: true}` (keep the file, send it after the punch); the same punch again: `{ok: true, duplicate: true}` (never replaced). JPEG only, 2000–60000 bytes; the thumb a JPEG ≤ 8 KB. `late` = it arrived more than 10 min after its punch; a `taken_at` outside the tap − 2 min … + 10 min flags the punch `selfie_time`. Errors: `NEO_GATE: The request is empty.` · `NEO_GATE: Say which punch the photo is for.` · `NEO_GATE: That punch is someone else's.` · `NEO_GATE: A photo goes with a punch in or a punch out.` · `NEO_GATE: That punch was removed.` · `NEO_GATE: That punch is too old for a photo.` · `NEO_GATE: The photo could not be read — take it again.` · `NEO_GATE: The photo must be between 2 KB and 60 KB.` · `NEO_GATE: That is not a JPEG photo.` · `NEO_GATE: The small photo must be a JPEG under 8 KB.` · `NEO_GATE: That photo was already used.` (byte-identical to another punch's) · `NEO_GATE: Too many photos today.` (8 a person a day) · `NEO_GATE: The photo store is full — tell the owner.` (over 200 MB).
+
+**`hr_selfie_get(p_event_id)`** — approvers; a tier 4 / 5 account's photos only to tier 4+. Every call is logged (`hr_selfie_views`). Returns `{ok, event_id, at, jpeg_b64, taken_at, w, h, late}` — keep it in memory, never on disk. Errors: `NEO_GATE: Only a head or a NeoHR lead can see punch photos.` · `NEO_GATE: That photo is not there any more.` · `NEO_GATE: Only tier 4 and above can see the photos of a tier 4 or 5 account.`
+
+**`hr_punch_checks(p_day)`** — approvers (default today, India): every punch in / out of that India day the caller may see, **unverified first**, then by time. Thumbs are not logged as views.
+```json
+{"now": "…", "day": "2026-10-24", "counts": {"punches": 27, "unverified": 13},
+ "punches": [{"id": "c2b178cb-…", "email": "…", "name": "…", "field_staff": false, "kind": "punch_in", "at": "…", "received_at": "…",
+              "source": "phone", "place": "office", "office_m": 12, "verify": "ok", "flags": ["selfie_time"], "reason_kind": null,
+              "reason_text": null, "reason_ref": null, "selfie_skip": null, "unverified": true, "request": null,
+              "selfie": {"thumb_b64": "/9j/4…", "late": false, "taken_at": "…", "w": 480, "h": 360, "seen_by_me": false, "seen_by_any": false},
+              "prev_selfie": {"event_id": "…", "event_at": "…", "thumb_b64": "/9j/4…"}}, "…"]}
+```
+Error: `NEO_GATE: Only a head or a NeoHR lead can see the punch checks.`
+**Unverified** = a phone punch in / out with `verify` not `ok`, any flag, no photo 10 min after its time, `selfie_skip`, a late photo, or a non-field punch away from the shop on a day that is not work from home.
+
+### 15.7 Trips (D7, D8) — field staff
+**`hr_trip_start(p)`** — `p = {id, kind: on_site | rma, at, age_ms?, ref_code? (NT-… / RM-…), note?, lat?, lng?, accuracy_m?}`: while punched in and not on a break; with no ticket a note of 3+ characters. Idempotent by `id` (`duplicate: true`). Time anchored like a punch (§14.12). Another trip whose window holds `at` ends there (`end_reason: next_trip`) — there is never an "already on a trip" refusal. Flags: `no_ticket`, `ticket_not_mine`, `sent_late`. Returns `{ok, duplicate, trip}`. Errors: `NEO_GATE: Trips are for field staff.` · `NEO_GATE: Punch in (or end your break) to start a trip.` · `NEO_GATE: Say where you're going — at least 3 characters.` · `NEO_GATE: Say On-site or RMA.` · `NEO_GATE: That trip id is already used.` (someone else's) · `NEO_GATE: id is required — make one UUID per trip and reuse it on every retry.` · `NEO_GATE: A job code looks like NT-7KQ2ACDE or RM-7KQ2PX4D.` · `NEO_GATE: The note is too long — keep it under 200 characters.` · `NEO_GATE: The phone's clock is wrong — turn on automatic date and time, then punch again.` · `NEO_GATE: The request is empty.`
+
+**`hr_trip_end(p)`** — `p = {id, at, age_ms?, lat?, lng?, accuracy_m?}`. An unknown (or voided) id: `{ok: false, unknown: true}` — no exception. The end is clamped to [start + 1 s, the end of its session]; an end the session made (punch-out, the 16 h cap, the next trip) later than the tap is replaced by the tap (`end_reason: tapped`); a trip already ended by a tap (or by HR) answers `duplicate: true`. Returns `{ok, duplicate, trip}`.
+
+**A trip** (`hr_my_day.trips`, `hr_route.trips`, the start / end answers):
+```json
+{"id": "e5555555-…", "kind": "on_site", "ref_code": "NT-ZQV24J02", "ref_title": "Zq Printer", "note": null,
+ "started_at": "2026-10-24T16:01:17.706+00:00", "ended_at": "2026-10-24T16:04:17.706+00:00", "end_reason": "next_trip",
+ "km": 0.45, "moving_min": 1, "stops": 0, "open": false, "flags": []}
+```
+- `ended_at` is the **effective** end: never later than its session (the punch-out, or for a session the server closed, its last punch or point ≤ the cap); `null` while open. `end_reason`: `tapped` · `punch_out` · `cap` · `next_trip` · `hr`. A trip is on the session day of its start.
+- `km` / `moving_min` / `stops`: §14.11 over the route points of the session's runs inside the trip (breaks are left out). A punch_out ends the open trips of its session; `hr_punch` with `p.trip` starts one with the punch_in.
+- While a trip is open, `tracking.pause_at` = `cap_at`: keep recording.
+
+### 15.8 Travel allowance = trip km (D8)
+- `hr_my_month`: days gain `trip_km`; totals gain `trip_km` and `away_pending`; `ta.eligible` = `ta_eligible` AND field staff; `ta.amount` = trip km × rate (or the approved snapshot).
+- `hr_ta_report`: rows for field staff (and anyone approved that month). **`km`, `live_km`, `changed`, `amount` are on trip km** (so a Neo OS 1.12 desktop shows matching numbers and its approve still works); new `day_km` (the whole days' km) and `days: [{day, km (trip), day_km}]`.
+  `{"email": "…", "eligible": true, "km": 0.98, "live_km": 0.98, "day_km": 2.13, "rate": 10, "amount": 9.8, "changed": false, "days": [{"day": "2026-09-28", "km": 0.98, "day_km": 2.13}], "approved": {"by": "…", "at": "…", "note": "School installs"}, "can_approve": false}`
+- `hr_ta_approve` compares `p_expected_km` with trip km and snapshots trip km.
+
+### 15.9 The dashboard numbers: `neo_overview()`, `neo_overview_list(p_kind, p_scope, p_state)` (`sql/neohr-hr-v2.4-overview.sql`)
+`neo_dashboard()` is untouched. Both RPCs read one item list, so a tile's count is always the length of its list. A section the caller cannot see is left out (never zeros).
+- **Who sees what**: builds — any Builds role or tier 3+ (sales: their own builds); service — service desk and up, or tier 3+; RMA — RMA desk and up, or tier 3+; `hr` — NeoHR leads (the `hr_dashboard().hr` block, §15.2); `mine` — per kind, for a pool member or anyone holding / offered an item of it.
+- **Late and overdue never both (D12; overdue wins)**. Builds: overdue = deadline passed; late = in the queue unclaimed for 4 h (builds have no stage budgets). Service: overdue = not done and promised / needed-by passed, or a booked visit 30 min past its start; late = too long in its stage, or 4 h unclaimed. RMA: overdue = with the vendor past `expected_back_at`; late = too long in its stage.
+- **`neo_overview()`** → `{now, view, mine?: {builds?, service?, rma?: {items, offered, due_today, late, overdue}}, builds?: {open, assigned, in_queue, not_sent, mine, late, overdue, waiting_parts}, service?: {open, assigned, in_queue, mine, waiting_customer, waiting_supplier, ready_to_collect, late, overdue}, rma?: {open, assigned, in_queue, mine, at_vendor, to_return, late, overdue}, sales?: {open, by_stage: {waiting_parts, ready_to_build, building, qc}, late, overdue}, hr?: {…}, top: [≤ 6 late / overdue items]}`. Ticket numbers are per kind (D13).
+- **`neo_overview_list(p_kind, p_scope, p_state)`** → `{items: [{kind, id, code, title, stage, stage_label, tech_name, tech_email, due, since, late, overdue, why}], truncated}` (at most 300; overdue, then late, then by due). `p_kind` build \| service \| rma; `p_scope` all \| mine \| sales; `p_state` any \| assigned \| in_queue \| not_sent \| late \| overdue \| due_today \| offered \| waiting_customer \| waiting_supplier \| ready_to_collect \| at_vendor \| to_return \| waiting_parts \| `stage:<x>`. Wrong arguments: `NEO_GATE:` (the overview file lists its sentences). Every tile of `neo_overview` is one such call.
+
+### 15.10 Privacy and retention v2.4
+- **`attendance_events` is no longer readable directly** (no client select: the punch coordinates, fixes and reasons stay inside); read punches through `hr_my_day`, `hr_punch_checks` and the other RPCs. `hr_punch_selfies`, `hr_selfie_views` and `hr_trips` are readable by nobody directly either.
+- Punch photos, and the log of who opened them, are deleted after `retention_days` (by the punch's time); trips older than that keep their km (final) and lose their coordinates.
+- Photo views are logged; thumbs in lists are not.
+
+### 15.11 What clients see that is new, in one place
+New RPCs: `hr_punch_request_decide`, `hr_selfie_put`, `hr_selfie_get`, `hr_punch_checks`, `hr_trip_start`, `hr_trip_end`, `neo_overview`, `neo_overview_list`. New keys: §15.2 – §15.8. New request kinds `punch_reason`, `away_punch` (in `mine`, `pending_v4`, `all_v4` only). New scopes `pending_v4`, `all_v4`.
+
+### 15.12 Old clients (backward compatibility)
+- **NeoHR 2.2.0**: `hr_punch` keeps its one signature; nothing new refuses a punch except the 30-a-day cap; its punches are `old_app` and get the same place rules (a non-field punch it sends without a usable fix waits for HR); `pending` / `all` never show the new kinds; `hr_request_decide` refuses them with `NEO_GATE`; `location_push` answers `disabled` for non-field staff (2.2.0 drops those points — correct).
+- **Neo OS 1.12**: `hr_board` status words and `pending_requests` unchanged; the old scopes leave out the new kinds; travel allowance `km` is trip km, so its approve still matches; `my_work_profile` is additive.
+- **Rollback** = re-run `sql/neohr-hr.sql` (every redefined function kept its arguments and return type); the v2.4 tables and columns stay, the new RPCs stay callable. NeoHR 2.3.0 must hold its photo and trip queues on PGRST202.

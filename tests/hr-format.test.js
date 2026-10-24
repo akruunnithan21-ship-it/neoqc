@@ -247,5 +247,163 @@ test('labels: every live status, duty and request kind has one', function () {
   assert.strictEqual(F.shiftText({ start: '09:30:00', end: '18:30:00' }), '09:30–18:30');
 });
 
+// ═══ v1.12.1: the checked punch (sql v2.4) ════════════════════════════════
+
+test('punch request kinds: labelled, and the v2.3 kinds keep their words', function () {
+  assert.deepStrictEqual(F.PUNCH_REQUEST_KINDS, ['punch_reason', 'away_punch']);
+  assert.strictEqual(F.REQUEST_LABELS.punch_reason, 'Punch-in reason');
+  assert.strictEqual(F.REQUEST_LABELS.away_punch, 'Away from shop');
+  assert.strictEqual(F.REQUEST_LABELS.late_start, 'Late start');
+  assert.strictEqual(F.REQUEST_LABELS.flexible_day, 'Flexible day (on-site / RMA)');
+  assert.strictEqual(F.isPunchRequestKind('away_punch'), true);
+  assert.strictEqual(F.isPunchRequestKind('punch_reason'), true);
+  assert.strictEqual(F.isPunchRequestKind('late_start'), false);
+  assert.strictEqual(F.isPunchRequestKind(null), false);
+});
+
+test('vocabularies: every server word has a label; an unknown one shows as itself', function () {
+  ['late', 'on_site', 'rma', 'other'].forEach(function (k) { assert.ok(F.REASON_LABELS[k], k); });
+  ['office', 'away', 'unknown', 'unset'].forEach(function (k) { assert.ok(F.PLACE_LABELS[k], k); });
+  ['ok', 'weak_fix', 'no_fix', 'mock', 'old_app', 'restored', 'hr'].forEach(function (k) { assert.ok(F.VERIFY_LABELS[k], k); });
+  ['sent_late', 'new_login', 'odd_client', 'no_ticket', 'ticket_not_mine', 'selfie_skip'].forEach(function (k) {
+    assert.ok(F.FLAG_LABELS[k] && F.FLAG_TIPS[k], k);
+  });
+  ['camera_error', 'no_front_camera'].forEach(function (k) { assert.ok(F.SELFIE_SKIP_LABELS[k], k); });
+  ['on_site', 'rma'].forEach(function (k) { assert.ok(F.TRIP_LABELS[k], k); });
+  ['tapped', 'punch_out', 'cap', 'next_trip', 'hr'].forEach(function (k) { assert.ok(F.TRIP_END_LABELS[k], k); });
+  ['late_excused', 'pending_reason', 'away_pending'].forEach(function (k) { assert.ok(F.MARK_LABELS[k], k); });
+  assert.strictEqual(F.LIVE_TRIP_LABEL, 'On a trip');
+  assert.strictEqual(F.words(F.FLAG_LABELS, 'brand_new_flag'), 'brand new flag');
+  assert.strictEqual(F.words(F.FLAG_LABELS, 'sent_late'), 'Sent late');
+  assert.strictEqual(F.words(F.FLAG_LABELS, null), '');
+  assert.strictEqual(F.words(F.FLAG_LABELS, 'toString'), 'toString');   // never a prototype member
+  // the live statuses are unchanged: a trip is a column, not a status
+  assert.ok(F.LIVE_ORDER.indexOf('on_trip') === -1);
+});
+
+test('distText: metres to 10 m, then km with one decimal', function () {
+  assert.strictEqual(F.distText(0), '0 m');
+  assert.strictEqual(F.distText(7), '7 m');
+  assert.strictEqual(F.distText(84), '80 m');
+  assert.strictEqual(F.distText(85), '90 m');
+  assert.strictEqual(F.distText(994), '990 m');
+  assert.strictEqual(F.distText(996), '1.0 km');
+  assert.strictEqual(F.distText(1234), '1.2 km');
+  assert.strictEqual(F.distText('15460'), '15.5 km');
+  assert.strictEqual(F.distText(123456), '123 km');
+  assert.strictEqual(F.distText(null), '');
+  assert.strictEqual(F.distText(-5), '');
+  assert.strictEqual(F.distText('x'), '');
+});
+
+test('placeText / verifyText / placeTone: the place matrix', function () {
+  var cases = [
+    [{ place: 'office', office_m: 40, verify: 'ok' }, 'At the shop', '', 'ok'],
+    [{ place: 'office', office_m: 120, verify: 'weak_fix' }, 'At the shop (weak GPS)', '', 'away'],
+    [{ place: 'away', office_m: 1234, verify: 'ok' }, '1.2 km from the shop', '', 'away'],
+    [{ place: 'away', office_m: null, verify: 'ok' }, 'Away from the shop', '', 'away'],
+    [{ place: 'unknown', office_m: 400, verify: 'weak_fix' }, 'Weak GPS (about 400 m away)', '', 'bad'],
+    [{ place: 'unknown', office_m: null, verify: 'no_fix' }, 'No location', '', 'bad'],
+    [{ place: 'unset', office_m: null, verify: 'ok' }, 'Office location not set', '', 'muted'],
+    [{ place: 'unknown', verify: 'mock' }, 'Fake GPS', '', 'bad'],
+    [{ place: 'office', office_m: 30, verify: 'old_app' }, 'At the shop', 'Not verified — old NeoHR', 'away'],
+    [{ place: 'unknown', verify: 'old_app' }, 'No location', 'Not verified — old NeoHR', 'bad'],
+    [{ place: 'away', office_m: 5100, verify: 'restored' }, '5.1 km from the shop', 'Restored from a backup', 'away'],
+    [{ place: null, verify: 'hr' }, 'Added by HR', 'Added by HR', 'muted'],
+    [{}, '', '', 'muted'],
+    [{ place: 'moon', verify: 'ok' }, 'moon', '', 'muted']
+  ];
+  cases.forEach(function (c) {
+    assert.strictEqual(F.placeText(c[0]), c[1], 'placeText ' + JSON.stringify(c[0]));
+    assert.strictEqual(F.verifyText(c[0]), c[2], 'verifyText ' + JSON.stringify(c[0]));
+    assert.strictEqual(F.placeTone(c[0]), c[3], 'placeTone ' + JSON.stringify(c[0]));
+  });
+  assert.strictEqual(F.placeText(null), '');
+  assert.strictEqual(F.verifyText(null), '');
+  assert.strictEqual(F.placeTone(null), 'muted');
+});
+
+test('flagList: the server flags in order, once each; a skipped photo says why', function () {
+  var l = F.flagList({ flags: ['sent_late', 'new_login', 'sent_late', 'zz_new', 7, null] });
+  assert.deepStrictEqual(l.map(function (f) { return f.key; }), ['sent_late', 'new_login', 'zz_new']);
+  assert.strictEqual(l[0].text, 'Sent late');
+  assert.ok(/10 minutes/.test(l[0].tip));
+  assert.strictEqual(l[2].text, 'zz new');
+  assert.strictEqual(l[2].tip, '');
+  var s = F.flagList({ flags: ['selfie_skip'], selfie_skip: 'no_front_camera' });
+  assert.strictEqual(s.length, 1);
+  assert.strictEqual(s[0].text, 'No photo (no front camera)');
+  var s2 = F.flagList({ flags: [], selfie_skip: 'camera_error' });
+  assert.deepStrictEqual(s2.map(function (f) { return f.text; }), ['No photo (the camera did not work)']);
+  assert.deepStrictEqual(F.flagList({}), []);
+  assert.deepStrictEqual(F.flagList({ flags: 'sent_late' }), []);
+  assert.deepStrictEqual(F.flagList(null), []);
+});
+
+test('reasonText: the reason kind, the typed text and the ticket', function () {
+  assert.strictEqual(F.reasonText({ reason_kind: 'late', reason_text: null }), 'Late');
+  assert.strictEqual(F.reasonText({ reason_kind: 'late', reason_text: 'Bus was late' }), 'Late — “Bus was late”');
+  assert.strictEqual(F.reasonText({ reason_kind: 'other', reason_text: 'Bank visit' }), 'Own reason — “Bank visit”');
+  assert.strictEqual(F.reasonText({ reason_kind: 'on_site', reason_ref: 'NT-0412' }), 'On-site · NT-0412');
+  assert.strictEqual(F.reasonText({ reason_kind: 'rma', reason_text: '  ', reason_ref: 'RM-0031' }), 'RMA · RM-0031');
+  assert.strictEqual(F.reasonText({ reason_text: 'No reason sent (NeoHR 2.2)' }), '“No reason sent (NeoHR 2.2)”');
+  assert.strictEqual(F.reasonText({}), '');
+  assert.strictEqual(F.reasonText(null), '');
+});
+
+test('dueText: decide by the end of the day, or past it', function () {
+  var due = '2026-10-24T13:00:00Z';                      // 18:30 IST
+  assert.deepStrictEqual(F.dueText({ status: 'pending', due_at: due, past_eod: false }, '2026-10-24'), { text: 'Decide by 18:30', late: false });
+  assert.deepStrictEqual(F.dueText({ status: 'pending', due_at: due, past_eod: true }, '2026-10-24'), { text: 'Past end of day', late: true });
+  assert.deepStrictEqual(F.dueText({ status: 'pending', due_at: due }, '2026-10-25'), { text: 'Decide by 18:30 (Yesterday)', late: false });
+  // no past_eod from the server: the server clock decides
+  assert.deepStrictEqual(F.dueText({ status: 'pending', due_at: due }, '2026-10-24', Date.parse(due) + 1000), { text: 'Past end of day', late: true });
+  assert.deepStrictEqual(F.dueText({ status: 'pending', due_at: due, past_eod: false }, '2026-10-24', Date.parse(due) + 1000), { text: 'Decide by 18:30', late: false });
+  assert.strictEqual(F.dueText({ status: 'approved', due_at: due, past_eod: true }, '2026-10-24'), null);
+  assert.strictEqual(F.dueText({ status: 'pending' }, '2026-10-24'), null);
+  assert.strictEqual(F.dueText(null, '2026-10-24'), null);
+});
+
+test('effectText: what each decision does; the v2.3 sentences are unchanged', function () {
+  assert.ok(/late mark for that day goes/.test(F.effectText('punch_reason', true)));
+  assert.ok(/late mark stays/.test(F.effectText('punch_reason', false)));
+  assert.ok(/punch counts/.test(F.effectText('away_punch', true)));
+  assert.ok(/punch is removed/.test(F.effectText('away_punch', false)));
+  assert.strictEqual(F.effectText('leave', true, { half_day: false }), 'Those days are marked as leave on the roster (weekly offs and holidays skipped).');
+  assert.strictEqual(F.effectText('field_day', true), 'Those days are marked as field days on the roster.');
+  assert.ok(/^The punch is added to the day as HR’s\./.test(F.effectText('missed_punch', true)));
+  assert.strictEqual(F.effectText('late_start', true), 'The day counts as flexible: no late or early marks.');
+  assert.strictEqual(F.effectText('leave', true, { half_day: true }), 'The day counts as flexible: no late or early marks.');
+  assert.strictEqual(F.effectText('late_start', false), '');
+  // a kind this screen does not know never claims an effect
+  assert.strictEqual(F.effectText('something_new', true), '');
+});
+
+test('tripText / tripSpan', function () {
+  assert.strictEqual(F.tripText({ kind: 'on_site', ref_code: 'NT-0412' }), 'On-site trip · NT-0412');
+  assert.strictEqual(F.tripText({ kind: 'rma', ref_code: null, note: 'Distributor run' }), 'RMA trip · Distributor run');
+  assert.strictEqual(F.tripText({ kind: 'boat' }), 'boat');
+  assert.strictEqual(F.tripText({}), 'Trip');
+  assert.strictEqual(F.tripText(null), '');
+  assert.strictEqual(F.tripSpan({ started_at: '2026-10-24T05:35:00Z', ended_at: '2026-10-24T07:10:00Z', open: false }), '11:05–12:40');
+  assert.strictEqual(F.tripSpan({ started_at: '2026-10-24T05:35:00Z', ended_at: '2026-10-24T07:10:00Z', open: true }), '11:05 – still going');
+  assert.strictEqual(F.tripSpan({ started_at: '2026-10-24T05:35:00Z' }), '11:05 – still going');
+  assert.strictEqual(F.tripSpan({}), '');
+});
+
+test('jpegDataUrl: only a real JPEG becomes an image; line breaks are fine', function () {
+  var jpg = '/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8U';
+  assert.strictEqual(F.jpegDataUrl(jpg), 'data:image/jpeg;base64,' + jpg);
+  assert.strictEqual(F.jpegDataUrl(jpg.slice(0, 32) + '\n' + jpg.slice(32)), 'data:image/jpeg;base64,' + jpg);
+  assert.strictEqual(F.jpegDataUrl('data:image/jpeg;base64,' + jpg), 'data:image/jpeg;base64,' + jpg);
+  assert.strictEqual(F.jpegDataUrl('iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB'), null);          // a PNG
+  assert.strictEqual(F.jpegDataUrl('/9j/" onerror="alert(1)'), null);
+  assert.strictEqual(F.jpegDataUrl('/9j/abc'), null);                                   // too short
+  assert.strictEqual(F.jpegDataUrl('/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8'), null);   // not a multiple of 4
+  assert.strictEqual(F.jpegDataUrl('data:text/html;base64,' + jpg), null);
+  assert.strictEqual(F.jpegDataUrl(null), null);
+  assert.strictEqual(F.jpegDataUrl(42), null);
+});
+
 console.log((failures ? 'FAILED' : 'OK') + ' hr-format: ' + passed + ' passed, ' + failures + ' failed');
 process.exit(failures ? 1 : 0);

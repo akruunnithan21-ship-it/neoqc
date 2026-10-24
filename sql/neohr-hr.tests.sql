@@ -1,8 +1,10 @@
 -- =============================================================================
 -- neohr-hr.tests.sql — tests for the neohr_hr_v2_3 migration (sql/neohr-hr.sql)
 -- -----------------------------------------------------------------------------
--- Run AFTER sql/service-v2.sql, sql/service-v2.1.sql, sql/work-queue.sql and
--- sql/neohr-hr.sql, as the database owner (Supabase SQL editor or psql as
+-- Run AFTER sql/service-v2.sql, sql/service-v2.1.sql, sql/work-queue.sql,
+-- sql/neohr-hr.sql and sql/neohr-hr-v2.4.sql (v2.4 is live: these v2.3 tests
+-- run on top of it — its own tests are sql/neohr-hr-v2.4.tests.sql), as the
+-- database owner (Supabase SQL editor or psql as
 -- postgres). Everything happens inside one transaction that ends in ROLLBACK:
 -- nothing is left behind, not even the helper schema.
 --
@@ -39,6 +41,10 @@ create table neo_hrt.ctx (k text primary key, v text);
 create table neo_hrt.fx (name text primary key, body jsonb not null);
 grant select on neo_hrt.users, neo_hrt.fx to anon, authenticated;
 grant select, insert, update, delete on neo_hrt.ctx to anon, authenticated;
+-- v2.4: no client reads attendance_events directly any more; the assertions made while
+-- signed in read it through this view (it runs as the owner)
+create view neo_hrt.ae as select * from public.attendance_events;
+grant select on neo_hrt.ae to authenticated;
 
 -- The shared fixtures, inlined byte for byte (tests/sql-parity.test.js).
 insert into neo_hrt.fx (name, body) values ('hr-km', $fx${"version":1,"about":"HR-SPEC 9.5.4: distance fixtures shared by SQL (_hr_track_points), Kotlin (HrDistance) and JS. Comparisons: total_m within 0.001 m, km exactly, stop lat/lng within 1e-7.","cases":[{"name":"dt0_pair","note":"same at: keep the smaller accuracy, then the smaller id; input not in time order","runs":[[{"id":"a4","at":"2026-10-20T04:02:00Z","lat":10.0159,"lng":76.3437265,"accuracy_m":10},{"id":"a2","at":"2026-10-20T04:01:00Z","lat":10.0159,"lng":76.3428132,"accuracy_m":20},{"id":"a1","at":"2026-10-20T04:00:00Z","lat":10.0159,"lng":76.3419,"accuracy_m":10},{"id":"a3","at":"2026-10-20T04:01:00Z","lat":10.015927,"lng":76.3428498,"accuracy_m":8},{"id":"a6","at":"2026-10-20T04:03:00Z","lat":10.015918,"lng":76.3446945,"accuracy_m":10},{"id":"a5","at":"2026-10-20T04:03:00Z","lat":10.015882,"lng":76.3446397,"accuracy_m":10}]],"expect":{"total_m":300.108568,"km":0.3,"km_gaps":0,"kept":["a1","a3","a4","a5"],"stops":[]}},{"name":"bad_first_fix","note":"first fix far away: the three-reject re-anchor; nothing counted to the jump","runs":[[{"id":"b1","at":"2026-10-20T04:00:00Z","lat":10.0159,"lng":76.387562,"accuracy_m":20},{"id":"b2","at":"2026-10-20T04:00:30Z","lat":10.0159,"lng":76.3419,"accuracy_m":10},{"id":"b3","at":"2026-10-20T04:01:00Z","lat":10.0159,"lng":76.3422653,"accuracy_m":10},{"id":"b4","at":"2026-10-20T04:01:30Z","lat":10.0159,"lng":76.3426306,"accuracy_m":10},{"id":"b5","at":"2026-10-20T04:02:00Z","lat":10.015927,"lng":76.3429959,"accuracy_m":10},{"id":"b6","at":"2026-10-20T04:02:30Z","lat":10.015945,"lng":76.3433703,"accuracy_m":10}]],"expect":{"total_m":161.159793,"km":0.16,"km_gaps":0,"kept":["b1","b2","b3","b4","b5","b6"],"stops":[]}},{"name":"teleport_mid","note":"three consecutive far fixes mid-run: jump, nothing counted across it","runs":[[{"id":"c1","at":"2026-10-20T04:00:00Z","lat":10.0159,"lng":76.3419,"accuracy_m":10},{"id":"c2","at":"2026-10-20T04:00:30Z","lat":10.0159,"lng":76.342174,"accuracy_m":10},{"id":"c3","at":"2026-10-20T04:01:00Z","lat":10.015918,"lng":76.3424571,"accuracy_m":10},{"id":"c4","at":"2026-10-20T04:01:30Z","lat":10.015909,"lng":76.3427402,"accuracy_m":10},{"id":"c5","at":"2026-10-20T04:02:30Z","lat":10.0159,"lng":76.5253699,"accuracy_m":10},{"id":"c6","at":"2026-10-20T04:03:00Z","lat":10.015936,"lng":76.525653,"accuracy_m":10},{"id":"c7","at":"2026-10-20T04:03:30Z","lat":10.015918,"lng":76.5259361,"accuracy_m":10},{"id":"c8","at":"2026-10-20T04:04:00Z","lat":10.015909,"lng":76.5262192,"accuracy_m":10}]],"expect":{"total_m":185.419726,"km":0.19,"km_gaps":0,"kept":["c1","c2","c3","c4","c5","c6","c7","c8"],"stops":[]}},{"name":"stationary_jitter","note":"jitter inside a stop counts 0; the stop first fix counts; anchor stays at it","runs":[[{"id":"d00","at":"2026-10-20T03:58:00Z","lat":10.0159,"lng":76.3446397,"accuracy_m":12},{"id":"d01","at":"2026-10-20T04:00:00Z","lat":10.0159,"lng":76.3419,"accuracy_m":12},{"id":"d02","at":"2026-10-20T04:01:00Z","lat":10.015864,"lng":76.3419548,"accuracy_m":12},{"id":"d03","at":"2026-10-20T04:02:00Z","lat":10.015963,"lng":76.3418543,"accuracy_m":12},{"id":"d04","at":"2026-10-20T04:03:00Z","lat":10.015927,"lng":76.3419731,"accuracy_m":12},{"id":"d05","at":"2026-10-20T04:04:00Z","lat":10.0158281,"lng":76.3418726,"accuracy_m":12},{"id":"d06","at":"2026-10-20T04:05:00Z","lat":10.015954,"lng":76.3419365,"accuracy_m":12},{"id":"d07","at":"2026-10-20T04:06:00Z","lat":10.015882,"lng":76.3418361,"accuracy_m":12},{"id":"d08","at":"2026-10-20T04:07:00Z","lat":10.0159809,"lng":76.3419183,"accuracy_m":12},{"id":"d09","at":"2026-10-20T04:08:00Z","lat":10.015846,"lng":76.3419822,"accuracy_m":12},{"id":"d10","at":"2026-10-20T04:09:00Z","lat":10.015936,"lng":76.3418452,"accuracy_m":12},{"id":"d11","at":"2026-10-20T04:10:00Z","lat":10.015873,"lng":76.3419457,"accuracy_m":12},{"id":"d12","at":"2026-10-20T04:11:00Z","lat":10.015945,"lng":76.3418817,"accuracy_m":12},{"id":"d13","at":"2026-10-20T04:12:00Z","lat":10.0161698,"lng":76.3456443,"accuracy_m":12}]],"expect":{"total_m":711.096639,"km":0.71,"km_gaps":0,"kept":["d00","d01","d02","d03","d04","d05","d06","d07","d08","d09","d10","d11","d12","d13"],"stops":[{"arrived":"2026-10-20T04:00:00Z","left":"2026-10-20T04:11:00Z","lat":10.01590825,"lng":76.341908375}]}},{"name":"slow_walk","note":"steps under 15 m are skipped and the anchor stays; 270 s within 75 m is not a stop","runs":[[{"id":"e01","at":"2026-10-20T04:00:00Z","lat":10.0159,"lng":76.3419,"accuracy_m":5},{"id":"e02","at":"2026-10-20T04:00:30Z","lat":10.0159,"lng":76.3419548,"accuracy_m":5},{"id":"e03","at":"2026-10-20T04:01:00Z","lat":10.0159,"lng":76.3420096,"accuracy_m":5},{"id":"e04","at":"2026-10-20T04:01:30Z","lat":10.0159,"lng":76.3420662,"accuracy_m":5},{"id":"e05","at":"2026-10-20T04:02:00Z","lat":10.0159,"lng":76.342121,"accuracy_m":5},{"id":"e06","at":"2026-10-20T04:02:30Z","lat":10.0159,"lng":76.3421758,"accuracy_m":5},{"id":"e07","at":"2026-10-20T04:03:00Z","lat":10.0159,"lng":76.3422333,"accuracy_m":5},{"id":"e08","at":"2026-10-20T04:03:30Z","lat":10.0159,"lng":76.3422881,"accuracy_m":5},{"id":"e09","at":"2026-10-20T04:04:00Z","lat":10.0159,"lng":76.3423429,"accuracy_m":5},{"id":"e10","at":"2026-10-20T04:04:30Z","lat":10.0159,"lng":76.3424014,"accuracy_m":5}]],"expect":{"total_m":54.903508,"km":0.06,"km_gaps":0,"kept":["e01","e02","e03","e04","e05","e06","e07","e08","e09","e10"],"stops":[]}},{"name":"accuracy_threshold","note":"acc 40 + 40: a step must reach 40 m; a zig-zag of 30 m steps is measured corner to corner","runs":[[{"id":"f1","at":"2026-10-20T04:00:00Z","lat":10.0159,"lng":76.3419,"accuracy_m":40},{"id":"f2","at":"2026-10-20T04:00:30Z","lat":10.0160979,"lng":76.3420826,"accuracy_m":40},{"id":"f3","at":"2026-10-20T04:01:00Z","lat":10.0159,"lng":76.342311,"accuracy_m":40},{"id":"f4","at":"2026-10-20T04:01:30Z","lat":10.0160979,"lng":76.3424936,"accuracy_m":40},{"id":"f5","at":"2026-10-20T04:02:00Z","lat":10.0159,"lng":76.3427219,"accuracy_m":40}]],"expect":{"total_m":89.998391,"km":0.09,"km_gaps":0,"kept":["f1","f2","f3","f4","f5"],"stops":[]}},{"name":"break_two_runs","note":"two runs (a break between): each measured alone, summed","runs":[[{"id":"g1","at":"2026-10-20T04:00:00Z","lat":10.0159,"lng":76.3419,"accuracy_m":10},{"id":"g2","at":"2026-10-20T04:00:30Z","lat":10.0159,"lng":76.3423566,"accuracy_m":10},{"id":"g3","at":"2026-10-20T04:01:00Z","lat":10.0159,"lng":76.3428224,"accuracy_m":10},{"id":"g4","at":"2026-10-20T04:01:30Z","lat":10.0159,"lng":76.3432881,"accuracy_m":10}],[{"id":"g5","at":"2026-10-20T05:00:00Z","lat":10.0159,"lng":76.3615529,"accuracy_m":10},{"id":"g6","at":"2026-10-20T05:00:30Z","lat":10.0159,"lng":76.3620095,"accuracy_m":10},{"id":"g7","at":"2026-10-20T05:01:00Z","lat":10.0159,"lng":76.3624753,"accuracy_m":10},{"id":"g8","at":"2026-10-20T05:01:30Z","lat":10.0159,"lng":76.362941,"accuracy_m":10}]],"expect":{"total_m":303.995051,"km":0.3,"km_gaps":0,"kept":["g1","g2","g3","g4","g5","g6","g7","g8"],"stops":[]}},{"name":"tunnel_gap","note":"dt > 600 s and d > 1000 m: counted, km_gaps + 1; dt > 600 s with d < 1000 m: an ordinary step","runs":[[{"id":"h1","at":"2026-10-20T04:00:00Z","lat":10.0159,"lng":76.3419,"accuracy_m":10},{"id":"h2","at":"2026-10-20T04:00:30Z","lat":10.0159,"lng":76.3428132,"accuracy_m":10},{"id":"h3","at":"2026-10-20T04:12:10Z","lat":10.0159,"lng":76.361078,"accuracy_m":10},{"id":"h4","at":"2026-10-20T04:12:40Z","lat":10.0159,"lng":76.3620004,"accuracy_m":10},{"id":"h5","at":"2026-10-20T04:23:30Z","lat":10.0159,"lng":76.3665757,"accuracy_m":10}]],"expect":{"total_m":2701.999379,"km":2.7,"km_gaps":1,"kept":["h1","h2","h3","h4","h5"],"stops":[]}},{"name":"null_accuracy","note":"accuracy null = 50: kept, and it raises the threshold to (50 + 10) / 2 = 30","runs":[[{"id":"i1","at":"2026-10-20T04:00:00Z","lat":10.0159,"lng":76.3419,"accuracy_m":null},{"id":"i2","at":"2026-10-20T04:00:30Z","lat":10.0159,"lng":76.3421283,"accuracy_m":10},{"id":"i3","at":"2026-10-20T04:01:00Z","lat":10.0159,"lng":76.342311,"accuracy_m":10},{"id":"i4","at":"2026-10-20T04:01:30Z","lat":10.0160979,"lng":76.342311,"accuracy_m":null}]],"expect":{"total_m":45.00467,"km":0.05,"km_gaps":0,"kept":["i1","i2","i3","i4"],"stops":[]}},{"name":"all_bad_accuracy","note":"every fix > 50 m: nothing kept, 0 km","runs":[[{"id":"k1","at":"2026-10-20T04:00:00Z","lat":10.0159,"lng":76.3419,"accuracy_m":60},{"id":"k2","at":"2026-10-20T04:00:30Z","lat":10.0159,"lng":76.3437265,"accuracy_m":51},{"id":"k3","at":"2026-10-20T04:01:00Z","lat":10.0159,"lng":76.345553,"accuracy_m":120},{"id":"k4","at":"2026-10-20T04:01:30Z","lat":10.0159,"lng":76.3473794,"accuracy_m":80}]],"expect":{"total_m":0,"km":0,"km_gaps":0,"kept":[],"stops":[]}},{"name":"drive","note":"a drive at ~12 m/s with a dropped bad-accuracy fix and a single glitch, ending in a 7-minute stop","runs":[[{"id":"m01","at":"2026-10-20T04:00:00Z","lat":10.015936,"lng":76.3419,"accuracy_m":8},{"id":"m02","at":"2026-10-20T04:00:20Z","lat":10.015873,"lng":76.3441009,"accuracy_m":8},{"id":"m03","at":"2026-10-20T04:00:40Z","lat":10.015873,"lng":76.3463292,"accuracy_m":8},{"id":"m04","at":"2026-10-20T04:01:00Z","lat":10.015936,"lng":76.3485849,"accuracy_m":8},{"id":"m05","at":"2026-10-20T04:01:20Z","lat":10.015873,"lng":76.350868,"accuracy_m":8},{"id":"m06","at":"2026-10-20T04:01:40Z","lat":10.015873,"lng":76.3530689,"accuracy_m":8},{"id":"m90","at":"2026-10-20T04:01:55Z","lat":10.0239939,"lng":76.3550507,"accuracy_m":80},{"id":"m07","at":"2026-10-20T04:02:00Z","lat":10.015936,"lng":76.3552972,"accuracy_m":8},{"id":"m08","at":"2026-10-20T04:02:20Z","lat":10.015873,"lng":76.3575529,"accuracy_m":8},{"id":"m09","at":"2026-10-20T04:02:40Z","lat":10.015873,"lng":76.359836,"accuracy_m":8},{"id":"m10","at":"2026-10-20T04:03:00Z","lat":10.015936,"lng":76.3620369,"accuracy_m":8},{"id":"m91","at":"2026-10-20T04:03:15Z","lat":9.9925176,"lng":76.3857355,"accuracy_m":8},{"id":"m11","at":"2026-10-20T04:03:20Z","lat":10.015873,"lng":76.3642652,"accuracy_m":8},{"id":"m12","at":"2026-10-20T04:03:40Z","lat":10.015873,"lng":76.3665209,"accuracy_m":8},{"id":"m13","at":"2026-10-20T04:04:00Z","lat":10.015936,"lng":76.368804,"accuracy_m":8},{"id":"m14","at":"2026-10-20T04:04:20Z","lat":10.015873,"lng":76.371005,"accuracy_m":8},{"id":"m15","at":"2026-10-20T04:04:40Z","lat":10.015873,"lng":76.3732333,"accuracy_m":8},{"id":"m16","at":"2026-10-20T04:05:00Z","lat":10.015936,"lng":76.375489,"accuracy_m":8},{"id":"m17","at":"2026-10-20T04:05:20Z","lat":10.015873,"lng":76.3777721,"accuracy_m":8},{"id":"m18","at":"2026-10-20T04:05:40Z","lat":10.015873,"lng":76.379973,"accuracy_m":8},{"id":"m19","at":"2026-10-20T04:06:00Z","lat":10.0159,"lng":76.3821647,"accuracy_m":10},{"id":"m20","at":"2026-10-20T04:07:00Z","lat":10.015927,"lng":76.3822469,"accuracy_m":10},{"id":"m21","at":"2026-10-20T04:08:00Z","lat":10.015954,"lng":76.3821647,"accuracy_m":10},{"id":"m22","at":"2026-10-20T04:09:00Z","lat":10.0159,"lng":76.3822469,"accuracy_m":10},{"id":"m23","at":"2026-10-20T04:10:00Z","lat":10.015927,"lng":76.3821647,"accuracy_m":10},{"id":"m24","at":"2026-10-20T04:11:00Z","lat":10.015954,"lng":76.3822469,"accuracy_m":10},{"id":"m25","at":"2026-10-20T04:12:00Z","lat":10.0159,"lng":76.3821647,"accuracy_m":10},{"id":"m26","at":"2026-10-20T04:13:00Z","lat":10.015927,"lng":76.3822469,"accuracy_m":10}]],"expect":{"total_m":4410.119016,"km":4.41,"km_gaps":0,"kept":["m01","m02","m03","m04","m05","m06","m07","m08","m09","m10","m11","m12","m13","m14","m15","m16","m17","m18","m19","m20","m21","m22","m23","m24","m25","m26"],"stops":[{"arrived":"2026-10-20T04:06:00Z","left":"2026-10-20T04:13:00Z","lat":10.015923625,"lng":76.3822058}]}},{"name":"two_stops","note":"two stops 300 m apart; a 290 s cluster is not a stop","runs":[[{"id":"n01","at":"2026-10-20T04:00:00Z","lat":10.0159,"lng":76.3419,"accuracy_m":10},{"id":"n02","at":"2026-10-20T04:02:00Z","lat":10.015927,"lng":76.3419457,"accuracy_m":10},{"id":"n03","at":"2026-10-20T04:04:00Z","lat":10.015954,"lng":76.3418635,"accuracy_m":10},{"id":"n04","at":"2026-10-20T04:06:00Z","lat":10.015855,"lng":76.3419274,"accuracy_m":10},{"id":"n05","at":"2026-10-20T04:07:00Z","lat":10.0159,"lng":76.344658,"accuracy_m":10},{"id":"n06","at":"2026-10-20T04:09:00Z","lat":10.015936,"lng":76.3446945,"accuracy_m":10},{"id":"n07","at":"2026-10-20T04:11:00Z","lat":10.015846,"lng":76.3446306,"accuracy_m":10},{"id":"n08","at":"2026-10-20T04:13:00Z","lat":10.015918,"lng":76.3446762,"accuracy_m":10},{"id":"n09","at":"2026-10-20T04:14:00Z","lat":10.0159,"lng":76.3482927,"accuracy_m":10},{"id":"n10","at":"2026-10-20T04:15:30Z","lat":10.015927,"lng":76.3483475,"accuracy_m":10},{"id":"n11","at":"2026-10-20T04:17:00Z","lat":10.015864,"lng":76.3483109,"accuracy_m":10},{"id":"n12","at":"2026-10-20T04:18:50Z","lat":10.015909,"lng":76.3483657,"accuracy_m":10},{"id":"n13","at":"2026-10-20T04:19:20Z","lat":10.0159,"lng":76.3510324,"accuracy_m":10}]],"expect":{"total_m":1000.001586,"km":1,"km_gaps":0,"kept":["n01","n02","n03","n04","n05","n06","n07","n08","n09","n10","n11","n12","n13"],"stops":[{"arrived":"2026-10-20T04:00:00Z","left":"2026-10-20T04:06:00Z","lat":10.015909,"lng":76.34190915},{"arrived":"2026-10-20T04:07:00Z","left":"2026-10-20T04:13:00Z","lat":10.0159,"lng":76.344664825}]}},{"name":"double_glitch","note":"two far fixes in a row are dropped (only a third reject re-anchors)","runs":[[{"id":"q1","at":"2026-10-20T04:00:00Z","lat":10.0159,"lng":76.3419,"accuracy_m":10},{"id":"q2","at":"2026-10-20T04:00:30Z","lat":10.0159,"lng":76.342174,"accuracy_m":10},{"id":"q3","at":"2026-10-20T04:01:00Z","lat":10.0159,"lng":76.3424571,"accuracy_m":10},{"id":"q4","at":"2026-10-20T04:01:30Z","lat":10.015918,"lng":76.3427402,"accuracy_m":10},{"id":"q5","at":"2026-10-20T04:02:00Z","lat":10.0293898,"lng":76.3701374,"accuracy_m":10},{"id":"q6","at":"2026-10-20T04:02:30Z","lat":10.0295697,"lng":76.3703018,"accuracy_m":10},{"id":"q7","at":"2026-10-20T04:03:00Z","lat":10.015927,"lng":76.3432881,"accuracy_m":10},{"id":"q8","at":"2026-10-20T04:03:30Z","lat":10.015909,"lng":76.3435712,"accuracy_m":10},{"id":"q9","at":"2026-10-20T04:04:00Z","lat":10.015936,"lng":76.3438543,"accuracy_m":10}]],"expect":{"total_m":214.279136,"km":0.21,"km_gaps":0,"kept":["q1","q2","q3","q4","q7","q8","q9"],"stops":[]}},{"name":"stop_wander","note":"only the stop first fix counts; the stop radius is 75 m (85 m is outside)","runs":[[{"id":"w1","at":"2026-10-20T04:00:00Z","lat":10.0159,"lng":76.3419,"accuracy_m":10},{"id":"w2","at":"2026-10-20T04:01:00Z","lat":10.0159,"lng":76.3420826,"accuracy_m":10},{"id":"w3","at":"2026-10-20T04:02:00Z","lat":10.0160619,"lng":76.341763,"accuracy_m":10},{"id":"w4","at":"2026-10-20T04:03:00Z","lat":10.0161248,"lng":76.3421283,"accuracy_m":10},{"id":"w5","at":"2026-10-20T04:04:00Z","lat":10.0157201,"lng":76.3419,"accuracy_m":10},{"id":"w6","at":"2026-10-20T04:05:00Z","lat":10.0161698,"lng":76.3419913,"accuracy_m":10},{"id":"w7","at":"2026-10-20T04:06:00Z","lat":10.015945,"lng":76.3417174,"accuracy_m":10},{"id":"w8","at":"2026-10-20T04:06:30Z","lat":10.0159,"lng":76.3426763,"accuracy_m":10}]],"expect":{"total_m":85.005172,"km":0.09,"km_gaps":0,"kept":["w1","w2","w3","w4","w5","w6","w7","w8"],"stops":[{"arrived":"2026-10-20T04:00:00Z","left":"2026-10-20T04:06:00Z","lat":10.015974514,"lng":76.341926086}]}}]}$fx$::jsonb);
@@ -242,6 +248,9 @@ update public.profiles p
 update public.profiles set full_name = 'Zqhr Guest', tier = 1, is_staff = false, active = true
  where email = 'zq.hr.guest@neotokyo.test';
 
+-- (the real tier 3 head may be inactive now: active again inside this transaction only)
+update public.profiles set active = true, is_staff = true where lower(email) = 'jophy.joseph@neotokyo.in' and tier = 3;
+
 insert into neo_hrt.users (alias, id, email, tier, name)
 select a.alias, p.id, lower(p.email), p.tier, p.full_name
   from (values ('owner', 'ananthakrishnan@neotokyo.in'), ('ceo', 'ajay.joy@neotokyo.in'), ('cto', 'rony.thomas@neotokyo.in'),
@@ -291,6 +300,10 @@ delete from public.hr_holidays where day between neo_hrt.d(-130) and neo_hrt.d(1
 delete from public.hr_roster where profile_id in (select id from neo_hrt.users);
 delete from public.hr_shift_history where profile_id in (select id from neo_hrt.users);
 delete from public.hr_person where profile_id in (select id from neo_hrt.users);
+-- v2.4: route, trips and travel allowance are for field staff only (no row = none), so
+-- the throw-away logins these tests record routes for are field staff
+insert into public.hr_person (profile_id, track_location, ta_eligible, updated_by)
+select u.id, true, true, 'tests' from neo_hrt.users u where u.email like 'zq.hr.%@neotokyo.test' and u.alias <> 'guest';
 
 
 -- ── 2. Schema facts, RLS, grants (as the owner) ─────────────────────────────
@@ -309,12 +322,14 @@ begin
                            t || ': anon has no privilege');
     perform neo_hrt.assert(not has_table_privilege('authenticated', format('public.%I', t), 'insert, update, delete, truncate, references, trigger'),
                            t || ': authenticated cannot write');
-    perform neo_hrt.assert(has_table_privilege('authenticated', format('public.%I', t), 'select') = (t <> 'location_points'),
-                           t || ': authenticated may select (location_points: nobody)');
+    perform neo_hrt.assert(has_table_privilege('authenticated', format('public.%I', t), 'select') = (t not in ('location_points', 'attendance_events')),
+                           t || ': authenticated may select (location_points and, since v2.4, attendance_events: nobody)');
     perform neo_hrt.assert(not exists (select 1 from pg_publication_tables where tablename = t), t || ' is not in realtime');
   end loop;
   perform neo_hrt.assert(not exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'location_points'),
                          'location_points has no policy at all');
+  perform neo_hrt.assert(not has_column_privilege('authenticated', 'public.attendance_events', 'lat', 'select'),
+                         'v2.4: no client reads punch coordinates');
   -- every function of the file: _hr_* internal, the API for authenticated
   for f in select p.oid, p.proname, p.prosecdef, p.proconfig from pg_proc p
             where p.pronamespace = 'public'::regnamespace and (p.proname ~ '^_hr_' or p.proname = any (v_api)) loop
@@ -490,7 +505,7 @@ begin
   exception when others then v := sqlerrm;
   end;
   perform neo_hrt.assert(v = 'probe:1', 'location_push holds the SHARED lock on the same key (' || v || ')');
-  perform neo_hrt.assert(not exists (select 1 from public.attendance_events where employee_email = neo_hrt.email('lock')),
+  perform neo_hrt.assert(not exists (select 1 from neo_hrt.ae where employee_email = neo_hrt.email('lock')),
                          'the probes left nothing behind');
 end $$;
 -- hr_correct takes the person's lock (once, for every change of the set)
@@ -509,7 +524,7 @@ begin
   exception when others then v := sqlerrm;
   end;
   perform neo_hrt.assert(v = 'probe:1', 'hr_correct holds pg_advisory_xact_lock on neo_hr_att:<email> (' || v || ')');
-  perform neo_hrt.assert(not exists (select 1 from public.attendance_events where employee_email = neo_hrt.email('lock')),
+  perform neo_hrt.assert(not exists (select 1 from neo_hrt.ae where employee_email = neo_hrt.email('lock')),
                          'the probe left nothing behind');
 end $$;
 
@@ -553,8 +568,8 @@ begin
                          and (r ->> 'since')::timestamptz = now() - interval '90 seconds' and r ->> 'id' = v_id::text
                          and r ? 'now' and r -> 'day' ->> 'status' = 'open' and r -> 'tracking' ->> 'enabled' = 'true',
                          'hr_punch answers {ok, duplicate, now, id, state, since, day, tracking} ' || r::text);
-  perform neo_hrt.assert(neo_hrt.keys(r) = array['day', 'duplicate', 'id', 'now', 'ok', 'since', 'state', 'tracking'], 'hr_punch keys ' || r::text);
-  select * into e from public.attendance_events where id = v_id;
+  perform neo_hrt.assert(r ?& array['day', 'duplicate', 'id', 'now', 'ok', 'since', 'state', 'tracking'], 'hr_punch keys (v2.4 adds check) ' || r::text);
+  select * into e from neo_hrt.ae where id = v_id;
   perform neo_hrt.assert(e.at = now() - interval '90 seconds' and e.device_at = '2019-01-01T00:00:00Z' and e.time_source = 'server'
                          and e.source = 'phone' and e.employee_email = neo_hrt.email('lock') and e.profile_id = neo_hrt.uid('lock')
                          and e.lat = 10.0159 and e.accuracy_m = 9 and e.note = 'first in',
@@ -564,7 +579,7 @@ begin
   r2 := public.hr_punch(jsonb_build_object('id', v_id, 'kind', 'punch_in', 'at', now()));
   perform neo_hrt.assert(r2 ->> 'ok' = 'true' and r2 ->> 'duplicate' = 'true' and r2 ->> 'state' = 'on_break',
                          'a replay answers with the current state ' || r2::text);
-  perform neo_hrt.assert((select count(*) from public.attendance_events where id = v_id) = 1, 'a replay stores nothing');
+  perform neo_hrt.assert((select count(*) from neo_hrt.ae where id = v_id) = 1, 'a replay stores nothing');
   perform neo_hrt.put('lock_punch', v_id::text);
   -- wrong steps
   perform neo_hrt.expect_error($q$select neo_hrt.punch('punch_in', now())$q$, '%NEO_GATE: You''re already punched in.%');
@@ -795,7 +810,7 @@ select neo_hrt.login('lead');
 do $$
 declare r jsonb; s text := 'select public.hr_correct(%L, %L::jsonb)'; v_n int; v_e text := neo_hrt.email('fix');
 begin
-  select count(*) into v_n from public.attendance_events where employee_email = v_e;
+  select count(*) into v_n from neo_hrt.ae where employee_email = v_e;
   -- one change at a time cannot remove the pair: either void alone breaks the order
   perform neo_hrt.expect_error(format(s, v_e, jsonb_build_object('action', 'void', 'id', neo_hrt.get('fix_p2'), 'note', 'Tapped out by mistake')),
                                '%NEO_GATE: Voiding that breaks the order of the day''s punches — fix the matching punch too.%');
@@ -830,8 +845,8 @@ begin
                                  jsonb_build_object('action', 'void', 'id', neo_hrt.get('fix_p2')),
                                  jsonb_build_object('action', 'add', 'kind', 'break_start', 'at', neo_hrt.at(-2, '11:02'))))),
                                '%NEO_GATE: That doesn''t fit the day''s punches.%');
-  perform neo_hrt.assert((select count(*) from public.attendance_events where employee_email = v_e) = v_n
-                         and not exists (select 1 from public.attendance_events where employee_email = v_e and voided_at is not null),
+  perform neo_hrt.assert((select count(*) from neo_hrt.ae where employee_email = v_e) = v_n
+                         and not exists (select 1 from neo_hrt.ae where employee_email = v_e and voided_at is not null),
                          'a refused set changes nothing');
   -- remove the pair: one correction, one day
   r := public.hr_correct(v_e, jsonb_build_object('note', 'Tapped out by mistake', 'ops', jsonb_build_array(
@@ -884,10 +899,10 @@ begin
                          'a missed punch approved with the changes it needs, in one correction ' || r::text);
   perform neo_hrt.assert((select status from public.hr_requests where id = neo_hrt.get('fix_missed')::uuid) = 'approved', 'the request is approved');
   -- …once: a request no longer pending answers 'decided' and changes nothing
-  select count(*) into v_n from public.attendance_events where employee_email = v_e;
+  select count(*) into v_n from neo_hrt.ae where employee_email = v_e;
   r := public.hr_correct(v_e, jsonb_build_object('ops', '[]'::jsonb, 'request_id', neo_hrt.get('fix_missed'), 'note', 'Again'));
   perform neo_hrt.assert(r ->> 'ok' = 'false' and r ->> 'reason' = 'decided' and r ->> 'status' = 'approved' and r ->> 'by' = neo_hrt.name('lead')
-                         and r ->> 'at' is not null and (select count(*) from public.attendance_events where employee_email = v_e) = v_n,
+                         and r ->> 'at' is not null and (select count(*) from neo_hrt.ae where employee_email = v_e) = v_n,
                          'a decided request through hr_correct ' || r::text);
   -- a missed punch on its own (no other change), through hr_correct and through hr_request_decide
   r := public.hr_correct(v_e, jsonb_build_object('ops', '[]'::jsonb, 'request_id', neo_hrt.get('fix_brk'), 'note', 'Lunch break'));
@@ -1352,7 +1367,7 @@ begin
   r := public.hr_dashboard();
   perform neo_hrt.assert(r -> 'me' ->> 'state' = 'on_duty' and (r -> 'me' ->> 'since')::timestamptz = now() - interval '1 hour'
                          and not (r ? 'hr') and r ? 'now'
-                         and neo_hrt.keys(r -> 'me') = array['break_min', 'flex', 'km', 'late_min', 'missed_out', 'since', 'state', 'tracking', 'worked_min'],
+                         and (r -> 'me') ?& array['break_min', 'flex', 'km', 'late_min', 'missed_out', 'since', 'state', 'tracking', 'worked_min'],
                          'hr_dashboard for staff: me only ' || r::text);
 end $$;
 
@@ -1411,7 +1426,7 @@ begin
                          'board: a session today that has closed → off_duty since its punch_out ' || p::text);
   -- the dashboard's hr block = the board's counts
   r := public.hr_dashboard();
-  perform neo_hrt.assert(r ? 'hr' and neo_hrt.keys(r -> 'hr') = array['absent', 'not_in_yet', 'on_break', 'on_duty', 'on_site', 'pending_requests'],
+  perform neo_hrt.assert(r ? 'hr' and (r -> 'hr') ?& array['absent', 'not_in_yet', 'on_break', 'on_duty', 'on_site', 'pending_requests'],
                          'hr_dashboard for an approver: hr ' || r::text);
   p := public.hr_board() -> 'counts';
   perform neo_hrt.assert((r -> 'hr' ->> 'on_duty')::int = coalesce((p ->> 'on_duty')::int, 0)
@@ -1503,8 +1518,9 @@ begin
   perform neo_hrt.expect_error(format('select public.hr_request_create(%L::jsonb)',
                                       jsonb_build_object('id', neo_hrt.get('f_late'), 'kind', 'late_start', 'date_from', neo_hrt.d(0), 'reason', 'Mine')),
                                '%NEO_GATE: That request id is already used.%');
+  -- v2.3 said NEO_DENIED: Only a head or a NeoHR lead can approve requests. — v2.4 says it as NEO_GATE
   perform neo_hrt.expect_error(format('select public.hr_request_decide(%L::uuid, true)', neo_hrt.get('f_late')),
-                               '%NEO_DENIED: Only a head or a NeoHR lead can approve requests.%');
+                               '%NEO_GATE: Only a head or a NeoHR lead can approve requests.%');
   perform neo_hrt.expect_error(format('select public.hr_request_cancel(%L::uuid, %L)', neo_hrt.get('f_field'), 'no'),
                                '%NEO_DENIED: You can only cancel your own requests.%');
   perform neo_hrt.expect_error($q$select public.hr_requests_list('pending')$q$,
@@ -1536,7 +1552,7 @@ begin
   -- decide
   r := public.hr_request_decide(neo_hrt.get('f_missed')::uuid, true, null);
   perform neo_hrt.assert(r ->> 'ok' = 'true' and r -> 'request' ->> 'status' = 'approved', 'approve a missed punch ' || r::text);
-  perform neo_hrt.assert(exists (select 1 from public.attendance_events e where e.employee_email = neo_hrt.email('flex') and e.kind = 'punch_out'
+  perform neo_hrt.assert(exists (select 1 from neo_hrt.ae e where e.employee_email = neo_hrt.email('flex') and e.kind = 'punch_out'
                                    and e.at = neo_hrt.at(-3, '18:00') and e.source = 'hr' and e.time_source = 'hr' and e.device_at is null
                                    and e.note = 'Phone died at the site' and e.created_by_email = neo_hrt.email('lead')),
                          'the approved missed punch is an hr punch (note = the reason, by the approver)');
@@ -1713,7 +1729,7 @@ declare r jsonb;
 begin
   r := public.hr_request_create(jsonb_build_object('kind', 'late_start', 'date_from', neo_hrt.d(1), 'reason', 'Lead running late'));
   perform neo_hrt.expect_error(format('select public.hr_request_decide(%L::uuid, true)', r -> 'request' ->> 'id'),
-                               '%NEO_DENIED: Someone else has to approve or change your own attendance, duty or travel allowance.%');
+                               '%NEO_GATE: Someone else has to approve or change your own attendance, duty or travel allowance.%');
 end $$;
 select neo_hrt.login('owner');
 do $$
@@ -1722,7 +1738,7 @@ begin
   r := public.hr_request_create(jsonb_build_object('kind', 'late_start', 'date_from', neo_hrt.d(0), 'reason', 'Doctor visit'));
   perform neo_hrt.put('owner_req', r -> 'request' ->> 'id');
   perform neo_hrt.expect_error(format('select public.hr_request_decide(%L::uuid, true)', r -> 'request' ->> 'id'),
-                               '%NEO_DENIED: Someone else has to approve or change your own attendance, duty or travel allowance.%');
+                               '%NEO_GATE: Someone else has to approve or change your own attendance, duty or travel allowance.%');
   perform neo_hrt.expect_error(format('select public.hr_correct(%L, %L::jsonb)', neo_hrt.email('owner'),
                                       jsonb_build_object('action', 'add', 'kind', 'punch_in', 'at', now(), 'note', 'self')),
                                '%NEO_DENIED: Someone else has to approve or change your own attendance, duty or travel allowance.%');
@@ -1732,6 +1748,12 @@ begin
                                '%NEO_DENIED: Someone else has to approve or change your own attendance, duty or travel allowance.%');
 end $$;
 select neo_hrt.login('head');
+do $$
+begin
+  perform neo_hrt.expect_error(format('select public.hr_request_decide(%L::uuid, true)', neo_hrt.get('owner_req')),
+                               '%NEO_GATE: Requests from a tier 4 or 5 account are decided by tier 4 and above.%');
+end $$;
+select neo_hrt.login('ceo');
 select public.hr_request_decide(neo_hrt.get('owner_req')::uuid, true, null);
 select neo_hrt.login('owner');
 do $$
@@ -2044,6 +2066,18 @@ begin
   perform neo_hrt.expect_error(format('select public.hr_ta_approve(%L, %L, null, 1)', neo_hrt.email('walk'), neo_hrt.lmd()),
                                '%NEO_DENIED: Only a head or a NeoHR lead can approve travel allowance.%');
 end $$;
+-- v2.4: the allowance is trip km — walk's day out was one on-site trip, 09:00–17:00
+select neo_hrt.login('walk');
+do $$
+declare r jsonb; v uuid := gen_random_uuid();
+begin
+  r := public.hr_trip_start(jsonb_build_object('id', v, 'kind', 'on_site', 'note', 'Zq site visits',
+                                               'at', (neo_hrt.lmd() + time '09:00') at time zone 'Asia/Kolkata'));
+  perform neo_hrt.assert(r ->> 'ok' = 'true', 'a trip over walk''s day ' || r::text);
+  r := public.hr_trip_end(jsonb_build_object('id', v, 'at', (neo_hrt.lmd() + time '17:00') at time zone 'Asia/Kolkata'));
+  perform neo_hrt.assert(r ->> 'ok' = 'true' and (r -> 'trip' ->> 'km')::numeric = (neo_hrt.fixture_expect('two_stops') ->> 'km')::numeric,
+                         'its km is the day''s km ' || r::text);
+end $$;
 select neo_hrt.login('noallow');
 select neo_hrt.punch('punch_in', (neo_hrt.lmd() + time '09:00') at time zone 'Asia/Kolkata');
 select neo_hrt.punch('punch_out', (neo_hrt.lmd() + time '17:00') at time zone 'Asia/Kolkata');
@@ -2057,7 +2091,7 @@ begin
   r := public.hr_ta_report(neo_hrt.lmd());
   p := neo_hrt.person(r, neo_hrt.email('walk'));
   perform neo_hrt.assert((r ->> 'month')::date = date_trunc('month', neo_hrt.lmd())::date and r ->> 'closed' = 'true' and r ->> 'rate' is null
-                         and (p ->> 'km')::numeric = v_km and p -> 'days' = jsonb_build_array(jsonb_build_object('day', neo_hrt.lmd(), 'km', v_km))
+                         and (p ->> 'km')::numeric = v_km and p -> 'days' @> jsonb_build_array(jsonb_build_object('day', neo_hrt.lmd(), 'km', v_km))
                          and p ->> 'rate' is null and p ->> 'amount' is null and p -> 'approved' = 'null'::jsonb and p ->> 'can_approve' = 'false',
                          'hr_ta_report: km per day and the month; no rate yet ' || p::text);
   perform neo_hrt.expect_error(format('select public.hr_ta_approve(%L, %L, null, %s)', neo_hrt.email('walk'), neo_hrt.d(0), v_km),
@@ -2343,7 +2377,7 @@ begin
   perform neo_hrt.assert(r = jsonb_build_object('id', v, 'applied', true, 'applied_note', 'Recorded.', 'duplicate', false, 'stage', null),
                          'a legacy punch answers in the old shape ' || r::text);
   perform neo_hrt.assert(not exists (select 1 from public.field_activity where client_request_id = v)
-                         and exists (select 1 from public.attendance_events where id = v and employee_email = neo_hrt.email('night')
+                         and exists (select 1 from neo_hrt.ae where id = v and employee_email = neo_hrt.email('night')
                                        and source = 'phone' and time_source = 'device' and lat = 10.0159),
                          'a legacy punch goes to attendance_events only');
   r := public.record_field_activity(jsonb_build_object('client_request_id', v, 'kind', 'punch_in', 'at', neo_hrt.at(-3, '09:00')));
@@ -2356,7 +2390,7 @@ begin
   -- employee_email is ignored: always the caller
   r := public.record_field_activity(jsonb_build_object('client_request_id', gen_random_uuid(), 'kind', 'punch_out', 'at', neo_hrt.at(-3, '17:00'),
                                                        'employee_email', neo_hrt.email('tech')));
-  perform neo_hrt.assert(r ->> 'applied' = 'true' and exists (select 1 from public.attendance_events where employee_email = neo_hrt.email('night')
+  perform neo_hrt.assert(r ->> 'applied' = 'true' and exists (select 1 from neo_hrt.ae where employee_email = neo_hrt.email('night')
                                                                 and at = neo_hrt.at(-3, '17:00')), 'a legacy punch is always the caller''s');
   r := public.hr_my_day(neo_hrt.d(-3));
   perform neo_hrt.assert(r ->> 'status' = 'present' and (r ->> 'worked_min')::int = 480 and jsonb_array_length(r -> 'events') = 2,
@@ -2426,11 +2460,20 @@ reset role;
 select neo_hrt.no_jwt();
 -- What each role can read of someone else's records: [settings, holidays, tech's punches, tech's shift rows,
 -- flex's requests, tech's roster, tech's person row, walk's allowance, walk's km rows, views of walk's route]
-create function neo_hrt.seen() returns int[] language sql stable as $$
+create function neo_hrt.try_count(p_sql text) returns int language plpgsql as $$
+declare n int;
+begin
+  execute p_sql into n;
+  return n;
+exception when insufficient_privilege then
+  return -1;
+end $$;
+grant execute on function neo_hrt.try_count(text) to authenticated;
+create function neo_hrt.seen() returns int[] language sql volatile as $$
   select array[
     (select count(*) from public.hr_settings)::int,
     (select count(*) from public.hr_holidays where day = neo_hrt.d(2))::int,
-    (select count(*) from public.attendance_events where employee_email = 'zq.hr.tech@neotokyo.test')::int,
+    neo_hrt.try_count('select count(*) from public.attendance_events where employee_email = ''zq.hr.tech@neotokyo.test'''),
     (select count(*) from public.hr_shift_history where profile_id = 'b2222222-0000-4000-8000-000000000001')::int,
     (select count(*) from public.hr_requests where employee_email = 'zq.hr.flex@neotokyo.test')::int,
     (select count(*) from public.hr_roster where profile_id = 'b2222222-0000-4000-8000-000000000001')::int,
@@ -2450,7 +2493,7 @@ select neo_hrt.login('sales');
 do $$
 declare s int[] := neo_hrt.seen();
 begin
-  perform neo_hrt.assert(s = array[1, 1, 0, 0, 0, 0, 0, 0, 0, 0], 'tier-1 sales: settings and holidays only ' || s::text);
+  perform neo_hrt.assert(s = array[1, 1, -1, 0, 0, 0, 0, 0, 0, 0], 'tier-1 sales: settings and holidays only (punches: no direct read at all) ' || s::text);
   perform neo_hrt.assert(exists (select 1 from public.hr_shift_history where profile_id is null), 'staff read the default shift rows');
   perform neo_hrt.expect_error($q$select count(*) from public.location_points$q$, '%permission denied%');
 end $$;
@@ -2458,14 +2501,14 @@ select neo_hrt.login('plain');
 do $$
 declare s int[] := neo_hrt.seen();
 begin
-  perform neo_hrt.assert(s = array[1, 1, 0, 0, 0, 0, 0, 0, 0, 0], 'a plain technician (NeoHR desk role): nobody else''s records ' || s::text);
+  perform neo_hrt.assert(s = array[1, 1, -1, 0, 0, 0, 0, 0, 0, 0], 'a plain technician (NeoHR desk role): nobody else''s records ' || s::text);
 end $$;
 select neo_hrt.login('tech');
 do $$
 declare s int[] := neo_hrt.seen();
 begin
-  perform neo_hrt.assert(s[3] > 0 and s[4] > 0 and s[6] > 0 and s[7] = 1 and s[5] = 0 and s[8] = 0 and s[9] = 0 and s[10] = 0,
-                         'the person: their own punches, shift rows, roster and switches; nobody else''s ' || s::text);
+  perform neo_hrt.assert(s[3] = -1 and s[4] > 0 and s[6] > 0 and s[7] = 1 and s[5] = 0 and s[8] = 0 and s[9] = 0 and s[10] = 0,
+                         'the person: their own shift rows, roster and switches (punches only through the RPCs); nobody else''s ' || s::text);
   perform neo_hrt.assert((select count(*) from public.hr_route_views where subject_email = neo_hrt.email('tech')) >= 1,
                          'the person sees the views of their own route');
   perform neo_hrt.expect_error($q$select count(*) from public.location_points$q$, '%permission denied%');
@@ -2476,14 +2519,14 @@ select neo_hrt.login('walk');
 do $$
 declare s int[] := neo_hrt.seen();
 begin
-  perform neo_hrt.assert(s[8] = 1 and s[9] > 0 and s[10] >= 1 and s[3] = 0, 'walk: own allowance, km rows and route views ' || s::text);
+  perform neo_hrt.assert(s[8] = 1 and s[9] > 0 and s[10] >= 1 and s[3] = -1, 'walk: own allowance, km rows and route views ' || s::text);
 end $$;
 select neo_hrt.login('lead');
 do $$
 declare s int[] := neo_hrt.seen();
 begin
-  perform neo_hrt.assert(s[3] > 0 and s[4] > 0 and s[5] > 0 and s[6] > 0 and s[7] = 1 and s[8] = 1 and s[9] > 0 and s[10] = 0,
-                         'a NeoHR lead (tier 2): everyone''s attendance records, but route views only at tier 4 ' || s::text);
+  perform neo_hrt.assert(s[3] = -1 and s[4] > 0 and s[5] > 0 and s[6] > 0 and s[7] = 1 and s[8] = 1 and s[9] > 0 and s[10] = 0,
+                         'a NeoHR lead (tier 2): everyone''s attendance records (punches through the RPCs), but route views only at tier 4 ' || s::text);
   perform neo_hrt.expect_error($q$select count(*) from public.location_points$q$, '%permission denied%');
   perform neo_hrt.expect_error($q$delete from public.hr_requests$q$, '%permission denied%');
 end $$;
@@ -2491,13 +2534,13 @@ select neo_hrt.login('head');
 do $$
 declare s int[] := neo_hrt.seen();
 begin
-  perform neo_hrt.assert(s[3] > 0 and s[5] > 0 and s[8] = 1 and s[10] = 0, 'tier 3: everyone''s records; route views only at tier 4 ' || s::text);
+  perform neo_hrt.assert(s[3] = -1 and s[5] > 0 and s[8] = 1 and s[10] = 0, 'tier 3: everyone''s records; route views only at tier 4 ' || s::text);
 end $$;
 select neo_hrt.login('ceo');
 do $$
 declare s int[] := neo_hrt.seen();
 begin
-  perform neo_hrt.assert(s[3] > 0 and s[5] > 0 and s[8] = 1 and s[10] >= 1, 'tier 4: everything, including who viewed whose route ' || s::text);
+  perform neo_hrt.assert(s[3] = -1 and s[5] > 0 and s[8] = 1 and s[10] >= 1, 'tier 4: everything, including who viewed whose route ' || s::text);
   perform neo_hrt.expect_error($q$update public.hr_settings set grace_min = 0$q$, '%permission denied%');
   perform neo_hrt.expect_error($q$select count(*) from public.location_points$q$, '%permission denied%');
 end $$;
@@ -2505,7 +2548,7 @@ select neo_hrt.login('owner');
 do $$
 declare s int[] := neo_hrt.seen();
 begin
-  perform neo_hrt.assert(s[3] > 0 and s[10] >= 1, 'tier 5: everything ' || s::text);
+  perform neo_hrt.assert(s[3] = -1 and s[10] >= 1, 'tier 5: everything (punches through the RPCs) ' || s::text);
 end $$;
 
 

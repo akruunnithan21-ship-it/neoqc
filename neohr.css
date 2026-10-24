@@ -460,6 +460,104 @@ body.dark-mode .hr-map .leaflet-tile-pane { filter: brightness(0.82) contrast(1.
 /* ── Settings → People: Service / RMA / Builds / NeoHR roles in one row ──── */
 .hr-roles-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
 
+/* ══ v1.12.1 — checked punches, punch reasons, photos, trips, the office map ═ */
+
+/* the Requests badge past the end of the day; the Live waiting tile too */
+.hr-badge.hr-badge-late { background: var(--status-urgent); }
+.hr-lt-trip { --hr-t: #2563eb; }
+.hr-ltile.hr-lt-late { --hr-t: var(--status-urgent); }
+.hr-ltile.hr-lt-late .hr-ltile-l { color: var(--status-urgent); font-weight: 700; }
+body.dark-mode .hr-ltile.hr-lt-late .hr-ltile-l { color: #fca5a5; }
+
+/* place tags (placeTone: ok / away / bad / muted) */
+.hr-mark-ok { color: #047857; background: rgba(16, 185, 129, 0.13); }
+.hr-mark-away { color: #b45309; background: rgba(245, 158, 11, 0.14); }
+.hr-mark-bad { color: #b91c1c; background: rgba(239, 68, 68, 0.12); }
+.hr-mark-muted { color: var(--text-muted); background: rgba(127, 127, 160, 0.12); }
+body.dark-mode .hr-mark-ok { color: #6ee7b7; }
+body.dark-mode .hr-mark-away { color: #fcd34d; }
+body.dark-mode .hr-mark-bad { color: #fca5a5; }
+
+/* "Decide by 18:30" / "Past end of day" */
+.hr-due {
+  display: inline-block; font-size: 0.66rem; font-weight: 800; white-space: nowrap; padding: 2px 8px; border-radius: 999px;
+  color: #b45309; background: rgba(245, 158, 11, 0.14);
+}
+.hr-due.late { color: #fff; background: var(--status-urgent); }
+body.dark-mode .hr-due:not(.late) { color: #fcd34d; }
+.hr-day-n.hr-day-late { color: #fff; background: var(--status-urgent); }
+.hr-req-chips { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.hr-req-eod { border-left-color: var(--status-urgent); box-shadow: inset 0 0 0 1px rgba(239, 68, 68, 0.25); }
+.hr-req-punch { display: flex; align-items: flex-start; gap: 10px; }
+.hr-req-photo { flex-shrink: 0; }
+.hr-req-checks { display: flex; flex-wrap: wrap; gap: 4px 0; min-width: 0; }
+.hr-req-checks .hr-mark:first-child { margin-left: 0; }
+
+/* punch photos: thumbnails (a click opens the full photo in the viewer) */
+.hr-thumb-btn { padding: 0; border: 0; background: none; cursor: zoom-in; border-radius: 10px; line-height: 0; }
+.hr-thumb-btn:focus-visible { outline: 2px solid var(--primary-pink); outline-offset: 2px; }
+.hr-thumb {
+  width: 72px; height: 72px; object-fit: cover; border-radius: 10px; display: inline-block;
+  border: 1px solid var(--glass-border); background: rgba(127, 127, 160, 0.12);
+}
+.hr-thumb.sm { width: 48px; height: 48px; border-radius: 8px; opacity: 0.9; }
+.hr-thumb-none {
+  display: inline-flex; align-items: center; justify-content: center; text-align: center; line-height: 1.2;
+  font-size: 0.64rem; font-weight: 700; color: var(--text-muted); border-style: dashed;
+}
+
+/* Live → Today's punches */
+.hr-checks { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 10px; }
+.hr-check {
+  display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 12px; padding: 11px 13px; border-radius: 12px;
+  background: var(--glass-bg); border: 1px solid var(--glass-border); border-left: 4px solid var(--status-completed);
+}
+.hr-check-flag { border-left-color: var(--status-awaiting); }
+.hr-check-pics { display: flex; align-items: flex-end; align-self: start; gap: 8px; }
+.hr-check-pics figure { margin: 0; display: flex; flex-direction: column; align-items: center; gap: 3px; }
+.hr-check-pics figcaption { font-size: 0.62rem; color: var(--text-muted); white-space: nowrap; }
+.hr-check-main { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.hr-check-when { font-size: 0.8rem; font-weight: 700; color: var(--text-dark); }
+.hr-check-tags .hr-mark:first-child { margin-left: 0; }
+.hr-check-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; margin-top: auto; }
+
+/* the day panel: a punch's checks, its reason, the day's requests */
+.hr-ev-reason { flex: 1 1 100%; color: var(--text-dark); }
+.hr-dd-reqs li { display: flex; flex-direction: column; gap: 2px; }
+.hr-dd-req-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.hr-dd-req-head .hr-ev-acts { margin-left: auto; }
+
+/* Routes: the trips list (a click picks one) */
+.hr-trips { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.hr-trip {
+  width: 100%; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left; cursor: pointer;
+  padding: 7px 10px; border-radius: 9px; font: inherit; font-size: 0.8rem; color: var(--text-dark);
+  background: rgba(59, 130, 246, 0.07); border: 1px solid transparent; border-left: 3px solid #2563eb;
+}
+.hr-trip:hover { border-color: rgba(37, 99, 235, 0.35); }
+.hr-trip.on { background: rgba(59, 130, 246, 0.16); border-color: #2563eb; }
+.hr-trip:focus-visible { outline: 2px solid var(--primary-pink); outline-offset: 2px; }
+.hr-trip .hr-mark:first-child { margin-left: 0; }
+.hr-map .hr-path-trip { stroke: #2563eb; }
+
+/* Settings → Edit…: the office point on a map */
+.hr-pick-wrap { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
+.hr-pick {
+  height: 280px; border-radius: 12px; overflow: hidden; z-index: 0;
+  border: 1px solid var(--glass-border); background: rgba(127, 127, 160, 0.12);
+}
+.hr-pick.hr-map-off { display: flex; align-items: center; justify-content: center; padding: 12px; text-align: center; font-size: 0.82rem; color: var(--text-muted); }
+.hr-pick.leaflet-container { font-family: inherit; font-size: 0.75rem; }
+.hr-pin {
+  border-radius: 50%; background: var(--primary-pink); border: 3px solid #fff;
+  box-shadow: 0 1px 6px rgba(15, 23, 42, 0.45); cursor: grab;
+}
+.hr-pin:active { cursor: grabbing; }
+body.dark-mode .hr-pick .leaflet-tile-pane { filter: brightness(0.82) contrast(1.05); }
+body.dark-mode .hr-pick .leaflet-control-attribution { background: rgba(11, 15, 25, 0.8); color: #cbd5e1; }
+body.dark-mode .hr-pick .leaflet-control-attribution a { color: #93c5fd; }
+body.dark-mode .hr-pick .leaflet-bar a { background: #1e293b; color: #e2e8f0; border-bottom-color: #334155; }
+
 @media (max-width: 1100px) {
   .hr-route { grid-template-columns: 1fr; }
   .hr-route-side { max-height: none; }
@@ -470,6 +568,8 @@ body.dark-mode .hr-map .leaflet-tile-pane { filter: brightness(0.82) contrast(1.
   .hr-log { grid-template-columns: 1fr; gap: 4px; }
   .hr-roles-grid { grid-template-columns: 1fr 1fr; }
   .hr-reqs { grid-template-columns: 1fr; }
+  .hr-checks { grid-template-columns: 1fr; }
   .hr-dd-facts { grid-template-columns: 1fr 1fr; }
   .hr-dl { grid-template-columns: 1fr; }
+  .hr-pick { height: 220px; }
 }

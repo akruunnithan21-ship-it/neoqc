@@ -18,6 +18,11 @@
     refused (demo mode), and the Routes map asks tile.openstreetmap.org for
     tiles (the only network request the harness makes; offline it draws the
     route on a blank map).
+    1.12.1 (HR SQL v2.4) adds field staff, checked punches with drawn stand-in
+    photos, punch reasons and away punches, trips and trip km:
+        ?hrv=23          answer as a v2.3 server (no v2.4 keys, the v2.4
+                         request scopes refused): NeoHR must look like 1.12
+        ?office=unset    no office point yet (the banner; the map with no pin)
 
     The Queue (v1.11) reads a STUBBED work_queue feed built below from the
     demo service tickets plus a few harness builds (an offer to you, an open
@@ -51,7 +56,7 @@
       node -e "const c=require('crypto'),h=require('fs').readFileSync('dev/ops-harness.html','utf8').replace(/\r\n/g,'\n');for(const m of h.matchAll(/<(script)>([\s\S]*?)<\/\1>/g))console.log('sha256-'+c.createHash('sha256').update(m[2]).digest('base64'))"
     This folder is excluded from the packaged app (electron-builder.json).
   -->
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-KTH5/X/U+YoH8lDHCKjWulZF8V8I2B3jUHDdrMmbmWM=' 'sha256-c2tQrp6Kyg+TRsI8n2C1Km337z3sVkqzeIHzqiQM3R8=' 'sha256-ZYJyftR9Qit73jEYvj+NtWjk0Pcup3Gk4ZlBDCTSHvg='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: blob: https:; font-src 'self' https://fonts.gstatic.com data:; connect-src 'self' https: wss: data: blob:; worker-src 'self' blob:; child-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-KTH5/X/U+YoH8lDHCKjWulZF8V8I2B3jUHDdrMmbmWM=' 'sha256-DwlcMLk2ijb5gMbl7/zHq2uc1FwE7bLcKZODsRukH+I=' 'sha256-ZYJyftR9Qit73jEYvj+NtWjk0Pcup3Gk4ZlBDCTSHvg='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: blob: https:; font-src 'self' https://fonts.gstatic.com data:; connect-src 'self' https: wss: data: blob:; worker-src 'self' blob:; child-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'">
   <link rel="icon" href="data:,">
   <title>Ops harness — Overview, Service and RMA (demo data)</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -778,7 +783,19 @@ function switchScreen(mode) {
   // "signed in"), in the shapes sql/neohr-hr.sql answers with. Reads only —
   // every HR write goes to the data layer, which refuses it here (demo mode
   // is forced on), exactly as in the app.
+  //
+  // v1.12.1 (sql/neohr-hr-v2.4.sql): field staff, checked punches (place,
+  // verify, flags, reason, photo), the two punch request kinds, trips, trip
+  // km and the office point. The photos are drawn here on a canvas (a JPEG
+  // the size the phone sends). ?hrv=23 answers as a v2.3 server instead: no
+  // v2.4 keys, and the v2.4 request scopes are refused with its sentence —
+  // the screen must look like 1.12 and never break.
+  var HX_V23 = /[?&]hrv=23\b/.test(location.search);
+  var HX_OFFICE_UNSET = /[?&]office=unset\b/.test(location.search);   // read before the boot tidies the URL
   var HX_STAFF = HX_HR.concat([{ email: 'demo.field@harness.invalid', name: 'Demo Field' }]);
+  // Field staff: Demo Senior, Demo Tech, Demo Field and the owner; Demo Desk is not.
+  var HX_FIELD = { 'demo.desk@harness.invalid': false };
+  function hxIsField(email) { return HX_FIELD[low(email)] !== false; }
   function hxAt(day, hm) { return new Date(Date.parse(day + 'T' + hm + ':00+05:30')).toISOString(); }
   function hxAddDay(day, n) { return new Date(Date.parse(day + 'T00:00:00Z') + n * 86400000).toISOString().slice(0, 10); }
   function hxMe() { return low(currentProfile && currentProfile.email); }
@@ -788,37 +805,85 @@ function switchScreen(mode) {
     if (me.email && !list.some(function (p) { return p.email === low(me.email); })) list.push({ email: low(me.email), name: me.full_name || me.email, tier: me.tier });
     return list;
   }
+  function hxStrip(o, keys) { if (HX_V23 && o) keys.forEach(function (k) { delete o[k]; }); return o; }
+  // A stand-in photo: a coloured square with the person's initials, as a
+  // JPEG in base64 (what hr_selfie_get / hr_punch_checks send).
+  var hxFaceCache = {};
+  function hxFace(name, n, size) {
+    var key = name + '|' + n + '|' + size;
+    if (hxFaceCache[key]) return hxFaceCache[key];
+    var b64 = null;
+    try {
+      var c = document.createElement('canvas');
+      c.width = size; c.height = Math.round(size * 0.75) || size;
+      var g = c.getContext('2d');
+      var hue = (String(name).split('').reduce(function (a, ch) { return a + ch.charCodeAt(0); }, 0) * 37 + n * 23) % 360;
+      g.fillStyle = 'hsl(' + hue + ',45%,58%)'; g.fillRect(0, 0, c.width, c.height);
+      g.fillStyle = 'hsl(' + hue + ',40%,88%)';
+      g.beginPath(); g.arc(c.width / 2, c.height * 0.42, c.height * 0.24, 0, Math.PI * 2); g.fill();
+      g.beginPath(); g.ellipse(c.width / 2, c.height * 1.02, c.width * 0.34, c.height * 0.36, 0, 0, Math.PI * 2); g.fill();
+      g.fillStyle = 'hsl(' + hue + ',50%,25%)';
+      g.font = 'bold ' + Math.round(c.height * 0.2) + 'px sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+      g.fillText(String(name).split(' ').map(function (w) { return w.charAt(0); }).join('').slice(0, 2).toUpperCase(), c.width / 2, c.height * 0.43);
+      b64 = c.toDataURL('image/jpeg', 0.7).replace(/^data:image\/jpeg;base64,/, '');
+    } catch (e) { b64 = null; }
+    hxFaceCache[key] = b64;
+    return b64;
+  }
+  function hxEv(n) { return '6f1c5a3e-0000-4000-8000-0000000001' + (n < 10 ? '0' : '') + n; }
   function hxBoard() {
     var now = Date.now(), t = hxDay(now);
     var st = [
       { status: 'on_site', state: 'on_duty', since: hxAt(t, '11:05'), first_in: hxAt(t, '09:24'), worked_min: 190, clock_marks: 1,
-        on_site: { job_id: 'demo_s_vishnu', code: 'NT-0412', title: 'Laptop hinge at the customer', since: hxAt(t, '11:05') }, last_point_at: new Date(now - 3 * 60000).toISOString() },
-      { status: 'on_duty', state: 'on_duty', since: hxAt(t, '09:41'), first_in: hxAt(t, '09:41'), worked_min: 170, stale: true, clock_marks: 2, last_point_at: new Date(now - 26 * 60000).toISOString() },
-      { status: 'not_in_yet', state: 'off_duty', since: null },
-      { status: 'on_break', state: 'on_break', since: hxAt(t, '13:10'), first_in: hxAt(t, '09:30'), worked_min: 200, pending_requests: 1, last_point_at: new Date(now - 40 * 60000).toISOString() }
+        on_site: { job_id: 'demo_s_vishnu', code: 'NT-0412', title: 'Laptop hinge at the customer', since: hxAt(t, '11:05') }, last_point_at: new Date(now - 3 * 60000).toISOString(),
+        trip: { id: '7a1b0c2d-0000-4000-8000-000000000001', kind: 'on_site', ref_code: 'NT-0412', started_at: hxAt(t, '10:40') },
+        punch_check: { place: 'office', office_m: 40, verify: 'ok', flags: [], selfie: true } },
+      { status: 'on_duty', state: 'on_duty', since: hxAt(t, '09:41'), first_in: hxAt(t, '09:41'), worked_min: 170, stale: true, clock_marks: 2, last_point_at: new Date(now - 26 * 60000).toISOString(),
+        punch_check: { place: 'office', office_m: 60, verify: 'ok', flags: [], selfie: true } },
+      { status: 'not_in_yet', state: 'off_duty', since: null, stale: true },
+      { status: 'on_break', state: 'on_break', since: hxAt(t, '13:10'), first_in: hxAt(t, '09:30'), worked_min: 200, pending_requests: 1, last_point_at: new Date(now - 40 * 60000).toISOString(),
+        punch_check: { place: 'unknown', office_m: 400, verify: 'weak_fix', flags: ['sent_late'], selfie: false } }
     ];
     var people = hxStaffAll().map(function (p, i) {
-      var s = st[i] || { status: 'off_duty', state: 'off_duty', since: hxAt(t, '17:00'), first_in: hxAt(t, '09:28'), worked_min: 400 };
-      return Object.assign({ email: p.email, name: p.name, designation: i === 3 ? 'Field Engineer' : 'Technician', duty: i === 3 ? 'field' : 'shop', holiday: null,
+      var s = st[i] || { status: 'off_duty', state: 'off_duty', since: hxAt(t, '17:00'), first_in: hxAt(t, '09:28'), worked_min: 400,
+        punch_check: { place: 'away', office_m: 1240, verify: 'ok', flags: ['new_login'], selfie: true } };
+      var row = Object.assign({ email: p.email, name: p.name, designation: i === 3 ? 'Field Engineer' : i === 2 ? 'Help Desk' : 'Technician', duty: i === 3 ? 'field' : 'shop', holiday: null,
         shift: { start: '09:30', end: '18:30' }, pending_requests: 0, stale: false, self: p.email === hxMe(), worked_min: 0, break_min: 0, missed_out: false,
-        flex: i === 3, late_min: 0, km: 0, last_point_at: null, tracking: true, attendance_required: true, clock_marks: 0 }, s);
+        flex: i === 3, late_min: 0, km: 0, last_point_at: null, tracking: hxIsField(p.email), attendance_required: true, clock_marks: 0,
+        field_staff: hxIsField(p.email), trip: null, punch_check: null }, s);
+      if (!hxIsField(p.email)) { row.last_point_at = null; row.km = 0; }
+      return hxStrip(row, ['field_staff', 'trip', 'punch_check']);
     });
     return { now: new Date(now).toISOString(), people: people, counts: {} };
   }
-  function hxRec(i, d, today) {
+  function hxRec(i, d, today, field) {
     var base = { day: d, holiday: null, shift: { start: '09:30', end: '18:30' }, flex: false, first_in: null, last_out: null, worked_min: 0, break_min: 0,
       late_min: 0, early_min: 0, missed_out: false, irregular: false, worked_on_duty: null, half_day_leave: false, open: false, km: 0, km_gaps: 0,
-      leave_units: 0, absent_units: 0, duty_source: 'default', roster_note: null, clock_marks: 0 };
+      leave_units: 0, absent_units: 0, duty_source: 'default', roster_note: null, clock_marks: 0,
+      late_excused: false, late_raw_min: 0, pending_reason: null, away_pending: false, pending_min: 0, trip_km: 0 };
+    hxStrip(base, ['late_excused', 'late_raw_min', 'pending_reason', 'away_pending', 'pending_min', 'trip_km']);
     if (new Date(Date.parse(d + 'T00:00:00Z')).getUTCDay() === 0) return Object.assign(base, { duty: 'off', status: 'off', duty_source: 'weekly_off' });
     var k = (i * 3 + Number(d.slice(8))) % 9;
-    if (d === today) return Object.assign(base, { duty: 'shop', status: i === 2 ? 'not_in_yet' : 'open', open: i !== 2, first_in: i === 2 ? null : hxAt(d, '09:3' + i), worked_min: i === 2 ? 0 : 180, break_min: 20, km: 4.2 * i });
+    var km = function (x) { return field ? x : 0; };
+    if (d === today) {
+      var tr = Object.assign(base, { duty: 'shop', status: i === 2 ? 'not_in_yet' : 'open', open: i !== 2, first_in: i === 2 ? null : hxAt(d, '09:3' + i), worked_min: i === 2 ? 0 : 180, break_min: 20, km: km(4.2 * i) });
+      if (!HX_V23 && field && i !== 2) tr.trip_km = Math.round(2.1 * i * 100) / 100;
+      if (!HX_V23 && i === 1) tr.pending_reason = '0b7e2c1a-0000-4000-8000-000000000007';
+      return tr;
+    }
     if (k === 0) return Object.assign(base, { duty: 'shop', status: 'absent', absent_units: 1 });
     if (k === 1) return Object.assign(base, { duty: 'leave', status: 'leave', leave_units: 1, duty_source: 'roster' });
     var late = k === 2 ? 22 : 0;
+    var dkm = Math.round((12.5 + i * 7.3 + k) * 100) / 100;
     var rec = Object.assign(base, { duty: k === 3 ? 'field' : 'shop', status: late ? 'late' : (k === 4 ? 'half_day' : 'present'),
       first_in: hxAt(d, late ? '10:02' : '09:2' + i), last_out: hxAt(d, k === 4 ? '13:10' : '18:4' + i), worked_min: k === 4 ? 210 : 520 - late, break_min: 35,
-      late_min: late, flex: k === 3, km: Math.round((12.5 + i * 7.3 + k) * 100) / 100, clock_marks: k === 5 ? 1 : 0 });
+      late_min: late, flex: k === 3, km: km(dkm), clock_marks: k === 5 ? 1 : 0 });
     if (k === 6) { rec.missed_out = true; rec.last_out = null; }
+    if (!HX_V23) {
+      if (field) rec.trip_km = Math.round(dkm * 0.55 * 100) / 100;
+      if (k === 7) { rec.late_excused = true; rec.late_raw_min = 18; }
+      if (k === 8 && !field) { rec.away_pending = true; rec.pending_min = 120; rec.worked_min -= 120; }
+    }
     return rec;
   }
   function hxRegister(from, to, email) {
@@ -827,27 +892,45 @@ function switchScreen(mode) {
     hxStaffAll().forEach(function (p, i) {
       if (email && email !== p.email) return;
       var days = [];
-      for (var d = from; d <= to && d <= t; d = hxAddDay(d, 1)) days.push(hxRec(i, d, t));
-      people.push({ email: p.email, name: p.name, designation: 'Technician', self: p.email === hxMe(), days: days });
+      for (var d = from; d <= to && d <= t; d = hxAddDay(d, 1)) days.push(hxRec(i, d, t, hxIsField(p.email)));
+      people.push(hxStrip({ email: p.email, name: p.name, designation: 'Technician', self: p.email === hxMe(), field_staff: hxIsField(p.email), days: days }, ['field_staff']));
     });
     return { now: new Date().toISOString(), from: from, to: to, people: people };
   }
   function hxMyDay(day, email) {
     var e = low(email || hxMe());
     var own = e === hxMe();
+    var field = hxIsField(e);
     var at = function (hm) { return hxAt(day, hm); };
     var mark = function (s) { return own ? null : s; };
-    return { now: new Date().toISOString(), email: e, day: day, duty: 'shop', status: 'late', first_in: at('09:52'), last_out: at('18:40'), worked_min: 478, break_min: 40,
-      late_min: 12, early_min: 0, flex: false, missed_out: false, irregular: false, holiday: null, shift: { start: '09:30', end: '18:30' }, km: 18.4, km_gaps: 1,
+    var chk = function (o) { return hxStrip(Object.assign({ place: null, office_m: null, verify: null, flags: [], reason_kind: null, reason_text: null, reason_ref: null,
+      selfie: false, selfie_skip: null, request_id: null }, o), ['place', 'office_m', 'verify', 'flags', 'reason_kind', 'reason_text', 'reason_ref', 'selfie', 'selfie_skip', 'request_id']); };
+    var rid = '0b7e2c1a-0000-4000-8000-000000000007';
+    var out = { now: new Date().toISOString(), email: e, day: day, duty: 'shop', status: 'late', first_in: at('09:52'), last_out: at('18:40'), worked_min: 478, break_min: 40,
+      late_min: 12, early_min: 0, flex: false, missed_out: false, irregular: false, holiday: null, shift: { start: '09:30', end: '18:30' }, km: field ? 18.4 : 0, km_gaps: field ? 1 : 0,
+      field_staff: field, pending_reason: rid, late_excused: false, away_pending: false, pending_min: 0, trip_km: field ? 9.52 : 0,
       events: [
-        { id: '6f1c5a3e-0000-4000-8000-000000000001', kind: 'punch_in', at: at('09:52'), device_at: at('09:44'), time_source: 'server', source: 'phone', note: null, clock_mark: mark('⏱ phone clock off by 8 min') },
-        { id: '6f1c5a3e-0000-4000-8000-000000000002', kind: 'break_start', at: at('13:05'), device_at: at('13:05'), time_source: 'device', source: 'phone', note: null, clock_mark: mark('⏱ time not verified') },
-        { id: '6f1c5a3e-0000-4000-8000-000000000003', kind: 'break_end', at: at('13:45'), device_at: at('13:45'), time_source: 'server', source: 'phone', note: null, clock_mark: null },
-        { id: '6f1c5a3e-0000-4000-8000-000000000004', kind: 'punch_out', at: at('17:10'), device_at: null, time_source: 'server', source: 'phone', note: null, voided_at: at('19:00'), void_reason: 'Punched out by mistake', clock_mark: null },
-        { id: '6f1c5a3e-0000-4000-8000-000000000005', kind: 'punch_out', at: at('18:40'), device_at: null, time_source: 'hr', source: 'hr', note: 'Left at 18:40 — told the manager', clock_mark: null }
+        chk({ id: hxEv(1), kind: 'punch_in', at: at('09:52'), device_at: at('09:44'), time_source: 'server', source: 'phone', note: null, clock_mark: mark('⏱ phone clock off by 8 min'),
+              place: 'office', office_m: 60, verify: 'ok', flags: ['sent_late'], reason_kind: 'late', reason_text: 'Bus broke down at Vyttila', selfie: true, request_id: rid }),
+        chk({ id: hxEv(2), kind: 'break_start', at: at('13:05'), device_at: at('13:05'), time_source: 'device', source: 'phone', note: null, clock_mark: mark('⏱ time not verified') }),
+        chk({ id: hxEv(3), kind: 'break_end', at: at('13:45'), device_at: at('13:45'), time_source: 'server', source: 'phone', note: null, clock_mark: null }),
+        chk({ id: hxEv(4), kind: 'punch_out', at: at('17:10'), device_at: null, time_source: 'server', source: 'phone', note: null, voided_at: at('19:00'), void_reason: 'Punched out by mistake', clock_mark: null,
+              place: 'office', office_m: 35, verify: 'ok', selfie: true }),
+        chk({ id: hxEv(5), kind: 'punch_out', at: at('18:40'), device_at: null, time_source: 'hr', source: 'hr', note: 'Left at 18:40 — told the manager', clock_mark: null, verify: 'hr' })
       ],
       visits: [{ job_id: 'demo_s_vishnu', code: 'NT-0412', title: 'Laptop hinge', arrived: at('11:05'), departed: at('12:20'), minutes: 75, travel_min: 28, outcome: 'done', assumed_arrival: false, open: false }],
-      requests: [] };
+      requests: HX_V23 ? [] : [{ id: rid, email: e, name: null, kind: 'punch_reason', date_from: day, date_to: day, reason: 'Bus broke down at Vyttila', reason_kind: 'late',
+        status: 'pending', created_at: at('09:53'), event_id: hxEv(1), punch_at: at('09:52'), punch_kind: 'punch_in', due_at: at('18:30'), past_eod: Date.now() > Date.parse(at('18:30')),
+        place: 'office', office_m: 60, verify: 'ok', flags: ['sent_late'], selfie: true, can_decide: !own, can_cancel: own }],
+      trips: field ? [hxTrip(1, day), hxTrip(2, day)] : [] };
+    return hxStrip(out, ['field_staff', 'pending_reason', 'late_excused', 'away_pending', 'pending_min', 'trip_km', 'trips']);
+  }
+  function hxTrip(n, day) {
+    var at = function (hm) { return hxAt(day, hm); };
+    if (n === 1) return { id: '7a1b0c2d-0000-4000-8000-000000000001', kind: 'on_site', ref_code: 'NT-0412', ref_title: 'Laptop hinge', note: null,
+      started_at: at('10:00'), ended_at: at('12:20'), end_reason: 'tapped', km: 9.52, moving_min: 62, stops: 1, open: false, flags: [] };
+    return { id: '7a1b0c2d-0000-4000-8000-000000000002', kind: 'rma', ref_code: null, ref_title: null, note: 'Distributor run',
+      started_at: at('15:00'), ended_at: at('16:30'), end_reason: 'punch_out', km: 4.05, moving_min: 41, stops: 0, open: false, flags: ['no_ticket'] };
   }
   var HX_ROUTE_BASE = [10.0159, 76.3419];
   function hxRoute(email, day) {
@@ -857,35 +940,65 @@ function switchScreen(mode) {
       pts.push({ at: new Date(at0 + i * 6 * 60000).toISOString(), lat: HX_ROUTE_BASE[0] + Math.sin(a) * 0.03, lng: HX_ROUTE_BASE[1] + (1 - Math.cos(a)) * 0.025 });
     }
     var P = function (i) { return pts[i]; };
-    return { now: new Date().toISOString(), email: low(email), day: day, points: pts,
-      stops: [{ lat: P(0).lat, lng: P(0).lng, arrived: P(0).at, left: P(5).at, minutes: 30, place_hint: 'Shop' },
-              { lat: P(30).lat, lng: P(30).lng, arrived: P(28).at, left: P(36).at, minutes: 48, place_hint: 'Kakkanad' }],
-      segments: [{ from: P(5).at, to: P(28).at, km: 6.42, minutes: 138, mode: 'moving' }, { from: P(36).at, to: P(44).at, km: 3.1, minutes: 48, mode: 'gap' },
-                 { from: P(44).at, to: P(59).at, km: 4.05, minutes: 90, mode: 'moving' }],
-      km: 13.57, km_gaps: 1, moving_min: 276,
-      visits: [{ job_id: 'demo_s_vishnu', code: 'NT-0412', title: 'Laptop hinge', arrived: P(28).at, departed: P(36).at, minutes: 48, travel_min: 35, outcome: 'done', assumed_arrival: false, open: false }] };
+    var field = hxIsField(email);
+    if (!field) pts = [];
+    return hxStrip({ now: new Date().toISOString(), email: low(email), day: day, points: pts,
+      stops: field ? [{ lat: P(0).lat, lng: P(0).lng, arrived: P(0).at, left: P(5).at, minutes: 30, place_hint: 'Shop' },
+              { lat: P(30).lat, lng: P(30).lng, arrived: P(28).at, left: P(36).at, minutes: 48, place_hint: 'Kakkanad' }] : [],
+      segments: field ? [{ from: P(5).at, to: P(28).at, km: 6.42, minutes: 138, mode: 'moving' }, { from: P(36).at, to: P(44).at, km: 3.1, minutes: 48, mode: 'gap' },
+                 { from: P(44).at, to: P(59).at, km: 4.05, minutes: 90, mode: 'moving' }] : [],
+      km: field ? 13.57 : 0, km_gaps: field ? 1 : 0, moving_min: field ? 276 : 0,
+      visits: field ? [{ job_id: 'demo_s_vishnu', code: 'NT-0412', title: 'Laptop hinge', arrived: P(28).at, departed: P(36).at, minutes: 48, travel_min: 35, outcome: 'done', assumed_arrival: false, open: false }] : [],
+      trips: field ? [
+        Object.assign(hxTrip(1, day), { started_at: P(5).at, ended_at: P(36).at }),
+        Object.assign(hxTrip(2, day), { started_at: P(44).at, ended_at: P(59).at })
+      ] : [] }, ['trips']);
   }
-  function hxRequests(scope) {
+  function hxRequests(scope, from, to) {
+    var v4 = /_v4$/.test(String(scope || ''));
+    if (v4 && HX_V23) return Promise.reject(new Error('NEO_GATE: The scope is mine, pending or all.'));
+    var base = String(scope || 'pending').replace(/_v4$/, '');
     var t = hxDay(Date.now()), s = hxStaffAll(), now = Date.now(), me = hxMe();
     var mk = function (n, p, o) {
       var r = Object.assign({ id: '0b7e2c1a-0000-4000-8000-00000000000' + n, email: p.email, name: p.name, status: 'pending', created_at: new Date(now - n * 3600000).toISOString(),
         half_day: false, leave_type: null, ref_code: null, missed_at: null, missed_kind: null, decided_by_name: null, decided_at: null, decision_note: null,
         cancelled_by_name: null, cancelled_at: null, cancel_note: null }, o);
       r.can_decide = r.status === 'pending' && r.email !== me;
-      r.can_cancel = r.email !== me && (r.status === 'pending' || (r.status === 'approved' && r.kind !== 'missed_punch'));
+      r.can_cancel = r.kind !== 'away_punch' && r.email !== me && (r.status === 'pending' || (r.status === 'approved' && r.kind !== 'missed_punch'));
       return r;
+    };
+    var punch = function (n, p, day, o) {
+      var due = hxAt(day, '18:30');
+      return mk(n, p, Object.assign({ kind: 'punch_reason', date_from: day, date_to: day, punch_kind: 'punch_in', due_at: due, past_eod: now > Date.parse(due),
+        place: 'office', office_m: 50, verify: 'ok', flags: [], selfie: true, reason_kind: 'late' }, o));
     };
     var pend = [
       mk(1, s[1], { kind: 'leave', leave_type: 'casual', date_from: hxAddDay(t, 3), date_to: hxAddDay(t, 4), reason: 'Sister’s wedding <b>not bold</b>' }),
       mk(2, s[3], { kind: 'missed_punch', missed_kind: 'punch_out', missed_at: hxAt(hxAddDay(t, -1), '18:52'), date_from: hxAddDay(t, -1), date_to: hxAddDay(t, -1), reason: 'Phone died at the site.' }),
       mk(3, s[s.length - 1], { kind: 'late_start', date_from: hxAddDay(t, 1), date_to: hxAddDay(t, 1), reason: 'Bank visit in the morning.' })
     ];
-    if (scope === 'pending') return pend;
-    return pend.concat([
+    if (v4) {
+      pend = pend.concat([
+        punch(7, s[1], t, { reason: 'Bus broke down at Vyttila', event_id: hxEv(11), punch_at: hxAt(t, '09:52'), flags: ['sent_late'],
+          selfie: { thumb_b64: hxFace(s[1].name, 1, 96), late: false } }),
+        punch(8, s[2], t, { kind: 'away_punch', reason_kind: 'other', reason: 'Picked up the courier at the post office', event_id: hxEv(12), punch_at: hxAt(t, '09:35'),
+          place: 'away', office_m: 2300, flags: ['new_login'], selfie: { thumb_b64: hxFace(s[2].name, 2, 96), late: false } }),
+        punch(9, s[3], hxAddDay(t, -1), { kind: 'punch_reason', reason: 'No reason sent (NeoHR 2.2)', reason_kind: null, event_id: hxEv(13), punch_at: hxAt(hxAddDay(t, -1), '10:14'),
+          place: 'unknown', office_m: 400, verify: 'weak_fix', selfie: false, past_eod: true })
+      ]);
+    }
+    if (base === 'pending') return Promise.resolve(pend);
+    var rest = pend.concat([
       mk(4, s[0], { kind: 'field_day', status: 'approved', date_from: hxAddDay(t, 2), date_to: hxAddDay(t, 2), reason: 'RMA run to the distributor.', ref_code: 'RM-0031', decided_by_name: 'Harness Owner', decided_at: new Date(now - 50 * 3600000).toISOString() }),
       mk(5, s[1], { kind: 'early_leave', status: 'rejected', date_from: hxAddDay(t, -3), date_to: hxAddDay(t, -3), reason: 'Personal work.', decided_by_name: 'Harness Owner', decided_at: new Date(now - 70 * 3600000).toISOString(), decision_note: 'Two builds due that evening.' }),
       mk(6, s[2], { kind: 'leave', leave_type: 'sick', status: 'cancelled', date_from: hxAddDay(t, -5), date_to: hxAddDay(t, -5), reason: 'Fever.', cancelled_by_name: 'Demo Desk', cancelled_at: new Date(now - 110 * 3600000).toISOString() })
     ]);
+    if (v4) {
+      rest.push(punch(0, s[0], t, { id: '0b7e2c1a-0000-4000-8000-000000000010', status: 'approved', reason: 'Traffic block at Edappally', event_id: hxEv(14), punch_at: hxAt(t, '09:47'),
+        selfie: { thumb_b64: hxFace(s[0].name, 3, 96), late: false }, decided_by_name: 'Harness Owner', decided_at: new Date(now - 2 * 3600000).toISOString() }));
+    }
+    if (from && to) rest = rest.filter(function (r) { return String(r.date_to) >= from && String(r.date_from) <= to; });
+    return Promise.resolve(rest);
   }
   function hxRoster(from, to) {
     var s = hxStaffAll(), hol = hxAddDay(from, 4);
@@ -910,14 +1023,19 @@ function switchScreen(mode) {
   function hxTa(month) {
     var s = hxStaffAll(), rate = 3.5, t = hxDay(Date.now());
     var closed = month < t.slice(0, 8) + '01';
-    return { now: new Date().toISOString(), month: month, closed: closed, rate: rate, people: s.map(function (p, i) {
-      var km = Math.round((180 + i * 97.35) * 100) / 100, elig = i !== 2;
+    var people = s.filter(function (p) { return HX_V23 || hxIsField(p.email); }).map(function (p, i) {
+      var dayKm = Math.round((180 + i * 97.35) * 100) / 100, elig = HX_V23 ? i !== 2 : true;
+      var km = HX_V23 ? dayKm : Math.round(dayKm * 0.55 * 100) / 100;
       var r = { email: p.email, name: p.name, self: p.email === hxMe(), eligible: elig, km: km, rate: elig ? rate : 0, amount: Math.round(km * (elig ? rate : 0) * 100) / 100,
-        live_km: km, changed: false, approved: null, days: [{ day: month, km: 12.4 }, { day: month.slice(0, 8) + '02', km: 18.05 }] };
+        live_km: km, changed: false, approved: null,
+        days: [{ day: month, km: HX_V23 ? 12.4 : 6.8, day_km: 12.4 }, { day: month.slice(0, 8) + '02', km: HX_V23 ? 18.05 : 9.93, day_km: 18.05 }] };
+      if (!HX_V23) { r.day_km = dayKm; r.field_staff = true; }
+      else r.days.forEach(function (d) { delete d.day_km; });
       if (i === 0) { r.approved = { by: 'Harness Owner', at: new Date(Date.now() - 5 * 86400000).toISOString(), note: null }; r.live_km = km + 2.5; r.changed = true; }
       r.can_approve = !r.self && closed && elig && !r.approved;
       return r;
-    }) };
+    });
+    return { now: new Date().toISOString(), month: month, closed: closed, rate: rate, people: people };
   }
   function hxSettings() {
     var me = currentProfile || {};
@@ -929,29 +1047,70 @@ function switchScreen(mode) {
       { effective_from: next, shift_start: '10:00', shift_end: '19:00', grace_min: 15, weekly_off: [0], half_day_min: 240, set_by_email: 'owner@harness.invalid' },
       { effective_from: '2020-01-01', shift_start: '09:30', shift_end: '18:30', grace_min: 10, weekly_off: [0], half_day_min: 240, set_by_email: null }
     ];
+    // ?office=unset: no office point yet (the banner, the map with no pin).
+    var unset = HX_OFFICE_UNSET;
     var out = { shift_start: '10:00', shift_end: '19:00', grace_min: 15, weekly_off: [0], half_day_min: 240, track_interval_s: 120,
-      track_distance_m: 100, retention_days: 90, ta_rate_per_km: 3.5, office_lat: 10.0159, office_lng: 76.3419, office_radius_m: 150, max_session_h: 16, history: history,
-      me: { shift: { start: '09:30', end: '18:30', grace_min: 10, weekly_off: [0], half_day_min: 240 }, attendance_required: true, ta_eligible: true, tracking: { enabled: false, reason: 'off_duty' } } };
+      track_distance_m: 100, retention_days: 90, ta_rate_per_km: 3.5, office_lat: unset ? null : 10.0159, office_lng: unset ? null : 76.3419, office_radius_m: 150, max_session_h: 16, history: history,
+      me: { shift: { start: '09:30', end: '18:30', grace_min: 10, weekly_off: [0], half_day_min: 240 }, attendance_required: true, ta_eligible: true, tracking: { enabled: false, reason: 'off_duty' },
+            field_staff: hxIsField(me.email), dash_view: (Number(me.tier) || 0) >= 3 ? 'head' : 'basic' } };
+    if (HX_V23) { delete out.me.field_staff; delete out.me.dash_view; }
     if ((Number(me.tier) || 0) >= 4) {
+      if (!HX_V23) out.selfie_store_bytes = 13002342;
       out.people = hxStaffAll().map(function (p, i) {
         var self = p.email === hxMe();
+        var field = HX_V23 ? true : hxIsField(p.email);
         return { email: p.email, name: p.name, tier: p.tier, designation: 'Technician', self: self,
           can_edit: (self && me.tier >= 5) || (!self && (me.tier >= 5 || p.tier <= 3)),
-          ta_eligible: i !== 2, track_location: true, attendance_required: true,
+          ta_eligible: field && i !== 2, track_location: field, attendance_required: true,
           shift: i === 3 ? { effective_from: '2026-01-01', shift_start: '08:30', shift_end: '17:30', grace_min: null, weekly_off: [0, 6], half_day_min: null } : null,
           upcoming: [] };
       });
     }
     return out;
   }
+  // Live → Today's punches (hr_punch_checks): every punch in / out of the
+  // day with its checks and a small photo next to the previous one.
+  function hxChecks(day) {
+    var s = hxStaffAll(), t = hxDay(Date.now());
+    var at = function (hm) { return hxAt(day, hm); };
+    var mkc = function (n, p, o) {
+      return Object.assign({ id: hxEv(20 + n), email: p.email, name: p.name, kind: 'punch_in', at: at('09:30'), received_at: at('09:30'),
+        place: 'office', office_m: 40, verify: 'ok', flags: [], reason_kind: null, reason_text: null, reason_ref: null, selfie_skip: null, request: null,
+        selfie: { thumb_b64: hxFace(p.name, n, 96), late: false, seen_by_me: n % 3 === 0, seen_by_any: n % 2 === 0 },
+        prev_selfie: { event_id: hxEv(40 + n), thumb_b64: hxFace(p.name, n + 7, 96), event_at: hxAt(hxAddDay(day, -1), '09:2' + (n % 10)) }, unverified: false },
+        o, { received_at: o.received_at || o.at || at('09:30') });
+    };
+    var rows = [
+      mkc(1, s[2], { at: at('09:35'), place: 'away', office_m: 2300, flags: ['new_login'], reason_kind: 'other', reason_text: 'Picked up the courier at the post office',
+        request: { id: '0b7e2c1a-0000-4000-8000-000000000008', kind: 'away_punch', status: 'pending' }, unverified: true,
+        prev_selfie: { event_id: hxEv(39), thumb_b64: hxFace('Someone Else', 4, 96), event_at: hxAt(hxAddDay(day, -1), '09:31') } }),
+      mkc(2, s[3], { at: at('09:30'), received_at: at('09:44'), place: 'unknown', office_m: 400, verify: 'weak_fix', flags: ['sent_late'], selfie: null, unverified: true }),
+      mkc(3, s[1], { at: at('09:52'), flags: ['sent_late'], reason_kind: 'late', reason_text: 'Bus broke down at Vyttila',
+        request: { id: '0b7e2c1a-0000-4000-8000-000000000007', kind: 'punch_reason', status: 'pending' }, unverified: true }),
+      mkc(4, s[0], { at: at('09:24'), prev_selfie: null }),
+      mkc(5, s[0], { kind: 'punch_out', at: at('18:41'), received_at: at('18:41'), place: 'office', office_m: 25 })
+    ];
+    if (day > t) rows = [];
+    return { now: new Date().toISOString(), day: day, punches: rows };
+  }
   D.hrBoard = function () { return Promise.resolve(hxBoard()); };
   D.hrRegister = function (f, t, e) { return Promise.resolve(hxRegister(f, t, e ? low(e) : null)); };
   D.hrMyDay = function (d, e) { return Promise.resolve(hxMyDay(d, e)); };
   D.hrRoute = function (e, d) { return Promise.resolve(hxRoute(e, d)); };
-  D.hrRequestsList = function (scope) { return Promise.resolve(hxRequests(scope)); };
+  D.hrRequestsList = function (scope, f, t) { return hxRequests(scope, f, t); };
   D.hrRosterGet = function (f, t) { return Promise.resolve(hxRoster(f, t)); };
   D.hrSettingsGet = function () { return Promise.resolve(hxSettings()); };
   D.hrTaReport = function (m) { return Promise.resolve(hxTa(m)); };
+  // v1.12.1 (sql v2.4): reads only; hrPunchRequestDecide is a write, which
+  // the data layer refuses in demo mode as every other HR write.
+  D.hrPunchChecks = function (d) {
+    if (HX_V23) { var e = new Error('Could not find the function public.hr_punch_checks(p_day) in the schema cache'); e.code = 'PGRST202'; return Promise.reject(e); }
+    return Promise.resolve(hxChecks(d));
+  };
+  D.hrSelfieGet = function (id) {
+    var n = Number(String(id).slice(-2)) || 1;
+    return Promise.resolve({ ok: true, event_id: id, jpeg_b64: hxFace('Harness ' + n, n, 480), taken_at: new Date(Date.now() - n * 3600000).toISOString(), w: 480, h: 360, late: n === 2 });
+  };
 })();
   </script>
   <script src="../photo-tray.js"></script>

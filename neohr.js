@@ -54,6 +54,33 @@
   Loaded after queue.js and before shell.js, after shared/hr-format.js and
   vendor/leaflet/leaflet.js. Uses app.js globals only through typeof /
   appGlobal guards.
+
+  1.12.1 (sql/neohr-hr-v2.4.sql, NeoHR 2.3; NEOHR-2.3 spec §7):
+    - Field staff (hr_person.track_location, "Field staff" in Settings →
+      People) are the only people with a route, km, trips and travel
+      allowance. Everyone else's Location, Route, km and TA are hidden.
+      Who is field comes from the server (a day record's field_staff, the
+      board's field_staff, Settings → People); when nothing says (a v2.3
+      server) the screen shows what 1.12 showed.
+    - Every punch in / out is checked by the server: the place (at the shop,
+      how far away, no location), how sure it is, its flags, the punch-in
+      reason, and a photo. Requests gets the two punch kinds — Punch-in
+      reason and Away from shop — through the pending_v4 / all_v4 lists,
+      decided with hr_punch_request_decide (rejecting an away punch asks for
+      the right time). Cards show the punch, the place, the reason, the
+      photo and "Decide by 18:30" / "Past end of day"; the list refreshes
+      every minute while it is open, and the badge turns red past the end
+      of the day. Live → Today's punches shows every punch with its photo
+      next to the person's previous one (hr_punch_checks). A full photo is
+      fetched on a click (hr_selfie_get: the server logs the look), shown
+      in the photo viewer from memory, and never stored.
+    - Trips (on-site / RMA, field staff): a Trip column on Live, a Trips list
+      in the day panel and on Routes (click one to see its part of the
+      route), and travel allowance on trip km.
+    - Settings: the office point on a map (click or drag the pin; the circle
+      is the radius), and a banner while it is not set.
+  Every new key is read leniently: a v2.3 server (or an older answer) just
+  leaves the new bits out, it never breaks a tab.
 */
 (function () {
   'use strict';
@@ -79,10 +106,15 @@
     { id: 'app', label: 'NeoHR app' },
     { id: 'settings', label: 'Settings', tier: 4 }
   ];
-  var LIVE_VIEWS = [['board', 'Attendance'], ['load', 'Work load']];
+  var LIVE_VIEWS = [['board', 'Attendance'], ['punches', 'Today’s punches'], ['load', 'Work load']];
   var LOG_VIEWS = [['logs', 'Work logs'], ['activity', 'Field activity']];
   var REG_VIEWS = [['day', 'Day'], ['month', 'Month']];
-  var REQ_SCOPES = [['pending', 'Waiting'], ['all', 'All requests']];
+  var REQ_SCOPES = [['pending', 'Waiting'], ['today', 'Punch reasons today'], ['all', 'All requests']];
+  // A v2.3 server answers the v2.4 list scopes with this sentence: it has no
+  // punch kinds at all, so the old scopes are the whole list.
+  var OLD_SCOPES = /scope is mine, pending or all/i;
+  // An RPC this server does not have yet (PostgREST PGRST202).
+  var NO_RPC = /PGRST202|could not find the function|schema cache/i;
   var PRESETS = [['today', 'Today'], ['yesterday', 'Yesterday'], ['7d', '7 days'], ['30d', '30 days']];
   var WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
   var MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -127,6 +159,8 @@
     if (ui && typeof ui.errText === 'function') { try { return ui.errText(e); } catch (x) { /* plain below */ } }
     return (e && e.message) ? String(e.message).replace(/^NEO_[A-Z_]+:\s*/, '') : String(e);
   }
+  // The server does not have this RPC yet (an older HR database).
+  function noRpc(e) { return !!e && (String(e.code || '') === 'PGRST202' || NO_RPC.test(String((e && e.message) || e || ''))); }
   function banner(text, kind) {
     var ui = UI();
     if (ui && typeof ui.banner === 'function') return ui.banner(text, kind);
@@ -229,7 +263,7 @@
 
   // ── state ─────────────────────────────────────────────────────────────────
   var SLOT_NAMES = ['team', 'dash', 'todayLogs', 'todayAct', 'logs', 'act', 'app',
-                    'board', 'reg', 'reqPending', 'reqAll', 'roster', 'route', 'ta', 'settings'];
+                    'board', 'reg', 'reqPending', 'reqAll', 'reqToday', 'checks', 'roster', 'route', 'ta', 'settings'];
   function freshSlots() {
     var s = {};
     SLOT_NAMES.forEach(function (k) { s[k] = { val: null, err: null, loading: false, seq: 0, key: null, at: 0 }; });
@@ -243,8 +277,9 @@
       regView: 'day', regDay: t, regMonth: monthStart(t), regPerson: '',
       reqScope: 'pending',
       rosterWeek: weekStart(t),
-      routePerson: '', routeDay: t,
-      taMonth: addMonths(t, -1), taOpen: {}
+      routePerson: '', routeDay: t, routeTrip: '',
+      taMonth: addMonths(t, -1), taOpen: {},
+      checksDay: t
     };
   }
   var st = {
@@ -259,7 +294,8 @@
     slots: freshSlots(),
     map: null, mapLayer: null, mapKey: null,
     timer: null, debounce: null, dateTimer: null, workTimer: null, hrTimer: null,
-    filterSig: null, peopleSig: null, kp: null
+    filterSig: null, peopleSig: null, kp: null, bm: null,
+    reqV3: false                               // the server has no v2.4 request scopes (a v2.3 server)
   };
 
   function readPrefs() {
@@ -300,7 +336,7 @@
     st.v.liveView = keepViews.liveView; st.v.logsView = keepViews.logsView; st.v.regView = keepViews.regView;
     st.person = ''; st.search = ''; st.expanded = {}; st.openLogs = {};
     st.preset = 'today'; st.from = null; st.to = null;
-    st.filterSig = null; st.peopleSig = null; st.kp = null;
+    st.filterSig = null; st.peopleSig = null; st.kp = null; st.bm = null; st.reqV3 = false;
     if (st.debounce) { clearTimeout(st.debounce); st.debounce = null; }
     if (st.dateTimer) { clearTimeout(st.dateTimer); st.dateTimer = null; }
     if (st.workTimer) { clearTimeout(st.workTimer); st.workTimer = null; }
@@ -389,9 +425,20 @@
     var jobs = [loadBoard(),
       // The app strip: cached for 15–30 minutes by the data layer, and never
       // forced from here (GitHub allows 60 reads an hour per network).
-      loadApp(false)];
+      loadApp(false),
+      // The waiting list, for the badge: the board counts only the v2.3
+      // kinds, and the punch kinds are the ones due today.
+      loadPending()];
     if (st.v.liveView === 'load') jobs.push(loadTeamToday());
+    if (st.v.liveView === 'punches') jobs.push(loadChecks());
+    // The office point (the "not set" banner, the map's centre); read once.
+    if (!st.slots.settings.val && !st.slots.settings.loading && !st.slots.settings.err) loadSettings();
     return Promise.all(jobs);
+  }
+  // Live → Today's punches (hr_punch_checks; approvers, v2.4).
+  function loadChecks() {
+    var d = validDay(st.v.checksDay) ? st.v.checksDay : today();
+    return run('checks', 'checks|' + d, function () { return need('hrPunchChecks').hrPunchChecks(d); });
   }
   // The person pickers name everyone the board (or the team view) knows; asked once.
   function ensurePeople() {
@@ -436,12 +483,32 @@
     var person = st.v.regPerson;
     return run('reg', 'reg|' + r.from + '|' + r.to + '|' + person, function () { return need('hrRegister').hrRegister(r.from, r.to, person || null); });
   }
+  // The request lists with the punch kinds (pending_v4 / all_v4). A v2.3
+  // server has no such scopes (and no punch kinds): then the old ones, for
+  // the rest of this sign-in.
+  function listRequests(base, from, to) {
+    var d = need('hrRequestsList');
+    if (st.reqV3) return d.hrRequestsList(base, from, to);
+    var who = whoKey();
+    return d.hrRequestsList(base + '_v4', from, to).catch(function (e) {
+      if (!OLD_SCOPES.test(String((e && e.message) || e || ''))) throw e;
+      if (who === whoKey()) st.reqV3 = true;
+      return d.hrRequestsList(base, from, to);
+    });
+  }
+  function loadPending() {
+    if (!canApprove()) return Promise.resolve(null);
+    return run('reqPending', 'pending', function () { return listRequests('pending', null, null); });
+  }
   function loadRequests() {
     var t = today();
-    var jobs = [run('reqPending', 'pending', function () { return need('hrRequestsList').hrRequestsList('pending', null, null); })];
+    var jobs = [loadPending()];
     if (st.v.reqScope === 'all') {
       var f = addDays(t, -REQ_BACK_DAYS), to = addDays(t, REQ_AHEAD_DAYS);
-      jobs.push(run('reqAll', 'all|' + f + '|' + to, function () { return need('hrRequestsList').hrRequestsList('all', f, to); }));
+      jobs.push(run('reqAll', 'all|' + f + '|' + to, function () { return listRequests('all', f, to); }));
+    }
+    if (st.v.reqScope === 'today' && !st.reqV3) {
+      jobs.push(run('reqToday', 'today|' + t, function () { return listRequests('all', t, t); }));
     }
     return Promise.all(jobs);
   }
@@ -500,7 +567,11 @@
   }
 
   // hr_board → [{ email, name, designation, status, since, duty, shift, first_in,
-  // worked_min, on_site, last_point_at, pending, stale, clock_marks, self, raw }]
+  // worked_min, on_site, last_point_at, pending, stale, clock_marks, self, raw,
+  // field_staff (true / false / null = not said), trip ({id, kind, ref_code,
+  // started_at} | null), punch_check ({place, office_m, verify, flags,
+  // selfie} of today's first punch-in | null) }]. The last three are v2.4.
+  function objOrNull(v) { return v && typeof v === 'object' && !Array.isArray(v) ? v : null; }
   function boardRows() {
     var v = objOf(st.slots.board.val);
     if (!v) return [];
@@ -514,15 +585,39 @@
         duty: r.duty || r.duty_today || null, holiday: r.holiday || null, shift: r.shift && typeof r.shift === 'object' ? r.shift : null,
         first_in: r.first_in || null, worked_min: r.worked_min, on_site: site,
         last_point_at: r.last_point_at || null, pending: Math.max(0, num(r.pending_requests)), stale: r.stale === true,
-        clock_marks: Math.max(0, num(r.clock_marks)), self: r.self === true || isSelf(email), tier: numOrNull(r.tier)
+        clock_marks: Math.max(0, num(r.clock_marks)), self: r.self === true || isSelf(email), tier: numOrNull(r.tier),
+        field_staff: typeof r.field_staff === 'boolean' ? r.field_staff : null,
+        trip: objOrNull(r.trip), punch_check: objOrNull(r.punch_check),
+        v4: Object.prototype.hasOwnProperty.call(r, 'field_staff') || Object.prototype.hasOwnProperty.call(r, 'trip')
       };
     });
   }
+  // Worked out once per board answer.
   function boardByEmail() {
+    var val = st.slots.board.val;
+    if (st.bm && st.bm.val === val) return st.bm.map;
     var o = {};
     boardRows().forEach(function (r) { o[r.email] = r; });
+    st.bm = { val: val, map: o };
     return o;
   }
+  // Is this person field staff (route, km, trips, travel allowance)? true /
+  // false when the server says so — a day record or register person
+  // (rec.field_staff), the board, or Settings → People (track_location IS
+  // the field switch) — and null when nothing says: the screen then shows
+  // what 1.12 showed (a v2.3 server).
+  function fieldOf(email, rec) {
+    if (rec && typeof rec.field_staff === 'boolean') return rec.field_staff;
+    var e = lower(email);
+    var b = boardByEmail()[e];
+    if (b && typeof b.field_staff === 'boolean') return b.field_staff;
+    var p = settingsPeople().filter(function (x) { return lower(x.email) === e; })[0];
+    if (p && typeof p.field_staff === 'boolean') return p.field_staff;
+    if (p && typeof p.track_location === 'boolean') return p.track_location;
+    return null;
+  }
+  // Route, km and trips are shown unless the person is known not to be field staff.
+  function showsRoute(email, rec) { return fieldOf(email, rec) !== false; }
 
   // hr_register → flat day records { email, name, day, …record }
   function regRecords() {
@@ -543,6 +638,7 @@
     (Array.isArray(v.people) ? v.people : []).forEach(function (p) {
       if (!p) return;
       var base = { email: p.email || p.employee_email, name: p.name || p.full_name || p.employee_name, designation: p.designation, self: p.self === true };
+      if (typeof p.field_staff === 'boolean') base.field_staff = p.field_staff;
       (Array.isArray(p.days) ? p.days : []).forEach(function (d) { push(d, base); });
     });
     return out;
@@ -668,13 +764,21 @@
         live_km: numOrNull(r.live_km), changed: r.changed === true,
         eligible: r.ta_eligible !== false && r.eligible !== false,
         can_approve: typeof r.can_approve === 'boolean' ? r.can_approve : null,
-        days: Array.isArray(r.days) ? r.days : []
+        days: Array.isArray(r.days) ? r.days : [],
+        // v2.4: km is trip km (what TA pays); day_km is the whole day's route.
+        day_km: numOrNull(r.day_km), field_staff: typeof r.field_staff === 'boolean' ? r.field_staff : null,
+        v4: Object.prototype.hasOwnProperty.call(r, 'day_km')
       };
+    }).filter(function (r) {
+      // TA is for field staff only (the v2.4 server already sends only them,
+      // plus anyone approved that month).
+      return r.approved || fieldOf(r.email, r) !== false;
     }).sort(function (a, b) { return a.name.localeCompare(b.name); });
     var rate = numOrNull(v.rate != null ? v.rate : v.ta_rate_per_km);
     if (rate == null) { var s = settingsData(); if (s) rate = numOrNull(s.ta_rate_per_km); }
     return { month: String(v.month || st.v.taMonth).slice(0, 10), rate: rate, rows: rows,
-             closed: typeof v.closed === 'boolean' ? v.closed : null };
+             closed: typeof v.closed === 'boolean' ? v.closed : null,
+             trips: rows.some(function (r) { return r.v4; }) };
   }
 
   // Tier 4+: everyone's NeoHR settings from hr_settings_get().people —
@@ -807,11 +911,18 @@
   function setStat(text) { var s = el('hr-stat'); if (s) s.textContent = text; }
   function visibleTabs() { var t = tierNow(); return TAB_DEFS.filter(function (d) { return !d.tier || t >= d.tier; }); }
   function fixTab() { if (!visibleTabs().some(function (d) { return d.id === st.tab; })) st.tab = 'live'; }
+  function pendingList() { return reqRows('reqPending').filter(function (r) { return !r.status || r.status === 'pending'; }); }
   function pendingCount() {
     var p = st.slots.reqPending.val;
-    if (p) return reqRows('reqPending').filter(function (r) { return !r.status || r.status === 'pending'; }).length;
+    if (p) return pendingList().length;
     if (st.slots.board.val) return boardRows().reduce(function (a, r) { return a + r.pending; }, 0);
     return null;
+  }
+  // Waiting requests already past the end of their day (punch kinds, v2.4).
+  function pastEodCount() {
+    var t = today(), now = nowMs(), f = F();
+    if (!st.slots.reqPending.val || !f) return 0;
+    return pendingList().filter(function (r) { var d = f.dueText(r, t, now); return !!(d && d.late); }).length;
   }
 
   function renderToolbar() {
@@ -819,15 +930,20 @@
     if (!tb) return;
     var busy = Object.keys(st.slots).some(function (k) { return st.slots[k].loading; });
     var pend = pendingCount();
+    var late = pend ? pastEodCount() : 0;
     var tabs = visibleTabs();
-    var sig = st.tab + '|' + (busy ? 1 : 0) + '|' + pend + '|' + tabs.length;
+    var sig = st.tab + '|' + (busy ? 1 : 0) + '|' + pend + '|' + late + '|' + tabs.length;
     if (tb.dataset.sig === sig) return;
     tb.dataset.sig = sig;
     tb.innerHTML =
       '<div class="hr-tabs" role="group" aria-label="Show">' +
         tabs.map(function (t) {
           var on = st.tab === t.id;
-          var badge = t.id === 'requests' && pend ? ' <span class="hr-badge" aria-label="' + esc(plural(pend, 'request') + ' waiting') + '">' + esc(pend) + '</span>' : '';
+          var badge = t.id === 'requests' && pend
+            ? ' <span class="hr-badge' + (late ? ' hr-badge-late' : '') + '" aria-label="' +
+              esc(plural(pend, 'request') + ' waiting' + (late ? ', ' + late + ' past the end of the day' : '')) + '"' +
+              (late ? ' title="' + esc(plural(late, 'request') + ' past the end of the day') + '"' : '') + '>' + esc(pend) + '</span>'
+            : '';
           return '<button type="button" class="hr-tab' + (on ? ' on' : '') + '" data-hr-tab="' + t.id + '" aria-pressed="' + (on ? 'true' : 'false') + '">' + esc(t.label) + badge + '</button>';
         }).join('') +
       '</div>' +
@@ -853,13 +969,17 @@
     if (st.tab === 'live') return 'live|' + st.v.liveView;
     if (st.tab === 'attendance') return 'att|' + st.v.regView;
     if (st.tab === 'logs') return 'logs';
+    if (st.tab === 'requests') return 'requests|' + (st.reqV3 ? 3 : 4);
     return st.tab;
   }
+  // A v2.3 server has no punch reasons: no chip for them.
+  function reqScopes() { return st.reqV3 ? REQ_SCOPES.filter(function (x) { return x[0] !== 'today'; }) : REQ_SCOPES; }
   function controlsHtml() {
     var v = st.v;
     if (st.tab === 'live') {
       return seg(LIVE_VIEWS, v.liveView, 'data-hr-live-view', 'View') +
-        (v.liveView === 'board' ? '<label class="hr-f hr-f-grow"><span>Search</span><input type="search" id="hr-live-search" maxlength="60" placeholder="Name, designation, job…" autocomplete="off" spellcheck="false"></label>' : '');
+        (v.liveView === 'board' ? '<label class="hr-f hr-f-grow"><span>Search</span><input type="search" id="hr-live-search" maxlength="60" placeholder="Name, designation, job…" autocomplete="off" spellcheck="false"></label>' : '') +
+        (v.liveView === 'punches' ? '<label class="hr-f"><span>Day</span><input type="date" id="hr-checks-day"></label>' + navBtns('checks', 'Today') : '');
     }
     if (st.tab === 'attendance') {
       return seg(REG_VIEWS, v.regView, 'data-hr-reg-view', 'View') +
@@ -870,7 +990,7 @@
         '<button type="button" class="secondary-btn hr-btn" data-hr-ctl="reg-csv">Export CSV</button>';
     }
     if (st.tab === 'requests') {
-      return seg(REQ_SCOPES, v.reqScope, 'data-hr-req-scope', 'Show') +
+      return seg(reqScopes(), v.reqScope, 'data-hr-req-scope', 'Show') +
         '<span class="hr-muted" id="hr-req-note"></span>';
     }
     if (st.tab === 'roster') {
@@ -888,9 +1008,9 @@
     if (st.tab === 'logs') return seg(LOG_VIEWS, v.logsView, 'data-hr-logs-view', 'Show');
     return '';
   }
-  function fillPeopleSelect(sel, blank, cur) {
+  function fillPeopleSelect(sel, blank, cur, list) {
     if (!sel) return;
-    var people = knownPeople();
+    var people = list || knownPeople();
     var sig = blank + '#' + people.map(function (p) { return p.email + '=' + p.name; }).join(',');
     if (sel.dataset.sig !== sig && document.activeElement !== sel) {
       sel.dataset.sig = sig;
@@ -923,7 +1043,16 @@
       if (ui && typeof ui.guardEnter === 'function') { try { ui.guardEnter(host); } catch (e) { /* Enter just does nothing */ } }
     }
     var v = st.v, t = today();
-    if (st.tab === 'live') setVal('hr-live-search', v.liveSearch);
+    if (st.tab === 'live') {
+      setVal('hr-live-search', v.liveSearch);
+      setVal('hr-checks-day', v.checksDay);
+      var cd = el('hr-checks-day');
+      if (cd) {
+        cd.max = t;
+        var cs = settingsData();
+        cd.min = addDays(t, -Math.max(30, num(cs && cs.retention_days, 90)));
+      }
+    }
     if (st.tab === 'attendance') {
       setVal('hr-reg-day', v.regDay); setVal('hr-reg-month', v.regMonth.slice(0, 7));
       var d = el('hr-reg-day'); if (d) d.max = t;
@@ -931,7 +1060,7 @@
       fillPeopleSelect(el('hr-reg-person'), 'Everyone', v.regPerson);
     }
     if (st.tab === 'routes') {
-      fillPeopleSelect(el('hr-route-person'), 'Choose a person…', v.routePerson);
+      fillPeopleSelect(el('hr-route-person'), 'Choose a person…', v.routePerson, routePeople());
       setVal('hr-route-day', v.routeDay);
       var rd = el('hr-route-day');
       if (rd) {
@@ -949,7 +1078,10 @@
     }
     if (st.tab === 'requests') {
       var note = el('hr-req-note');
-      if (note) note.textContent = v.reqScope === 'all' ? 'The last ' + REQ_BACK_DAYS + ' days and anything coming up.' : '';
+      if (note) {
+        note.textContent = v.reqScope === 'all' ? 'The last ' + REQ_BACK_DAYS + ' days and anything coming up.'
+          : v.reqScope === 'today' ? 'Every punch-in reason and away punch of today, decided or not.' : '';
+      }
     }
     host.querySelectorAll('.hr-seg [aria-pressed]').forEach(function (b) {
       var key = b.getAttribute('data-hr-live-view') || b.getAttribute('data-hr-reg-view') || b.getAttribute('data-hr-req-scope') || b.getAttribute('data-hr-logs-view');
@@ -1127,29 +1259,64 @@
     return [r.name, r.email, r.designation, site.code, site.title, label('LIVE_LABELS', r.status)]
       .some(function (v) { return v && String(v).toLowerCase().indexOf(q) !== -1; });
   }
+  // The office point is not set: nobody's punch is checked against the shop.
+  function officeUnset() {
+    var s = settingsData();
+    return !!s && (numOrNull(s.office_lat) == null || numOrNull(s.office_lng) == null);
+  }
+  function officeBanner() {
+    if (!officeUnset()) return '';
+    return banner('The office location is not set, so punches are not checked against the shop yet: nobody is asked why they are away. ' +
+      (tierNow() >= 4 ? 'Set it in Settings → Edit… (pick it on the map).' : 'Someone at tier 4 or above sets it in Settings.'), 'warn');
+  }
+  // The server's check of today's first punch-in, as small tags (Live).
+  function punchCheckTags(pc) {
+    var f = F();
+    if (!pc || !f) return '';
+    var out = [];
+    var place = f.placeText(pc);
+    if (place) out.push(tag(place, 'hr-mark-' + f.placeTone(pc), 'Where the server puts today’s first punch-in'));
+    var vt = f.verifyText(pc);
+    if (vt) out.push(tag(vt, 'hr-mark-clock'));
+    var flags = f.flagList(pc);
+    if (flags.length) out.push(tag('⚑ ' + flags.length, 'hr-mark-warn', flags.map(function (x) { return x.text + (x.tip ? ' — ' + x.tip : ''); }).join('\n')));
+    if (pc.selfie === false && !pc.selfie_skip) out.push(tag('No photo', 'hr-mark-warn', 'No photo came with the punch-in yet.'));
+    return out.join('');
+  }
   function liveHtml() {
     var html = [];
     if (st.v.liveView === 'load') {
       html.push(teamHtml());
       return html.join('');
     }
+    if (st.v.liveView === 'punches') return checksHtml();
     html.push(slotBanner('board', 'The live board could not be loaded'));
+    html.push(officeBanner());
     var s = st.slots.board;
     var rows = boardRows();
     var f = F();
     var order = f ? f.LIVE_ORDER : [];
     var counts = {};
     rows.forEach(function (r) { counts[r.status] = (counts[r.status] || 0) + 1; });
-    var pend = rows.reduce(function (a, r) { return a + r.pending; }, 0);
+    var pc = pendingCount();
+    var pend = pc != null ? pc : rows.reduce(function (a, r) { return a + r.pending; }, 0);
+    var late = pastEodCount();
+    // v2.4: who is on a trip right now (field staff).
+    var v4 = rows.some(function (r) { return r.v4; });
+    var onTrip = rows.filter(function (r) { return !!r.trip; }).length;
+    counts.trip = onTrip;
     var cur = st.v.liveFilter;
     if (cur !== 'all' && !counts[cur]) cur = st.v.liveFilter = 'all';
     var tiles = [['all', rows.length, 'Everyone']].concat(order.map(function (k) { return [k, counts[k] || 0, label('LIVE_LABELS', k)]; }));
+    if (v4) tiles.push(['trip', onTrip, (f && f.LIVE_TRIP_LABEL) || 'On a trip']);
     html.push('<div class="hr-ltiles" role="group" aria-label="Filter by status">' + tiles.map(function (x) {
       var on = x[0] === cur;
       return '<button type="button" class="hr-ltile hr-lt-' + x[0] + (on ? ' on' : '') + (x[1] ? '' : ' zero') + '" data-hr-act="live-filter" data-hr-status="' + x[0] + '" aria-pressed="' + (on ? 'true' : 'false') + '"' +
         (s.val ? '' : ' disabled') + '><span class="hr-ltile-n">' + esc(s.val ? x[1] : '—') + '</span><span class="hr-ltile-l">' + esc(x[2]) + '</span></button>';
     }).join('') +
-      '<button type="button" class="hr-ltile hr-lt-pending' + (pend ? '' : ' zero') + '" data-hr-act="tab" data-hr-to="requests"><span class="hr-ltile-n">' + esc(s.val ? pend : '—') + '</span><span class="hr-ltile-l">Waiting for approval</span></button>' +
+      '<button type="button" class="hr-ltile hr-lt-pending' + (pend ? '' : ' zero') + (late ? ' hr-lt-late' : '') + '" data-hr-act="tab" data-hr-to="requests"' +
+        (late ? ' title="' + esc(plural(late, 'request') + ' past the end of the day') + '"' : '') + '><span class="hr-ltile-n">' + esc(s.val ? pend : '—') + '</span>' +
+        '<span class="hr-ltile-l">Waiting for approval' + (late ? ' · ' + esc(late) + ' past end of day' : '') + '</span></button>' +
     '</div>');
     if (!s.val) {
       setStat(s.loading ? '…' : '—');
@@ -1158,55 +1325,197 @@
       return html.join('');
     }
     var q = lower(st.v.liveSearch);
-    var shown = rows.filter(function (r) { return (cur === 'all' || r.status === cur) && liveMatches(r, q); });
+    var shown = rows.filter(function (r) { return (cur === 'all' || (cur === 'trip' ? !!r.trip : r.status === cur)) && liveMatches(r, q); });
     var rank = {};
     order.forEach(function (k, i) { rank[k] = i; });
     shown.sort(function (a, b) { return ((rank[a.status] != null ? rank[a.status] : 99) - (rank[b.status] != null ? rank[b.status] : 99)) || a.name.localeCompare(b.name); });
     var t = today();
+    // The waiting requests per person, punch kinds included (the board's
+    // own count has the v2.3 kinds only).
+    var waitBy = null;
+    if (st.slots.reqPending.val) {
+      waitBy = {};
+      pendingList().forEach(function (q) { waitBy[q.email] = (waitBy[q.email] || 0) + 1; });
+    }
+    var tripCol = v4 && rows.some(function (r) { return r.field_staff !== false; });
     if (!shown.length) {
       html.push(emptyBox(rows.length ? 'Nobody matches.' : 'No staff on the board yet.'));
     } else {
       var out = '<div class="hr-table-wrap"><table class="hr-table hr-live"><thead><tr>' +
         '<th scope="col">Person</th><th scope="col">Now</th><th scope="col">Duty</th><th scope="col">Shift</th><th scope="col">In</th>' +
-        '<th scope="col">Worked</th><th scope="col">On site</th><th scope="col">Location</th><th scope="col">Requests</th><th scope="col"><span class="hr-sr">Actions</span></th>' +
+        '<th scope="col">Worked</th><th scope="col">On site</th>' + (tripCol ? '<th scope="col">Trip</th>' : '') +
+        '<th scope="col">Location</th><th scope="col">Requests</th><th scope="col"><span class="hr-sr">Actions</span></th>' +
         '</tr></thead><tbody>';
       shown.forEach(function (r) {
+        var onField = r.field_staff !== false;
         var site = r.on_site;
         var siteHtml = site ? '<span class="hr-site"><b>' + esc(site.code || '') + '</b> ' + esc(site.title || '') +
           ((site.since || site.arrived) ? ' <span class="hr-muted">since ' + esc(istHm(site.since || site.arrived)) + '</span>' : '') + '</span>' : '<span class="hr-muted">—</span>';
         var loc;
-        if (r.stale) {
+        var stale = r.stale && onField;
+        if (!onField) {
+          loc = '<span class="hr-muted" title="Not field staff: their phone records no route.">—</span>';
+        } else if (stale) {
           var ref = r.last_point_at || r.since;
           loc = '<span class="hr-stale" title="Recording should send a point every few minutes while on duty.">⚠ ' +
             esc(r.last_point_at ? 'Last point ' + fmtRel(r.last_point_at) : 'No location yet' + (ref ? ' (in since ' + istHm(ref) + ')' : '')) + '</span>';
         } else {
           loc = r.last_point_at ? esc(fmtRel(r.last_point_at)) : '<span class="hr-muted">—</span>';
         }
+        var tripHtml = '';
+        if (tripCol) {
+          tripHtml = r.trip
+            ? '<td><span class="hr-site"><b>' + esc(f ? f.tripText(r.trip) : 'Trip') + '</b>' +
+              (r.trip.started_at ? ' <span class="hr-muted">since ' + esc(istHm(r.trip.started_at)) + '</span>' : '') + '</span></td>'
+            : '<td><span class="hr-muted">—</span></td>';
+        }
         var since = r.since ? ' <span class="hr-muted">since ' + esc(hmOn(r.since, t)) + '</span>' : '';
         var marks = r.self ? '' : countClockTag(r.clock_marks, r.email);
-        out += '<tr class="' + (r.stale ? 'hr-row-stale' : '') + '">' +
+        var waiting = waitBy ? (waitBy[r.email] || 0) : r.pending;
+        out += '<tr class="' + (stale ? 'hr-row-stale' : '') + '">' +
           '<th scope="row"><div class="hr-who">' + esc(r.name) + (r.self ? ' <span class="hr-you">you</span>' : '') + '</div>' +
             (r.designation ? '<div class="hr-muted">' + esc(r.designation) + '</div>' : '') + '</th>' +
           '<td>' + liveChip(r.status) + since + '</td>' +
           '<td>' + esc(r.duty ? label('DUTY_LABELS', r.duty) : '—') + (r.holiday ? ' ' + tag(String(r.holiday), 'hr-mark-hol') : '') + '</td>' +
           '<td class="hr-n">' + esc((F() && F().shiftText(r.shift)) || '—') + '</td>' +
-          '<td class="hr-n">' + esc(r.first_in ? hmOn(r.first_in, t) : '—') + marks + '</td>' +
+          '<td class="hr-n">' + esc(r.first_in ? hmOn(r.first_in, t) : '—') + marks + (r.first_in ? punchCheckTags(r.punch_check) : '') + '</td>' +
           '<td class="hr-n">' + esc(r.first_in || num(r.worked_min) > 0 ? fmtDur(r.worked_min) : '—') + '</td>' +
           '<td>' + siteHtml + '</td>' +
+          tripHtml +
           '<td>' + loc + '</td>' +
-          '<td>' + (r.pending ? '<button type="button" class="text-btn hr-btn" data-hr-act="tab" data-hr-to="requests">' + esc(r.pending + ' waiting') + '</button>' : '<span class="hr-muted">—</span>') + '</td>' +
+          '<td>' + (waiting ? '<button type="button" class="text-btn hr-btn" data-hr-act="tab" data-hr-to="requests">' + esc(waiting + ' waiting') + '</button>' : '<span class="hr-muted">—</span>') + '</td>' +
           '<td class="hr-acts">' +
             '<button type="button" class="text-btn hr-btn" data-hr-act="open-day" data-hr-email="' + esc(r.email) + '" data-hr-day="' + esc(t) + '">Day</button>' +
-            '<button type="button" class="text-btn hr-btn" data-hr-act="open-route" data-hr-email="' + esc(r.email) + '" data-hr-day="' + esc(t) + '">Route</button>' +
+            (onField ? '<button type="button" class="text-btn hr-btn" data-hr-act="open-route" data-hr-email="' + esc(r.email) + '" data-hr-day="' + esc(t) + '">Route</button>' : '') +
           '</td></tr>';
       });
       out += '</tbody></table></div>';
       html.push(out);
     }
-    html.push('<p class="hr-hint">Live status comes from the punches on NeoHR. “Not in yet” turns into “Absent” after the shift start and grace (after the shift on a field or flexible day). An amber row means the phone stopped sending its route while the person is on duty.</p>');
+    html.push('<p class="hr-hint">Live status comes from the punches on NeoHR. “Not in yet” turns into “Absent” after the shift start and grace (after the shift on a field or flexible day). ' +
+      (v4 ? 'The tags beside In say where the server puts the first punch-in. Only field staff have a route and trips. ' : '') +
+      'An amber row means a phone stopped sending its route while the person is on duty.</p>');
     html.push(appStrip());
     var inCount = (counts.on_duty || 0) + (counts.on_site || 0) + (counts.on_break || 0);
     setStat(plural(rows.length, 'person', 'people') + ' · ' + inCount + ' in now' + (pend ? ' · ' + pend + ' waiting' : ''));
+    return html.join('');
+  }
+
+  // ── Live → Today's punches (hr_punch_checks, v2.4) ────────────────────────
+  // [{event_id, email, name, kind, at, received_at, place, office_m, verify,
+  //   flags, reason_kind, reason_text, reason_ref, selfie_skip, unverified?,
+  //   request: {id, kind, status} | null,
+  //   selfie: {thumb_b64, late, seen_by_me, seen_by_any} | null,
+  //   prev: {thumb_b64, at, event_id?} | null}]   — the server's order kept.
+  function checkRows() {
+    var v = objOf(st.slots.checks.val);
+    if (!v) return [];
+    var list = Array.isArray(v) ? v : (Array.isArray(v.punches) ? v.punches : (Array.isArray(v.rows) ? v.rows : []));
+    return list.filter(function (x) { return x && (x.email || x.employee_email); }).map(function (x) {
+      var email = lower(x.email || x.employee_email);
+      var prev = objOrNull(x.prev_selfie) || objOrNull(x.previous_selfie) ||
+        (x.prev_thumb_b64 ? { thumb_b64: x.prev_thumb_b64, at: x.prev_at || null } : null);
+      if (prev) prev = Object.assign({}, prev, { at: prev.at || prev.event_at || null });
+      return Object.assign({}, x, { email: email, name: String(x.name || x.employee_name || nameOf(email)),
+        event_id: x.event_id || x.id || null, selfie: objOrNull(x.selfie), prev: prev, request: objOrNull(x.request) });
+    });
+  }
+  // Something for HR to look at: the server's own `unverified` when it says.
+  function needsCheck(x) {
+    if (typeof x.unverified === 'boolean') return x.unverified;
+    var f = F();
+    return !!((x.verify && x.verify !== 'ok' && x.verify !== 'hr') || (f && f.flagList(x).length) || !x.selfie ||
+      x.selfie.late === true || x.place === 'unknown');
+  }
+  // A punch photo's thumbnail; a click opens the full photo (hr_selfie_get).
+  function thumbHtml(b64, eventId, title, sub, small) {
+    var f = F();
+    var url = f ? f.jpegDataUrl(b64) : null;
+    if (!url) return '<span class="hr-thumb hr-thumb-none' + (small ? ' sm' : '') + '">' + esc(small ? '—' : 'No photo') + '</span>';
+    var img = '<img class="hr-thumb' + (small ? ' sm' : '') + '" src="' + esc(url) + '" alt="' + esc(title || 'Punch photo') + '">';
+    if (!eventId) return img;
+    return '<button type="button" class="hr-thumb-btn" data-hr-act="photo" data-hr-event="' + esc(eventId) + '" data-hr-title="' + esc(title || '') +
+      '" data-hr-sub="' + esc(sub || '') + '" title="Open the full photo (each look is recorded)">' + img + '</button>';
+  }
+  // The checks of one punch as tags: place, how sure, flags.
+  function checkTags(x) {
+    var f = F();
+    if (!f || !x) return '';
+    var out = [];
+    var place = f.placeText(x);
+    if (place) out.push(tag(place, 'hr-mark-' + f.placeTone(x), 'Where the server puts this punch'));
+    var vt = f.verifyText(x);
+    if (vt) out.push(tag(vt, 'hr-mark-clock'));
+    f.flagList(x).forEach(function (g) { out.push(tag(g.text, 'hr-mark-warn', g.tip)); });
+    return out.join('');
+  }
+  function checkCard(x) {
+    var f = F();
+    var d = st.v.checksDay, t = today();
+    var when = label('EVENT_LABELS', x.kind) + ' at ' + hmOn(x.at, d);
+    var title = x.name + ' — ' + when;
+    var sf = x.selfie;
+    var sentLate = Array.isArray(x.flags) && x.flags.indexOf('sent_late') !== -1 && Math.abs(tsMs(x.received_at) - tsMs(x.at)) > 60000;
+    var reason = f ? f.reasonText(x) : '';
+    var rq = x.request;
+    var seen = sf ? (sf.seen_by_me ? tag('Seen', 'hr-mark-info', 'You have opened this photo.') : (sf.seen_by_any === false ? tag('New photo', 'hr-mark-flex', 'Nobody has opened this photo yet.') : '')) : '';
+    var prevAt = x.prev && x.prev.at ? shortDay(dayOf(x.prev.at)) + ' ' + istHm(x.prev.at) : '';
+    // A photo whose thumbnail did not come (none sent, or not for this viewer):
+    // the full photo is still a click away (the server says if it may be seen).
+    var nowPic = sf && !sf.thumb_b64 && x.event_id
+      ? '<button type="button" class="hr-thumb hr-thumb-none hr-thumb-btn" data-hr-act="photo" data-hr-event="' + esc(x.event_id) + '" data-hr-title="' + esc(title) +
+        '" data-hr-sub="' + esc(dayLabel(d, t)) + '" title="Open the full photo (each look is recorded)">📷 Photo</button>'
+      : thumbHtml(sf && sf.thumb_b64, x.event_id, title, dayLabel(d, t), false);
+    return '<div class="hr-check' + (needsCheck(x) ? ' hr-check-flag' : '') + '">' +
+      '<div class="hr-check-pics">' +
+        '<figure>' + nowPic +
+          '<figcaption>' + esc(sf ? (sf.late ? 'Sent late' : 'This punch') : (x.selfie_skip ? 'Camera failed' : 'No photo')) + '</figcaption></figure>' +
+        (x.prev ? '<figure>' + thumbHtml(x.prev.thumb_b64, x.prev.event_id || null, x.name + ' — earlier photo', prevAt, true) +
+          '<figcaption>' + esc('Before' + (prevAt ? ' · ' + prevAt : '')) + '</figcaption></figure>' : '') +
+      '</div>' +
+      '<div class="hr-check-main">' +
+        '<div class="hr-who">' + esc(x.name) + (isSelf(x.email) ? ' <span class="hr-you">you</span>' : '') + '</div>' +
+        '<div class="hr-check-when">' + esc(when) + (sentLate ? ' <span class="hr-muted">sent ' + esc(hmOn(x.received_at, d)) + '</span>' : '') + '</div>' +
+        '<div class="hr-check-tags">' + checkTags(x) + seen + '</div>' +
+        (reason ? '<div class="hr-req-reason">' + esc(reason) + '</div>' : '') +
+        '<div class="hr-check-foot">' +
+          (rq ? chip('hr-rs-' + (/^[a-z]+$/.test(String(rq.status)) ? rq.status : 'x'), label('REQUEST_LABELS', rq.kind) + ': ' + label('REQUEST_STATUS', rq.status)) : '') +
+          '<span class="hr-req-acts">' +
+            (rq && rq.status === 'pending' ? '<button type="button" class="text-btn hr-btn" data-hr-act="tab" data-hr-to="requests">Requests</button>' : '') +
+            '<button type="button" class="text-btn hr-btn" data-hr-act="open-day" data-hr-email="' + esc(x.email) + '" data-hr-day="' + esc(d) + '">Day</button>' +
+          '</span></div>' +
+      '</div>' +
+    '</div>';
+  }
+  function checksHtml() {
+    var html = [];
+    var s = st.slots.checks;
+    var d = st.v.checksDay, t = today();
+    if (s.err && !s.val && noRpc(s.err)) {
+      setStat('—');
+      return banner('Today’s punches need the HR database update (v2.4). Ask the admin to apply it, then refresh.', 'info');
+    }
+    html.push(slotBanner('checks', 'The punches could not be loaded'));
+    html.push(officeBanner());
+    if (!s.val) {
+      setStat(s.loading ? '…' : '—');
+      html.push(s.loading ? loadingBox('Loading the punches…') : '');
+      return html.join('');
+    }
+    var rows = checkRows();
+    var flagged = rows.filter(needsCheck), fine = rows.filter(function (x) { return !needsCheck(x); });
+    var head = dayLabel(d, t) + ' · ' + plural(rows.length, 'punch', 'punches') + (flagged.length ? ' · ' + flagged.length + ' to check' : '');
+    setStat(head);
+    html.push('<div class="hr-summary">' + esc(head) + '</div>');
+    if (!rows.length) {
+      html.push(emptyBox('No punches in or out on this day.'));
+      return html.join('');
+    }
+    if (flagged.length) html.push('<h4 class="hr-day-h">To check<span class="hr-day-n">' + esc(flagged.length) + '</span></h4><div class="hr-checks">' + flagged.map(checkCard).join('') + '</div>');
+    if (fine.length) html.push('<h4 class="hr-day-h">Looks fine<span class="hr-day-n">' + esc(fine.length) + '</span></h4><div class="hr-checks">' + fine.map(checkCard).join('') + '</div>');
+    var sd = settingsData();
+    html.push('<p class="hr-hint">Every punch in and out, with the photo taken at the punch next to the same person’s previous one, so a different face stands out. ' +
+      'Click a photo to see it full size: each look is recorded. Photos are deleted after ' + esc(num(sd && sd.retention_days, 90)) + ' days.</p>');
     return html.join('');
   }
 
@@ -1366,7 +1675,21 @@
     if (r.irregular) out.push(tag('Irregular', 'hr-mark-warn', 'A punch that did not fit the order of the day was skipped.'));
     if (r.worked_on_duty) out.push(tag('Worked on ' + (r.worked_on_duty === 'leave' ? 'a leave day' : 'an off day'), 'hr-mark-info'));
     if (r.half_day_leave) out.push(tag('Half-day leave', 'hr-mark-info'));
-    if (num(r.km_gaps) > 0) out.push(tag(plural(num(r.km_gaps), 'gap') + ' in the route', 'hr-mark-info', 'Stretches with no points (a tunnel, the phone off); the straight line still counts.'));
+    if (num(r.km_gaps) > 0 && showsRoute(r.email, r)) out.push(tag(plural(num(r.km_gaps), 'gap') + ' in the route', 'hr-mark-info', 'Stretches with no points (a tunnel, the phone off); the straight line still counts.'));
+    // v2.4 marks
+    if (r.late_excused) {
+      out.push(tag(label('MARK_LABELS', 'late_excused') || 'Late excused', 'hr-mark-flex',
+        (num(r.late_raw_min) > 0 ? 'Late by ' + fmtDur(r.late_raw_min) + ', but excused' : 'Excused') +
+        ': an on-site or RMA trip started away from the shop, or a reason HR approved.'));
+    }
+    if (r.pending_reason) {
+      out.push(tag(label('MARK_LABELS', 'pending_reason') || 'Reason waiting', 'hr-mark-clock',
+        'A punch-in reason is waiting for HR. The late mark stays until it is approved.'));
+    }
+    if (r.away_pending) {
+      out.push(tag((label('MARK_LABELS', 'away_pending') || 'Away — waiting for HR') + (num(r.pending_min) > 0 ? ' (' + fmtDur(r.pending_min) + ')' : ''), 'hr-mark-warn',
+        'A punch away from the shop is waiting for HR. Its time is not counted until HR approves it.'));
+    }
     return out.join('');
   }
   function attendanceHtml() {
@@ -1391,12 +1714,16 @@
       ['present', 'late', 'half_day', 'absent', 'leave'].filter(function (k) { return counts[k]; }).map(function (k) { return ' · ' + counts[k] + ' ' + label('DAY_LABELS', k).toLowerCase(); }).join('');
     setStat(head);
     if (!rows.length) return '<div class="hr-summary">' + esc(head) + '</div>' + emptyBox('No day records for this day.');
+    // v2.4: trip km (what travel allowance pays) beside the day's km.
+    var tripCol = recs.some(function (r) { return Object.prototype.hasOwnProperty.call(r, 'trip_km'); });
     var out = '<div class="hr-summary">' + esc(head) + '</div><div class="hr-table-wrap"><table class="hr-table hr-reg"><thead><tr>' +
       '<th scope="col">Person</th><th scope="col">Duty</th><th scope="col">Status</th><th scope="col">In</th><th scope="col">Out</th>' +
-      '<th scope="col">Worked</th><th scope="col">Breaks</th><th scope="col">Late</th><th scope="col">Early</th><th scope="col">km</th><th scope="col"><span class="hr-sr">Actions</span></th>' +
+      '<th scope="col">Worked</th><th scope="col">Breaks</th><th scope="col">Late</th><th scope="col">Early</th><th scope="col">km</th>' +
+      (tripCol ? '<th scope="col">Trip km</th>' : '') + '<th scope="col"><span class="hr-sr">Actions</span></th>' +
       '</tr></thead><tbody>';
     rows.forEach(function (r) {
       var why = whyNotAct(r.email);
+      var onField = showsRoute(r.email, r);
       out += '<tr><th scope="row"><div class="hr-who">' + esc(r.name) + (isSelf(r.email) ? ' <span class="hr-you">you</span>' : '') + '</div></th>' +
         '<td>' + esc(r.duty ? label('DUTY_LABELS', r.duty) : '—') + '</td>' +
         '<td>' + dayChip(r.status) + recMarks(r) + '</td>' +
@@ -1406,11 +1733,12 @@
         '<td class="hr-n">' + esc(r.first_in && num(r.break_min) ? fmtDur(r.break_min) : '—') + '</td>' +
         '<td class="hr-n">' + (num(r.late_min) > 0 ? '<span class="hr-late">' + esc(fmtDur(r.late_min)) + '</span>' : '—') + '</td>' +
         '<td class="hr-n">' + (num(r.early_min) > 0 ? '<span class="hr-late">' + esc(fmtDur(r.early_min)) + '</span>' : '—') + '</td>' +
-        '<td class="hr-n">' + esc(r.km != null ? fmtKm(r.km) : '—') + '</td>' +
+        '<td class="hr-n">' + esc(onField && r.km != null ? fmtKm(r.km) : '—') + '</td>' +
+        (tripCol ? '<td class="hr-n">' + esc(onField && r.trip_km != null ? fmtKm(r.trip_km) : '—') + '</td>' : '') +
         '<td class="hr-acts">' +
           '<button type="button" class="text-btn hr-btn" data-hr-act="open-day" data-hr-email="' + esc(r.email) + '" data-hr-day="' + esc(r.day) + '">Day</button>' +
           actBtn('text-btn', 'correct', 'Correct…', ' data-hr-email="' + esc(r.email) + '" data-hr-day="' + esc(r.day) + '"', why) +
-          '<button type="button" class="text-btn hr-btn" data-hr-act="open-route" data-hr-email="' + esc(r.email) + '" data-hr-day="' + esc(r.day) + '">Route</button>' +
+          (onField ? '<button type="button" class="text-btn hr-btn" data-hr-act="open-route" data-hr-email="' + esc(r.email) + '" data-hr-day="' + esc(r.day) + '">Route</button>' : '') +
         '</td></tr>';
     });
     out += '</tbody></table></div>';
@@ -1427,21 +1755,29 @@
     setStat(head);
     if (!people.length) return '<div class="hr-summary">' + esc(head) + '</div>' + emptyBox('No day records in this month.');
     var codes = (F() && F().DAY_CODES) || {};
+    // v2.4: days whose away punch is waiting for HR, and trip km.
+    var has = function (k) { return recs.some(function (x) { return Object.prototype.hasOwnProperty.call(x, k); }); };
+    var waitCol = has('away_pending'), tripCol = has('trip_km');
     var out = '<div class="hr-summary">' + esc(head) + '</div><div class="hr-table-wrap hr-grid-wrap"><table class="hr-table hr-grid"><thead><tr><th scope="col" class="hr-grid-name">Person</th>' +
       days.map(function (d) {
         var w = weekdayOf(d);
         return '<th scope="col" class="hr-gd' + (w === 0 ? ' hr-gd-sun' : '') + (d === t ? ' hr-gd-today' : '') + '"><span>' + esc(WEEKDAYS[w].slice(0, 2)) + '</span><span>' + esc(Number(d.slice(8))) + '</span></th>';
       }).join('') +
-      '<th scope="col">P</th><th scope="col">Late</th><th scope="col">Half</th><th scope="col">Absent</th><th scope="col">Leave</th><th scope="col">Worked</th><th scope="col">km</th></tr></thead><tbody>';
+      '<th scope="col">P</th><th scope="col">Late</th><th scope="col">Half</th><th scope="col">Absent</th><th scope="col">Leave</th>' +
+      (waitCol ? '<th scope="col" title="Days with an away punch waiting for HR (not counted yet)">Waiting</th>' : '') +
+      '<th scope="col">Worked</th><th scope="col">km</th>' + (tripCol ? '<th scope="col">Trip km</th>' : '') + '</tr></thead><tbody>';
     people.forEach(function (e) {
-      var tot = { present: 0, late: 0, half_day: 0, absent: 0, leave: 0, worked: 0, km: 0 };
+      var tot = { present: 0, late: 0, half_day: 0, absent: 0, leave: 0, worked: 0, km: 0, waiting: 0, trip_km: 0 };
+      var onField = showsRoute(e, by[e][Object.keys(by[e])[0]]);
       var cells = days.map(function (d) {
         var x = by[e][d];
         if (!x) return '<td class="hr-gc hr-gc-none"></td>';
         var stt = String(x.status || '');
-        if (stt === 'present' || stt === 'late' || stt === 'half_day' || stt === 'open') tot.present++;
-        if (stt === 'late') tot.late++;
-        if (stt === 'half_day') tot.half_day++;
+        // An away punch waiting for HR: the day counts once it is approved.
+        if (x.away_pending) tot.waiting++;
+        else if (stt === 'present' || stt === 'late' || stt === 'half_day' || stt === 'open') tot.present++;
+        if (stt === 'late' && !x.away_pending) tot.late++;
+        if (stt === 'half_day' && !x.away_pending) tot.half_day++;
         if (x.leave_units != null || x.absent_units != null) {
           // The server's units (S14: a half-day leave is 0.5 leave, plus 0.5 absent when not punched).
           tot.leave += Math.max(0, num(x.leave_units)); tot.absent += Math.max(0, num(x.absent_units));
@@ -1452,32 +1788,44 @@
         }
         tot.worked += Math.max(0, num(x.worked_min));
         tot.km += Math.max(0, num(x.km));
+        tot.trip_km += Math.max(0, num(x.trip_km));
         var tip = [shortDay(d), label('DAY_LABELS', stt),
-          num(x.late_min) > 0 ? 'late ' + fmtDur(x.late_min) : '', x.first_in ? 'in ' + istHm(x.first_in) : '',
+          num(x.late_min) > 0 ? 'late ' + fmtDur(x.late_min) : '', x.late_excused ? 'late excused' : '',
+          x.first_in ? 'in ' + istHm(x.first_in) : '',
           x.last_out ? 'out ' + istHm(x.last_out) : (x.missed_out ? 'no punch-out' : ''),
-          x.worked_min != null && num(x.worked_min) ? fmtDur(x.worked_min) : '', x.km != null && num(x.km) ? fmtKm(x.km) + ' km' : '',
-          x.flex ? 'flex' : '', x.holiday ? String(x.holiday) : ''].filter(Boolean).join(' · ');
-        var flags = (x.missed_out ? '!' : '') + (x.flex ? '*' : '');
+          x.worked_min != null && num(x.worked_min) ? fmtDur(x.worked_min) : '',
+          onField && x.km != null && num(x.km) ? fmtKm(x.km) + ' km' : '', onField && x.trip_km != null && num(x.trip_km) ? fmtKm(x.trip_km) + ' trip km' : '',
+          x.flex ? 'flex' : '', x.holiday ? String(x.holiday) : '',
+          x.pending_reason ? 'reason waiting for HR' : '', x.away_pending ? 'away — waiting for HR' : ''].filter(Boolean).join(' · ');
+        var flags = (x.missed_out ? '!' : '') + (x.flex ? '*' : '') + (x.away_pending || x.pending_reason ? '?' : '');
         return '<td class="hr-gc"><button type="button" class="hr-gcell hr-ds-' + (/^[a-z_]+$/.test(stt) ? stt : 'x') + '" data-hr-act="open-day" data-hr-email="' + esc(e) + '" data-hr-day="' + esc(d) + '" title="' + esc(tip) + '" aria-label="' + esc(names[e] + ': ' + tip) + '">' +
           esc((codes[stt] || '?') + flags) + '</button></td>';
       }).join('');
       out += '<tr><th scope="row" class="hr-grid-name">' + esc(names[e]) + (isSelf(e) ? ' <span class="hr-you">you</span>' : '') + '</th>' + cells +
         '<td class="hr-n">' + esc(tot.present) + '</td><td class="hr-n">' + esc(tot.late) + '</td><td class="hr-n">' + esc(tot.half_day) + '</td>' +
-        '<td class="hr-n">' + esc(tot.absent) + '</td><td class="hr-n">' + esc(tot.leave) + '</td><td class="hr-n">' + esc(fmtDur(tot.worked)) + '</td>' +
-        '<td class="hr-n">' + esc(fmtKm(Math.round(tot.km * 100) / 100)) + '</td></tr>';
+        '<td class="hr-n">' + esc(tot.absent) + '</td><td class="hr-n">' + esc(tot.leave) + '</td>' +
+        (waitCol ? '<td class="hr-n">' + (tot.waiting ? '<span class="hr-late">' + esc(tot.waiting) + '</span>' : '0') + '</td>' : '') +
+        '<td class="hr-n">' + esc(fmtDur(tot.worked)) + '</td>' +
+        '<td class="hr-n">' + esc(onField ? fmtKm(Math.round(tot.km * 100) / 100) : '—') + '</td>' +
+        (tripCol ? '<td class="hr-n">' + esc(onField ? fmtKm(Math.round(tot.trip_km * 100) / 100) : '—') + '</td>' : '') + '</tr>';
     });
     out += '</tbody></table></div>';
     out += '<p class="hr-hint hr-legend">' + ['present', 'late', 'half_day', 'absent', 'leave', 'off', 'open', 'not_in_yet', 'not_tracked'].map(function (k) {
       return '<span><span class="hr-gkey hr-ds-' + k + '">' + esc(codes[k] || '') + '</span> ' + esc(label('DAY_LABELS', k)) + '</span>';
-    }).join('') + '<span><b>!</b> no punch-out</span><span><b>*</b> flex</span> Click a day for its punches.</p>';
+    }).join('') + '<span><b>!</b> no punch-out</span><span><b>*</b> flex</span>' + (waitCol ? '<span><b>?</b> waiting for HR</span>' : '') + ' Click a day for its punches.</p>';
     return out;
   }
 
   // ── Requests ──────────────────────────────────────────────────────────────
+  function isPunchKind(kind) { var f = F(); return !!(f && typeof f.isPunchRequestKind === 'function' && f.isPunchRequestKind(kind)); }
   function reqDates(r) {
     var t = today();
     if (r.kind === 'missed_punch' && r.missed_at) {
       return label('EVENT_LABELS', r.missed_kind) + ' at ' + istHm(r.missed_at) + ' on ' + dayLabel(dayOf(r.missed_at), t);
+    }
+    // A punch reason / away punch: the punch it came with.
+    if (isPunchKind(r.kind) && r.punch_at) {
+      return label('EVENT_LABELS', r.punch_kind || 'punch_in') + ' at ' + istHm(r.punch_at) + ' · ' + dayLabel(reqDay(r), t);
     }
     var f = String(r.date_from || '').slice(0, 10), to = String(r.date_to || '').slice(0, 10);
     if (!validDay(f)) return '';
@@ -1497,38 +1845,80 @@
       meta.push('Cancelled by ' + (r.cancelled_by_name || r.cancelled_by_email) + (r.cancelled_at ? ' · ' + shortDate(r.cancelled_at) : ''));
     }
     var acts = '';
+    var punch = isPunchKind(r.kind);
     // The server says what this viewer may do (can_decide / can_cancel); the
     // sentence says why not.
     if (status === 'pending') {
-      var dw = why || (r.can_decide === false ? 'This request can no longer be decided — refresh.' : null);
+      var dw = why || (r.can_decide === false ? 'You can’t decide this one — the owner’s requests go to a tier 4 head. Refresh if it should be yours.' : null);
       acts = actBtn('primary-pink-btn', 'req-approve', 'Approve…', ' data-hr-id="' + esc(r.id) + '"', dw) +
         actBtn('secondary-btn', 'req-reject', 'Reject…', ' data-hr-id="' + esc(r.id) + '"', dw);
     } else if (status === 'approved') {
       var cw = r.kind === 'missed_punch' ? 'Fix an added punch with Correct… instead.'
+        : r.kind === 'away_punch' ? 'HR decides an away punch. To change the day, use Correct… on it.'
         : (why || (r.can_cancel === false ? 'It can no longer be cancelled.' : null));
       acts = actBtn('text-btn', 'req-cancel', 'Cancel it…', ' data-hr-id="' + esc(r.id) + '"', cw);
     }
+    if (punch && r.email && validDay(reqDay(r))) {
+      acts = '<button type="button" class="text-btn hr-btn" data-hr-act="open-day" data-hr-email="' + esc(r.email) + '" data-hr-day="' + esc(reqDay(r)) + '">Day</button>' + acts;
+    }
     var notes = [r.decision_note ? 'Note: ' + r.decision_note : '', r.cancel_note ? 'Cancelled: ' + r.cancel_note : ''].filter(Boolean);
-    return '<div class="hr-req hr-req-' + (/^[a-z]+$/.test(status) ? status : 'x') + '">' +
+    var f = F();
+    var due = punch && f ? f.dueText(r, today(), nowMs()) : null;
+    // A punch kind: where the punch was, its checks, the reason and the photo.
+    var punchHtml = '';
+    var reasonLine = r.reason ? String(r.reason) : '';
+    if (punch && f) {
+      var tags = checkTags(r);
+      var rk = r.reason_kind ? label('REASON_LABELS', r.reason_kind) : '';
+      reasonLine = (rk && rk !== reasonLine ? rk + (reasonLine ? ' — ' : '') : '') + reasonLine;
+      var sf = objOrNull(r.selfie);
+      var photo = '';
+      if (sf && sf.thumb_b64) photo = thumbHtml(sf.thumb_b64, r.event_id, r.name + ' — ' + reqDates(r), label('REQUEST_LABELS', r.kind), false);
+      else if ((r.selfie === true || sf) && r.event_id) {
+        photo = '<button type="button" class="secondary-btn hr-btn" data-hr-act="photo" data-hr-event="' + esc(r.event_id) + '" data-hr-title="' + esc(r.name + ' — ' + reqDates(r)) +
+          '" data-hr-sub="' + esc(label('REQUEST_LABELS', r.kind)) + '" title="Open the photo taken at the punch (each look is recorded)">📷 Photo</button>';
+      } else if (Object.prototype.hasOwnProperty.call(r, 'selfie')) {
+        photo = '<span class="hr-thumb hr-thumb-none">No photo</span>';
+      }
+      punchHtml = '<div class="hr-req-punch">' + (photo ? '<div class="hr-req-photo">' + photo + '</div>' : '') +
+        '<div class="hr-req-checks">' + (tags || '<span class="hr-muted">No location details.</span>') + '</div></div>';
+    }
+    return '<div class="hr-req hr-req-' + (/^[a-z]+$/.test(status) ? status : 'x') + (due && due.late ? ' hr-req-eod' : '') + '">' +
       '<div class="hr-req-head"><div><div class="hr-who">' + esc(r.name) + (isSelf(r.email) ? ' <span class="hr-you">you</span>' : '') + '</div>' +
         '<div class="hr-req-kind">' + esc(kind) + '</div></div>' +
-        chip('hr-rs-' + (/^[a-z]+$/.test(status) ? status : 'x'), label('REQUEST_STATUS', status)) + '</div>' +
+        '<div class="hr-req-chips">' + (due ? '<span class="hr-due' + (due.late ? ' late' : '') + '">' + esc(due.text) + '</span>' : '') +
+        chip('hr-rs-' + (/^[a-z]+$/.test(status) ? status : 'x'), label('REQUEST_STATUS', status)) + '</div></div>' +
       '<div class="hr-req-when">' + esc(reqDates(r)) + (r.ref_code ? ' <span class="hr-tag">' + esc(r.ref_code) + '</span>' : '') + '</div>' +
-      (r.reason ? '<div class="hr-req-reason">' + esc(r.reason) + '</div>' : '') +
+      punchHtml +
+      (reasonLine ? '<div class="hr-req-reason">' + esc(reasonLine) + '</div>' : '') +
       (notes.length ? '<div class="hr-req-note">' + esc(notes.join(' · ')) + '</div>' : '') +
       '<div class="hr-req-foot"><span class="hr-muted">' + esc(meta.join(' · ')) + '</span><span class="hr-req-acts">' + acts + '</span></div>' +
     '</div>';
+  }
+  // Waiting first: past the end of the day, then the oldest.
+  function byUrgency(a, b) {
+    var f = F(), t = today(), now = nowMs();
+    var la = f ? !!(f.dueText(a, t, now) || {}).late : false, lb = f ? !!(f.dueText(b, t, now) || {}).late : false;
+    if (la !== lb) return la ? -1 : 1;
+    return tsMs(a.created_at) - tsMs(b.created_at);
   }
   function requestsHtml() {
     var html = [];
     html.push(demoWriteBanner());
     html.push(slotBanner('reqPending', 'Waiting requests could not be loaded'));
+    if (st.reqV3 && st.v.reqScope === 'today') st.v.reqScope = 'pending';   // a v2.3 server: no punch reasons
     var p = st.slots.reqPending;
-    var pending = reqRows('reqPending').filter(function (r) { return !r.status || r.status === 'pending'; })
-      .sort(function (a, b) { return tsMs(a.created_at) - tsMs(b.created_at); });
-    html.push('<h4 class="hr-day-h">Waiting for a decision<span class="hr-day-n">' + esc(p.val ? pending.length : '…') + '</span></h4>');
+    var pending = pendingList().sort(byUrgency);
+    var late = pastEodCount();
+    if (st.v.reqScope === 'today') {
+      html.push(reqTodayHtml());
+      setStat(p.val ? plural(pending.length, 'request') + ' waiting' : '—');
+      return html.join('');
+    }
+    html.push('<h4 class="hr-day-h">Waiting for a decision<span class="hr-day-n">' + esc(p.val ? pending.length : '…') + '</span>' +
+      (late ? '<span class="hr-day-n hr-day-late">' + esc(late + ' past end of day') + '</span>' : '') + '</h4>');
     if (!p.val) html.push(p.loading ? loadingBox('Loading the requests…') : '');
-    else if (!pending.length) html.push(emptyBox('Nothing is waiting. Requests people send with Tell HR on NeoHR show up here.'));
+    else if (!pending.length) html.push(emptyBox('Nothing is waiting. Requests people send with Tell HR on NeoHR, and punch-in reasons and away punches, show up here.'));
     else html.push('<div class="hr-reqs">' + pending.map(reqCard).join('') + '</div>');
     if (st.v.reqScope === 'all') {
       html.push(slotBanner('reqAll', 'The other requests could not be loaded'));
@@ -1540,12 +1930,36 @@
       else if (!rest.length) html.push(emptyBox('None in this range.'));
       else html.push('<div class="hr-reqs">' + rest.map(reqCard).join('') + '</div>');
     }
-    html.push('<p class="hr-hint">Approving leave or a field day marks those days on the roster (weekly offs and holidays are skipped). Approving a missed punch adds it to the day. Nobody approves their own request.</p>');
+    html.push('<p class="hr-hint">Approving leave or a field day marks those days on the roster (weekly offs and holidays are skipped). Approving a missed punch adds it to the day. ' +
+      (st.reqV3 ? 'Nobody approves their own request.'
+        : 'A punch-in reason (late, or a reason they typed) and an away punch should be decided before the end of their day: an away punch counts only once it is approved. ' +
+          'Nobody approves their own request, and the owner’s go to a tier 4 head.') +
+      ' This list refreshes every minute.</p>');
     setStat(p.val ? plural(pending.length, 'request') + ' waiting' : '—');
     return html.join('');
   }
+  // Requests → Punch reasons today: every punch reason and away punch of today.
+  function reqTodayHtml() {
+    var html = [];
+    if (st.reqV3) return emptyBox('Punch-in reasons need the HR database update (v2.4).');
+    html.push(slotBanner('reqToday', 'Today’s punch reasons could not be loaded'));
+    var s = st.slots.reqToday, t = today();
+    var rows = reqRows('reqToday').filter(function (r) { return isPunchKind(r.kind) && reqDay(r) === t; });
+    var wait = rows.filter(function (r) { return !r.status || r.status === 'pending'; }).sort(byUrgency);
+    var done = rows.filter(function (r) { return r.status && r.status !== 'pending'; })
+      .sort(function (x, y) { return tsMs(y.decided_at || y.cancelled_at || y.created_at) - tsMs(x.decided_at || x.cancelled_at || x.created_at); });
+    html.push('<h4 class="hr-day-h">Waiting today<span class="hr-day-n">' + esc(s.val ? wait.length : '…') + '</span></h4>');
+    if (!s.val) html.push(s.loading ? loadingBox('Loading today’s punch reasons…') : '');
+    else if (!wait.length) html.push(emptyBox('No punch-in reason or away punch is waiting today.'));
+    else html.push('<div class="hr-reqs">' + wait.map(reqCard).join('') + '</div>');
+    if (s.val && done.length) {
+      html.push('<h4 class="hr-day-h">Decided today<span class="hr-day-n">' + esc(done.length) + '</span></h4><div class="hr-reqs">' + done.map(reqCard).join('') + '</div>');
+    }
+    html.push('<p class="hr-hint">Late, or a reason they typed, at punch-in goes to HR. On-site and RMA from away from the shop do not need approval. A punch away from the shop by shop staff counts only once HR approves it.</p>');
+    return html.join('');
+  }
   function findRequest(id) {
-    var all = reqRows('reqPending').concat(reqRows('reqAll'));
+    var all = reqRows('reqPending').concat(reqRows('reqAll'), reqRows('reqToday'));
     for (var i = 0; i < all.length; i++) if (String(all[i].id) === String(id)) return all[i];
     return null;
   }
@@ -1624,8 +2038,21 @@
     }).filter(function (p) { return p && isFinite(p.lat) && isFinite(p.lng) && Math.abs(p.lat) <= 90 && Math.abs(p.lng) <= 180; });
     var stops = (Array.isArray(v.stops) ? v.stops : []).filter(function (x) { return x && isFinite(Number(x.lat)) && isFinite(Number(x.lng)); });
     var segs = (Array.isArray(v.segments) ? v.segments : []).filter(Boolean);
+    // v2.4: the on-site / RMA trips of the day (field staff).
+    var trips = (Array.isArray(v.trips) ? v.trips : []).filter(function (x) { return x && x.id && isFinite(tsMs(x.started_at)); });
     return { points: pts, stops: stops, segments: segs, km: v.km, km_gaps: num(v.km_gaps), moving_min: v.moving_min,
-             visits: Array.isArray(v.visits) ? v.visits : [] };
+             visits: Array.isArray(v.visits) ? v.visits : [], trips: trips, hasTrips: Array.isArray(v.trips) };
+  }
+  // The trip picked on the side panel (or from the day panel), if it is in this route.
+  function pickedTrip(r) {
+    var id = st.v.routeTrip;
+    if (!id || !r) return null;
+    return r.trips.filter(function (x) { return String(x.id) === String(id); })[0] || null;
+  }
+  // A trip's window: [start, effective end] (an open trip runs to now).
+  function tripWindow(x) {
+    var a = tsMs(x.started_at), b = tsMs(x.ended_at);
+    return [a, isFinite(b) && x.open !== true ? b : nowMs()];
   }
   function renderRoutes(body) {
     if (body.dataset.view !== 'routes' || !el('hr-map')) {
@@ -1658,11 +2085,13 @@
       setStat(s.loading ? '…' : '—');
       return;
     }
-    var key = s.key + '|' + s.at;
+    var key = s.key + '|' + s.at + '|' + (st.v.routeTrip || '');
     if (map && st.mapKey !== key) { drawRoute(map, r); st.mapKey = key; }
     setMsg(msg, r.points.length ? '' : (window.L ? 'No route was recorded on this day.' : ''));
     side.innerHTML = routeSideHtml(r, e, d);
-    setStat(nameOf(e) + ' · ' + dayLabel(d, today()) + ' · ' + fmtKm(r.km != null ? r.km : 0) + ' km');
+    var tp = pickedTrip(r);
+    setStat(nameOf(e) + ' · ' + dayLabel(d, today()) + ' · ' + fmtKm(r.km != null ? r.km : 0) + ' km' +
+      (tp && F() ? ' · ' + F().tripText(tp) + (tp.km != null ? ' ' + fmtKm(tp.km) + ' km' : '') : ''));
   }
   function setMsg(msgEl, text) {
     if (!msgEl) return;
@@ -1675,15 +2104,36 @@
     r.stops.forEach(function (x, i) { items.push({ at: tsMs(x.arrived), type: 'stop', x: x, n: i + 1 }); });
     r.segments.forEach(function (x) { items.push({ at: tsMs(x.from), type: 'seg', x: x }); });
     items.sort(function (a, b) { return (isFinite(a.at) ? a.at : 0) - (isFinite(b.at) ? b.at : 0); });
+    var f = F();
+    var tripKm = Math.round(r.trips.reduce(function (a, x) { return a + Math.max(0, num(x.km)); }, 0) * 100) / 100;
     var html = '<div class="hr-rtiles">' +
-      tile(fmtKm(r.km != null ? r.km : 0), 'km travelled', 'ok', 'The server’s figure, the one travel allowance uses') +
+      tile(fmtKm(r.km != null ? r.km : 0), 'km travelled', 'ok', r.hasTrips ? 'The whole day’s route, the server’s figure' : 'The server’s figure, the one travel allowance uses') +
+      (r.hasTrips ? tile(fmtKm(tripKm), 'trip km', 'busy', 'On-site and RMA trips only: what travel allowance pays') : '') +
       tile(r.moving_min != null ? fmtDur(r.moving_min) : '—', 'moving') +
       tile(r.stops.length, plural(r.stops.length, 'stop').replace(/^\d+ /, '')) +
       (r.km_gaps ? tile(r.km_gaps, r.km_gaps === 1 ? 'gap' : 'gaps', 'late','Stretches with no points (a tunnel, the phone off); the straight line between them still counts') : '') +
     '</div>';
+    // v2.4: the trips; a click shows that part of the route on the map.
+    if (r.trips.length) {
+      var picked = pickedTrip(r);
+      html += '<h4 class="hr-app-h">Trips</h4><ul class="hr-trips">' + r.trips.map(function (x) {
+        var on = picked && String(picked.id) === String(x.id);
+        var bits = [f ? f.tripSpan(x) : '', x.km != null ? fmtKm(x.km) + ' km' : '', x.moving_min != null ? fmtDur(x.moving_min) + ' moving' : '',
+                    x.stops != null ? plural(num(x.stops), 'stop') : '', !x.open && x.end_reason ? label('TRIP_END_LABELS', x.end_reason) : ''].filter(Boolean).join(' · ');
+        var flags = f ? f.flagList(x) : [];
+        return '<li><button type="button" class="hr-trip' + (on ? ' on' : '') + '" data-hr-act="route-trip" data-hr-trip="' + esc(x.id) + '" aria-pressed="' + (on ? 'true' : 'false') + '"' +
+          ' title="' + esc(on ? 'Show the whole day again' : 'Show this trip on the map') + '">' +
+          '<span class="hr-tl-t">' + esc(f ? f.tripText(x) : 'Trip') + (x.ref_title ? ' — ' + esc(x.ref_title) : '') + '</span>' +
+          '<span class="hr-muted">' + esc(bits) + '</span>' +
+          (flags.length ? '<span>' + flags.map(function (g) { return tag(g.text, 'hr-mark-warn', g.tip); }).join('') + '</span>' : '') +
+        '</button></li>';
+      }).join('') + '</ul>';
+    } else if (r.hasTrips) {
+      html += '<p class="hr-hint">No on-site or RMA trip was started on this day.</p>';
+    }
     html += '<h4 class="hr-app-h">' + esc(dayLabel(day, t)) + '</h4>';
     if (!items.length) {
-      html += emptyBox(r.points.length ? 'No stops or moving stretches long enough to list.' : 'No route was recorded on this day — they may not have punched in, worked from home, or route recording is off for them.');
+      html += emptyBox(r.points.length ? 'No stops or moving stretches long enough to list.' : 'No route was recorded on this day — they may not have punched in, worked from home, or they are not field staff.');
     } else {
       html += '<ol class="hr-tl">' + items.map(function (it) {
         var x = it.x;
@@ -1807,6 +2257,24 @@
       L.circleMarker([b.lat, b.lng], { radius: 6, color: '#1f2937', weight: 2, fillColor: '#6b7280', fillOpacity: 1, className: 'hr-end' })
         .bindTooltip(tipNode('Last point · ' + istHm(b.at)), { direction: 'top' }).addTo(layer);
     }
+    // v2.4: the picked trip's part of the route, on top, and the map on it.
+    var tp = pickedTrip(r);
+    if (tp) {
+      var w = tripWindow(tp);
+      var seg = r.points.filter(function (p) { var ta = tsMs(p.at); return isFinite(ta) && ta >= w[0] - 1000 && ta <= w[1] + 1000; })
+        .map(function (p) { return [p.lat, p.lng]; });
+      if (seg.length > 1) L.polyline(seg, { color: '#2563eb', weight: 6, opacity: 0.9, className: 'hr-path-trip' }).addTo(layer);
+      var tname = F() ? F().tripText(tp) : 'Trip';
+      if (seg.length) {
+        L.circleMarker(seg[0], { radius: 7, color: '#1e3a8a', weight: 2, fillColor: '#3b82f6', fillOpacity: 1, className: 'hr-trip-start' })
+          .bindTooltip(tipNode(tname + ' · started ' + istHm(tp.started_at)), { direction: 'top' }).addTo(layer);
+        if (seg.length > 1 && !tp.open) {
+          L.circleMarker(seg[seg.length - 1], { radius: 7, color: '#1e3a8a', weight: 2, fillColor: '#93c5fd', fillOpacity: 1, className: 'hr-trip-end' })
+            .bindTooltip(tipNode(tname + ' · ended ' + istHm(tp.ended_at)), { direction: 'top' }).addTo(layer);
+        }
+        bounds = seg;
+      }
+    }
     try {
       map.invalidateSize(false);
       if (bounds.length > 1) map.fitBounds(bounds, { padding: [28, 28], maxZoom: 17, animate: false });
@@ -1843,12 +2311,16 @@
     html.push('<div class="hr-summary">' + esc(monthLabel(m) + ' · ' + (data.rate != null ? 'Rate ' + money(data.rate) + ' per km' : 'No rate set')) + '</div>');
     if (data.rate == null) html.push(banner('No travel allowance rate is set. ' + (tierNow() >= 4 ? 'Set it in the Settings tab.' : 'Someone at tier 4 or above sets it in Settings.'), 'warn'));
     if (!ended) html.push(banner('This month has not ended: the km can still grow. Approve it after it ends.', 'info'));
-    if (!data.rows.length) { html.push(emptyBox('Nobody travelled this month.')); setStat(monthLabel(m)); return html.join(''); }
-    var tot = { km: 0, amount: 0 };
-    var out = '<div class="hr-table-wrap"><table class="hr-table hr-ta"><thead><tr><th scope="col">Person</th><th scope="col">km</th><th scope="col">Rate</th>' +
+    if (!data.rows.length) { html.push(emptyBox(data.trips ? 'No field staff trips this month.' : 'Nobody travelled this month.')); setStat(monthLabel(m)); return html.join(''); }
+    var tot = { km: 0, amount: 0, day_km: 0 };
+    // v2.4: TA pays trip km (km); the whole day's route (day_km) is shown beside it.
+    var trips = data.trips;
+    var cols = trips ? 7 : 6;
+    var out = '<div class="hr-table-wrap"><table class="hr-table hr-ta"><thead><tr><th scope="col">Person</th><th scope="col">' + (trips ? 'Trip km' : 'km') + '</th>' +
+      (trips ? '<th scope="col" title="The whole day’s route, for comparison: not paid">All travel km</th>' : '') + '<th scope="col">Rate</th>' +
       '<th scope="col">Amount</th><th scope="col">Approval</th><th scope="col"><span class="hr-sr">Actions</span></th></tr></thead><tbody>';
     data.rows.forEach(function (r) {
-      tot.km += Math.max(0, num(r.km)); tot.amount += Math.max(0, num(r.amount));
+      tot.km += Math.max(0, num(r.km)); tot.amount += Math.max(0, num(r.amount)); tot.day_km += Math.max(0, num(r.day_km));
       var open = !!st.v.taOpen[r.email];
       var appr;
       if (r.approved) {
@@ -1864,21 +2336,28 @@
       out += '<tr><th scope="row"><button type="button" class="hr-expand" data-hr-act="ta-expand" data-hr-email="' + esc(r.email) + '" aria-expanded="' + (open ? 'true' : 'false') + '">' +
           '<span aria-hidden="true">' + (open ? '▾' : '▸') + '</span> ' + esc(r.name) + '</button>' + (isSelf(r.email) ? ' <span class="hr-you">you</span>' : '') + '</th>' +
         '<td class="hr-n">' + esc(r.km != null ? fmtKm(r.km) : '—') + '</td>' +
+        (trips ? '<td class="hr-n hr-muted">' + esc(r.day_km != null ? fmtKm(r.day_km) : '—') + '</td>' : '') +
         '<td class="hr-n">' + esc(!r.eligible && !r.approved ? '—' : r.rate != null ? money(r.rate) : (data.rate != null ? money(data.rate) : '—')) + '</td>' +
         '<td class="hr-n">' + esc(!r.eligible && !r.approved ? '—' : r.amount != null ? money(r.amount) : '—') + '</td>' +
         '<td>' + appr + '</td><td class="hr-acts">' + acts + '</td></tr>';
       if (open) {
         var days = r.days.filter(function (x) { return x && x.day; }).sort(function (a, b) { return String(a.day).localeCompare(String(b.day)); });
-        out += '<tr class="hr-drow"><td colspan="6">' + (days.length
-          ? '<div class="hr-kmdays">' + days.map(function (x) { return '<span><b>' + esc(shortDay(String(x.day).slice(0, 10))) + '</b> ' + esc(fmtKm(x.km)) + ' km</span>'; }).join('') + '</div>'
+        out += '<tr class="hr-drow"><td colspan="' + cols + '">' + (days.length
+          ? '<div class="hr-kmdays">' + days.map(function (x) {
+              return '<span><b>' + esc(shortDay(String(x.day).slice(0, 10))) + '</b> ' + esc(fmtKm(x.km)) + (trips ? ' trip km' : ' km') +
+                (trips && x.day_km != null ? ' <span class="hr-muted">(' + esc(fmtKm(x.day_km)) + ' all)</span>' : '') + '</span>';
+            }).join('') + '</div>'
           : '<span class="hr-muted">No km by day in this answer.</span>') + '</td></tr>';
       }
     });
-    out += '<tr class="hr-total"><th scope="row">Everyone</th><td class="hr-n">' + esc(fmtKm(Math.round(tot.km * 100) / 100)) + '</td><td></td><td class="hr-n">' +
+    out += '<tr class="hr-total"><th scope="row">Everyone</th><td class="hr-n">' + esc(fmtKm(Math.round(tot.km * 100) / 100)) + '</td>' +
+      (trips ? '<td class="hr-n hr-muted">' + esc(fmtKm(Math.round(tot.day_km * 100) / 100)) + '</td>' : '') + '<td></td><td class="hr-n">' +
       esc(money(Math.round(tot.amount * 100) / 100)) + '</td><td colspan="2"></td></tr>';
     out += '</tbody></table></div>';
     html.push(out);
-    html.push('<p class="hr-hint">km is the server’s figure from each day’s route (the phone’s live figure is only for show). Approving keeps the km, rate and amount as they are now.</p>');
+    html.push(trips
+      ? '<p class="hr-hint">Travel allowance is paid on trip km only: the on-site and RMA trips field staff start on NeoHR, from the server’s route. All travel km is the whole day’s route, shown for comparison. Approving keeps the trip km, rate and amount as they are now.</p>'
+      : '<p class="hr-hint">km is the server’s figure from each day’s route (the phone’s live figure is only for show). Approving keeps the km, rate and amount as they are now.</p>');
     setStat(monthLabel(m) + ' · ' + fmtKm(Math.round(tot.km * 100) / 100) + ' km');
     return html.join('');
   }
@@ -1912,19 +2391,26 @@
       ['Route recording', 'a point every ' + num(s.track_interval_s) + ' s or ' + num(s.track_distance_m) + ' m while moving'],
       ['Route points kept', num(s.retention_days) + ' days (each day’s km is kept)'],
       ['Travel allowance', s.ta_rate_per_km != null ? money(s.ta_rate_per_km) + ' per km' : 'No rate set'],
-      ['Office point', (s.office_lat != null && s.office_lng != null) ? Number(s.office_lat).toFixed(5) + ', ' + Number(s.office_lng).toFixed(5) + ' · within ' + num(s.office_radius_m) + ' m is “Shop”' : 'Not set']
+      ['Office point', (s.office_lat != null && s.office_lng != null) ? Number(s.office_lat).toFixed(5) + ', ' + Number(s.office_lng).toFixed(5) + ' · within ' + num(s.office_radius_m) + ' m is “at the shop”' : 'Not set']
     ]);
+    // v2.4: how full the punch photo store is (tier 4+).
+    if (s.selfie_store_bytes != null) {
+      var used = num(s.selfie_store_bytes, 0);
+      rows.push(['Punch photos', (fmtBytes(used) || '0 bytes') + ' of 200 MB used' + (used > 160 * 1048576 ? ' — nearly full: tell the owner' : '') + ' (kept ' + num(s.retention_days, 90) + ' days)']);
+    }
+    html.push(officeBanner());
     html.push('<section class="hr-card"><div class="hr-card-head"><h3 class="hr-app-title">Office hours and tracking</h3>' +
       actBtn('primary-pink-btn', 'settings-edit', 'Edit…', '', isDemo() ? DEMO_OFF : null) + '</div>' +
       '<dl class="hr-dl">' + rows.map(function (x) { return '<dt>' + esc(x[0]) + '</dt><dd>' + esc(x[1]) + '</dd>'; }).join('') + '</dl>' +
-      '<p class="hr-hint">Shift changes apply from the date you pick (tomorrow by default), so past days keep the hours they had. Tracking changes reach a phone at its next punch-in or break end.</p></section>');
+      '<p class="hr-hint">Shift changes apply from the date you pick (tomorrow by default), so past days keep the hours they had. Tracking changes reach a phone at its next punch-in or break end. ' +
+      'Every punch in and out is checked against the office point: inside the radius counts as at the shop.</p></section>');
     // People (hr_settings_get's `people`, tier 4+)
     var people = settingsPeople().slice().sort(function (a, b) { return String(a.name || a.email).localeCompare(String(b.name || b.email)); });
     var out = '<section class="hr-card"><div class="hr-card-head"><h3 class="hr-app-title">People</h3></div>';
     if (!people.length) out += emptyBox(Array.isArray(s.people) ? 'No staff to show.' : 'Per-person settings did not come with this answer. Refresh to try again.');
     else {
       out += '<div class="hr-table-wrap"><table class="hr-table"><thead><tr><th scope="col">Person</th><th scope="col">Hours</th><th scope="col">Weekly off</th>' +
-        '<th scope="col">Travel allowance</th><th scope="col">Route recording</th><th scope="col">Attendance</th><th scope="col"><span class="hr-sr">Actions</span></th></tr></thead><tbody>';
+        '<th scope="col">Field staff</th><th scope="col">Travel allowance</th><th scope="col">Attendance</th><th scope="col"><span class="hr-sr">Actions</span></th></tr></thead><tbody>';
       people.forEach(function (p) {
         var pr = personRow(p.email) || {};
         var custom = pr.shift_start || pr.shift_end;
@@ -1939,14 +2425,16 @@
             (nextDay ? '<div class="hr-muted">' + esc('From ' + shortDay(nextDay) + ': ' +
               ((hhmm(next.shift_start) || hhmm(nd.shift_start)) + '–' + (hhmm(next.shift_end) || hhmm(nd.shift_end)))) + '</div>' : '') + '</td>' +
           '<td>' + esc(Array.isArray(pr.weekly_off) ? f.weeklyOffText(pr.weekly_off) : 'Default') + '</td>' +
-          '<td>' + esc(pr.ta_eligible === false ? 'Not eligible' : 'Eligible') + '</td>' +
-          '<td>' + esc(pr.track_location === false ? 'Off' : 'On') + '</td>' +
+          '<td>' + (pr.track_location === false ? esc('No') : '<b>' + esc('Yes') + '</b>') + '</td>' +
+          '<td>' + (pr.track_location === false ? '<span class="hr-muted" title="Only field staff get travel allowance">—</span>'
+            : esc(pr.ta_eligible === false ? 'Not eligible' : 'Eligible')) + '</td>' +
           '<td>' + esc(pr.attendance_required === false ? 'Not tracked' : 'Required') + '</td>' +
           '<td class="hr-acts">' + actBtn('text-btn', 'person-edit', 'Edit…', ' data-hr-email="' + esc(lower(p.email)) + '"', why) + '</td></tr>';
       });
       out += '</tbody></table></div>';
     }
-    out += '<p class="hr-hint">“Not tracked” people are never late or absent (for example the owner). Route recording off means their phone records no route, so they have no km for travel allowance.</p></section>';
+    out += '<p class="hr-hint">Field staff are the engineers who go out on site: only their phones record a route while they are on duty, and only they have trips, km and travel allowance. ' +
+      'Everyone else is checked at the shop when they punch in and out. “Not tracked” people are never late or absent (for example the owner).</p></section>';
     html.push(out);
     setStat('Settings');
     return html.join('');
@@ -2285,6 +2773,31 @@
       return out;
     }
     function evText(x) { return label('EVENT_LABELS', x.kind) + ' at ' + hmOn(x.at, day); }
+    // v2.4: the server's check of one punch in / out — where, how sure, its
+    // flags, the reason, the request it opened, and the photo.
+    function evChecks(ev) {
+      var f = F();
+      if (!f || !ev || (ev.kind !== 'punch_in' && ev.kind !== 'punch_out')) return '';
+      var has = function (k) { return Object.prototype.hasOwnProperty.call(ev, k); };
+      if (!has('place') && !has('verify') && !has('selfie')) return '';
+      var out = ev.source === 'hr' ? '' : checkTags(ev);
+      var reason = f.reasonText(ev);
+      if (reason) out += '<span class="hr-ev-note hr-ev-reason">' + esc(reason) + '</span>';
+      var rq = null;
+      if (ev.request_id && state.data && Array.isArray(state.data.requests)) {
+        rq = state.data.requests.filter(function (q) { return q && String(q.id) === String(ev.request_id); })[0] || null;
+      }
+      if (rq) out += chip('hr-rs-' + (/^[a-z]+$/.test(String(rq.status)) ? rq.status : 'x'), label('REQUEST_LABELS', rq.kind) + ': ' + label('REQUEST_STATUS', rq.status || 'pending'));
+      else if (ev.request_id) out += tag('Sent to HR', 'hr-mark-clock');
+      if (ev.selfie === true && ev.id) {
+        if (ev.selfie_late) out += tag('Photo sent late', 'hr-mark-warn', 'The photo arrived more than 10 minutes after the punch.');
+        out += '<button type="button" class="text-btn hr-btn" data-hr-act="photo" data-hr-event="' + esc(ev.id) + '" data-hr-title="' + esc(nameOf(e) + ' — ' + evText(ev)) +
+          '" data-hr-sub="' + esc(dayLabel(day, today())) + '" title="Open the photo taken at this punch (each look is recorded)">📷 Photo</button>';
+      } else if (has('selfie') && ev.source !== 'hr' && !ev.selfie_skip) {
+        out += tag('No photo', 'hr-mark-warn', 'No photo came with this punch (yet).');
+      }
+      return out;
+    }
     function reqText(r) { return label('EVENT_LABELS', r.missed_kind) + ' at ' + hmOn(r.missed_at, day); }
     function reqHint() {
       return state.req ? '<p class="ops-hint hr-dd-req">' + esc('Their missed punch (' + reqText(state.req) + ') is added too, and the request is approved with this change.') + '</p>' : '';
@@ -2399,6 +2912,8 @@
       if (!v && !state.err) html.push(loadingBox('Loading the day…'));
       if (v) {
         var rec = (v.record && typeof v.record === 'object') ? v.record : (v.day && typeof v.day === 'object' ? v.day : v);
+        var onField = showsRoute(e, typeof v.field_staff === 'boolean' ? v : rec);
+        var trips = Array.isArray(v.trips) ? v.trips.filter(function (x) { return x && typeof x === 'object'; }) : [];
         var facts = [
           ['Duty', rec.duty || v.duty ? label('DUTY_LABELS', rec.duty || v.duty) : '—'],
           ['Status', rec.status ? label('DAY_LABELS', rec.status) : '—'],
@@ -2406,12 +2921,18 @@
           ['In', rec.first_in ? hmOn(rec.first_in, day) : '—'],
           ['Out', rec.last_out ? hmOn(rec.last_out, day) : (rec.missed_out ? 'no punch-out' : '—')],
           ['Worked', rec.worked_min != null ? fmtDur(rec.worked_min) : '—'],
-          ['Breaks', rec.break_min != null ? fmtDur(rec.break_min) : '—'],
-          ['km', v.km != null ? fmtKm(v.km) : (rec.km != null ? fmtKm(rec.km) : '—')]
+          ['Breaks', rec.break_min != null ? fmtDur(rec.break_min) : '—']
         ];
+        if (onField) facts.push(['km', v.km != null ? fmtKm(v.km) : (rec.km != null ? fmtKm(rec.km) : '—')]);
+        if (onField && (rec.trip_km != null || trips.length)) {
+          facts.push(['Trip km', rec.trip_km != null ? fmtKm(rec.trip_km)
+            : fmtKm(Math.round(trips.reduce(function (a, x) { return a + Math.max(0, num(x.km)); }, 0) * 100) / 100)]);
+        }
+        if (num(rec.pending_min) > 0) facts.push(['Waiting for HR', fmtDur(rec.pending_min)]);
         html.push('<div class="hr-dd-facts">' + facts.map(function (x) { return '<div><span>' + esc(x[0]) + '</span><b>' + esc(x[1]) + '</b></div>'; }).join('') + '</div>');
-        var marks = recMarks(Object.assign({}, rec, { holiday: rec.holiday || v.holiday }));
+        var marks = recMarks(Object.assign({ email: e }, rec, { holiday: rec.holiday || v.holiday }));
         if (marks) html.push('<div class="hr-dd-marks">' + marks + '</div>');
+        var reqs = (Array.isArray(v.requests) ? v.requests : []).filter(function (q) { return q && q.id; });
         var evs = events();
         var pr = why ? {} : pairs();
         // While approving a missed punch: where it would go, among the punches.
@@ -2438,10 +2959,48 @@
               '<button type="button" class="text-btn hr-btn" data-hr-void="' + esc(ev.id) + '">Void…</button></span>' : '';
             return '<li class="' + (voided ? 'voided' : '') + '"><span class="hr-ev-t">' + esc(hmOn(ev.at, day)) + '</span>' +
               '<span class="hr-ev-k">' + esc(label('EVENT_LABELS', ev.kind)) + '</span>' + src + (voided ? '' : clockTag(ev, e)) +
+              (voided ? '' : evChecks(ev)) +
               (ev.note ? '<span class="hr-ev-note">' + esc(ev.note) + '</span>' : '') +
               (voided ? '<span class="hr-ev-note">Voided' + (ev.void_reason ? ': ' + esc(ev.void_reason) : '') + '</span>' : '') +
               acts +
             '</li>';
+          }).join('') + '</ul>');
+        }
+        // v2.4: the requests of this day (punch reasons, away punches and
+        // Tell HR), each with its decision; an approver decides from here.
+        if (reqs.length) {
+          html.push('<h4 class="hr-app-h">Requests</h4><ul class="hr-visits hr-dd-reqs">' + reqs.map(function (q) {
+            var status = String(q.status || 'pending');
+            var f = F();
+            var due = isPunchKind(q.kind) && f ? f.dueText(q, today(), nowMs()) : null;
+            var rk = q.reason_kind ? label('REASON_LABELS', q.reason_kind) : '';
+            var reasonLine = (rk && rk !== q.reason ? rk + (q.reason ? ' — ' : '') : '') + (q.reason || '');
+            var dw = why || (q.can_decide === false ? 'You can’t decide this one.' : null);
+            var acts2 = status === 'pending' && !why
+              ? '<span class="hr-ev-acts"><button type="button" class="text-btn hr-btn" data-hr-decide="' + esc(q.id) + '" data-hr-ok="1"' + (dw ? ' disabled title="' + esc(dw) + '"' : '') + '>Approve…</button>' +
+                '<button type="button" class="text-btn hr-btn" data-hr-decide="' + esc(q.id) + '" data-hr-ok="0"' + (dw ? ' disabled title="' + esc(dw) + '"' : '') + '>Reject…</button></span>'
+              : '';
+            return '<li><div class="hr-dd-req-head"><b>' + esc(label('REQUEST_LABELS', q.kind)) + '</b> ' +
+                chip('hr-rs-' + (/^[a-z]+$/.test(status) ? status : 'x'), label('REQUEST_STATUS', status)) +
+                (due ? ' <span class="hr-due' + (due.late ? ' late' : '') + '">' + esc(due.text) + '</span>' : '') + acts2 + '</div>' +
+              (reasonLine ? '<div class="hr-muted">' + esc(reasonLine) + (q.ref_code ? ' · ' + esc(q.ref_code) : '') + '</div>' : '') +
+              (q.decision_note || q.decided_by_name ? '<div class="hr-muted">' + esc([q.decided_by_name ? label('REQUEST_STATUS', status) + ' by ' + q.decided_by_name : '', q.decision_note || ''].filter(Boolean).join(' · ')) + '</div>' : '') +
+            '</li>';
+          }).join('') + '</ul>');
+        }
+        // v2.4: trips (field staff).
+        if (trips.length && onField) {
+          html.push('<h4 class="hr-app-h">Trips</h4><ul class="hr-visits">' + trips.map(function (x) {
+            var f = F();
+            var bits = [f ? f.tripSpan(x) : '', x.moving_min != null ? fmtDur(x.moving_min) + ' moving' : '',
+                        x.km != null ? fmtKm(x.km) + ' km' : '', x.stops != null ? plural(num(x.stops), 'stop') : '',
+                        x.open ? '' : (x.end_reason ? label('TRIP_END_LABELS', x.end_reason) : '')].filter(Boolean).join(' · ');
+            var flags = f ? f.flagList(x) : [];
+            return '<li><b>' + esc(f ? f.tripText(x) : 'Trip') + '</b>' + (x.ref_title ? ' — ' + esc(x.ref_title) : '') +
+              (x.id ? ' <button type="button" class="text-btn hr-btn" data-hr-trip="' + esc(x.id) + '" title="See this trip on the route map">Map</button>' : '') +
+              flags.map(function (g) { return tag(g.text, 'hr-mark-warn', g.tip); }).join('') +
+              '<div class="hr-muted">' + esc(bits) + '</div>' +
+              (x.note && x.ref_code ? '<div class="hr-muted">' + esc(x.note) + '</div>' : '') + '</li>';
           }).join('') + '</ul>');
         }
         var visits = Array.isArray(v.visits) ? v.visits : [];
@@ -2478,6 +3037,25 @@
       });
     }
     bodyEl.addEventListener('click', function (ev) {
+      // v2.4: a punch photo, a request of the day, a trip on the map.
+      var ph = ev.target.closest('[data-hr-act="photo"]');
+      if (ph && !ph.disabled) { openPhoto(ph); return; }
+      var dq = ev.target.closest('[data-hr-decide]');
+      if (dq && !dq.disabled && !why) {
+        var qid = dq.getAttribute('data-hr-decide');
+        var q = (state.data && Array.isArray(state.data.requests) ? state.data.requests : []).filter(function (x) { return x && String(x.id) === qid; })[0];
+        if (q) decideRequest(Object.assign({}, q, { email: lower(q.email || q.employee_email || e), name: String(q.name || q.employee_name || nameOf(e)) }),
+          dq.getAttribute('data-hr-ok') === '1', function () { load(); });
+        return;
+      }
+      var tr = ev.target.closest('[data-hr-trip]');
+      if (tr) {
+        var tid = tr.getAttribute('data-hr-trip');
+        var ui = UI();
+        if (ui && typeof ui.closeAll === 'function') { try { ui.closeAll(); } catch (x) { /* the day panel stays */ } }
+        showRoute(e, day, tid);
+        return;
+      }
       var b = ev.target.closest('[data-hr-void], [data-hr-replace], [data-hr-pair]');
       if (!b || b.disabled || why) return;
       if (b.hasAttribute('data-hr-void')) voidPunch(b.getAttribute('data-hr-void'));
@@ -2506,22 +3084,49 @@
     });
   }
 
+  // A punch photo, full size (hr_selfie_get): fetched on a click, shown in
+  // the photo viewer from memory, and never kept anywhere. The server
+  // records each look.
+  var photoBusy = {};
+  function openPhoto(btn) {
+    var id = btn.getAttribute('data-hr-event');
+    if (!id || photoBusy[id]) return;
+    var title = btn.getAttribute('data-hr-title') || 'Punch photo';
+    var sub = btn.getAttribute('data-hr-sub') || '';
+    var who = whoKey();
+    photoBusy[id] = true;
+    Promise.resolve().then(function () { return need('hrSelfieGet').hrSelfieGet(id); }).then(function (res) {
+      delete photoBusy[id];
+      if (!stillMe(who)) return;
+      var f = F();
+      var url = f && res ? f.jpegDataUrl(res.jpeg_b64) : null;
+      if (!url) { toast('There is no photo for this punch.', 'info'); return; }
+      var ui = UI();
+      if (!ui || typeof ui.lightbox !== 'function') { toast('The photo viewer could not open. Restart Neo OS.', 'error'); return; }
+      var bits = [sub, res.taken_at ? 'taken at ' + istHm(res.taken_at) : '', res.late ? 'sent late' : ''].filter(Boolean).join(' · ');
+      ui.lightbox([{ url: url, title: title, sub: bits, type: 'image/jpeg' }], 0);
+    }, function (err) {
+      delete photoBusy[id];
+      if (!stillMe(who)) return;
+      toast('The photo could not be opened: ' + errText(err), 'error');
+    });
+  }
+
   // hr_request_decide's answer when a missed punch no longer fits the day:
   // its punch would not be taken, or a later punch would become irregular.
   var NO_LONGER_FITS = /no longer fits the day/i;
   // The day a missed punch is fixed on: the request's day (India day of missed_at).
-  function reqDay(r) { var d = String(r.date_from || '').slice(0, 10); return validDay(d) ? d : dayOf(r.missed_at); }
+  function reqDay(r) { var d = String(r.date_from || '').slice(0, 10); return validDay(d) ? d : dayOf(r.missed_at || r.punch_at); }
 
-  function decideRequest(id, approve) {
-    var r = findRequest(id);
+  // id: a request id from the lists, or the request itself (the day panel).
+  // onDone: called after a decision went through (the day panel reloads).
+  function decideRequest(id, approve, onDone) {
+    var r = id && typeof id === 'object' ? id : findRequest(id);
     if (!r) { toast('That request is no longer listed. Refresh and try again.', 'info'); return; }
+    if (isPunchKind(r.kind)) { decidePunchRequest(r, approve, onDone); return; }
     var who = whoKey();
     var verb = approve ? 'Approve' : 'Reject';
-    var effect = '';
-    if (approve && r.kind === 'leave' && !r.half_day) effect = 'Those days are marked as leave on the roster (weekly offs and holidays skipped).';
-    else if (approve && r.kind === 'field_day') effect = 'Those days are marked as field days on the roster.';
-    else if (approve && r.kind === 'missed_punch') effect = 'The punch is added to the day as HR’s. If it no longer fits the day, Correct… opens on that day to approve it with the change it needs.';
-    else if (approve) effect = 'The day counts as flexible: no late or early marks.';
+    var effect = F() ? F().effectText(r.kind, approve, r) : '';
     var fix = null;
     dialog({
       title: verb + ' ' + label('REQUEST_LABELS', r.kind).toLowerCase() + ' for ' + r.name + '?',
@@ -2544,6 +3149,7 @@
             return res.message || 'That did not go through. Refresh and try again.';
           }
           toast((approve ? 'Approved' : 'Rejected') + ' — ' + r.name + ' sees it on NeoHR.', 'success');
+          if (typeof onDone === 'function') onDone();
           return true;
         }, function (err) {
           // Nothing was changed and it stays pending: Correct… on that day
@@ -2562,14 +3168,85 @@
       openDay(r.email, reqDay(r), { correct: true, request: r, note: fix.note });
     });
   }
+  // A punch reason or an away punch (v2.4): hr_punch_request_decide.
+  // Rejecting an away punch removes it; HR may give the right time, and the
+  // server adds HR's punch there when the day allows it. When it does not
+  // (correct.ok false), Correct… opens on that day.
+  function decidePunchRequest(r, approve, onDone) {
+    var who = whoKey();
+    var f = F();
+    var verb = approve ? 'Approve' : 'Reject';
+    var away = r.kind === 'away_punch';
+    var day = reqDay(r);
+    var effect = f ? f.effectText(r.kind, approve, r) : '';
+    var place = f ? f.placeText(r) : '';
+    var reason = f ? f.reasonText({ reason_kind: r.reason_kind, reason_text: r.reason, reason_ref: r.ref_code }) : String(r.reason || '');
+    var askTime = away && !approve;
+    var outcome = null;
+    dialog({
+      title: verb + ' ' + (away ? 'the away punch' : 'the ' + label('REQUEST_LABELS', r.kind).toLowerCase()) + ' for ' + r.name + '?',
+      sub: reqDates(r),
+      okText: verb, danger: !approve, busyText: approve ? 'Approving…' : 'Rejecting…',
+      body: (place || reason ? '<p class="ops-dialog-msg">' + esc([place, reason].filter(Boolean).join(' · ')) + '</p>' : '') +
+        (effect ? '<p class="ops-hint">' + esc(effect) + '</p>' : '') +
+        (askTime ? '<div class="ops-grid">' +
+            field('Date', '<input type="date" data-hr-f="cdate" value="' + esc(day) + '" min="' + esc(day) + '" max="' + esc(addDays(day, 1)) + '">') +
+            field('The right time (India; empty = none)', '<input type="time" data-hr-f="ctime">') +
+          '</div><p class="ops-hint">' + esc('Leave the time empty if they did not work then. You can also add it later with Correct… on the day.') + '</p>' : '') +
+        field(approve ? 'Note (optional)' : 'Note (required — they will read it)', '<textarea data-hr-f="note" maxlength="300" rows="3"></textarea>'),
+      onOk: function (root) {
+        if (!stillMe(who)) return GONE;
+        var note = val(root, '[data-hr-f="note"]');
+        if (!approve && !note) return 'Say why you are rejecting it.';
+        var at = null;
+        if (askTime) {
+          var time = val(root, '[data-hr-f="ctime"]'), date = val(root, '[data-hr-f="cdate"]');
+          if (time) {
+            at = f ? f.istToIso(date, time) : null;
+            if (!at) return 'Choose the date and time.';
+            if (tsMs(at) > nowMs() + 60000) return 'That time is in the future.';
+          }
+        }
+        return need('hrPunchRequestDecide').hrPunchRequestDecide(r.id, approve, note || null, at).then(function (res) {
+          refreshAfterWrite();
+          if (res && res.ok === false) {
+            if (res.reason === 'decided') {
+              toast('Already ' + label('REQUEST_STATUS', res.status).toLowerCase() + (res.by ? ' by ' + res.by : '') + (res.at ? ' at ' + istHm(res.at) : '') + '.', 'warning', 8000);
+              return true;
+            }
+            return res.message || 'That did not go through. Refresh and try again.';
+          }
+          var c = res && res.correct && typeof res.correct === 'object' ? res.correct : null;
+          outcome = { at: at, correct: c };
+          if (approve) toast('Approved — ' + r.name + ' sees it on NeoHR.', 'success');
+          else if (away && at && (!c || c.ok !== false)) toast('Rejected — the away punch is removed and HR’s punch at ' + istHm(at) + ' is added in its place.', 'success', 7000);
+          else if (away && !at) toast('Rejected — the away punch is removed from ' + r.name + '’s day.', 'success', 7000);
+          else if (!away) toast('Rejected — the late mark stays. ' + r.name + ' sees your note on NeoHR.', 'success');
+          if (typeof onDone === 'function') onDone();
+          return true;
+        });
+      }
+    }).then(function (done) {
+      if (!done || !outcome || !stillMe(who)) return;
+      var c = outcome.correct;
+      if (outcome.at && c && c.ok === false) {
+        // Rejected, but the right time does not fit the day as it is.
+        toast('The away punch is removed, but HR’s punch at ' + istHm(outcome.at) + ' could not be added' + (c.message ? ': ' + c.message : '.') + ' Add it with Correct….', 'warning', 9000);
+        openDay(r.email, day, { correct: true });
+      }
+    });
+  }
   function cancelRequest(id) {
     var r = findRequest(id);
     if (!r) { toast('That request is no longer listed. Refresh and try again.', 'info'); return; }
     var who = whoKey();
+    var what = r.kind === 'punch_reason' ? 'The late mark for that day comes back.'
+      : isPunchKind(r.kind) ? 'The day goes back to how it was before it was approved.'
+      : 'Roster days set by this request go back to their defaults.';
     dialog({
       title: 'Cancel ' + r.name + '’s approved ' + label('REQUEST_LABELS', r.kind).toLowerCase() + '?', sub: reqDates(r),
       okText: 'Cancel it', cancelText: 'Keep it', danger: true, busyText: 'Cancelling…',
-      body: '<p class="ops-dialog-msg">Roster days set by this request go back to their defaults.</p>' +
+      body: '<p class="ops-dialog-msg">' + esc(what) + '</p>' +
         field('Note (required — they will read it)', '<textarea data-hr-f="note" maxlength="300" rows="3"></textarea>'),
       onOk: function (root) {
         if (!stillMe(who)) return GONE;
@@ -2655,7 +3332,7 @@
     var rate = r.rate != null ? r.rate : data.rate;
     dialog({
       title: 'Approve travel allowance for ' + r.name + '?', sub: monthLabel(data.month), okText: 'Approve', busyText: 'Approving…',
-      body: '<p class="ops-dialog-msg">' + esc(fmtKm(r.km) + ' km × ' + money(rate) + ' = ' + money(r.amount != null ? r.amount : Math.round(num(r.km) * num(rate) * 100) / 100)) + '</p>' +
+      body: '<p class="ops-dialog-msg">' + esc(fmtKm(r.km) + (data.trips ? ' trip km' : ' km') + ' × ' + money(rate) + ' = ' + money(r.amount != null ? r.amount : Math.round(num(r.km) * num(rate) * 100) / 100)) + '</p>' +
         '<p class="ops-hint">The km, rate and amount are kept as they are now. If the km changed since you opened this, nothing is approved and the report refreshes.</p>' +
         field('Note (optional)', '<input type="text" data-hr-f="note" maxlength="300">'),
       onOk: function (root) {
@@ -2714,6 +3391,7 @@
     if (!s) return;
     var who = whoKey();
     var tmw = addDays(today(), 1);
+    var picker = null;                       // the office map (v1.12.1)
     // The shift fields start from today's default, not the newest row (which
     // may be a change planned for later: said in the banner).
     var cur = defaultShift(today()) || {};
@@ -2739,12 +3417,18 @@
           field('…or every (metres)', numIn('track_distance_m', s.track_distance_m, 25, 1000)) +
           field('Keep route points (days)', numIn('retention_days', s.retention_days, 30, 365)) +
           field('Longest shift (hours)', numIn('max_session_h', s.max_session_h != null ? s.max_session_h : 16, 4, 24)) +
-        '</div><div class="ops-section-title">Travel allowance and the office</div><div class="ops-grid">' +
+        '</div><div class="ops-section-title">Travel allowance and the office</div>' +
+        // v1.12.1: the office point on a map, on top of the number fields.
+        '<div class="hr-pick-wrap"><div class="hr-pick" data-hr-pick role="region" aria-label="Office location map"></div>' +
+          '<p class="ops-hint">Click the map, or drag the pin, to the shop’s entrance. The circle is the radius: a punch inside it counts as at the shop. ' +
+          'The fields below follow the pin, and the pin follows them.</p></div>' +
+        '<div class="ops-grid">' +
           field('Rate per km (₹; empty = not set)', numIn('ta_rate_per_km', s.ta_rate_per_km, 0, null, '0.01')) +
           field('Office radius (metres)', numIn('office_radius_m', s.office_radius_m, 50, 2000)) +
           field('Office latitude', numIn('office_lat', s.office_lat, -90, 90, 'any')) +
           field('Office longitude', numIn('office_lng', s.office_lng, -180, 180, 'any')) +
         '</div>',
+      onOpen: function (root) { picker = officePicker(root, s); },
       onOk: function (root) {
         if (!stillMe(who)) return GONE;
         var p = {};
@@ -2796,7 +3480,80 @@
           return true;
         });
       }
+    }).then(function () { if (picker) picker.remove(); picker = null; }, function () { if (picker) picker.remove(); picker = null; });
+  }
+
+  // The office point picker (Leaflet + OSM, in the settings dialog): click
+  // the map or drag the pin; the radius circle follows the radius field.
+  // The number fields stay the source of truth for Save. → {remove} | null.
+  function officePicker(root, s) {
+    var host = root.querySelector('[data-hr-pick]');
+    var L = window.L;
+    if (!host) return null;
+    if (!L || typeof L.map !== 'function') {
+      host.classList.add('hr-map-off');
+      host.textContent = 'The map could not load. Type the latitude and longitude below instead.';
+      return null;
+    }
+    var latIn = root.querySelector('[data-hr-s="office_lat"]'), lngIn = root.querySelector('[data-hr-s="office_lng"]');
+    var radIn = root.querySelector('[data-hr-s="office_radius_m"]');
+    var lat0 = numOrNull(s.office_lat), lng0 = numOrNull(s.office_lng);
+    var map = L.map(host, { zoomControl: true, attributionControl: true, minZoom: 3, maxZoom: 19 });
+    map.attributionControl.setPrefix(LEAFLET_PREFIX);
+    L.tileLayer(OSM_TILES, { maxZoom: 19, attribution: OSM_ATTRIBUTION }).addTo(map);
+    var radius = function () { var r = numOrNull(radIn && radIn.value); return r != null && r >= 50 && r <= 2000 ? r : num(s.office_radius_m, 150); };
+    var pin = null, ring = null;
+    function place(lat, lng, pan) {
+      var ll = [lat, lng];
+      if (!pin) {
+        pin = L.marker(ll, { draggable: true, keyboard: true, title: 'The office', alt: 'The office',
+          icon: L.divIcon({ className: 'hr-pin', html: '', iconSize: [22, 22], iconAnchor: [11, 11] }) }).addTo(map);
+        ring = L.circle(ll, { radius: radius(), color: '#e11d74', weight: 2, fillColor: '#e11d74', fillOpacity: 0.12, interactive: false }).addTo(map);
+        pin.on('drag', function () { var p = pin.getLatLng(); ring.setLatLng(p); });
+        pin.on('dragend', function () { var p = pin.getLatLng(); write(p.lat, p.lng); });
+      } else {
+        pin.setLatLng(ll); ring.setLatLng(ll);
+      }
+      if (pan) map.setView(ll, Math.max(map.getZoom() || 0, 17), { animate: false });
+    }
+    function write(lat, lng) {
+      if (latIn) latIn.value = lat.toFixed(6);
+      if (lngIn) lngIn.value = lng.toFixed(6);
+    }
+    function readInputs(pan) {
+      var la = numOrNull(latIn && latIn.value), ln = numOrNull(lngIn && lngIn.value);
+      if (la == null || ln == null || Math.abs(la) > 90 || Math.abs(ln) > 180) return;
+      place(la, ln, pan);
+    }
+    map.on('click', function (ev) { place(ev.latlng.lat, ev.latlng.lng, false); write(ev.latlng.lat, ev.latlng.lng); });
+    if (latIn) latIn.addEventListener('change', function () { readInputs(true); });
+    if (lngIn) lngIn.addEventListener('change', function () { readInputs(true); });
+    if (radIn) radIn.addEventListener('input', function () { if (ring) ring.setRadius(radius()); });
+    if (lat0 != null && lng0 != null) { map.setView([lat0, lng0], 17); place(lat0, lng0, false); }
+    else { var c = defaultCenter(); map.setView(c.c, c.z); }
+    // The attribution links open in the system browser, never in the app window.
+    host.addEventListener('click', function (e) {
+      var a = e.target && e.target.closest ? e.target.closest('a[href]') : null;
+      if (!a) return;
+      e.preventDefault();
+      var href = a.getAttribute('href') || '';
+      if (/^https:\/\/(www\.openstreetmap\.org|leafletjs\.com)(\/|$)/.test(href)) openUrl(href, 'that page');
     });
+    // The dialog is still opening: size the map once it has its size, and
+    // centre it again on the pin until the person moves the map themselves.
+    var touched = false;
+    ['mousedown', 'wheel', 'touchstart', 'keydown'].forEach(function (k) { host.addEventListener(k, function () { touched = true; }, { passive: true }); });
+    [60, 320, 700].forEach(function (ms) {
+      setTimeout(function () {
+        try {
+          map.invalidateSize(false);
+          if (touched) return;
+          if (pin) map.setView(pin.getLatLng(), map.getZoom(), { animate: false });
+          else { var c2 = defaultCenter(); map.setView(c2.c, c2.z, { animate: false }); }
+        } catch (e) { /* closed */ }
+      }, ms);
+    });
+    return { remove: function () { try { map.remove(); } catch (e) { /* already gone */ } } };
   }
 
   function editPerson(email) {
@@ -2827,8 +3584,16 @@
           field('Effective from', '<input type="date" data-hr-p="effective_from" value="' + esc(tmw) + '" min="' + esc(today()) + '">') +
         '</div><div class="ops-section-title">NeoHR</div>' +
         sw('attendance_required', pr.attendance_required !== false, 'Attendance required (off = never late or absent)') +
-        sw('track_location', pr.track_location !== false, 'Record their route while on duty') +
-        sw('ta_eligible', pr.ta_eligible !== false, 'Eligible for travel allowance'),
+        sw('track_location', pr.track_location !== false, 'Field staff (route, trips and travel allowance)') +
+        sw('ta_eligible', pr.ta_eligible !== false && pr.track_location !== false, 'Eligible for travel allowance (field staff only)') +
+        '<p class="ops-hint">Field staff are the engineers who go out on site. Their phone records a route while they are on duty. Everyone else is checked at the shop when they punch in and out.</p>',
+      onOpen: function (root) {
+        // Field staff on → travel allowance on too (and off → off), as the
+        // server does when only the field switch is sent.
+        var fs = root.querySelector('[data-hr-p="track_location"]'), ta = root.querySelector('[data-hr-p="ta_eligible"]');
+        var sync = function () { if (ta) { ta.checked = !!fs.checked; ta.disabled = !fs.checked; } };
+        if (fs && ta) { ta.disabled = !fs.checked; fs.addEventListener('change', sync); }
+      },
       onOk: function (root) {
         if (!stillMe(who)) return GONE;
         var out = {};
@@ -2893,10 +3658,17 @@
     if (tab === 'activity') st.v.logsView = 'activity';
     setTab('logs');
   }
-  function showRoute(email, day) {
+  // tripId (v1.12.1): show that trip's part of the route.
+  function showRoute(email, day, tripId) {
     st.v.routePerson = lower(email);
     if (validDay(day)) st.v.routeDay = day;
+    st.v.routeTrip = tripId ? String(tripId) : '';
+    st.mapKey = null;
     setTab('routes');
+  }
+  function routePeople() {
+    var cur = st.v.routePerson;
+    return knownPeople().filter(function (p) { return p.email === cur || showsRoute(p.email); });
   }
 
   function onBodyClick(e) {
@@ -2915,6 +3687,13 @@
     if (act === 'req-approve') { decideRequest(b.getAttribute('data-hr-id'), true); return; }
     if (act === 'req-reject') { decideRequest(b.getAttribute('data-hr-id'), false); return; }
     if (act === 'req-cancel') { cancelRequest(b.getAttribute('data-hr-id')); return; }
+    if (act === 'photo') { openPhoto(b); return; }
+    if (act === 'route-trip') {
+      var tid = b.getAttribute('data-hr-trip') || '';
+      st.v.routeTrip = st.v.routeTrip === tid ? '' : tid;
+      render();
+      return;
+    }
     if (act === 'roster-cell') { editRosterCell(em, day); return; }
     if (act === 'ta-approve') { taApprove(em); return; }
     if (act === 'ta-unapprove') { taUnapprove(em); return; }
@@ -3007,7 +3786,7 @@
     var b = e.target.closest('button');
     if (!b || b.disabled) return;
     var v = st.v, t = today();
-    if (b.hasAttribute('data-hr-live-view')) { v.liveView = b.getAttribute('data-hr-live-view'); writePrefs(); render(); loadLive(); return; }
+    if (b.hasAttribute('data-hr-live-view')) { v.liveView = b.getAttribute('data-hr-live-view'); writePrefs(); render(); loadLive(); syncTimer(); return; }
     if (b.hasAttribute('data-hr-reg-view')) { v.regView = b.getAttribute('data-hr-reg-view'); writePrefs(); render(); loadReg(); return; }
     if (b.hasAttribute('data-hr-req-scope')) { v.reqScope = b.getAttribute('data-hr-req-scope'); render(); loadRequests(); return; }
     if (b.hasAttribute('data-hr-logs-view')) { v.logsView = b.getAttribute('data-hr-logs-view'); writePrefs(); st.filterSig = null; render(); loadTab(false); return; }
@@ -3029,7 +3808,12 @@
     if (c === 'holidays') { editHolidays(); return; }
     if (c === 'route-prev' || c === 'route-next' || c === 'route-now') {
       v.routeDay = c === 'route-now' ? t : stepDay(v.routeDay, c === 'route-prev' ? -1 : 1);
+      v.routeTrip = '';
       render(); loadRoute(); return;
+    }
+    if (c === 'checks-prev' || c === 'checks-next' || c === 'checks-now') {
+      v.checksDay = c === 'checks-now' ? t : stepDay(v.checksDay, c === 'checks-prev' ? -1 : 1);
+      render(); loadChecks(); return;
     }
     if (c === 'ta-prev' || c === 'ta-next' || c === 'ta-now') {
       var tm = c === 'ta-now' ? addMonths(t, -1) : addMonths(v.taMonth, c === 'ta-prev' ? -1 : 1);
@@ -3046,8 +3830,9 @@
     if (x.id === 'hr-reg-day' && validDay(x.value)) { v.regDay = x.value > t ? t : x.value; render(); loadReg(); return; }
     if (x.id === 'hr-reg-month' && mv) { v.regMonth = mv > monthStart(t) ? monthStart(t) : mv; render(); loadReg(); return; }
     if (x.id === 'hr-reg-person') { v.regPerson = lower(x.value); render(); loadReg(); return; }
-    if (x.id === 'hr-route-person') { v.routePerson = lower(x.value); render(); loadRoute(); return; }
-    if (x.id === 'hr-route-day' && validDay(x.value)) { v.routeDay = x.value > t ? t : x.value; render(); loadRoute(); return; }
+    if (x.id === 'hr-route-person') { v.routePerson = lower(x.value); v.routeTrip = ''; render(); loadRoute(); return; }
+    if (x.id === 'hr-route-day' && validDay(x.value)) { v.routeDay = x.value > t ? t : x.value; v.routeTrip = ''; render(); loadRoute(); return; }
+    if (x.id === 'hr-checks-day' && validDay(x.value)) { v.checksDay = x.value > t ? t : x.value; render(); loadChecks(); return; }
     if (x.id === 'hr-ta-month' && mv) { v.taMonth = mv > monthStart(t) ? monthStart(t) : mv; render(); loadTa(); return; }
   }
   function onControlsInput(e) {
@@ -3055,13 +3840,20 @@
   }
 
   // ── timers ────────────────────────────────────────────────────────────────
+  // Live and Requests refresh every minute while they are on show (Requests
+  // since 1.12.1: punch reasons are due the same day).
+  function timedTab() { return st.tab === 'live' || st.tab === 'requests'; }
   function syncTimer() {
-    var want = active() && !!profile() && st.tab === 'live';
+    var want = active() && !!profile() && timedTab();
     if (want && !st.timer) {
       st.timer = setInterval(function () {
-        if (!active() || !profile() || st.tab !== 'live') { syncTimer(); return; }
+        if (!active() || !profile() || !timedTab()) { syncTimer(); return; }
+        if (st.tab === 'requests') { loadRequests(); return; }
         loadBoard();
+        loadPending();
         if (st.v.liveView === 'load') loadTeamToday();
+        // Today's punches: only today's list changes.
+        if (st.v.liveView === 'punches' && st.v.checksDay === today()) loadChecks();
       }, LIVE_REFRESH_MS);
     } else if (!want && st.timer) {
       clearInterval(st.timer);
