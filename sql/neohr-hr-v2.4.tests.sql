@@ -22,7 +22,7 @@
 -- tests/fixtures/hr-day-v24.json is inlined below byte for byte
 -- (tests/sql-parity.test.js checks that) and runs through _hr_day_calc.
 --
--- Two halves: sections 0–8 and sections 0–1 + 9–16 each pass on their own as
+-- Two halves: sections 0–8 and sections 0–1 + 9–17 each pass on their own as
 -- well (a live rehearsal can send them separately); the whole file runs them in
 -- this order.
 --
@@ -45,7 +45,7 @@ grant select on neo_v24t.users, neo_v24t.fx to anon, authenticated;
 grant select, insert, update, delete on neo_v24t.ctx to anon, authenticated;
 
 -- The shared fixture, inlined byte for byte (tests/sql-parity.test.js).
-insert into neo_v24t.fx (name, body) values ('hr-day-v24', $fx${"version":1,"about":"v2.4 day records of public._hr_day_calc (NEOHR-2.3-SPEC 1.4): excused_in, pending_ids, pending_reason. India time; minutes are whole minutes, rounded down.","cases":[{"name":"excused_late","note":"an excused first punch_in: late_raw_min keeps the 50 minutes, late_min is 0, never \"late\"","input":{"day":"2026-10-20","now":"2026-10-22T06:30:00Z","max_session_h":16,"shift":{"start":"09:30","end":"18:30","grace_min":10,"half_day_min":240},"duty":"shop","holiday":null,"attendance_required":true,"flex_request":false,"half_day_leave":false,"events":[{"id":"e101","kind":"punch_in","at":"2026-10-20T05:00:00Z"},{"id":"e102","kind":"punch_out","at":"2026-10-20T13:30:00Z"}],"points_at":[],"km":0,"km_gaps":0,"excused_in":["e101"],"pending_ids":[],"pending_reason":false},"expect":{"late_excused":true,"pending_min":0,"away_pending":false,"pending_reason":false,"missed_out":false,"irregular":false,"open":false,"status":"present","flex":false,"first_in":"2026-10-20T05:00:00Z","last_out":"2026-10-20T13:30:00Z","worked_min":510,"break_min":0,"late_min":0,"late_raw_min":50,"early_min":0}},{"name":"late_not_excused","note":"the same day without the excuse: late","input":{"day":"2026-10-20","now":"2026-10-22T06:30:00Z","max_session_h":16,"shift":{"start":"09:30","end":"18:30","grace_min":10,"half_day_min":240},"duty":"shop","holiday":null,"attendance_required":true,"flex_request":false,"half_day_leave":false,"events":[{"id":"e103","kind":"punch_in","at":"2026-10-20T05:00:00Z"},{"id":"e104","kind":"punch_out","at":"2026-10-20T13:30:00Z"}],"points_at":[],"km":0,"km_gaps":0,"excused_in":[],"pending_ids":[],"pending_reason":false},"expect":{"late_excused":false,"pending_min":0,"away_pending":false,"pending_reason":false,"missed_out":false,"irregular":false,"open":false,"status":"late","flex":false,"worked_min":510,"late_min":50,"late_raw_min":50}},{"name":"excused_on_time","note":"excused but on time: nothing to excuse, still marked excused","input":{"day":"2026-10-20","now":"2026-10-22T06:30:00Z","max_session_h":16,"shift":{"start":"09:30","end":"18:30","grace_min":10,"half_day_min":240},"duty":"shop","holiday":null,"attendance_required":true,"flex_request":false,"half_day_leave":false,"events":[{"id":"e105","kind":"punch_in","at":"2026-10-20T04:05:00Z"},{"id":"e106","kind":"punch_out","at":"2026-10-20T13:05:00Z"}],"points_at":[],"km":0,"km_gaps":0,"excused_in":["e105"],"pending_ids":[],"pending_reason":false},"expect":{"late_excused":true,"pending_min":0,"away_pending":false,"pending_reason":false,"missed_out":false,"irregular":false,"open":false,"status":"present","worked_min":540,"late_min":0,"late_raw_min":0}},{"name":"excused_second_session_only","note":"only the FIRST session's punch_in can excuse the day","input":{"day":"2026-10-20","now":"2026-10-22T06:30:00Z","max_session_h":16,"shift":{"start":"09:30","end":"18:30","grace_min":10,"half_day_min":240},"duty":"shop","holiday":null,"attendance_required":true,"flex_request":false,"half_day_leave":false,"events":[{"id":"e107","kind":"punch_in","at":"2026-10-20T05:00:00Z"},{"id":"e108","kind":"punch_out","at":"2026-10-20T07:00:00Z"},{"id":"e109","kind":"punch_in","at":"2026-10-20T08:00:00Z"},{"id":"e110","kind":"punch_out","at":"2026-10-20T13:30:00Z"}],"points_at":[],"km":0,"km_gaps":0,"excused_in":["e109"],"pending_ids":[],"pending_reason":false},"expect":{"late_excused":false,"pending_min":0,"away_pending":false,"pending_reason":false,"missed_out":false,"irregular":false,"open":false,"status":"late","worked_min":450,"late_min":50,"late_raw_min":50}},{"name":"excused_skipped_punch_in","note":"a skipped (irregular) second punch_in is not the first session's","input":{"day":"2026-10-20","now":"2026-10-22T06:30:00Z","max_session_h":16,"shift":{"start":"09:30","end":"18:30","grace_min":10,"half_day_min":240},"duty":"shop","holiday":null,"attendance_required":true,"flex_request":false,"half_day_leave":false,"events":[{"id":"e111","kind":"punch_in","at":"2026-10-20T04:30:00Z"},{"id":"e112","kind":"punch_in","at":"2026-10-20T05:00:00Z"},{"id":"e113","kind":"punch_out","at":"2026-10-20T13:00:00Z"}],"points_at":[],"km":0,"km_gaps":0,"excused_in":["e112"],"pending_ids":[],"pending_reason":false},"expect":{"late_excused":false,"pending_min":0,"away_pending":false,"pending_reason":false,"missed_out":false,"irregular":true,"open":false,"status":"late","worked_min":510,"late_min":20,"late_raw_min":20}},{"name":"pending_away_punch_in","note":"a pending away punch_in: the session counts nowhere until HR approves","input":{"day":"2026-10-20","now":"2026-10-22T06:30:00Z","max_session_h":16,"shift":{"start":"09:30","end":"18:30","grace_min":10,"half_day_min":240},"duty":"shop","holiday":null,"attendance_required":true,"flex_request":false,"half_day_leave":false,"events":[{"id":"e114","kind":"punch_in","at":"2026-10-20T04:00:00Z"},{"id":"e115","kind":"punch_out","at":"2026-10-20T13:00:00Z"}],"points_at":[],"km":0,"km_gaps":0,"excused_in":[],"pending_ids":["e114"],"pending_reason":false},"expect":{"late_excused":false,"pending_min":540,"away_pending":true,"pending_reason":false,"missed_out":false,"irregular":false,"open":false,"status":"half_day","first_in":"2026-10-20T04:00:00Z","last_out":"2026-10-20T13:00:00Z","worked_min":0,"break_min":0,"late_min":0,"late_raw_min":0,"early_min":0}},{"name":"pending_away_punch_out","note":"a pending away punch_out takes its whole session out too","input":{"day":"2026-10-20","now":"2026-10-22T06:30:00Z","max_session_h":16,"shift":{"start":"09:30","end":"18:30","grace_min":10,"half_day_min":240},"duty":"shop","holiday":null,"attendance_required":true,"flex_request":false,"half_day_leave":false,"events":[{"id":"e116","kind":"punch_in","at":"2026-10-20T04:00:00Z"},{"id":"e117","kind":"punch_out","at":"2026-10-20T13:00:00Z"}],"points_at":[],"km":0,"km_gaps":0,"excused_in":[],"pending_ids":["e117"],"pending_reason":false},"expect":{"late_excused":false,"pending_min":540,"away_pending":true,"pending_reason":false,"missed_out":false,"irregular":false,"open":false,"status":"half_day","worked_min":0}},{"name":"pending_second_session","note":"only the pending session is left out","input":{"day":"2026-10-20","now":"2026-10-22T06:30:00Z","max_session_h":16,"shift":{"start":"09:30","end":"18:30","grace_min":10,"half_day_min":240},"duty":"shop","holiday":null,"attendance_required":true,"flex_request":false,"half_day_leave":false,"events":[{"id":"e118","kind":"punch_in","at":"2026-10-20T04:00:00Z"},{"id":"e119","kind":"punch_out","at":"2026-10-20T06:30:00Z"},{"id":"e120","kind":"punch_in","at":"2026-10-20T07:30:00Z"},{"id":"e121","kind":"punch_out","at":"2026-10-20T13:00:00Z"}],"points_at":[],"km":0,"km_gaps":0,"excused_in":[],"pending_ids":["e120"],"pending_reason":false},"expect":{"late_excused":false,"pending_min":330,"away_pending":true,"pending_reason":false,"missed_out":false,"irregular":false,"open":false,"status":"half_day","worked_min":150,"late_min":0,"early_min":0}},{"name":"pending_with_break","note":"a pending session's break minutes are left out too","input":{"day":"2026-10-20","now":"2026-10-22T06:30:00Z","max_session_h":16,"shift":{"start":"09:30","end":"18:30","grace_min":10,"half_day_min":240},"duty":"shop","holiday":null,"attendance_required":true,"flex_request":false,"half_day_leave":false,"events":[{"id":"e122","kind":"punch_in","at":"2026-10-20T04:00:00Z"},{"id":"e123","kind":"break_start","at":"2026-10-20T07:00:00Z"},{"id":"e124","kind":"break_end","at":"2026-10-20T07:30:00Z"},{"id":"e125","kind":"punch_out","at":"2026-10-20T13:00:00Z"}],"points_at":[],"km":0,"km_gaps":0,"excused_in":[],"pending_ids":["e122"],"pending_reason":false},"expect":{"late_excused":false,"pending_min":510,"away_pending":true,"pending_reason":false,"missed_out":false,"irregular":false,"open":false,"status":"half_day","worked_min":0,"break_min":0}},{"name":"pending_open_today","note":"an open pending session: open, its minutes so far pending","input":{"day":"2026-10-22","now":"2026-10-22T06:30:00Z","max_session_h":16,"shift":{"start":"09:30","end":"18:30","grace_min":10,"half_day_min":240},"duty":"shop","holiday":null,"attendance_required":true,"flex_request":false,"half_day_leave":false,"events":[{"id":"e126","kind":"punch_in","at":"2026-10-22T03:50:00Z"}],"points_at":[],"km":0,"km_gaps":0,"excused_in":[],"pending_ids":["e126"],"pending_reason":false},"expect":{"late_excused":false,"pending_min":160,"away_pending":true,"pending_reason":false,"missed_out":false,"irregular":false,"open":true,"status":"open","first_in":"2026-10-22T03:50:00Z","last_out":null,"worked_min":0}},{"name":"pending_reason_absent","note":"pending_reason is copied through; no punch: absent","input":{"day":"2026-10-20","now":"2026-10-22T06:30:00Z","max_session_h":16,"shift":{"start":"09:30","end":"18:30","grace_min":10,"half_day_min":240},"duty":"shop","holiday":null,"attendance_required":true,"flex_request":false,"half_day_leave":false,"events":[],"points_at":[],"km":0,"km_gaps":0,"excused_in":[],"pending_ids":[],"pending_reason":true},"expect":{"late_excused":false,"pending_min":0,"away_pending":false,"pending_reason":true,"missed_out":false,"irregular":false,"open":false,"status":"absent","worked_min":0,"absent_units":1,"late_raw_min":0}},{"name":"excused_flex_request","note":"a flexible day has no late minutes to excuse","input":{"day":"2026-10-20","now":"2026-10-22T06:30:00Z","max_session_h":16,"shift":{"start":"09:30","end":"18:30","grace_min":10,"half_day_min":240},"duty":"shop","holiday":null,"attendance_required":true,"flex_request":true,"half_day_leave":false,"events":[{"id":"e127","kind":"punch_in","at":"2026-10-20T05:00:00Z"},{"id":"e128","kind":"punch_out","at":"2026-10-20T13:30:00Z"}],"points_at":[],"km":0,"km_gaps":0,"excused_in":["e127"],"pending_ids":[],"pending_reason":false},"expect":{"late_excused":true,"pending_min":0,"away_pending":false,"pending_reason":false,"missed_out":false,"irregular":false,"open":false,"status":"present","flex":true,"worked_min":510,"late_min":0,"late_raw_min":0}},{"name":"v23_input_no_v24_keys","note":"a v2.3 input (no v2.4 keys): the new keys read false / 0","input":{"day":"2026-10-20","now":"2026-10-22T06:30:00Z","max_session_h":16,"shift":{"start":"09:30","end":"18:30","grace_min":10,"half_day_min":240},"duty":"shop","holiday":null,"attendance_required":true,"flex_request":false,"half_day_leave":false,"events":[{"id":"e129","kind":"punch_in","at":"2026-10-20T04:22:00Z"},{"id":"e130","kind":"punch_out","at":"2026-10-20T13:01:00Z"}],"points_at":[],"km":0,"km_gaps":0},"expect":{"late_excused":false,"pending_min":0,"away_pending":false,"pending_reason":false,"missed_out":false,"irregular":false,"open":false,"status":"late","worked_min":519,"late_min":12,"late_raw_min":12}},{"name":"folded_sessions_pending_out","note":"already-folded sessions: pending_ids match out_id as well as in_id","input":{"day":"2026-10-20","now":"2026-10-22T06:30:00Z","max_session_h":16,"shift":{"start":"09:30","end":"18:30","grace_min":10,"half_day_min":240},"duty":"shop","holiday":null,"attendance_required":true,"flex_request":false,"half_day_leave":false,"sessions":[{"in_id":"s1","start":"2026-10-20T04:00:00Z","cap":"2026-10-20T20:00:00Z","end":"out","out":"2026-10-20T13:00:00Z","out_id":"s2","breaks":[],"open_break":null,"last_at":"2026-10-20T13:00:00Z","irregular":false,"day":"2026-10-20"}],"orphans":[],"km":0,"km_gaps":0,"excused_in":[],"pending_ids":["s2"],"pending_reason":false},"expect":{"late_excused":false,"pending_min":540,"away_pending":true,"pending_reason":false,"missed_out":false,"irregular":false,"open":false,"status":"half_day","worked_min":0}},{"name":"excused_and_pending","note":"excused and pending at once: no late mark, and nothing counted yet","input":{"day":"2026-10-20","now":"2026-10-22T06:30:00Z","max_session_h":16,"shift":{"start":"09:30","end":"18:30","grace_min":10,"half_day_min":240},"duty":"shop","holiday":null,"attendance_required":true,"flex_request":false,"half_day_leave":false,"events":[{"id":"e131","kind":"punch_in","at":"2026-10-20T05:00:00Z"},{"id":"e132","kind":"punch_out","at":"2026-10-20T13:30:00Z"}],"points_at":[],"km":0,"km_gaps":0,"excused_in":["e131"],"pending_ids":["e131"],"pending_reason":false},"expect":{"late_excused":true,"pending_min":510,"away_pending":true,"pending_reason":false,"missed_out":false,"irregular":false,"open":false,"status":"half_day","worked_min":0,"late_min":0,"late_raw_min":50}},{"name":"excused_short_day","note":"excused but short: half day, not late","input":{"day":"2026-10-20","now":"2026-10-22T06:30:00Z","max_session_h":16,"shift":{"start":"09:30","end":"18:30","grace_min":10,"half_day_min":240},"duty":"shop","holiday":null,"attendance_required":true,"flex_request":false,"half_day_leave":false,"events":[{"id":"e133","kind":"punch_in","at":"2026-10-20T05:00:00Z"},{"id":"e134","kind":"punch_out","at":"2026-10-20T07:00:00Z"}],"points_at":[],"km":0,"km_gaps":0,"excused_in":["e133"],"pending_ids":[],"pending_reason":false},"expect":{"late_excused":true,"pending_min":0,"away_pending":false,"pending_reason":false,"missed_out":false,"irregular":false,"open":false,"status":"half_day","worked_min":120,"late_min":0,"late_raw_min":50,"early_min":360}},{"name":"excused_field_duty","note":"duty field: no late minutes at all","input":{"day":"2026-10-20","now":"2026-10-22T06:30:00Z","max_session_h":16,"shift":{"start":"09:30","end":"18:30","grace_min":10,"half_day_min":240},"duty":"field","holiday":null,"attendance_required":true,"flex_request":false,"half_day_leave":false,"events":[{"id":"e135","kind":"punch_in","at":"2026-10-20T05:00:00Z"},{"id":"e136","kind":"punch_out","at":"2026-10-20T13:30:00Z"}],"points_at":[],"km":0,"km_gaps":0,"excused_in":["e135"],"pending_ids":[],"pending_reason":false},"expect":{"late_excused":true,"pending_min":0,"away_pending":false,"pending_reason":false,"missed_out":false,"irregular":false,"open":false,"status":"present","flex":true,"worked_min":510,"late_min":0,"late_raw_min":0}}]}$fx$::jsonb);
+insert into neo_v24t.fx (name, body) values ('hr-day-v24', $fx${"version":1,"about":"v2.4 day records of public._hr_day_calc (NEOHR-2.3-SPEC 1.4): excused_in, pending_ids, pending_reason. India time; minutes are whole minutes, rounded down. The status word counts worked + pending minutes (a day waiting for HR is not a half day for that alone).","cases":[{"name":"excused_late","note":"an excused first punch_in: late_raw_min keeps the 50 minutes, late_min is 0, never \"late\"","input":{"day":"2026-10-20","now":"2026-10-22T06:30:00Z","max_session_h":16,"shift":{"start":"09:30","end":"18:30","grace_min":10,"half_day_min":240},"duty":"shop","holiday":null,"attendance_required":true,"flex_request":false,"half_day_leave":false,"events":[{"id":"e101","kind":"punch_in","at":"2026-10-20T05:00:00Z"},{"id":"e102","kind":"punch_out","at":"2026-10-20T13:30:00Z"}],"points_at":[],"km":0,"km_gaps":0,"excused_in":["e101"],"pending_ids":[],"pending_reason":false},"expect":{"late_excused":true,"pending_min":0,"away_pending":false,"pending_reason":false,"missed_out":false,"irregular":false,"open":false,"status":"present","flex":false,"first_in":"2026-10-20T05:00:00Z","last_out":"2026-10-20T13:30:00Z","worked_min":510,"break_min":0,"late_min":0,"late_raw_min":50,"early_min":0}},{"name":"late_not_excused","note":"the same day without the excuse: late","input":{"day":"2026-10-20","now":"2026-10-22T06:30:00Z","max_session_h":16,"shift":{"start":"09:30","end":"18:30","grace_min":10,"half_day_min":240},"duty":"shop","holiday":null,"attendance_required":true,"flex_request":false,"half_day_leave":false,"events":[{"id":"e103","kind":"punch_in","at":"2026-10-20T05:00:00Z"},{"id":"e104","kind":"punch_out","at":"2026-10-20T13:30:00Z"}],"points_at":[],"km":0,"km_gaps":0,"excused_in":[],"pending_ids":[],"pending_reason":false},"expect":{"late_excused":false,"pending_min":0,"away_pending":false,"pending_reason":false,"missed_out":false,"irregular":false,"open":false,"status":"late","flex":false,"worked_min":510,"late_min":50,"late_raw_min":50}},{"name":"excused_on_time","note":"excused but on time: nothing to excuse, still marked excused","input":{"day":"2026-10-20","now":"2026-10-22T06:30:00Z","max_session_h":16,"shift":{"start":"09:30","end":"18:30","grace_min":10,"half_day_min":240},"duty":"shop","holiday":null,"attendance_required":true,"flex_request":false,"half_day_leave":false,"events":[{"id":"e105","kind":"punch_in","at":"2026-10-20T04:05:00Z"},{"id":"e106","kind":"punch_out","at":"2026-10-20T13:05:00Z"}],"points_at":[],"km":0,"km_gaps":0,"excused_in":["e105"],"pending_ids":[],"pending_reason":false},"expect":{"late_excused":true,"pending_min":0,"away_pending":false,"pending_reason":false,"missed_out":false,"irregular":false,"open":false,"status":"present","worked_min":540,"late_min":0,"late_raw_min":0}},{"name":"excused_second_session_only","note":"only the FIRST session's punch_in can excuse the day","input":{"day":"2026-10-20","now":"2026-10-22T06:30:00Z","max_session_h":16,"shift":{"start":"09:30","end":"18:30","grace_min":10,"half_day_min":240},"duty":"shop","holiday":null,"attendance_required":true,"flex_request":false,"half_day_leave":false,"events":[{"id":"e107","kind":"punch_in","at":"2026-10-20T05:00:00Z"},{"id":"e108","kind":"punch_out","at":"2026-10-20T07:00:00Z"},{"id":"e109","kind":"punch_in","at":"2026-10-20T08:00:00Z"},{"id":"e110","kind":"punch_out","at":"2026-10-20T13:30:00Z"}],"points_at":[],"km":0,"km_gaps":0,"excused_in":["e109"],"pending_ids":[],"pending_reason":false},"expect":{"late_excused":false,"pending_min":0,"away_pending":false,"pending_reason":false,"missed_out":false,"irregular":false,"open":false,"status":"late","worked_min":450,"late_min":50,"late_raw_min":50}},{"name":"excused_skipped_punch_in","note":"a skipped (irregular) second punch_in is not the first session's","input":{"day":"2026-10-20","now":"2026-10-22T06:30:00Z","max_session_h":16,"shift":{"start":"09:30","end":"18:30","grace_min":10,"half_day_min":240},"duty":"shop","holiday":null,"attendance_required":true,"flex_request":false,"half_day_leave":false,"events":[{"id":"e111","kind":"punch_in","at":"2026-10-20T04:30:00Z"},{"id":"e112","kind":"punch_in","at":"2026-10-20T05:00:00Z"},{"id":"e113","kind":"punch_out","at":"2026-10-20T13:00:00Z"}],"points_at":[],"km":0,"km_gaps":0,"excused_in":["e112"],"pending_ids":[],"pending_reason":false},"expect":{"late_excused":false,"pending_min":0,"away_pending":false,"pending_reason":false,"missed_out":false,"irregular":true,"open":false,"status":"late","worked_min":510,"late_min":20,"late_raw_min":20}},{"name":"pending_away_punch_in","note":"a pending away punch_in: the session counts nowhere until HR approves; the status word counts it (present, not half_day)","input":{"day":"2026-10-20","now":"2026-10-22T06:30:00Z","max_session_h":16,"shift":{"start":"09:30","end":"18:30","grace_min":10,"half_day_min":240},"duty":"shop","holiday":null,"attendance_required":true,"flex_request":false,"half_day_leave":false,"events":[{"id":"e114","kind":"punch_in","at":"2026-10-20T04:00:00Z"},{"id":"e115","kind":"punch_out","at":"2026-10-20T13:00:00Z"}],"points_at":[],"km":0,"km_gaps":0,"excused_in":[],"pending_ids":["e114"],"pending_reason":false},"expect":{"late_excused":false,"pending_min":540,"away_pending":true,"pending_reason":false,"missed_out":false,"irregular":false,"open":false,"status":"present","first_in":"2026-10-20T04:00:00Z","last_out":"2026-10-20T13:00:00Z","worked_min":0,"break_min":0,"late_min":0,"late_raw_min":0,"early_min":0}},{"name":"pending_away_punch_out","note":"a pending away punch_out takes its whole session out too; status from worked + pending minutes","input":{"day":"2026-10-20","now":"2026-10-22T06:30:00Z","max_session_h":16,"shift":{"start":"09:30","end":"18:30","grace_min":10,"half_day_min":240},"duty":"shop","holiday":null,"attendance_required":true,"flex_request":false,"half_day_leave":false,"events":[{"id":"e116","kind":"punch_in","at":"2026-10-20T04:00:00Z"},{"id":"e117","kind":"punch_out","at":"2026-10-20T13:00:00Z"}],"points_at":[],"km":0,"km_gaps":0,"excused_in":[],"pending_ids":["e117"],"pending_reason":false},"expect":{"late_excused":false,"pending_min":540,"away_pending":true,"pending_reason":false,"missed_out":false,"irregular":false,"open":false,"status":"present","worked_min":0}},{"name":"pending_second_session","note":"only the pending session is left out; 150 counted + 330 pending is a full day","input":{"day":"2026-10-20","now":"2026-10-22T06:30:00Z","max_session_h":16,"shift":{"start":"09:30","end":"18:30","grace_min":10,"half_day_min":240},"duty":"shop","holiday":null,"attendance_required":true,"flex_request":false,"half_day_leave":false,"events":[{"id":"e118","kind":"punch_in","at":"2026-10-20T04:00:00Z"},{"id":"e119","kind":"punch_out","at":"2026-10-20T06:30:00Z"},{"id":"e120","kind":"punch_in","at":"2026-10-20T07:30:00Z"},{"id":"e121","kind":"punch_out","at":"2026-10-20T13:00:00Z"}],"points_at":[],"km":0,"km_gaps":0,"excused_in":[],"pending_ids":["e120"],"pending_reason":false},"expect":{"late_excused":false,"pending_min":330,"away_pending":true,"pending_reason":false,"missed_out":false,"irregular":false,"open":false,"status":"present","worked_min":150,"late_min":0,"early_min":0}},{"name":"pending_with_break","note":"a pending session's break minutes are left out too; status from worked + pending minutes","input":{"day":"2026-10-20","now":"2026-10-22T06:30:00Z","max_session_h":16,"shift":{"start":"09:30","end":"18:30","grace_min":10,"half_day_min":240},"duty":"shop","holiday":null,"attendance_required":true,"flex_request":false,"half_day_leave":false,"events":[{"id":"e122","kind":"punch_in","at":"2026-10-20T04:00:00Z"},{"id":"e123","kind":"break_start","at":"2026-10-20T07:00:00Z"},{"id":"e124","kind":"break_end","at":"2026-10-20T07:30:00Z"},{"id":"e125","kind":"punch_out","at":"2026-10-20T13:00:00Z"}],"points_at":[],"km":0,"km_gaps":0,"excused_in":[],"pending_ids":["e122"],"pending_reason":false},"expect":{"late_excused":false,"pending_min":510,"away_pending":true,"pending_reason":false,"missed_out":false,"irregular":false,"open":false,"status":"present","worked_min":0,"break_min":0}},{"name":"pending_open_today","note":"an open pending session: open, its minutes so far pending","input":{"day":"2026-10-22","now":"2026-10-22T06:30:00Z","max_session_h":16,"shift":{"start":"09:30","end":"18:30","grace_min":10,"half_day_min":240},"duty":"shop","holiday":null,"attendance_required":true,"flex_request":false,"half_day_leave":false,"events":[{"id":"e126","kind":"punch_in","at":"2026-10-22T03:50:00Z"}],"points_at":[],"km":0,"km_gaps":0,"excused_in":[],"pending_ids":["e126"],"pending_reason":false},"expect":{"late_excused":false,"pending_min":160,"away_pending":true,"pending_reason":false,"missed_out":false,"irregular":false,"open":true,"status":"open","first_in":"2026-10-22T03:50:00Z","last_out":null,"worked_min":0}},{"name":"pending_reason_absent","note":"pending_reason is copied through; no punch: absent","input":{"day":"2026-10-20","now":"2026-10-22T06:30:00Z","max_session_h":16,"shift":{"start":"09:30","end":"18:30","grace_min":10,"half_day_min":240},"duty":"shop","holiday":null,"attendance_required":true,"flex_request":false,"half_day_leave":false,"events":[],"points_at":[],"km":0,"km_gaps":0,"excused_in":[],"pending_ids":[],"pending_reason":true},"expect":{"late_excused":false,"pending_min":0,"away_pending":false,"pending_reason":true,"missed_out":false,"irregular":false,"open":false,"status":"absent","worked_min":0,"absent_units":1,"late_raw_min":0}},{"name":"excused_flex_request","note":"a flexible day has no late minutes to excuse","input":{"day":"2026-10-20","now":"2026-10-22T06:30:00Z","max_session_h":16,"shift":{"start":"09:30","end":"18:30","grace_min":10,"half_day_min":240},"duty":"shop","holiday":null,"attendance_required":true,"flex_request":true,"half_day_leave":false,"events":[{"id":"e127","kind":"punch_in","at":"2026-10-20T05:00:00Z"},{"id":"e128","kind":"punch_out","at":"2026-10-20T13:30:00Z"}],"points_at":[],"km":0,"km_gaps":0,"excused_in":["e127"],"pending_ids":[],"pending_reason":false},"expect":{"late_excused":true,"pending_min":0,"away_pending":false,"pending_reason":false,"missed_out":false,"irregular":false,"open":false,"status":"present","flex":true,"worked_min":510,"late_min":0,"late_raw_min":0}},{"name":"v23_input_no_v24_keys","note":"a v2.3 input (no v2.4 keys): the new keys read false / 0","input":{"day":"2026-10-20","now":"2026-10-22T06:30:00Z","max_session_h":16,"shift":{"start":"09:30","end":"18:30","grace_min":10,"half_day_min":240},"duty":"shop","holiday":null,"attendance_required":true,"flex_request":false,"half_day_leave":false,"events":[{"id":"e129","kind":"punch_in","at":"2026-10-20T04:22:00Z"},{"id":"e130","kind":"punch_out","at":"2026-10-20T13:01:00Z"}],"points_at":[],"km":0,"km_gaps":0},"expect":{"late_excused":false,"pending_min":0,"away_pending":false,"pending_reason":false,"missed_out":false,"irregular":false,"open":false,"status":"late","worked_min":519,"late_min":12,"late_raw_min":12}},{"name":"folded_sessions_pending_out","note":"already-folded sessions: pending_ids match out_id as well as in_id; status from worked + pending minutes","input":{"day":"2026-10-20","now":"2026-10-22T06:30:00Z","max_session_h":16,"shift":{"start":"09:30","end":"18:30","grace_min":10,"half_day_min":240},"duty":"shop","holiday":null,"attendance_required":true,"flex_request":false,"half_day_leave":false,"sessions":[{"in_id":"s1","start":"2026-10-20T04:00:00Z","cap":"2026-10-20T20:00:00Z","end":"out","out":"2026-10-20T13:00:00Z","out_id":"s2","breaks":[],"open_break":null,"last_at":"2026-10-20T13:00:00Z","irregular":false,"day":"2026-10-20"}],"orphans":[],"km":0,"km_gaps":0,"excused_in":[],"pending_ids":["s2"],"pending_reason":false},"expect":{"late_excused":false,"pending_min":540,"away_pending":true,"pending_reason":false,"missed_out":false,"irregular":false,"open":false,"status":"present","worked_min":0}},{"name":"excused_and_pending","note":"excused and pending at once: no late mark, nothing counted yet, present","input":{"day":"2026-10-20","now":"2026-10-22T06:30:00Z","max_session_h":16,"shift":{"start":"09:30","end":"18:30","grace_min":10,"half_day_min":240},"duty":"shop","holiday":null,"attendance_required":true,"flex_request":false,"half_day_leave":false,"events":[{"id":"e131","kind":"punch_in","at":"2026-10-20T05:00:00Z"},{"id":"e132","kind":"punch_out","at":"2026-10-20T13:30:00Z"}],"points_at":[],"km":0,"km_gaps":0,"excused_in":["e131"],"pending_ids":["e131"],"pending_reason":false},"expect":{"late_excused":true,"pending_min":510,"away_pending":true,"pending_reason":false,"missed_out":false,"irregular":false,"open":false,"status":"present","worked_min":0,"late_min":0,"late_raw_min":50}},{"name":"excused_short_day","note":"excused but short: half day, not late","input":{"day":"2026-10-20","now":"2026-10-22T06:30:00Z","max_session_h":16,"shift":{"start":"09:30","end":"18:30","grace_min":10,"half_day_min":240},"duty":"shop","holiday":null,"attendance_required":true,"flex_request":false,"half_day_leave":false,"events":[{"id":"e133","kind":"punch_in","at":"2026-10-20T05:00:00Z"},{"id":"e134","kind":"punch_out","at":"2026-10-20T07:00:00Z"}],"points_at":[],"km":0,"km_gaps":0,"excused_in":["e133"],"pending_ids":[],"pending_reason":false},"expect":{"late_excused":true,"pending_min":0,"away_pending":false,"pending_reason":false,"missed_out":false,"irregular":false,"open":false,"status":"half_day","worked_min":120,"late_min":0,"late_raw_min":50,"early_min":360}},{"name":"excused_field_duty","note":"duty field: no late minutes at all","input":{"day":"2026-10-20","now":"2026-10-22T06:30:00Z","max_session_h":16,"shift":{"start":"09:30","end":"18:30","grace_min":10,"half_day_min":240},"duty":"field","holiday":null,"attendance_required":true,"flex_request":false,"half_day_leave":false,"events":[{"id":"e135","kind":"punch_in","at":"2026-10-20T05:00:00Z"},{"id":"e136","kind":"punch_out","at":"2026-10-20T13:30:00Z"}],"points_at":[],"km":0,"km_gaps":0,"excused_in":["e135"],"pending_ids":[],"pending_reason":false},"expect":{"late_excused":true,"pending_min":0,"away_pending":false,"pending_reason":false,"missed_out":false,"irregular":false,"open":false,"status":"present","flex":true,"worked_min":510,"late_min":0,"late_raw_min":0}},{"name":"pending_late","note":"a pending away punch_in at 10:30: late keeps its word (late, 50 min) while the session waits for HR","input":{"day":"2026-10-20","now":"2026-10-22T06:30:00Z","max_session_h":16,"shift":{"start":"09:30","end":"18:30","grace_min":10,"half_day_min":240},"duty":"shop","holiday":null,"attendance_required":true,"flex_request":false,"half_day_leave":false,"events":[{"id":"e140","kind":"punch_in","at":"2026-10-20T05:00:00Z"},{"id":"e141","kind":"punch_out","at":"2026-10-20T13:00:00Z"}],"points_at":[],"km":0,"km_gaps":0,"excused_in":[],"pending_ids":["e140"],"pending_reason":false},"expect":{"status":"late","worked_min":0,"pending_min":480,"away_pending":true,"late_min":50,"late_raw_min":50,"late_excused":false}},{"name":"pending_short_day","note":"120 counted + 119 pending is 239 minutes: under the half-day line, half_day","input":{"day":"2026-10-20","now":"2026-10-22T06:30:00Z","max_session_h":16,"shift":{"start":"09:30","end":"18:30","grace_min":10,"half_day_min":240},"duty":"shop","holiday":null,"attendance_required":true,"flex_request":false,"half_day_leave":false,"events":[{"id":"e142","kind":"punch_in","at":"2026-10-20T04:00:00Z"},{"id":"e143","kind":"punch_out","at":"2026-10-20T06:00:00Z"},{"id":"e144","kind":"punch_in","at":"2026-10-20T06:30:00Z"},{"id":"e145","kind":"punch_out","at":"2026-10-20T08:29:00Z"}],"points_at":[],"km":0,"km_gaps":0,"excused_in":[],"pending_ids":["e144"],"pending_reason":false},"expect":{"status":"half_day","worked_min":120,"pending_min":119,"away_pending":true,"late_min":0}},{"name":"pending_full_half","note":"120 counted + 120 pending is exactly the half-day line: present","input":{"day":"2026-10-20","now":"2026-10-22T06:30:00Z","max_session_h":16,"shift":{"start":"09:30","end":"18:30","grace_min":10,"half_day_min":240},"duty":"shop","holiday":null,"attendance_required":true,"flex_request":false,"half_day_leave":false,"events":[{"id":"e148","kind":"punch_in","at":"2026-10-20T04:00:00Z"},{"id":"e149","kind":"punch_out","at":"2026-10-20T06:00:00Z"},{"id":"e150","kind":"punch_in","at":"2026-10-20T06:30:00Z"},{"id":"e151","kind":"punch_out","at":"2026-10-20T08:30:00Z"}],"points_at":[],"km":0,"km_gaps":0,"excused_in":[],"pending_ids":["e150"],"pending_reason":false},"expect":{"status":"present","worked_min":120,"pending_min":120,"away_pending":true,"late_min":0}},{"name":"pending_half_day_leave","note":"a half-day leave with a pending session: half_day whatever the minutes","input":{"day":"2026-10-20","now":"2026-10-22T06:30:00Z","max_session_h":16,"shift":{"start":"09:30","end":"18:30","grace_min":10,"half_day_min":240},"duty":"shop","holiday":null,"attendance_required":true,"flex_request":false,"half_day_leave":true,"events":[{"id":"e146","kind":"punch_in","at":"2026-10-20T04:00:00Z"},{"id":"e147","kind":"punch_out","at":"2026-10-20T09:00:00Z"}],"points_at":[],"km":0,"km_gaps":0,"excused_in":[],"pending_ids":["e146"],"pending_reason":false},"expect":{"status":"half_day","worked_min":0,"pending_min":300,"away_pending":true,"leave_units":0.5,"late_min":0}}]}$fx$::jsonb);
 
 create function neo_v24t.put(p_k text, p_v text) returns void language plpgsql as $$
 begin
@@ -319,7 +319,7 @@ declare
   v_new text[] := array['_hr_is_field', '_hr_dash_view', '_hr_place', '_hr_can_decide', '_hr_decide_gate', '_hr_sees', '_hr_selfie_brief',
     '_hr_unverified', '_hr_day_totals', '_hr_is_late_punch', '_hr_msg', '_hr_punch_extras', '_hr_punch_core', '_hr_punch_check',
     '_hr_punch_request', '_hr_session_at', '_hr_trip_eff', '_hr_trip_measure', '_hr_trip_json', '_hr_trip_sync', '_hr_trip_begin',
-    '_hr_day_trips', '_hr_month_trip_km', '_hr_dash_hr',
+    '_hr_day_trips', '_hr_month_trip_km', '_hr_dash_hr', '_hr_req_acts', '_hr_trip_km_days',
     'hr_selfie_put', 'hr_selfie_get', 'hr_punch_checks', 'hr_punch_request_decide', 'hr_trip_start', 'hr_trip_end'];
   v_api text[] := array['hr_selfie_put', 'hr_selfie_get', 'hr_punch_checks', 'hr_punch_request_decide', 'hr_trip_start', 'hr_trip_end',
     'my_work_profile'];
@@ -523,6 +523,21 @@ begin
                           and public._hr_dash_view(neo_v24t.uid('sales')) = 'sales' and public._hr_dash_view(neo_v24t.uid('basic')) = 'basic'
                           and public._hr_dash_view(gen_random_uuid()) = 'basic',
                           '_hr_dash_view: head · hr · field · desk · supply · sales · basic');
+  -- F30: the departments come before a desk role — procurement / logistics staff with a desk role still get supply;
+  -- a desk role alone (any other department) is desk
+  insert into public.module_access (profile_id, module, role, granted_by)
+  values (neo_v24t.uid('supply'), 'rma', 'desk', 'tests'), (neo_v24t.uid('supply'), 'qc', 'desk', 'tests'),
+         (neo_v24t.uid('basic'), 'service', 'desk', 'tests');
+  perform neo_v24t.assert(public._hr_dash_view(neo_v24t.uid('supply')) = 'supply' and public._hr_dash_view(neo_v24t.uid('basic')) = 'desk',
+                          'F30: procurement with RMA / Builds desk roles → supply; marketing with a service desk role → desk');
+  update public.profiles set department = 'Logistics' where id = neo_v24t.uid('supply');
+  perform neo_v24t.assert(public._hr_dash_view(neo_v24t.uid('supply')) = 'supply', 'F30: logistics (any case) with a desk role → supply');
+  update public.profiles set department = 'support' where id = neo_v24t.uid('supply');
+  perform neo_v24t.assert(public._hr_dash_view(neo_v24t.uid('supply')) = 'desk', 'F30: department support stays desk');
+  update public.profiles set department = 'procurement' where id = neo_v24t.uid('supply');
+  delete from public.module_access where profile_id in (neo_v24t.uid('supply'), neo_v24t.uid('basic')) and granted_by = 'tests' and role = 'desk';
+  perform neo_v24t.assert(public._hr_dash_view(neo_v24t.uid('supply')) = 'supply' and public._hr_dash_view(neo_v24t.uid('basic')) = 'basic',
+                          'F30: back as they were');
   -- D10 the decider rule
   perform neo_v24t.assert(public._hr_can_decide(neo_v24t.uid('hr'), neo_v24t.email('fe'))
                           and public._hr_can_decide(neo_v24t.uid('head3'), neo_v24t.email('fe'))
@@ -823,6 +838,15 @@ begin
                           'a 1.12 desktop sends the row''s km and the approval goes through ' || r::text);
   perform neo_v24t.expect_error(format('select public.hr_ta_approve(%L, %L, null, 1)', neo_v24t.email('desk'), neo_v24t.lmd()),
                                 '%NEO_GATE: Zqv Desk isn''t eligible for travel allowance.%');
+  -- the register's days carry trip_km too (0 on a day without trips)
+  r := public.hr_register(neo_v24t.lmd() - 1, neo_v24t.lmd(), neo_v24t.email('ta'));
+  p := neo_v24t.person(r, neo_v24t.email('ta'));
+  perform neo_v24t.assert(jsonb_array_length(p -> 'days') = 2 and (p -> 'days' -> 1 ->> 'day')::date = neo_v24t.lmd()
+                          and (p -> 'days' -> 1 ->> 'trip_km')::numeric = v_km and (p -> 'days' -> 0 ->> 'trip_km')::numeric = 0
+                          and (p -> 'days' -> 1 ->> 'km')::numeric > v_km,
+                          'hr_register: days gain trip_km beside the day km ' || (p -> 'days')::text);
+  r := public.hr_register(neo_v24t.lmd(), neo_v24t.lmd(), neo_v24t.email('desk'));
+  perform neo_v24t.assert((neo_v24t.person(r, neo_v24t.email('desk')) -> 'days' -> 0 ->> 'trip_km')::numeric = 0, 'no trips: trip_km 0');
 end $$;
 select neo_v24t.login('ta');
 do $$
@@ -874,7 +898,7 @@ begin
 end $$;
 
 
--- ═══ The second half (sections 9–16) runs after sections 0–1 on its own too ══
+-- ═══ The second half (sections 9–17) runs after sections 0–1 on its own too ══
 
 -- ── 9. Before the office point is set: place 'unset', nothing is asked ───────
 select neo_v24t.login('desk2');
@@ -1273,9 +1297,18 @@ select neo_v24t.login('fe');
 do $$
 declare r jsonb;
 begin
+  -- F31 / §9: 'mine' keeps to the v2.3 kinds (NeoHR 2.2.0 shows raw words otherwise); 'mine_v4' has them all
   r := public.hr_requests_list('mine');
-  perform neo_v24t.assert(neo_v24t.req(r, neo_v24t.get('fe_other_req')) ->> 'can_cancel' = 'true'
-                          and neo_v24t.req(r, neo_v24t.get('fe_other_req')) ->> 'kind' = 'punch_reason', 'mine: my punch reasons, cancellable');
+  perform neo_v24t.assert(r ->> 'scope' = 'mine' and neo_v24t.req(r, neo_v24t.get('fe_other_req')) is null
+                          and not exists (select 1 from jsonb_array_elements(r -> 'requests') x where x.value ->> 'kind' in ('punch_reason', 'away_punch')),
+                          'mine: no punch reasons for NeoHR 2.2.0 ' || r::text);
+  r := public.hr_requests_list('mine_v4');
+  perform neo_v24t.assert(r ->> 'scope' = 'mine_v4' and neo_v24t.req(r, neo_v24t.get('fe_other_req')) ->> 'can_cancel' = 'true'
+                          and neo_v24t.req(r, neo_v24t.get('fe_other_req')) ->> 'kind' = 'punch_reason'
+                          and neo_v24t.req(r, neo_v24t.get('fe_other_req')) ->> 'kind_label' = 'Punch-in reason'
+                          and neo_v24t.req(r, neo_v24t.get('fe_other_req')) ->> 'can_decide' = 'false',
+                          'mine_v4: my punch reasons, cancellable, in words, never mine to decide');
+  perform neo_v24t.expect_error($q$select public.hr_requests_list('mine_v5')$q$, '%NEO_GATE: The scope is mine, pending or all.%');
   r := public.hr_request_cancel(neo_v24t.get('fe_other_req')::uuid);
   perform neo_v24t.assert(r ->> 'ok' = 'true' and r -> 'request' ->> 'status' = 'cancelled', 'the owner cancels a pending punch reason ' || r::text);
   -- only a punch makes these kinds: hr_request_create refuses them with its v2.3 sentence
@@ -1292,11 +1325,15 @@ select neo_v24t.login('desk2');
 do $$
 declare r jsonb;
 begin
-  r := public.hr_requests_list('mine');
+  r := public.hr_requests_list('mine_v4');
   perform neo_v24t.assert(exists (select 1 from jsonb_array_elements(r -> 'requests') x where x.value ->> 'kind' = 'away_punch')
                           and not exists (select 1 from jsonb_array_elements(r -> 'requests') x
-                                           where x.value ->> 'kind' = 'away_punch' and x.value ->> 'can_cancel' = 'true'),
-                          'mine: my away punches, never cancellable');
+                                           where x.value ->> 'kind' = 'away_punch' and x.value ->> 'can_cancel' = 'true')
+                          and not exists (select 1 from jsonb_array_elements(r -> 'requests') x
+                                           where x.value ->> 'kind' = 'away_punch' and x.value ->> 'kind_label' is distinct from 'Away from shop'),
+                          'mine_v4: my away punches, never cancellable, in words');
+  perform neo_v24t.assert(not exists (select 1 from jsonb_array_elements(public.hr_requests_list('mine') -> 'requests') x
+                                       where x.value ->> 'kind' = 'away_punch'), 'mine: no away punches for NeoHR 2.2.0');
   perform neo_v24t.expect_error(format('select public.hr_request_cancel(%L::uuid)',
                                        (select x.value ->> 'id' from jsonb_array_elements(r -> 'requests') x where x.value ->> 'kind' = 'away_punch' limit 1)),
                                 '%NEO_GATE: HR decides an away punch — ask them.%');
@@ -1373,6 +1410,28 @@ begin
 end $$;
 
 -- the dashboard counts and the board
+-- (F28, D10) a tier 4 account's pending leave: the tier 2 HR person cannot decide it, so it is not in their count
+select neo_v24t.login('ceo4');
+do $$
+declare r jsonb;
+begin
+  r := public.hr_request_create(jsonb_build_object('kind', 'leave', 'date_from', neo_v24t.d(5), 'leave_type', 'casual', 'reason', 'Zq family function'));
+  perform neo_v24t.assert(r ->> 'ok' = 'true' and r -> 'request' ->> 'status' = 'pending', 'a tier 4 leave request ' || r::text);
+  perform neo_v24t.put('ceo_leave', r -> 'request' ->> 'id');
+end $$;
+reset role;
+select neo_v24t.no_jwt();
+do $$
+begin
+  -- what the HR person (tier 2) may decide: the v2.3 kinds, not their own, none of a tier 4 / 5 account
+  perform neo_v24t.put('hr_pending_n', (select count(*) from public.hr_requests q
+    where q.status = 'pending' and q.kind in ('late_start', 'early_leave', 'flexible_day', 'field_day', 'missed_punch', 'leave')
+      and q.employee_email <> neo_v24t.email('hr')
+      and coalesce((select p.tier from public.profiles p where lower(p.email) = q.employee_email order by p.active desc limit 1), 0) <= 3)::text);
+  perform neo_v24t.put('hr_pending_all', (select count(*) from public.hr_requests q
+    where q.status = 'pending' and q.kind in ('late_start', 'early_leave', 'flexible_day', 'field_day', 'missed_punch', 'leave')
+      and q.employee_email <> neo_v24t.email('hr'))::text);
+end $$;
 select neo_v24t.login('hr');
 do $$
 declare r jsonb; p jsonb; n int;
@@ -1382,10 +1441,12 @@ begin
   perform neo_v24t.assert((r ->> 'away_pending')::int >= 3 and (r ->> 'reasons_pending')::int >= 1 and (r ->> 'past_eod')::int >= 1
                           and (r ->> 'unverified_today')::int >= 5,
                           'hr counts: away punches waiting, reasons waiting, unverified today ' || r::text);
-  select count(*) into n from public.hr_requests q
-   where q.status = 'pending' and q.kind in ('late_start', 'early_leave', 'flexible_day', 'field_day', 'missed_punch', 'leave')
-     and q.employee_email <> neo_v24t.email('hr');
-  perform neo_v24t.assert((r ->> 'pending_requests')::int = n, 'pending_requests counts only the v2.3 kinds (1.12 desktops, 2.2.0 phones)');
+  n := neo_v24t.get('hr_pending_n')::int;
+  perform neo_v24t.assert((r ->> 'pending_requests')::int = n and n < neo_v24t.get('hr_pending_all')::int,
+                          format('pending_requests counts only the v2.3 kinds (1.12 desktops, 2.2.0 phones) the caller may decide (D10): %s, expected %s of %s',
+                                 r ->> 'pending_requests', n, neo_v24t.get('hr_pending_all')));
+  perform neo_v24t.assert(neo_v24t.req(public.hr_requests_list('pending'), neo_v24t.get('ceo_leave')) ->> 'can_decide' = 'false',
+                          'the tier 4 leave is listed for the HR person, not theirs to decide');
   r := public.hr_board();
   p := neo_v24t.person(r, neo_v24t.email('desk2'));
   perform neo_v24t.assert(p ->> 'status' in ('on_break', 'on_site', 'on_duty', 'off', 'on_leave', 'off_duty', 'not_tracked', 'not_in_yet', 'absent')
@@ -1526,14 +1587,17 @@ begin
                                 '%NEO_GATE: Only tier 4 and above can see the photos of a tier 4 or 5 account.%');
   perform neo_v24t.expect_error(format('select public.hr_selfie_get(%L::uuid)', gen_random_uuid()), '%NEO_GATE: That photo is not there any more.%');
   r := neo_v24t.req(public.hr_requests_list('all_v4'), neo_v24t.get('own_req'));
-  perform neo_v24t.assert(r -> 'selfie' ->> 'thumb_b64' is null and r -> 'selfie' ? 'late', 'a tier 3 sees no thumb of the tier 5''s photo ' || r::text);
+  perform neo_v24t.assert(r -> 'selfie' ->> 'thumb_b64' is null and r -> 'selfie' ? 'late' and r -> 'selfie' ->> 'has_thumb' = 'false',
+                          'a tier 3 sees no thumb of the tier 5''s photo ' || r::text);
 end $$;
 select neo_v24t.login('ceo4');
 do $$
 declare r jsonb;
 begin
+  -- (F33) own_req is decided: its row carries no thumb — has_thumb says one is there (hr_selfie_get opens it)
   r := neo_v24t.req(public.hr_requests_list('all_v4'), neo_v24t.get('own_req'));
-  perform neo_v24t.assert(r -> 'selfie' ->> 'thumb_b64' is not null, 'a tier 4 sees it');
+  perform neo_v24t.assert(r ->> 'status' = 'approved' and not (r -> 'selfie' ? 'thumb_b64') and r -> 'selfie' ->> 'has_thumb' = 'true',
+                          'a tier 4 may see it: a decided request says has_thumb, without the thumb ' || r::text);
   perform neo_v24t.assert(public.hr_selfie_get(neo_v24t.get('own_in')::uuid) ->> 'ok' = 'true', 'tier 4: the full photo');
 end $$;
 select neo_v24t.login('hr');
@@ -1619,6 +1683,242 @@ begin
                                         and start_lat is null and start_lng is null and km = 0)
                           and exists (select 1 from public.hr_punch_selfies where event_id = neo_v24t.get('pic_out')::uuid),
                           'retention: a 120-day-old photo, its views and the trip''s coordinates go; today''s photo stays');
+end $$;
+
+
+-- ── 17. The review round: device flags, failed requests, what lists carry, the bounded purge ──
+-- F1: what the phone reports about itself (p.flags) — fake-GPS route points, an emulator — becomes a server flag
+select neo_v24t.login('ta');
+do $$
+declare r jsonb;
+begin
+  r := neo_v24t.punch('punch_in', neo_v24t.app(0) || '{"flags": {"mock_route_points": 3, "emulator": true, "dev_options": true}}'::jsonb, 120000);
+  perform neo_v24t.assert(r ->> 'ok' = 'true' and r -> 'check' -> 'flags' ? 'mock_route' and r -> 'check' -> 'flags' ? 'emulator'
+                          and not (r -> 'check' -> 'flags' ? 'dev_options') and r -> 'check' -> 'request' = 'null'::jsonb,
+                          'F1: fake-GPS route points and an emulator are server flags (developer options alone is not) ' || r::text);
+  perform neo_v24t.put('ta_mock', r ->> 'id');
+  r := neo_v24t.punch('punch_out', neo_v24t.app(0) || '{"flags": {"mock_route_points": 0, "emulator": false}}'::jsonb, 100000);
+  perform neo_v24t.assert(r ->> 'ok' = 'true' and not (r -> 'check' -> 'flags' ? 'mock_route') and not (r -> 'check' -> 'flags' ? 'emulator'),
+                          'F1: no fake points, no emulator: no flag ' || r::text);
+  r := neo_v24t.punch('punch_in', neo_v24t.app(0) || '{"flags": {"mock_route_points": "lots", "emulator": "yes"}}'::jsonb, 80000);
+  perform neo_v24t.assert(r ->> 'ok' = 'true' and r -> 'check' -> 'flags' = '[]'::jsonb, 'F1 (R2): junk device flags: no flag, the punch counts ' || r::text);
+  r := neo_v24t.punch('punch_out', neo_v24t.app(0) || '{"flags": {"mock_route_points": 1}}'::jsonb, 60000);
+  perform neo_v24t.assert(r -> 'check' -> 'flags' ? 'mock_route', 'F1: one fake point is enough ' || r::text);
+end $$;
+
+-- F29: a request that cannot be made never fails open — the punch is kept, check.request says so, the punch is flagged
+reset role;
+select neo_v24t.no_jwt();
+create function neo_v24t.boom() returns trigger language plpgsql as $$
+begin
+  if new.employee_email = 'zq.v24.basic@neotokyo.test' then raise exception 'zq test: the request store is broken'; end if;
+  return new;
+end $$;
+create trigger zq_v24_boom before insert on public.hr_requests for each row execute function neo_v24t.boom();
+select neo_v24t.login('basic');
+do $$
+declare r jsonb; r2 jsonb;
+begin
+  r := neo_v24t.punch('punch_in', neo_v24t.app(2000), 110000);
+  perform neo_v24t.assert(r ->> 'ok' = 'true' and r ->> 'duplicate' = 'false' and r -> 'check' ->> 'place' = 'away'
+                          and r -> 'check' -> 'request' ->> 'ok' = 'false' and char_length(r -> 'check' -> 'request' ->> 'message') > 10
+                          and r -> 'check' -> 'flags' ? 'request_failed',
+                          'F29: the away request could not be made: the punch is kept, check.request {ok:false, message}, request_failed ' || r::text);
+  perform neo_v24t.put('basic_fail', r ->> 'id');
+  r2 := public.hr_punch(jsonb_build_object('id', r ->> 'id', 'kind', 'punch_in', 'at', now()));
+  perform neo_v24t.assert(r2 ->> 'duplicate' = 'true' and r2 -> 'check' -> 'request' ->> 'ok' = 'false' and r2 -> 'check' -> 'flags' ? 'request_failed',
+                          'F29: a replay answers the same ' || r2::text);
+end $$;
+reset role;
+select neo_v24t.no_jwt();
+drop trigger zq_v24_boom on public.hr_requests;
+do $$
+declare e public.attendance_events;
+begin
+  e := neo_v24t.ev(neo_v24t.get('basic_fail')::uuid);
+  perform neo_v24t.assert(e.request_id is null and 'request_failed' = any (e.flags) and e.voided_at is null
+                          and not exists (select 1 from public.hr_requests where event_id = e.id) and public._hr_unverified(e, now()),
+                          'F29: stored with request_failed and no request: it is in HR''s To check');
+  -- an HR punch (never a photo) is today's first punch_in of head3
+  perform neo_v24t.put('head3_hr', neo_v24t.raw_event('head3', 'punch_in',
+                                                      greatest(public._hr_at(neo_v24t.today(), '00:00'), now() - interval '30 seconds'), 'hr')::text);
+end $$;
+
+-- sales (not field staff): an away punch_in with no camera, an away punch_out with a photo, a punch_in at the shop with a photo
+select neo_v24t.login('sales');
+do $$
+declare r jsonb;
+begin
+  r := neo_v24t.punch('punch_in', neo_v24t.app(0) || '{"selfie_skip": "camera_error"}'::jsonb, 300000);
+  perform neo_v24t.assert(r -> 'check' -> 'request' ->> 'kind' = 'away_punch' and r -> 'check' -> 'request' ->> 'ok' = 'true'
+                          and r -> 'check' -> 'request' ->> 'status' = 'pending', 'a request that was made: check.request.ok ' || r::text);
+  perform neo_v24t.put('sales_in', r ->> 'id');
+  perform neo_v24t.put('sales_in_req', r -> 'check' -> 'request' ->> 'id');
+  r := neo_v24t.punch('punch_out', neo_v24t.app(1500), 240000);
+  perform neo_v24t.assert(r -> 'check' -> 'request' ->> 'kind' = 'away_punch', 'away punch_out ' || r::text);
+  perform neo_v24t.put('sales_out', r ->> 'id');
+  perform neo_v24t.put('sales_out_req', r -> 'check' -> 'request' ->> 'id');
+  perform neo_v24t.assert(neo_v24t.photo((r ->> 'id')::uuid, neo_v24t.jpeg(4000)) ->> 'ok' = 'true', 'its photo');
+  r := neo_v24t.punch('punch_in', neo_v24t.app(0), 180000);
+  perform neo_v24t.assert(r -> 'check' -> 'request' = 'null'::jsonb, 'at the shop ' || r::text);
+  perform neo_v24t.put('sales_in2', r ->> 'id');
+  perform neo_v24t.assert(neo_v24t.photo((r ->> 'id')::uuid, neo_v24t.jpeg(4000)) ->> 'ok' = 'true', 'its photo');
+  -- F31: 'mine' (NeoHR 2.2.0) has none of the punch kinds, 'mine_v4' has both, in words
+  r := public.hr_requests_list('mine');
+  perform neo_v24t.assert(neo_v24t.req(r, neo_v24t.get('sales_in_req')) is null and neo_v24t.req(r, neo_v24t.get('sales_out_req')) is null,
+                          'F31: mine keeps to the v2.3 kinds ' || r::text);
+  r := public.hr_requests_list('mine_v4');
+  perform neo_v24t.assert(neo_v24t.req(r, neo_v24t.get('sales_in_req')) ->> 'kind_label' = 'Away from shop'
+                          and neo_v24t.req(r, neo_v24t.get('sales_out_req')) ->> 'can_cancel' = 'false',
+                          'F31: mine_v4 has them, with kind_label ' || r::text);
+  -- F18: my own day says whether I am field staff
+  r := public.hr_my_day(neo_v24t.dago(240));
+  perform neo_v24t.assert(r ->> 'field_staff' = 'false' and r ->> 'away_pending' = 'true', 'F18: hr_my_day.field_staff (own day) ' || left(r::text, 300));
+end $$;
+
+select neo_v24t.login('hr');
+do $$
+declare r jsonb; p jsonb; x jsonb;
+begin
+  -- F4: the board's punch_check says how the punch came (no photo expected from an HR punch or a skipped camera)
+  if neo_v24t.dago(300) = neo_v24t.today() then
+    p := neo_v24t.person(public.hr_board(), neo_v24t.email('sales'));
+    perform neo_v24t.assert(p -> 'punch_check' ->> 'id' = neo_v24t.get('sales_in') and p -> 'punch_check' ->> 'selfie_skip' = 'camera_error'
+                            and p -> 'punch_check' ->> 'source' = 'phone' and p -> 'punch_check' ->> 'selfie' = 'false',
+                            'F4: punch_check.selfie_skip and source ' || (p -> 'punch_check')::text);
+  end if;
+  p := neo_v24t.person(public.hr_board(), neo_v24t.email('head3'));
+  perform neo_v24t.assert(p -> 'punch_check' ->> 'id' = neo_v24t.get('head3_hr') and p -> 'punch_check' ->> 'source' = 'hr'
+                          and p -> 'punch_check' ? 'selfie_skip', 'F4: an HR punch says source hr ' || (p -> 'punch_check')::text);
+  -- F33: a pending request carries its thumb …
+  x := neo_v24t.req(public.hr_requests_list('pending_v4'), neo_v24t.get('sales_out_req'));
+  perform neo_v24t.assert(x -> 'selfie' ->> 'thumb_b64' is not null and x -> 'selfie' ->> 'has_thumb' = 'true' and x ->> 'kind_label' = 'Away from shop',
+                          'F33: a pending request: the thumb ' || left(x::text, 300));
+  -- F5 / F15 / F18: the day panel's requests carry can_decide / can_cancel; the day says field_staff
+  r := public.hr_my_day(neo_v24t.dago(240), neo_v24t.email('sales'));
+  x := (select q.value from jsonb_array_elements(r -> 'requests') q where q.value ->> 'id' = neo_v24t.get('sales_out_req'));
+  perform neo_v24t.assert(r ->> 'field_staff' = 'false' and x ->> 'can_decide' = 'true' and x ->> 'can_cancel' = 'false',
+                          'F5: hr_my_day.requests: can_decide / can_cancel as the lists ' || coalesce(x::text, r::text));
+  perform neo_v24t.assert(public.hr_my_day(neo_v24t.dago(120), neo_v24t.email('ta')) ->> 'field_staff' = 'true', 'F18: field staff');
+  r := public.hr_my_day(neo_v24t.d(5), neo_v24t.email('ceo4'));
+  x := (select q.value from jsonb_array_elements(r -> 'requests') q where q.value ->> 'id' = neo_v24t.get('ceo_leave'));
+  perform neo_v24t.assert(x ->> 'can_decide' = 'false' and x ->> 'can_cancel' = 'true',
+                          'F5 (D10): a tier 4 account''s request is not the tier 2 HR person''s to decide ' || coalesce(x::text, r::text));
+  -- … a decided one does not (has_thumb; hr_selfie_get opens it)
+  r := public.hr_punch_request_decide(neo_v24t.get('sales_out_req')::uuid, true, 'At the customer''s for us');
+  perform neo_v24t.assert(r ->> 'ok' = 'true' and not (r -> 'request' -> 'selfie' ? 'thumb_b64') and r -> 'request' -> 'selfie' ->> 'has_thumb' = 'true',
+                          'F33: the decided request answers without the thumb ' || left(r::text, 300));
+  x := neo_v24t.req(public.hr_requests_list('all_v4'), neo_v24t.get('sales_out_req'));
+  perform neo_v24t.assert(x ->> 'status' = 'approved' and not (x -> 'selfie' ? 'thumb_b64') and x -> 'selfie' ->> 'has_thumb' = 'true',
+                          'F33: all_v4: no thumb on a decided row ' || left(x::text, 300));
+  -- F33 / gaps: hr_punch_checks rows — event_id, device_flags, the previous photo without a second thumb
+  r := public.hr_punch_checks(neo_v24t.dago(180));
+  x := (select q.value from jsonb_array_elements(r -> 'punches') q where q.value ->> 'id' = neo_v24t.get('sales_in2'));
+  perform neo_v24t.assert(x ->> 'event_id' = neo_v24t.get('sales_in2') and x -> 'selfie' ->> 'thumb_b64' is not null
+                          and x -> 'prev_selfie' ->> 'event_id' = neo_v24t.get('sales_out') and x -> 'prev_selfie' ? 'event_at'
+                          and not (x -> 'prev_selfie' ? 'thumb_b64') and x ? 'device_flags',
+                          'hr_punch_checks: event_id, the thumb, prev_selfie {event_id, event_at} only ' || coalesce(left(x::text, 400), 'missing'));
+  r := public.hr_punch_checks(neo_v24t.dago(120));
+  x := (select q.value from jsonb_array_elements(r -> 'punches') q where q.value ->> 'id' = neo_v24t.get('ta_mock'));
+  perform neo_v24t.assert(x ->> 'unverified' = 'true' and x -> 'flags' ? 'mock_route' and (x -> 'device_flags' ->> 'mock_route_points')::int = 3
+                          and x -> 'device_flags' ->> 'emulator' = 'true',
+                          'F1: HR sees the fake-GPS route in To check, with the device flags ' || coalesce(x::text, 'missing'));
+  -- on_leave in the hr block (the hr dashboard's "On leave" tile), the same as the board's count
+  perform public.hr_roster_set(neo_v24t.email('supply'), neo_v24t.today(), 'leave', null);
+  perform neo_v24t.assert((public.hr_dashboard() -> 'hr' ->> 'on_leave')::int >= 1
+                          and (public.hr_dashboard() -> 'hr' ->> 'on_leave')::int = coalesce((public.hr_board() -> 'counts' ->> 'on_leave')::int, 0)
+                          and neo_v24t.person(public.hr_board(), neo_v24t.email('supply')) ->> 'status' = 'on_leave',
+                          'hr.on_leave: people on leave today ' || (public.hr_dashboard() -> 'hr')::text);
+end $$;
+select neo_v24t.login('own5');
+do $$
+declare x jsonb;
+begin
+  x := (select q.value from jsonb_array_elements(public.hr_my_day(neo_v24t.d(5), neo_v24t.email('ceo4')) -> 'requests') q
+         where q.value ->> 'id' = neo_v24t.get('ceo_leave'));
+  perform neo_v24t.assert(x ->> 'can_decide' = 'true', 'F5 (D10): the tier 5 may decide the tier 4''s request ' || coalesce(x::text, 'missing'));
+end $$;
+select neo_v24t.login('ceo4');
+do $$
+declare x jsonb;
+begin
+  x := (select q.value from jsonb_array_elements(public.hr_my_day(neo_v24t.d(5)) -> 'requests') q where q.value ->> 'id' = neo_v24t.get('ceo_leave'));
+  perform neo_v24t.assert(x ->> 'can_decide' = 'false' and x ->> 'can_cancel' = 'true', 'F5: my own request: cancel, never decide ' || coalesce(x::text, 'missing'));
+end $$;
+
+-- unseen_photos leaves out the photos of removed punches
+reset role;
+select neo_v24t.no_jwt();
+do $$
+declare v uuid := neo_v24t.raw_event('cap', 'punch_out', greatest(public._hr_at(neo_v24t.today(), '00:00'), now() - interval '20 seconds'));
+begin
+  insert into public.hr_punch_selfies (event_id, profile_id, employee_email, event_at, taken_at, jpeg, bytes, md5)
+  values (v, neo_v24t.uid('cap'), neo_v24t.email('cap'), (neo_v24t.ev(v)).at, now(), neo_v24t.jpeg(3000), 3000, md5(random()::text));
+  perform neo_v24t.put('cap_photo', v::text);
+end $$;
+select neo_v24t.login('hr');
+do $$ begin perform neo_v24t.put('unseen_1', public.hr_dashboard() -> 'hr' ->> 'unseen_photos'); end $$;
+reset role;
+select neo_v24t.no_jwt();
+update public.attendance_events set voided_at = now(), voided_by = 'tests', void_reason = 'Zq test' where id = neo_v24t.get('cap_photo')::uuid;
+select neo_v24t.login('hr');
+do $$
+begin
+  perform neo_v24t.assert((public.hr_dashboard() -> 'hr' ->> 'unseen_photos')::int = neo_v24t.get('unseen_1')::int - 1,
+                          'unseen_photos: a removed punch''s photo no longer waits for a look');
+end $$;
+
+-- F32: the bounded purge finalises trips oldest first, whoever they belong to, and never deletes a point inside a trip
+-- that is not final yet. T1 (ta, d−200) is the oldest; 49 fillers of fe2 (no route) follow; T2 (fe2, d−130) is the 51st.
+reset role;
+select neo_v24t.no_jwt();
+do $$
+declare
+  r jsonb; v_km1 numeric; v_km2 numeric; t public.hr_trips;
+  v_t1 uuid := 'e5555555-0000-4000-8000-000000000011';
+  v_t2 uuid := 'e5555555-0000-4000-8000-000000000012';
+begin
+  perform neo_v24t.raw_event('ta', 'punch_in', neo_v24t.at(-200, '09:00'));
+  perform neo_v24t.raw_event('ta', 'punch_out', neo_v24t.at(-200, '17:00'));
+  perform neo_v24t.raw_points('ta', jsonb_build_array(
+    jsonb_build_object('at', neo_v24t.at(-200, '10:05'), 'lat', 10.0, 'lng', 76.30, 'accuracy_m', 10),
+    jsonb_build_object('at', neo_v24t.at(-200, '10:25'), 'lat', 10.0, 'lng', 76.31, 'accuracy_m', 10),
+    jsonb_build_object('at', neo_v24t.at(-200, '10:45'), 'lat', 10.0, 'lng', 76.32, 'accuracy_m', 10)));
+  perform neo_v24t.raw_event('fe2', 'punch_in', neo_v24t.at(-130, '09:00'));
+  perform neo_v24t.raw_event('fe2', 'punch_out', neo_v24t.at(-130, '17:00'));
+  perform neo_v24t.raw_points('fe2', jsonb_build_array(
+    jsonb_build_object('at', neo_v24t.at(-130, '10:05'), 'lat', 10.0, 'lng', 76.30, 'accuracy_m', 10),
+    jsonb_build_object('at', neo_v24t.at(-130, '10:25'), 'lat', 10.0, 'lng', 76.31, 'accuracy_m', 10),
+    jsonb_build_object('at', neo_v24t.at(-130, '10:45'), 'lat', 10.0, 'lng', 76.32, 'accuracy_m', 10),
+    jsonb_build_object('at', neo_v24t.at(-130, '15:00'), 'lat', 10.0, 'lng', 76.40, 'accuracy_m', 10)));
+  insert into public.hr_trips (id, profile_id, employee_email, kind, note, started_at, ended_at, end_source, end_reason)
+  values (v_t1, neo_v24t.uid('ta'), neo_v24t.email('ta'), 'on_site', 'Zq old site one', neo_v24t.at(-200, '10:00'), neo_v24t.at(-200, '11:30'), 'phone', 'tapped'),
+         (v_t2, neo_v24t.uid('fe2'), neo_v24t.email('fe2'), 'on_site', 'Zq old site two', neo_v24t.at(-130, '10:00'), neo_v24t.at(-130, '11:30'), 'phone', 'tapped');
+  insert into public.hr_trips (id, profile_id, employee_email, kind, note, started_at)
+  select gen_random_uuid(), neo_v24t.uid('fe2'), neo_v24t.email('fe2'), 'on_site', 'Zq filler trip', neo_v24t.at(-180, '10:00') + g * interval '1 minute'
+    from generate_series(1, 49) as g;
+  v_km1 := (public._hr_trip_measure(v_t1, now()) ->> 'km')::numeric;
+  v_km2 := (public._hr_trip_measure(v_t2, now()) ->> 'km')::numeric;
+  perform neo_v24t.assert(v_km1 > 1 and v_km2 > 1, format('the two old trips measure %s and %s km', v_km1, v_km2));
+  update public.hr_settings set last_purge_at = null where id = 1;
+  -- a bounded call (location_push's): 50 trips at most
+  r := public._hr_purge(5000);
+  select * into t from public.hr_trips where id = v_t1;
+  perform neo_v24t.assert((r ->> 'trip_finals')::int = 50 and t.final and t.km = v_km1 and t.start_lat is null,
+                          'F32: the oldest trip (someone later in the alphabet) is final first, with its km ' || r::text || ' ' || row_to_json(t)::text);
+  select * into t from public.hr_trips where id = v_t2;
+  perform neo_v24t.assert(not t.final
+                          and exists (select 1 from public.hr_day_km h where h.employee_email = neo_v24t.email('fe2') and h.day = neo_v24t.d(-130) and h.final)
+                          and (select count(*) from public.location_points where employee_email = neo_v24t.email('fe2')
+                                and at >= neo_v24t.at(-130, '10:00') and at <= neo_v24t.at(-130, '11:30')) = 3
+                          and not exists (select 1 from public.location_points where employee_email = neo_v24t.email('fe2') and at = neo_v24t.at(-130, '15:00'))
+                          and not exists (select 1 from public.location_points where employee_email = neo_v24t.email('ta') and at < neo_v24t.at(-199, '00:00')),
+                          'F32: the 51st trip waits — its day is final, its points stay; the points outside it and the final trip''s go');
+  r := public._hr_purge(5000);
+  select * into t from public.hr_trips where id = v_t2;
+  perform neo_v24t.assert((r ->> 'trip_finals')::int = 1 and t.final and t.km = v_km2
+                          and not exists (select 1 from public.location_points where employee_email = neo_v24t.email('fe2') and at < neo_v24t.at(-129, '00:00')),
+                          'F32: the next call makes it final with its km, then its points go ' || r::text || ' ' || row_to_json(t)::text);
 end $$;
 
 

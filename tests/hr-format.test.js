@@ -265,9 +265,13 @@ test('vocabularies: every server word has a label; an unknown one shows as itsel
   ['late', 'on_site', 'rma', 'other'].forEach(function (k) { assert.ok(F.REASON_LABELS[k], k); });
   ['office', 'away', 'unknown', 'unset'].forEach(function (k) { assert.ok(F.PLACE_LABELS[k], k); });
   ['ok', 'weak_fix', 'no_fix', 'mock', 'old_app', 'restored', 'hr'].forEach(function (k) { assert.ok(F.VERIFY_LABELS[k], k); });
-  ['sent_late', 'new_login', 'odd_client', 'no_ticket', 'ticket_not_mine', 'selfie_skip'].forEach(function (k) {
+  ['sent_late', 'new_login', 'odd_client', 'no_ticket', 'ticket_not_mine', 'selfie_skip', 'selfie_late', 'selfie_time',
+   'mock_route', 'emulator', 'request_failed'].forEach(function (k) {
     assert.ok(F.FLAG_LABELS[k] && F.FLAG_TIPS[k], k);
   });
+  // the phone's words for the same flags (HrUi.flagLabel)
+  assert.strictEqual(F.FLAG_LABELS.mock_route, 'Fake GPS on the route');
+  assert.strictEqual(F.FLAG_LABELS.request_failed, 'Request not created — check this punch');
   ['camera_error', 'no_front_camera'].forEach(function (k) { assert.ok(F.SELFIE_SKIP_LABELS[k], k); });
   ['on_site', 'rma'].forEach(function (k) { assert.ok(F.TRIP_LABELS[k], k); });
   ['tapped', 'punch_out', 'cap', 'next_trip', 'hr'].forEach(function (k) { assert.ok(F.TRIP_END_LABELS[k], k); });
@@ -340,6 +344,21 @@ test('flagList: the server flags in order, once each; a skipped photo says why',
   assert.deepStrictEqual(F.flagList(null), []);
 });
 
+test('flagList: fake GPS on the route says how many points when the phone counted them', function () {
+  var m = F.flagList({ flags: ['mock_route'], device_flags: { mock_route_points: 40, dev_options: true } });
+  assert.strictEqual(m[0].text, 'Fake GPS on the route');
+  assert.strictEqual(m[0].tip, 'The phone dropped 40 fake-GPS route points since the last punch.');
+  assert.strictEqual(F.flagList({ flags: ['mock_route'], device_flags: { mock_route_points: 1 } })[0].tip,
+    'The phone dropped 1 fake-GPS route point since the last punch.');
+  // no count (or a junk one): the general sentence
+  [undefined, null, {}, { mock_route_points: 'x' }, { mock_route_points: 0 }, { mock_route_points: 2.5 }, 'str'].forEach(function (df) {
+    assert.strictEqual(F.flagList({ flags: ['mock_route'], device_flags: df })[0].tip, F.FLAG_TIPS.mock_route, JSON.stringify(df));
+  });
+  // the phone's own flags never become tags on their own (only the server's flags[] do)
+  assert.deepStrictEqual(F.flagList({ flags: [], device_flags: { mock_route_points: 9 } }), []);
+  assert.strictEqual(F.flagList({ flags: ['request_failed'] })[0].text, 'Request not created — check this punch');
+});
+
 test('reasonText: the reason kind, the typed text and the ticket', function () {
   assert.strictEqual(F.reasonText({ reason_kind: 'late', reason_text: null }), 'Late');
   assert.strictEqual(F.reasonText({ reason_kind: 'late', reason_text: 'Bus was late' }), 'Late — “Bus was late”');
@@ -349,6 +368,26 @@ test('reasonText: the reason kind, the typed text and the ticket', function () {
   assert.strictEqual(F.reasonText({ reason_text: 'No reason sent (NeoHR 2.2)' }), '“No reason sent (NeoHR 2.2)”');
   assert.strictEqual(F.reasonText({}), '');
   assert.strictEqual(F.reasonText(null), '');
+  // the server's placeholders already name the kind: said once, as they are
+  assert.strictEqual(F.reasonText({ reason_kind: 'late', reason_text: 'Late — no reason typed' }), 'Late — no reason typed');
+  assert.strictEqual(F.reasonText({ reason_kind: 'on_site', reason_text: 'On-site visit', reason_ref: 'NT-0412' }), 'On-site visit · NT-0412');
+  assert.strictEqual(F.reasonText({ reason_kind: 'rma', reason_text: 'RMA trip' }), 'RMA trip');
+  assert.strictEqual(F.reasonText({ reason_kind: 'other', reason_text: 'No reason typed' }), 'Own reason — “No reason typed”');
+  // a word that only starts with the label is typed text, not a placeholder
+  assert.strictEqual(F.reasonText({ reason_kind: 'late', reason_text: 'Lateness of the bus' }), 'Late — “Lateness of the bus”');
+});
+
+test('reasonLine: the reason-kind label in front of a request reason, once', function () {
+  assert.strictEqual(F.reasonLine('Late', 'Bus broke down'), 'Late — Bus broke down');
+  assert.strictEqual(F.reasonLine('Late', 'Late — no reason typed'), 'Late — no reason typed');
+  assert.strictEqual(F.reasonLine('On-site', 'On-site visit'), 'On-site visit');
+  assert.strictEqual(F.reasonLine('RMA', 'RMA trip'), 'RMA trip');
+  assert.strictEqual(F.reasonLine('RMA', 'rma trip'), 'rma trip');
+  assert.strictEqual(F.reasonLine('Late', 'Lateness'), 'Late — Lateness');
+  assert.strictEqual(F.reasonLine('Late', ''), 'Late');
+  assert.strictEqual(F.reasonLine('Late', null), 'Late');
+  assert.strictEqual(F.reasonLine('', 'No reason sent (NeoHR 2.2)'), 'No reason sent (NeoHR 2.2)');
+  assert.strictEqual(F.reasonLine(null, null), '');
 });
 
 test('dueText: decide by the end of the day, or past it', function () {
@@ -366,7 +405,9 @@ test('dueText: decide by the end of the day, or past it', function () {
 
 test('effectText: what each decision does; the v2.3 sentences are unchanged', function () {
   assert.ok(/late mark for that day goes/.test(F.effectText('punch_reason', true)));
-  assert.ok(/late mark stays/.test(F.effectText('punch_reason', false)));
+  // they may not have been late at all (a field engineer away, or with no location)
+  assert.strictEqual(F.effectText('punch_reason', false), 'Nothing on the day changes (a late mark, if any, stays). They see your note on NeoHR.');
+  assert.strictEqual(F.PUNCH_REASON_REJECT, F.effectText('punch_reason', false));
   assert.ok(/punch counts/.test(F.effectText('away_punch', true)));
   assert.ok(/punch is removed/.test(F.effectText('away_punch', false)));
   assert.strictEqual(F.effectText('leave', true, { half_day: false }), 'Those days are marked as leave on the roster (weekly offs and holidays skipped).');

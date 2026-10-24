@@ -95,7 +95,9 @@
   // The server's flags on a punch, short (a tag) and long (its title).
   var FLAG_LABELS = {
     sent_late: 'Sent late', new_login: 'New sign-in', odd_client: 'Not sent by NeoHR', no_ticket: 'No ticket',
-    ticket_not_mine: 'Not their ticket', selfie_skip: 'No photo', selfie_late: 'Photo sent late', selfie_time: 'Photo time is off'
+    ticket_not_mine: 'Not their ticket', selfie_skip: 'No photo', selfie_late: 'Photo sent late', selfie_time: 'Photo time is off',
+    mock_route: 'Fake GPS on the route', emulator: 'Emulator', dev_options: 'Developer options on', mock_app: 'Fake GPS app found',
+    request_failed: 'Request not created — check this punch'
   };
   var FLAG_TIPS = {
     sent_late: 'The phone sent this punch more than 10 minutes after its time (it was offline, or the time was set back).',
@@ -105,7 +107,12 @@
     ticket_not_mine: 'The ticket picked is not one of their service jobs or RMA parts.',
     selfie_skip: 'The phone could not take a photo.',
     selfie_late: 'The photo arrived more than 10 minutes after the punch.',
-    selfie_time: 'The photo was taken well before or after the punch time.'
+    selfie_time: 'The photo was taken well before or after the punch time.',
+    mock_route: 'The phone dropped fake-GPS route points since the last punch.',
+    emulator: 'The punch came from an Android emulator, not a real phone.',
+    dev_options: 'The phone had developer options switched on at the punch.',
+    mock_app: 'A fake-GPS app is set up on the phone.',
+    request_failed: 'The server could not open the HR request this punch needed, so it counts as it is. Check the punch and correct the day if needed.'
   };
   var SELFIE_SKIP_LABELS = { camera_error: 'the camera did not work', no_front_camera: 'no front camera' };
   // Trips (field staff, v2.4 §1.5).
@@ -415,10 +422,34 @@
     if (x.selfie_skip && !seen.selfie_skip) {
       out.push({ key: 'selfie_skip', text: FLAG_LABELS.selfie_skip, tip: FLAG_TIPS.selfie_skip });
     }
+    // How many fake-GPS route points the phone dropped, when the answer
+    // carries the phone's own flags (device_flags.mock_route_points).
+    var df = x.device_flags && typeof x.device_flags === 'object' ? x.device_flags : null;
+    var mockPts = df ? num(df.mock_route_points) : NaN;
     out.forEach(function (f) {
       if (f.key === 'selfie_skip' && x.selfie_skip) f.text = 'No photo (' + words(SELFIE_SKIP_LABELS, x.selfie_skip) + ')';
+      if (f.key === 'mock_route' && isFinite(mockPts) && mockPts > 0 && mockPts === Math.floor(mockPts)) {
+        f.tip = 'The phone dropped ' + mockPts + ' fake-GPS route point' + (mockPts === 1 ? '' : 's') + ' since the last punch.';
+      }
     });
     return out;
+  }
+  // Does text already start with the label (case and spaces aside)? The
+  // server's placeholder reasons do: 'Late — no reason typed', 'On-site
+  // visit', 'RMA trip'.
+  function startsWithLabel(text, lbl) {
+    var t = String(text == null ? '' : text).trim().toLowerCase(), l = String(lbl == null ? '' : lbl).trim().toLowerCase();
+    return !!l && t.slice(0, l.length) === l && !/[a-z0-9]/.test(t.charAt(l.length));
+  }
+  // A request's reason with its reason-kind label in front, once:
+  // 'Late — Bus was late', but 'Late — no reason typed' (not 'Late — Late —
+  // no reason typed') and 'On-site visit' (not 'On-site — On-site visit').
+  function reasonLine(lbl, reason) {
+    var k = lbl == null ? '' : String(lbl).trim();
+    var t = reason == null ? '' : String(reason).trim();
+    if (!k) return t;
+    if (!t) return k;
+    return startsWithLabel(t, k) ? t : k + ' — ' + t;
   }
   // The reason picked at punch-in in one line: 'Late — “Bus was late”',
   // 'On-site · NT-0412'. x: {reason_kind, reason_text, reason_ref}.
@@ -428,7 +459,9 @@
     var t = x.reason_text != null ? String(x.reason_text).trim() : '';
     var ref = x.reason_ref != null ? String(x.reason_ref).trim() : '';
     var s = k;
-    if (t && t !== k) s = (s ? s + ' — ' : '') + '“' + t + '”';
+    // A server placeholder that already names the kind ('Late — no reason
+    // typed', 'On-site visit') is said as it is, not after the label again.
+    if (t && t !== k) s = k && startsWithLabel(t, k) ? t : (s ? s + ' — ' : '') + '“' + t + '”';
     if (ref) s = (s ? s + ' · ' : '') + ref;
     return s;
   }
@@ -446,13 +479,17 @@
     var d = istDay(t);
     return { text: 'Decide by ' + istHm(t) + (isDay(today) && d !== today ? ' (' + dayLabel(d, today) + ')' : ''), late: false };
   }
+  // Rejecting a punch reason changes nothing on the day. The person may not
+  // have been late at all (a field engineer away from the shop, or with no
+  // location, who gave a reason), so it never says "the late mark stays".
+  var PUNCH_REASON_REJECT = 'Nothing on the day changes (a late mark, if any, stays). They see your note on NeoHR.';
   // What approving (or rejecting) a request does to the day, said before it
   // is done. '' when there is nothing more to say.
   function effectText(kind, approve, r) {
     r = r || {};
     if (kind === 'punch_reason') {
       return approve ? 'The late mark for that day goes. Nothing else on the day changes.'
-                     : 'The late mark stays. They see your note on NeoHR.';
+                     : PUNCH_REASON_REJECT;
     }
     if (kind === 'away_punch') {
       return approve ? 'The punch counts, and the time it covers is added to their day.'
@@ -524,6 +561,7 @@
     TRIP_END_LABELS: TRIP_END_LABELS,
     LIVE_TRIP_LABEL: LIVE_TRIP_LABEL,
     MARK_LABELS: MARK_LABELS,
+    PUNCH_REASON_REJECT: PUNCH_REASON_REJECT,
 
     isDay: isDay,
     istDay: istDay,
@@ -570,6 +608,7 @@
     placeTone: placeTone,
     flagList: flagList,
     reasonText: reasonText,
+    reasonLine: reasonLine,
     dueText: dueText,
     effectText: effectText,
     tripText: tripText,

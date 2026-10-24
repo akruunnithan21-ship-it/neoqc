@@ -2702,8 +2702,9 @@
   var HR_EVENT_KINDS = ['punch_in', 'punch_out', 'break_start', 'break_end'];
   // pending_v4 / all_v4 (v1.12.1, sql v2.4): the same lists WITH the punch
   // kinds (punch_reason, away_punch); pending / all leave them out, for the
-  // 1.12 desktops and 2.2 phones that cannot decide them.
-  var HR_SCOPES = ['mine', 'pending', 'all', 'pending_v4', 'all_v4'];
+  // 1.12 desktops and 2.2 phones that cannot decide them. mine_v4 is 'mine'
+  // with the punch kinds (mine keeps to the v2.3 kinds for NeoHR 2.2).
+  var HR_SCOPES = ['mine', 'pending', 'all', 'pending_v4', 'all_v4', 'mine_v4'];
   var HR_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   var HR_NOTE_MAX = 300;
 

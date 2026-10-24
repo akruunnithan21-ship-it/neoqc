@@ -1553,6 +1553,38 @@ v24Test('v2.4: India time everywhere (no current_date), the field-staff seed is 
   });
 });
 
+// The review round (NeoHR 2.3.0 / Neo OS 1.12.1 before release): pinned so a later edit cannot quietly undo them.
+v24Test('v2.4 review: old clients keep their words, D10 counts, device flags, failed requests, the purge keeps live trips', function () {
+  var list = v24Body('hr_requests_list');
+  assert.ok(/when 'mine' then q\.employee_email = v_em and q\.kind = any \(v_old\)/.test(list) && /when 'mine_v4' then/.test(list),
+            "F31: 'mine' keeps to the v2.3 kinds (NeoHR 2.2.0); 'mine_v4' has the punch kinds");
+  assert.ok(/raise exception 'NEO_GATE: The scope is mine, pending or all\.'/.test(list) && HR_RAW && HR_RAW.indexOf("'NEO_GATE: The scope is mine, pending or all.'") !== -1,
+            'an unknown scope keeps the v2.3 sentence (NeoHR 2.3 and Neo OS 1.12.1 fall back on it)');
+  assert.ok(/public\._hr_req_acts\(q, v_me, v_appr\)/.test(list) && /public\._hr_req_acts\(q, v_me, v_appr\)/.test(v24Body('hr_my_day')),
+            'F5: hr_requests_list and hr_my_day.requests share one can_decide / can_cancel rule');
+  assert.ok(/'field_staff', public\._hr_is_field\(v_t\.id\)/.test(v24Body('hr_my_day')), 'F18: hr_my_day says whether the person is field staff');
+  var json = v24Body('_hr_req_json');
+  assert.ok(/'kind_label'/.test(json) && /if r\.status is distinct from 'pending' then v_sf := v_sf - 'thumb_b64'; end if;/.test(json),
+            'F31 / F33: kind_label; a thumb only while the request is pending');
+  assert.ok(!/'thumb_b64'/.test(v24Body('hr_punch_checks')), 'F33: hr_punch_checks sends no second thumb (prev_selfie is {event_id, event_at})');
+  var dash = v24Body('_hr_dash_hr');
+  assert.ok(/'pending_requests', count\(\*\) filter \(where q\.kind in \([^)]*\)\s+and public\._hr_can_decide\(p_me\.id, q\.employee_email\)\)/.test(dash)
+            && /'on_leave'/.test(dash) && /e\.voided_at is null/.test(dash),
+            "F28: pending_requests counts what you may decide (D10); on_leave; unseen photos of standing punches only");
+  var core = v24Body('_hr_punch_core');
+  assert.ok(/'mock_route'::text/.test(core) && /'emulator'::text/.test(core), 'F1: device flags become server flags');
+  assert.ok(/'request_failed'::text/.test(core) && /'request_failed' = any/.test(v24Body('_hr_punch_check')),
+            'F29: a request that cannot be made marks the punch and is reported in check.request');
+  assert.ok(/when floor\(\(v_wsum \+ v_psum\) \/ 60\) < v_half or v_hdl then 'half_day'/.test(v24Body('_hr_day_calc')),
+            'F3: the status word counts worked + pending minutes');
+  var purge = v24Body('_hr_purge');
+  assert.ok(/order by x\.started_at, x\.id/.test(purge) && /from public\.hr_trips tr\s+where tr\.employee_email = x\.em and not tr\.final/.test(purge),
+            'F32: trips are finalised oldest first; no point of a trip that is not final is deleted');
+  var view = v24Body('_hr_dash_view');
+  assert.ok(view.indexOf("('procurement', 'logistics')") !== -1 && view.indexOf("('procurement', 'logistics')") < view.indexOf("ma.role = 'desk'"),
+            'F30: the supply departments come before a desk role');
+});
+
 warnings.forEach(function (w) { console.warn('WARN ' + w); });
 console.log((failures ? 'FAILED' : 'OK') + ' sql-parity: ' + passed + ' passed, ' + failures + ' failed' +
             (warnings.length ? ', ' + warnings.length + ' warning' + (warnings.length === 1 ? '' : 's') : '') +

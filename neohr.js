@@ -113,6 +113,12 @@
   // A v2.3 server answers the v2.4 list scopes with this sentence: it has no
   // punch kinds at all, so the old scopes are the whole list.
   var OLD_SCOPES = /scope is mine, pending or all/i;
+  // ...for a while: the database may be updated while Neo OS stays signed in
+  // for days, so the v2.4 scopes are tried again after 10 minutes.
+  var OLD_SCOPES_RETRY_MS = 10 * 60000;
+  // _hr_can_decide (D10): the owner's (and any tier 4 account's) requests
+  // only reach tier 4 and above.
+  var TIER45_SENTENCE = 'Requests from a tier 4 or 5 account are decided by tier 4 and above.';
   // An RPC this server does not have yet (PostgREST PGRST202).
   var NO_RPC = /PGRST202|could not find the function|schema cache/i;
   var PRESETS = [['today', 'Today'], ['yesterday', 'Yesterday'], ['7d', '7 days'], ['30d', '30 days']];
@@ -295,7 +301,8 @@
     map: null, mapLayer: null, mapKey: null,
     timer: null, debounce: null, dateTimer: null, workTimer: null, hrTimer: null,
     filterSig: null, peopleSig: null, kp: null, bm: null,
-    reqV3: false                               // the server has no v2.4 request scopes (a v2.3 server)
+    reqV3: false,                              // the server has no v2.4 request scopes (a v2.3 server)
+    reqV3At: 0                                 // when that was last seen (Date.now)
   };
 
   function readPrefs() {
@@ -336,7 +343,7 @@
     st.v.liveView = keepViews.liveView; st.v.logsView = keepViews.logsView; st.v.regView = keepViews.regView;
     st.person = ''; st.search = ''; st.expanded = {}; st.openLogs = {};
     st.preset = 'today'; st.from = null; st.to = null;
-    st.filterSig = null; st.peopleSig = null; st.kp = null; st.bm = null; st.reqV3 = false;
+    st.filterSig = null; st.peopleSig = null; st.kp = null; st.bm = null; st.reqV3 = false; st.reqV3At = 0;
     if (st.debounce) { clearTimeout(st.debounce); st.debounce = null; }
     if (st.dateTimer) { clearTimeout(st.dateTimer); st.dateTimer = null; }
     if (st.workTimer) { clearTimeout(st.workTimer); st.workTimer = null; }
@@ -387,7 +394,9 @@
     paint();
     var p;
     try { p = Promise.resolve(fn()); } catch (e) { p = Promise.reject(e); }
-    return p.then(function (v) {
+    // Kept so someone can wait for the answer in flight (boardReady); it
+    // never rejects.
+    return (s.p = p.then(function (v) {
       if (s.seq !== seq || who !== whoKey() || st.slots[name] !== s) return null;
       // The data layer marks an answer meant for an earlier sign-in or demo
       // state: not ours, keep what we had.
@@ -400,7 +409,7 @@
       s.err = e || new Error('Something went wrong.'); s.loading = false;
       paint();
       return null;
-    });
+    }));
   }
   function need(name) {
     var d = D();
@@ -447,6 +456,13 @@
     var s = st.slots.team;
     if (!s.val && !s.loading && !s.err && b.err) run('team', 'team', function () { return need('workTeam').workTeam(); });
   }
+  // ensurePeople, and a promise that settles once the board's answer is in
+  // (or failed): who is field staff, for a day answer that does not say.
+  function boardReady() {
+    ensurePeople();
+    var b = st.slots.board;
+    return b.loading && b.p ? b.p.then(function () { return null; }, function () { return null; }) : Promise.resolve(null);
+  }
   function loadLogs() {
     var r = range();
     if (rangeError(r)) { paint(); return Promise.resolve(null); }
@@ -484,15 +500,20 @@
     return run('reg', 'reg|' + r.from + '|' + r.to + '|' + person, function () { return need('hrRegister').hrRegister(r.from, r.to, person || null); });
   }
   // The request lists with the punch kinds (pending_v4 / all_v4). A v2.3
-  // server has no such scopes (and no punch kinds): then the old ones, for
-  // the rest of this sign-in.
+  // server has no such scopes (and no punch kinds): then the old ones. That
+  // is tried again after OLD_SCOPES_RETRY_MS, so an HR database updated
+  // while Neo OS stays signed in is picked up (the controls rebuild then:
+  // controlsSig has reqV3).
   function listRequests(base, from, to) {
     var d = need('hrRequestsList');
-    if (st.reqV3) return d.hrRequestsList(base, from, to);
+    if (st.reqV3 && Date.now() - st.reqV3At < OLD_SCOPES_RETRY_MS) return d.hrRequestsList(base, from, to);
     var who = whoKey();
-    return d.hrRequestsList(base + '_v4', from, to).catch(function (e) {
+    return d.hrRequestsList(base + '_v4', from, to).then(function (v) {
+      if (st.reqV3 && who === whoKey()) { st.reqV3 = false; st.reqV3At = 0; paint(); }
+      return v;
+    }, function (e) {
       if (!OLD_SCOPES.test(String((e && e.message) || e || ''))) throw e;
-      if (who === whoKey()) st.reqV3 = true;
+      if (who === whoKey()) { st.reqV3 = true; st.reqV3At = Date.now(); }
       return d.hrRequestsList(base, from, to);
     });
   }
@@ -502,6 +523,8 @@
   }
   function loadRequests() {
     var t = today();
+    // The board says who is field staff (the day panel opened from here).
+    ensurePeople();
     var jobs = [loadPending()];
     if (st.v.reqScope === 'all') {
       var f = addDays(t, -REQ_BACK_DAYS), to = addDays(t, REQ_AHEAD_DAYS);
@@ -618,6 +641,15 @@
   }
   // Route, km and trips are shown unless the person is known not to be field staff.
   function showsRoute(email, rec) { return fieldOf(email, rec) !== false; }
+  // A person's tier where the screen knows it (the board, Settings → People,
+  // the staff list), else null.
+  function tierOf(email) {
+    var e = lower(email);
+    var b = boardByEmail()[e];
+    if (b && b.tier != null) return b.tier;
+    var s = staffRows().filter(function (x) { return lower(x.email) === e; })[0];
+    return s ? numOrNull(s.tier) : null;
+  }
 
   // hr_register → flat day records { email, name, day, …record }
   function regRecords() {
@@ -912,17 +944,24 @@
   function visibleTabs() { var t = tierNow(); return TAB_DEFS.filter(function (d) { return !d.tier || t >= d.tier; }); }
   function fixTab() { if (!visibleTabs().some(function (d) { return d.id === st.tab; })) st.tab = 'live'; }
   function pendingList() { return reqRows('reqPending').filter(function (r) { return !r.status || r.status === 'pending'; }); }
+  // The waiting requests this viewer may decide: never their own, and not a
+  // tier 4 / 5 account's for a lead below tier 4 (can_decide false). The
+  // badge, the past-end-of-day count, the Live tile and the per-person counts
+  // use these, as hr_dashboard's counts do; the Waiting list shows them all
+  // (the others with their buttons disabled).
+  function pendingDecidable() { return pendingList().filter(function (r) { return r.can_decide !== false && !isSelf(r.email); }); }
   function pendingCount() {
     var p = st.slots.reqPending.val;
-    if (p) return pendingList().length;
-    if (st.slots.board.val) return boardRows().reduce(function (a, r) { return a + r.pending; }, 0);
+    if (p) return pendingDecidable().length;
+    if (st.slots.board.val) return boardRows().reduce(function (a, r) { return a + (r.self ? 0 : r.pending); }, 0);
     return null;
   }
-  // Waiting requests already past the end of their day (punch kinds, v2.4).
+  // Waiting requests already past the end of their day (punch kinds, v2.4)
+  // that this viewer may decide.
   function pastEodCount() {
     var t = today(), now = nowMs(), f = F();
     if (!st.slots.reqPending.val || !f) return 0;
-    return pendingList().filter(function (r) { var d = f.dueText(r, t, now); return !!(d && d.late); }).length;
+    return pendingDecidable().filter(function (r) { var d = f.dueText(r, t, now); return !!(d && d.late); }).length;
   }
 
   function renderToolbar() {
@@ -1277,10 +1316,15 @@
     var place = f.placeText(pc);
     if (place) out.push(tag(place, 'hr-mark-' + f.placeTone(pc), 'Where the server puts today’s first punch-in'));
     var vt = f.verifyText(pc);
-    if (vt) out.push(tag(vt, 'hr-mark-clock'));
+    if (vt && vt !== place) out.push(tag(vt, 'hr-mark-clock'));
     var flags = f.flagList(pc);
+    // A photo the phone could not take says why, on its own tag.
+    var skip = flags.filter(function (x) { return x.key === 'selfie_skip'; })[0] || null;
+    flags = flags.filter(function (x) { return x.key !== 'selfie_skip'; });
     if (flags.length) out.push(tag('⚑ ' + flags.length, 'hr-mark-warn', flags.map(function (x) { return x.text + (x.tip ? ' — ' + x.tip : ''); }).join('\n')));
-    if (pc.selfie === false && !pc.selfie_skip) out.push(tag('No photo', 'hr-mark-warn', 'No photo came with the punch-in yet.'));
+    if (skip) out.push(tag(skip.text, 'hr-mark-warn', skip.tip));
+    // HR's own punch (hr_correct, a missed punch approved) never has a photo.
+    else if (pc.selfie === false && pc.source !== 'hr') out.push(tag('No photo', 'hr-mark-warn', 'No photo came with the punch-in yet.'));
     return out.join('');
   }
   function liveHtml() {
@@ -1299,7 +1343,7 @@
     var counts = {};
     rows.forEach(function (r) { counts[r.status] = (counts[r.status] || 0) + 1; });
     var pc = pendingCount();
-    var pend = pc != null ? pc : rows.reduce(function (a, r) { return a + r.pending; }, 0);
+    var pend = pc != null ? pc : rows.reduce(function (a, r) { return a + (r.self ? 0 : r.pending); }, 0);
     var late = pastEodCount();
     // v2.4: who is on a trip right now (field staff).
     var v4 = rows.some(function (r) { return r.v4; });
@@ -1330,12 +1374,12 @@
     order.forEach(function (k, i) { rank[k] = i; });
     shown.sort(function (a, b) { return ((rank[a.status] != null ? rank[a.status] : 99) - (rank[b.status] != null ? rank[b.status] : 99)) || a.name.localeCompare(b.name); });
     var t = today();
-    // The waiting requests per person, punch kinds included (the board's
-    // own count has the v2.3 kinds only).
+    // The waiting requests per person that this viewer may decide, punch
+    // kinds included (the board's own count has the v2.3 kinds only).
     var waitBy = null;
     if (st.slots.reqPending.val) {
       waitBy = {};
-      pendingList().forEach(function (q) { waitBy[q.email] = (waitBy[q.email] || 0) + 1; });
+      pendingDecidable().forEach(function (q) { waitBy[q.email] = (waitBy[q.email] || 0) + 1; });
     }
     var tripCol = v4 && rows.some(function (r) { return r.field_staff !== false; });
     if (!shown.length) {
@@ -1371,7 +1415,7 @@
         }
         var since = r.since ? ' <span class="hr-muted">since ' + esc(hmOn(r.since, t)) + '</span>' : '';
         var marks = r.self ? '' : countClockTag(r.clock_marks, r.email);
-        var waiting = waitBy ? (waitBy[r.email] || 0) : r.pending;
+        var waiting = waitBy ? (waitBy[r.email] || 0) : (r.self ? 0 : r.pending);
         out += '<tr class="' + (stale ? 'hr-row-stale' : '') + '">' +
           '<th scope="row"><div class="hr-who">' + esc(r.name) + (r.self ? ' <span class="hr-you">you</span>' : '') + '</div>' +
             (r.designation ? '<div class="hr-muted">' + esc(r.designation) + '</div>' : '') + '</th>' +
@@ -1437,6 +1481,11 @@
     return '<button type="button" class="hr-thumb-btn" data-hr-act="photo" data-hr-event="' + esc(eventId) + '" data-hr-title="' + esc(title || '') +
       '" data-hr-sub="' + esc(sub || '') + '" title="Open the full photo (each look is recorded)">' + img + '</button>';
   }
+  // A photo whose thumbnail did not come: a button that opens the full photo.
+  function photoBtnHtml(eventId, title, sub, small) {
+    return '<button type="button" class="hr-thumb hr-thumb-none hr-thumb-btn' + (small ? ' sm' : '') + '" data-hr-act="photo" data-hr-event="' + esc(eventId) +
+      '" data-hr-title="' + esc(title || '') + '" data-hr-sub="' + esc(sub || '') + '" title="Open the full photo (each look is recorded)">📷' + (small ? '' : ' Photo') + '</button>';
+  }
   // The checks of one punch as tags: place, how sure, flags.
   function checkTags(x) {
     var f = F();
@@ -1445,7 +1494,7 @@
     var place = f.placeText(x);
     if (place) out.push(tag(place, 'hr-mark-' + f.placeTone(x), 'Where the server puts this punch'));
     var vt = f.verifyText(x);
-    if (vt) out.push(tag(vt, 'hr-mark-clock'));
+    if (vt && vt !== place) out.push(tag(vt, 'hr-mark-clock'));
     f.flagList(x).forEach(function (g) { out.push(tag(g.text, 'hr-mark-warn', g.tip)); });
     return out.join('');
   }
@@ -1463,14 +1512,18 @@
     // A photo whose thumbnail did not come (none sent, or not for this viewer):
     // the full photo is still a click away (the server says if it may be seen).
     var nowPic = sf && !sf.thumb_b64 && x.event_id
-      ? '<button type="button" class="hr-thumb hr-thumb-none hr-thumb-btn" data-hr-act="photo" data-hr-event="' + esc(x.event_id) + '" data-hr-title="' + esc(title) +
-        '" data-hr-sub="' + esc(dayLabel(d, t)) + '" title="Open the full photo (each look is recorded)">📷 Photo</button>'
+      ? photoBtnHtml(x.event_id, title, dayLabel(d, t), false)
       : thumbHtml(sf && sf.thumb_b64, x.event_id, title, dayLabel(d, t), false);
+    // The previous photo may come without its thumbnail (the server sends
+    // only the one it needs); it is then a click away too.
+    var prevPic = x.prev ? (!x.prev.thumb_b64 && x.prev.event_id
+      ? photoBtnHtml(x.prev.event_id, x.name + ' — earlier photo', prevAt, true)
+      : thumbHtml(x.prev.thumb_b64, x.prev.event_id || null, x.name + ' — earlier photo', prevAt, true)) : '';
     return '<div class="hr-check' + (needsCheck(x) ? ' hr-check-flag' : '') + '">' +
       '<div class="hr-check-pics">' +
         '<figure>' + nowPic +
-          '<figcaption>' + esc(sf ? (sf.late ? 'Sent late' : 'This punch') : (x.selfie_skip ? 'Camera failed' : 'No photo')) + '</figcaption></figure>' +
-        (x.prev ? '<figure>' + thumbHtml(x.prev.thumb_b64, x.prev.event_id || null, x.name + ' — earlier photo', prevAt, true) +
+          '<figcaption>' + esc(sf ? (sf.late ? 'Sent late' : 'This punch') : (x.selfie_skip ? 'Camera failed' : x.source === 'hr' ? 'Added by HR' : 'No photo')) + '</figcaption></figure>' +
+        (x.prev ? '<figure>' + prevPic +
           '<figcaption>' + esc('Before' + (prevAt ? ' · ' + prevAt : '')) + '</figcaption></figure>' : '') +
       '</div>' +
       '<div class="hr-check-main">' +
@@ -1684,7 +1737,7 @@
     }
     if (r.pending_reason) {
       out.push(tag(label('MARK_LABELS', 'pending_reason') || 'Reason waiting', 'hr-mark-clock',
-        'A punch-in reason is waiting for HR. The late mark stays until it is approved.'));
+        'A punch-in reason is waiting for HR. A late mark, if any, stays until it is approved.'));
     }
     if (r.away_pending) {
       out.push(tag((label('MARK_LABELS', 'away_pending') || 'Away — waiting for HR') + (num(r.pending_min) > 0 ? ' (' + fmtDur(r.pending_min) + ')' : ''), 'hr-mark-warn',
@@ -1849,7 +1902,7 @@
     // The server says what this viewer may do (can_decide / can_cancel); the
     // sentence says why not.
     if (status === 'pending') {
-      var dw = why || (r.can_decide === false ? 'You can’t decide this one — the owner’s requests go to a tier 4 head. Refresh if it should be yours.' : null);
+      var dw = why || (r.can_decide === false ? TIER45_SENTENCE : null);
       acts = actBtn('primary-pink-btn', 'req-approve', 'Approve…', ' data-hr-id="' + esc(r.id) + '"', dw) +
         actBtn('secondary-btn', 'req-reject', 'Reject…', ' data-hr-id="' + esc(r.id) + '"', dw);
     } else if (status === 'approved') {
@@ -1870,7 +1923,8 @@
     if (punch && f) {
       var tags = checkTags(r);
       var rk = r.reason_kind ? label('REASON_LABELS', r.reason_kind) : '';
-      reasonLine = (rk && rk !== reasonLine ? rk + (reasonLine ? ' — ' : '') : '') + reasonLine;
+      // The label once: the server's placeholder reasons already start with it.
+      reasonLine = f.reasonLine ? f.reasonLine(rk, reasonLine) : (rk && rk !== reasonLine ? rk + (reasonLine ? ' — ' : '') : '') + reasonLine;
       var sf = objOrNull(r.selfie);
       var photo = '';
       if (sf && sf.thumb_b64) photo = thumbHtml(sf.thumb_b64, r.event_id, r.name + ' — ' + reqDates(r), label('REQUEST_LABELS', r.kind), false);
@@ -1933,7 +1987,7 @@
     html.push('<p class="hr-hint">Approving leave or a field day marks those days on the roster (weekly offs and holidays are skipped). Approving a missed punch adds it to the day. ' +
       (st.reqV3 ? 'Nobody approves their own request.'
         : 'A punch-in reason (late, or a reason they typed) and an away punch should be decided before the end of their day: an away punch counts only once it is approved. ' +
-          'Nobody approves their own request, and the owner’s go to a tier 4 head.') +
+          'Nobody approves their own request. ' + TIER45_SENTENCE) +
       ' This list refreshes every minute.</p>');
     setStat(p.val ? plural(pending.length, 'request') + ' waiting' : '—');
     return html.join('');
@@ -1955,7 +2009,7 @@
     if (s.val && done.length) {
       html.push('<h4 class="hr-day-h">Decided today<span class="hr-day-n">' + esc(done.length) + '</span></h4><div class="hr-reqs">' + done.map(reqCard).join('') + '</div>');
     }
-    html.push('<p class="hr-hint">Late, or a reason they typed, at punch-in goes to HR. On-site and RMA from away from the shop do not need approval. A punch away from the shop by shop staff counts only once HR approves it.</p>');
+    html.push('<p class="hr-hint">A field engineer’s reason at punch-in (Late, or one they typed) goes to HR. On-site and RMA picked away from the shop need no approval. A punch in or out by shop staff away from the shop counts only once HR approves it.</p>');
     return html.join('');
   }
   function findRequest(id) {
@@ -2748,6 +2802,8 @@
     opts = opts || {};
     var who = whoKey();
     var why = whyNotAct(e);
+    // Who is field staff (the board), for a day answer that does not say.
+    ensurePeople();
     var bodyEl = document.createElement('div');
     bodyEl.className = 'hr-dd';
     var rq = opts.request;
@@ -2933,6 +2989,8 @@
         var marks = recMarks(Object.assign({ email: e }, rec, { holiday: rec.holiday || v.holiday }));
         if (marks) html.push('<div class="hr-dd-marks">' + marks + '</div>');
         var reqs = (Array.isArray(v.requests) ? v.requests : []).filter(function (q) { return q && q.id; });
+        var targetTier = tierOf(e);
+        var tier45Blocked = targetTier != null && targetTier >= 4 && tierNow() < 4;
         var evs = events();
         var pr = why ? {} : pairs();
         // While approving a missed punch: where it would go, among the punches.
@@ -2974,8 +3032,12 @@
             var f = F();
             var due = isPunchKind(q.kind) && f ? f.dueText(q, today(), nowMs()) : null;
             var rk = q.reason_kind ? label('REASON_LABELS', q.reason_kind) : '';
-            var reasonLine = (rk && rk !== q.reason ? rk + (q.reason ? ' — ' : '') : '') + (q.reason || '');
-            var dw = why || (q.can_decide === false ? 'You can’t decide this one.' : null);
+            var reasonLine = f && f.reasonLine ? f.reasonLine(rk, q.reason) : (rk && rk !== q.reason ? rk + (q.reason ? ' — ' : '') : '') + (q.reason || '');
+            // hr_my_day says can_decide (v2.4); an answer without it falls
+            // back on the person's tier where the screen knows it (D10).
+            // Own requests and non-approvers are `why` already, so a false
+            // can_decide is the tier rule.
+            var dw = why || (q.can_decide === false || (q.can_decide == null && tier45Blocked) ? TIER45_SENTENCE : null);
             var acts2 = status === 'pending' && !why
               ? '<span class="hr-ev-acts"><button type="button" class="text-btn hr-btn" data-hr-decide="' + esc(q.id) + '" data-hr-ok="1"' + (dw ? ' disabled title="' + esc(dw) + '"' : '') + '>Approve…</button>' +
                 '<button type="button" class="text-btn hr-btn" data-hr-decide="' + esc(q.id) + '" data-hr-ok="0"' + (dw ? ' disabled title="' + esc(dw) + '"' : '') + '>Reject…</button></span>'
@@ -3030,7 +3092,15 @@
       paintDay();
       Promise.resolve().then(function () { return need('hrMyDay').hrMyDay(day, e); }).then(function (v) {
         if (!stillMe(who) || mine !== loadSeq) return;
-        state.data = v; paintDay();
+        // A v2.4 day says whether the person is field staff; for an answer
+        // that does not, wait for the board (asked for in boardReady) rather
+        // than show km for someone who has no route (D1).
+        var rec = v && typeof v === 'object' ? ((v.record && typeof v.record === 'object') ? v.record : v) : null;
+        var known = !!v && (typeof v.field_staff === 'boolean' || fieldOf(e, rec) !== null);
+        return (known ? Promise.resolve(null) : boardReady()).then(function () {
+          if (!stillMe(who) || mine !== loadSeq) return;
+          state.data = v; paintDay();
+        });
       }, function (err) {
         if (!stillMe(who) || mine !== loadSeq) return;
         state.err = err; paintDay();
@@ -3221,7 +3291,7 @@
           if (approve) toast('Approved — ' + r.name + ' sees it on NeoHR.', 'success');
           else if (away && at && (!c || c.ok !== false)) toast('Rejected — the away punch is removed and HR’s punch at ' + istHm(at) + ' is added in its place.', 'success', 7000);
           else if (away && !at) toast('Rejected — the away punch is removed from ' + r.name + '’s day.', 'success', 7000);
-          else if (!away) toast('Rejected — the late mark stays. ' + r.name + ' sees your note on NeoHR.', 'success');
+          else if (!away) toast('Rejected — nothing on the day changes (a late mark, if any, stays). ' + r.name + ' sees your note on NeoHR.', 'success', 7000);
           if (typeof onDone === 'function') onDone();
           return true;
         });
@@ -3240,7 +3310,7 @@
     var r = findRequest(id);
     if (!r) { toast('That request is no longer listed. Refresh and try again.', 'info'); return; }
     var who = whoKey();
-    var what = r.kind === 'punch_reason' ? 'The late mark for that day comes back.'
+    var what = r.kind === 'punch_reason' ? 'A late mark it excused on that day comes back.'
       : isPunchKind(r.kind) ? 'The day goes back to how it was before it was approved.'
       : 'Roster days set by this request go back to their defaults.';
     dialog({

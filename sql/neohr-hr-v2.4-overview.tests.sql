@@ -633,7 +633,7 @@ begin
                          and neo_ovt.keys(r -> 'service') = 'assigned,in_queue,late,mine,open,overdue,ready_to_collect,waiting_customer,waiting_supplier'
                          and neo_ovt.keys(r -> 'rma') = 'assigned,at_vendor,in_queue,late,mine,open,overdue,to_return',
                          'the section keys: ' || (r - 'hr' - 'top')::text);
-  perform neo_ovt.assert((r -> 'hr') ?& array['on_duty', 'on_break', 'on_site', 'absent', 'not_in_yet', 'pending_requests',
+  perform neo_ovt.assert((r -> 'hr') ?& array['on_duty', 'on_break', 'on_site', 'absent', 'not_in_yet', 'on_leave', 'pending_requests',
                                               'late_today', 'away_pending', 'reasons_pending', 'past_eod', 'unverified_today',
                                               'unseen_photos', 'on_trip'],
                          'the hr block has the §1.2 keys (it is hr_dashboard().hr): ' || (r -> 'hr')::text);
@@ -708,6 +708,21 @@ begin
   perform neo_ovt.assert(neo_ovt.keys(r) = 'builds,now,rma,top,view' and r ->> 'view' = 'supply',
                          'procurement with Builds and RMA roles (not desk): builds and rma, no mine: ' || neo_ovt.keys(r) || ' / ' || coalesce(r ->> 'view', 'null'));
 end $$;
+-- The department comes before a desk role (the live procurement / logistics staff hold RMA / Builds desk roles):
+-- still the supply view.
+reset role;
+select neo_ovt.no_jwt();
+update public.module_access set role = 'desk' where profile_id = neo_ovt.uid('supply') and module in ('qc', 'rma');
+select neo_ovt.login('supply');
+do $$
+declare r jsonb := public.neo_overview();
+begin
+  perform neo_ovt.assert(r ->> 'view' = 'supply' and r ? 'builds' and r ? 'rma',
+                         'procurement with Builds and RMA desk roles: still the supply view: ' || neo_ovt.keys(r) || ' / ' || coalesce(r ->> 'view', 'null'));
+end $$;
+reset role;
+select neo_ovt.no_jwt();
+update public.module_access set role = 'tech' where profile_id = neo_ovt.uid('supply') and module in ('qc', 'rma');
 
 select neo_ovt.login('sales');
 do $$
@@ -897,7 +912,7 @@ do $$ begin perform neo_ovt.put('hr0_boss2', (public.neo_overview() -> 'hr')::te
 --   e9   home in        ok, away, WFH today     selfie            → checked (WFH)
 --   e10  hr in          mock                    selfie            → unverified (not for hr: their own)
 --   e11  boss in        mock                    selfie            → unverified (tier 4: only for tier 4+, not boss)
---   e12  sales in       mock, VOIDED                              → never counted
+--   e12  sales in       mock, VOIDED        selfie                → never counted (its photo is not unseen either)
 --   e13  basic break    mock                                      → never counted (not a punch in / out)
 reset role;
 select neo_ovt.no_jwt();
@@ -921,11 +936,12 @@ begin
   e := neo_ovt.ev('home', 'punch_in', v_at, 'ok', 'away');                        perform neo_ovt.selfie(e);
   e := neo_ovt.ev('hr', 'punch_in', v_at, 'mock', 'unknown');                     perform neo_ovt.selfie(e); perform neo_ovt.put('e10', e::text);
   e := neo_ovt.ev('boss', 'punch_in', v_at, 'mock', 'unknown');                   perform neo_ovt.selfie(e); perform neo_ovt.put('e11', e::text);
-  e := neo_ovt.ev('sales', 'punch_in', v_at + interval '1 minute', 'mock', 'unknown', '{}', null, true);
+  e := neo_ovt.ev('sales', 'punch_in', v_at + interval '1 minute', 'mock', 'unknown', '{}', null, true); perform neo_ovt.selfie(e);
   e := neo_ovt.ev('basic', 'break_start', v_at + interval '1 minute', 'mock', 'unknown');
 
   -- requests: q1 away (supply, past its time), q2 reason (legacy), q3 a v2.3 late start (tech), q4 away (boss,
-  -- tier 4), q5 a reason already approved (sales), q6 away (hr, past), q7 reason (field, past)
+  -- tier 4), q5 a reason already approved (sales), q6 away (hr, past), q7 reason (field, past), q8 a v2.3 late start
+  -- (boss, tier 4: pending_requests counts it only for tier 4+, D10)
   insert into public.hr_requests (profile_id, employee_email, kind, date_from, date_to, reason, status, event_id, due_at,
                                   decided_by_email, decided_by_name, decided_at)
   values (neo_ovt.uid('supply'), neo_ovt.email('supply'), 'away_punch', public._hr_today(), public._hr_today(), 'Zq at the bank',
@@ -941,7 +957,9 @@ begin
          (neo_ovt.uid('hr'), neo_ovt.email('hr'), 'away_punch', public._hr_today(), public._hr_today(), 'Zq office supplies',
           'pending', neo_ovt.get('e10')::uuid, now() - interval '2 hours', null, null, null),
          (neo_ovt.uid('field'), neo_ovt.email('field'), 'punch_reason', public._hr_today(), public._hr_today(), 'Zq flat tyre',
-          'pending', neo_ovt.get('e1')::uuid, now() - interval '3 hours', null, null, null);
+          'pending', neo_ovt.get('e1')::uuid, now() - interval '3 hours', null, null, null),
+         (neo_ovt.uid('boss'), neo_ovt.email('boss'), 'late_start', public._hr_today() + 3, public._hr_today() + 3, 'Zq dentist',
+          'pending', null, null, null, null, null);
 
   -- trips: tech's is open (inside the open session); legacy's ended; sales' began before the session;
   -- field punched out after starting one; desk's is voided
@@ -989,14 +1007,14 @@ begin
 end $$;
 grant execute on function neo_ovt.hr_check(text, int, int, int, int, int, int, int) to authenticated;
 
-select neo_ovt.login('hr');       -- tier 2: not their own (q6, e10), not those of a tier 4 (q4, e11)
+select neo_ovt.login('hr');       -- tier 2: not their own (q6, e10), not those of a tier 4 (q4, q8, e11)
 do $$ begin perform neo_ovt.hr_check('hr', 1, 1, 2, 2, 5, 6, 1); end $$;
-select neo_ovt.login('head');     -- tier 3: those of hr too; still not those of a tier 4
+select neo_ovt.login('head');     -- tier 3: those of hr too; still not those of a tier 4 (q4, q8)
 do $$ begin perform neo_ovt.hr_check('head', 1, 2, 2, 3, 6, 7, 1); end $$;
-select neo_ovt.login('boss');     -- tier 4: everybody but themselves
+select neo_ovt.login('boss');     -- tier 4: everybody but themselves (not q4, q8)
 do $$ begin perform neo_ovt.hr_check('boss', 1, 2, 2, 3, 6, 7, 1); end $$;
-select neo_ovt.login('boss2');    -- tier 4: boss as well
-do $$ begin perform neo_ovt.hr_check('boss2', 1, 3, 2, 3, 7, 8, 1); end $$;
+select neo_ovt.login('boss2');    -- tier 4: boss as well (q4, q8)
+do $$ begin perform neo_ovt.hr_check('boss2', 2, 3, 2, 3, 7, 8, 1); end $$;
 
 -- People late today (punched in at half past, after 09:40) and the statuses.
 select neo_ovt.login('head');

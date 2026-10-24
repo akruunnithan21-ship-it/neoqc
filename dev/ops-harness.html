@@ -56,7 +56,7 @@
       node -e "const c=require('crypto'),h=require('fs').readFileSync('dev/ops-harness.html','utf8').replace(/\r\n/g,'\n');for(const m of h.matchAll(/<(script)>([\s\S]*?)<\/\1>/g))console.log('sha256-'+c.createHash('sha256').update(m[2]).digest('base64'))"
     This folder is excluded from the packaged app (electron-builder.json).
   -->
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-KTH5/X/U+YoH8lDHCKjWulZF8V8I2B3jUHDdrMmbmWM=' 'sha256-DwlcMLk2ijb5gMbl7/zHq2uc1FwE7bLcKZODsRukH+I=' 'sha256-ZYJyftR9Qit73jEYvj+NtWjk0Pcup3Gk4ZlBDCTSHvg='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: blob: https:; font-src 'self' https://fonts.gstatic.com data:; connect-src 'self' https: wss: data: blob:; worker-src 'self' blob:; child-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-KTH5/X/U+YoH8lDHCKjWulZF8V8I2B3jUHDdrMmbmWM=' 'sha256-9h0FcT/arbKDOz5sHOgy4ZdUPBgZLqSDGQ/IWRb4jaA=' 'sha256-ZYJyftR9Qit73jEYvj+NtWjk0Pcup3Gk4ZlBDCTSHvg='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: blob: https:; font-src 'self' https://fonts.gstatic.com data:; connect-src 'self' https: wss: data: blob:; worker-src 'self' blob:; child-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'">
   <link rel="icon" href="data:,">
   <title>Ops harness — Overview, Service and RMA (demo data)</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -837,16 +837,18 @@ function switchScreen(mode) {
       { status: 'on_site', state: 'on_duty', since: hxAt(t, '11:05'), first_in: hxAt(t, '09:24'), worked_min: 190, clock_marks: 1,
         on_site: { job_id: 'demo_s_vishnu', code: 'NT-0412', title: 'Laptop hinge at the customer', since: hxAt(t, '11:05') }, last_point_at: new Date(now - 3 * 60000).toISOString(),
         trip: { id: '7a1b0c2d-0000-4000-8000-000000000001', kind: 'on_site', ref_code: 'NT-0412', started_at: hxAt(t, '10:40') },
-        punch_check: { place: 'office', office_m: 40, verify: 'ok', flags: [], selfie: true } },
+        punch_check: { place: 'office', office_m: 40, verify: 'ok', flags: [], selfie: true, selfie_skip: null, source: 'phone' } },
+      // HR's punch-in (a missed punch approved): no photo, and no 'No photo' tag.
       { status: 'on_duty', state: 'on_duty', since: hxAt(t, '09:41'), first_in: hxAt(t, '09:41'), worked_min: 170, stale: true, clock_marks: 2, last_point_at: new Date(now - 26 * 60000).toISOString(),
-        punch_check: { place: 'office', office_m: 60, verify: 'ok', flags: [], selfie: true } },
+        punch_check: { place: null, office_m: null, verify: 'hr', flags: [], selfie: false, selfie_skip: null, source: 'hr' } },
       { status: 'not_in_yet', state: 'off_duty', since: null, stale: true },
+      // 'Punch without a selfie' (the camera failed): says why, once.
       { status: 'on_break', state: 'on_break', since: hxAt(t, '13:10'), first_in: hxAt(t, '09:30'), worked_min: 200, pending_requests: 1, last_point_at: new Date(now - 40 * 60000).toISOString(),
-        punch_check: { place: 'unknown', office_m: 400, verify: 'weak_fix', flags: ['sent_late'], selfie: false } }
+        punch_check: { place: 'unknown', office_m: 400, verify: 'weak_fix', flags: ['sent_late', 'selfie_skip'], selfie: false, selfie_skip: 'camera_error', source: 'phone' } }
     ];
     var people = hxStaffAll().map(function (p, i) {
       var s = st[i] || { status: 'off_duty', state: 'off_duty', since: hxAt(t, '17:00'), first_in: hxAt(t, '09:28'), worked_min: 400,
-        punch_check: { place: 'away', office_m: 1240, verify: 'ok', flags: ['new_login'], selfie: true } };
+        punch_check: { place: 'away', office_m: 1240, verify: 'ok', flags: ['new_login'], selfie: true, selfie_skip: null, source: 'phone' } };
       var row = Object.assign({ email: p.email, name: p.name, designation: i === 3 ? 'Field Engineer' : i === 2 ? 'Help Desk' : 'Technician', duty: i === 3 ? 'field' : 'shop', holiday: null,
         shift: { start: '09:30', end: '18:30' }, pending_requests: 0, stale: false, self: p.email === hxMe(), worked_min: 0, break_min: 0, missed_out: false,
         flex: i === 3, late_min: 0, km: 0, last_point_at: null, tracking: hxIsField(p.email), attendance_required: true, clock_marks: 0,
@@ -994,8 +996,14 @@ function switchScreen(mode) {
       mk(6, s[2], { kind: 'leave', leave_type: 'sick', status: 'cancelled', date_from: hxAddDay(t, -5), date_to: hxAddDay(t, -5), reason: 'Fever.', cancelled_by_name: 'Demo Desk', cancelled_at: new Date(now - 110 * 3600000).toISOString() })
     ]);
     if (v4) {
+      // A decided request's photo comes without its thumbnail (the server
+      // sends thumbs only while a decision is waiting): a Photo button.
       rest.push(punch(0, s[0], t, { id: '0b7e2c1a-0000-4000-8000-000000000010', status: 'approved', reason: 'Traffic block at Edappally', event_id: hxEv(14), punch_at: hxAt(t, '09:47'),
-        selfie: { thumb_b64: hxFace(s[0].name, 3, 96), late: false }, decided_by_name: 'Harness Owner', decided_at: new Date(now - 2 * 3600000).toISOString() }));
+        selfie: { has_thumb: true, late: false }, decided_by_name: 'Harness Owner', decided_at: new Date(now - 2 * 3600000).toISOString() }));
+      // A placeholder reason that already names its kind (no 'Late — Late — …').
+      rest.push(punch(1, s[3], hxAddDay(t, -2), { id: '0b7e2c1a-0000-4000-8000-000000000011', status: 'rejected', reason: 'Late — no reason typed', event_id: hxEv(15),
+        punch_at: hxAt(hxAddDay(t, -2), '09:58'), place: 'away', office_m: 3100, selfie: null, decided_by_name: 'Harness Owner',
+        decided_at: new Date(now - 30 * 3600000).toISOString(), decision_note: 'Say why next time.' }));
     }
     if (from && to) rest = rest.filter(function (r) { return String(r.date_to) >= from && String(r.date_from) <= to; });
     return Promise.resolve(rest);
@@ -1074,8 +1082,8 @@ function switchScreen(mode) {
     var s = hxStaffAll(), t = hxDay(Date.now());
     var at = function (hm) { return hxAt(day, hm); };
     var mkc = function (n, p, o) {
-      return Object.assign({ id: hxEv(20 + n), email: p.email, name: p.name, kind: 'punch_in', at: at('09:30'), received_at: at('09:30'),
-        place: 'office', office_m: 40, verify: 'ok', flags: [], reason_kind: null, reason_text: null, reason_ref: null, selfie_skip: null, request: null,
+      return Object.assign({ id: hxEv(20 + n), email: p.email, name: p.name, kind: 'punch_in', at: at('09:30'), received_at: at('09:30'), source: 'phone',
+        place: 'office', office_m: 40, verify: 'ok', flags: [], device_flags: null, reason_kind: null, reason_text: null, reason_ref: null, selfie_skip: null, request: null,
         selfie: { thumb_b64: hxFace(p.name, n, 96), late: false, seen_by_me: n % 3 === 0, seen_by_any: n % 2 === 0 },
         prev_selfie: { event_id: hxEv(40 + n), thumb_b64: hxFace(p.name, n + 7, 96), event_at: hxAt(hxAddDay(day, -1), '09:2' + (n % 10)) }, unverified: false },
         o, { received_at: o.received_at || o.at || at('09:30') });
@@ -1084,11 +1092,18 @@ function switchScreen(mode) {
       mkc(1, s[2], { at: at('09:35'), place: 'away', office_m: 2300, flags: ['new_login'], reason_kind: 'other', reason_text: 'Picked up the courier at the post office',
         request: { id: '0b7e2c1a-0000-4000-8000-000000000008', kind: 'away_punch', status: 'pending' }, unverified: true,
         prev_selfie: { event_id: hxEv(39), thumb_b64: hxFace('Someone Else', 4, 96), event_at: hxAt(hxAddDay(day, -1), '09:31') } }),
-      mkc(2, s[3], { at: at('09:30'), received_at: at('09:44'), place: 'unknown', office_m: 400, verify: 'weak_fix', flags: ['sent_late'], selfie: null, unverified: true }),
+      // Fake GPS on the route (the phone's own count in device_flags).
+      mkc(2, s[3], { at: at('09:30'), received_at: at('09:44'), place: 'unknown', office_m: 400, verify: 'weak_fix', flags: ['sent_late', 'mock_route'],
+        device_flags: { mock_route_points: 40, dev_options: true }, selfie: null, unverified: true }),
       mkc(3, s[1], { at: at('09:52'), flags: ['sent_late'], reason_kind: 'late', reason_text: 'Bus broke down at Vyttila',
         request: { id: '0b7e2c1a-0000-4000-8000-000000000007', kind: 'punch_reason', status: 'pending' }, unverified: true }),
       mkc(4, s[0], { at: at('09:24'), prev_selfie: null }),
-      mkc(5, s[0], { kind: 'punch_out', at: at('18:41'), received_at: at('18:41'), place: 'office', office_m: 25 })
+      // The previous photo without its thumbnail: a click away.
+      mkc(5, s[0], { kind: 'punch_out', at: at('18:41'), received_at: at('18:41'), place: 'office', office_m: 25,
+        prev_selfie: { event_id: hxEv(45), event_at: hxAt(hxAddDay(day, -1), '18:33') } }),
+      // HR's punch (no photo by design); and one whose request could not be opened.
+      mkc(6, s[1], { kind: 'punch_out', at: at('18:30'), received_at: at('19:05'), source: 'hr', place: null, office_m: null, verify: 'hr', selfie: null, prev_selfie: null }),
+      mkc(7, s[2], { kind: 'punch_out', at: at('18:35'), place: 'away', office_m: 900, flags: ['request_failed'], unverified: true })
     ];
     if (day > t) rows = [];
     return { now: new Date().toISOString(), day: day, punches: rows };

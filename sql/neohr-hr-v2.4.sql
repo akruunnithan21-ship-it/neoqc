@@ -47,7 +47,8 @@
 --     made of it — place (office / away / unknown / unset), metres to the
 --     office, verify (ok / weak_fix / no_fix / mock / old_app / restored / hr),
 --     flags (sent_late, new_login, odd_client, no_ticket, ticket_not_mine,
---     selfie_skip, selfie_time), the reason the phone sent. A field
+--     selfie_skip, selfie_time, mock_route, emulator, request_failed), the
+--     reason the phone sent. A field
 --     engineer's late or away punch-in with a reason becomes a punch_reason
 --     request (On-site / RMA away from the shop excuse the late mark at once);
 --     a non-field punch in / out the server cannot place at the shop becomes
@@ -97,8 +98,9 @@
 --   _hr_is_late_punch, _hr_punch_extras, _hr_punch_core, _hr_punch_check,
 --   _hr_punch_request, _hr_session_at, _hr_trip_eff, _hr_trip_measure,
 --   _hr_trip_json, _hr_trip_sync, _hr_trip_begin, _hr_day_trips,
---   _hr_month_trip_km, _hr_dash_hr, _hr_msg, hr_selfie_put, hr_selfie_get,
---   hr_punch_checks, hr_punch_request_decide, hr_trip_start, hr_trip_end
+--   _hr_month_trip_km, _hr_trip_km_days, _hr_req_acts, _hr_dash_hr, _hr_msg,
+--   hr_selfie_put, hr_selfie_get, hr_punch_checks, hr_punch_request_decide,
+--   hr_trip_start, hr_trip_end
 --   (neo_overview / neo_overview_list: sql/neohr-hr-v2.4-overview.sql; their
 --   grants are in _hr_lockdown's API list below)
 --
@@ -295,9 +297,12 @@ $$;
 
 -- §6: which dashboard a person gets — the first that matches, from the
 -- profile's OWN tier and roles (never the caller's): head (tier 3+) · hr
--- (a NeoHR lead role) · field (field staff) · desk (support / service desk /
--- front desk, or a service / RMA / Builds desk role) · supply (procurement,
--- logistics) · sales (department sales, or "sales" in the designation) · basic.
+-- (a NeoHR lead role) · field (field staff) · desk (department support /
+-- service desk / front desk) · supply (department procurement, logistics) ·
+-- desk (a service / RMA / Builds desk role) · sales (department sales, or
+-- "sales" in the designation) · basic. The departments come before the desk
+-- role: procurement and logistics staff often hold a desk role for their
+-- tickets and still get the supply dashboard (a change to the spec's order).
 create or replace function public._hr_dash_view(p_profile uuid)
 returns text language plpgsql stable set search_path = public as $$
 declare
@@ -312,12 +317,12 @@ begin
   end if;
   if public._hr_is_field(v.id) then return 'field'; end if;
   v_dept := lower(btrim(coalesce(v.department, '')));
-  if v_dept in ('support', 'service desk', 'front desk')
-     or exists (select 1 from public.module_access ma
-                 where ma.profile_id = v.id and ma.module in ('service', 'rma', 'qc') and ma.role = 'desk') then
+  if v_dept in ('support', 'service desk', 'front desk') then return 'desk'; end if;
+  if v_dept in ('procurement', 'logistics') then return 'supply'; end if;
+  if exists (select 1 from public.module_access ma
+              where ma.profile_id = v.id and ma.module in ('service', 'rma', 'qc') and ma.role = 'desk') then
     return 'desk';
   end if;
-  if v_dept in ('procurement', 'logistics') then return 'supply'; end if;
   if v_dept = 'sales' or coalesce(v.designation, '') ilike '%sales%' then return 'sales'; end if;
   return 'basic';
 end $$;
@@ -384,6 +389,24 @@ begin
   end if;
 end $$;
 
+-- What p_me may do with a request — hr_requests_list's rows and
+-- hr_my_day.requests (one rule for both): can_decide = an approver (p_appr),
+-- pending, _hr_can_decide (D10); can_cancel = never an away punch; the owner
+-- while pending, or approved and not started yet (not a missed punch); an
+-- approver someone else's pending or approved one (not an approved missed
+-- punch).
+create or replace function public._hr_req_acts(r public.hr_requests, p_me public.profiles, p_appr boolean)
+returns jsonb language sql stable set search_path = public as $$
+  select jsonb_build_object(
+    'can_decide', coalesce(p_appr, false) and r.status = 'pending' and public._hr_can_decide(p_me.id, r.employee_email),
+    'can_cancel', r.kind <> 'away_punch'
+                  and ((r.employee_email = lower(p_me.email)
+                        and (r.status = 'pending'
+                             or (r.status = 'approved' and r.kind <> 'missed_punch' and r.date_from > public._hr_today(now()))))
+                       or (coalesce(p_appr, false) and r.employee_email <> lower(p_me.email) and r.status in ('pending', 'approved')
+                           and not (r.status = 'approved' and r.kind = 'missed_punch'))))
+$$;
+
 -- Photo visibility: the person themselves, or a NeoHR lead — a tier 4 / 5
 -- account's photos only to tier 4+.
 create or replace function public._hr_sees(p_viewer uuid, p_subject text)
@@ -401,18 +424,20 @@ begin
 end $$;
 
 -- A punch's photo for a viewer: {thumb_b64 (only when the viewer may see it),
--- late, taken_at, w, h, seen_by_me, seen_by_any} or null (no photo).
+-- has_thumb (there is a thumb the viewer may see), late, taken_at, w, h,
+-- seen_by_me, seen_by_any} or null (no photo).
 create or replace function public._hr_selfie_brief(p_event_id uuid, p_viewer uuid)
 returns jsonb language sql stable set search_path = public as $$
   select jsonb_build_object(
-           'thumb_b64', case when s.thumb is not null and public._hr_sees(p_viewer, s.employee_email)
-                             then replace(encode(s.thumb, 'base64'), E'\n', '') end,
+           'thumb_b64', case when x.vis then replace(encode(s.thumb, 'base64'), E'\n', '') end,
+           'has_thumb', x.vis,
            'late', s.late, 'taken_at', s.taken_at, 'w', s.width, 'h', s.height,
            'seen_by_me', exists (select 1 from public.hr_selfie_views v
                                   where v.event_id = s.event_id
                                     and lower(v.viewer_email) = (select lower(p.email) from public.profiles p where p.id = p_viewer)),
            'seen_by_any', exists (select 1 from public.hr_selfie_views v where v.event_id = s.event_id))
     from public.hr_punch_selfies s
+    cross join lateral (select s.thumb is not null and public._hr_sees(p_viewer, s.employee_email) as vis) x
    where s.event_id = p_event_id
 $$;
 
@@ -847,10 +872,20 @@ end $$;
 -- 2 decimals, then summed). → {days: [{day, km}], km}
 create or replace function public._hr_month_trip_km(p_email text, p_month date, p_now timestamptz)
 returns jsonb language plpgsql volatile set search_path = public as $$
+begin
+  return public._hr_trip_km_days(p_email, date_trunc('month', p_month)::date,
+                                 least((date_trunc('month', p_month) + interval '1 month')::date - 1, public._hr_today(p_now)), p_now);
+end $$;
+
+-- Trip km per session day of [p_from, p_to] (the same rule as a month:
+-- trips on the session day of started_at, voided left out, each trip rounded
+-- to 2 decimals). → {days: [{day, km}] (days with km > 0), km}
+create or replace function public._hr_trip_km_days(p_email text, p_from date, p_to date, p_now timestamptz)
+returns jsonb language plpgsql volatile set search_path = public as $$
 declare
   v_em text := lower(btrim(p_email));
-  v_from date := date_trunc('month', p_month)::date;
-  v_to date := least((date_trunc('month', p_month) + interval '1 month')::date - 1, public._hr_today(p_now));
+  v_from date := p_from;
+  v_to date := p_to;
   v_h int := coalesce((select s.max_session_h from public.hr_settings s where s.id = 1), 16);
   t public.hr_trips;
   v_d date;
@@ -1432,7 +1467,9 @@ begin
 -- computed late, late_min = 0, late_excused (never 'late'). A session whose
 -- punch_in or punch_out is in pending_ids counts nowhere until HR approves:
 -- its minutes go to pending_min (not worked_min / break_min), the session
--- says pending, the day says away_pending (the status words are unchanged).
+-- says pending, the day says away_pending (the status words are unchanged;
+-- half_day is judged on worked + pending minutes, so a day waiting for HR
+-- reads present / late as it will once approved).
 create or replace function public._hr_day_calc(p jsonb)
 returns jsonb language plpgsql stable set search_path = public as $$
 declare
@@ -1544,8 +1581,11 @@ begin
       v_excused := true;
       v_late := 0;
     end if;
+    -- the status word counts the pending minutes as well (a day whose session
+    -- waits on an away punch is not a half day; away_pending keeps it out of
+    -- the totals until HR decides); worked_min / pending_min stay apart
     v_status := case when v_open then 'open'
-                     when v_worked < v_half or v_hdl then 'half_day'
+                     when floor((v_wsum + v_psum) / 60) < v_half or v_hdl then 'half_day'
                      when v_late > 0 then 'late'
                      else 'present' end;
     if v_hdl then v_leave := 0.5; end if;
@@ -1667,8 +1707,9 @@ end $$;
 -- attendance_from (or before the person's account existed) a day with no
 -- session is not_tracked, as in the day record (_hr_days' tracked_from).
 -- v2.4 adds field_staff, trip (the open trip {id, kind, ref_code, ref_title,
--- started_at} or null) and punch_check (today's first punch_in {place,
--- office_m, verify, flags, selfie} or null). The status words are v2.3's.
+-- started_at} or null) and punch_check (today's first punch_in {id, at, place,
+-- office_m, verify, flags, selfie, selfie_skip, source} or null; an 'hr'
+-- source punch never has a photo). The status words are v2.3's.
 create or replace function public._hr_live(p_prof public.profiles, p_now timestamptz)
 returns jsonb language plpgsql volatile set search_path = public as $$
 declare
@@ -1732,7 +1773,8 @@ begin
   end if;
   select jsonb_build_object('id', e.id, 'at', e.at, 'place', e.place, 'office_m', e.office_m, 'verify', e.verify,
                             'flags', to_jsonb(coalesce(e.flags, '{}')),
-                            'selfie', exists (select 1 from public.hr_punch_selfies sf where sf.event_id = e.id))
+                            'selfie', exists (select 1 from public.hr_punch_selfies sf where sf.event_id = e.id),
+                            'selfie_skip', e.selfie_skip, 'source', e.source)
     into v_pc
     from public.attendance_events e
    where lower(e.employee_email) = v_em and e.kind = 'punch_in' and e.voided_at is null
@@ -1755,16 +1797,29 @@ end $$;
 -- A request as the clients see it. v2.4 adds event_id, due_at, past_eod
 -- (pending and past due_at), the punch it came from (punch_at, punch_kind,
 -- place, office_m, verify, flags), its selfie (_hr_selfie_brief: the thumb
--- only for someone who may see it) and reason_kind.
+-- only for someone who may see it, and only while the request is pending —
+-- a decided one says has_thumb and the full photo comes from hr_selfie_get),
+-- reason_kind and kind_label (the kind in words, for clients that do not
+-- know a kind).
 create or replace function public._hr_req_json(r public.hr_requests)
 returns jsonb language plpgsql stable set search_path = public as $$
 declare
   e public.attendance_events;
+  v_sf jsonb;
 begin
-  if r.event_id is not null then select * into e from public.attendance_events x where x.id = r.event_id; end if;
+  if r.event_id is not null then
+    select * into e from public.attendance_events x where x.id = r.event_id;
+    v_sf := public._hr_selfie_brief(r.event_id, auth.uid());
+    if r.status is distinct from 'pending' then v_sf := v_sf - 'thumb_b64'; end if;
+  end if;
   return jsonb_build_object('id', r.id, 'email', r.employee_email,
     'name', (select p.full_name from public.profiles p where lower(p.email) = r.employee_email order by p.active desc limit 1),
-    'kind', r.kind, 'date_from', r.date_from, 'date_to', r.date_to, 'half_day', r.half_day, 'leave_type', r.leave_type,
+    'kind', r.kind,
+    'kind_label', case r.kind when 'late_start' then 'Late start' when 'early_leave' then 'Early leave'
+                              when 'flexible_day' then 'Flexible day (on-site / RMA)' when 'field_day' then 'Field day'
+                              when 'missed_punch' then 'Missed punch' when 'leave' then 'Leave'
+                              when 'punch_reason' then 'Punch-in reason' when 'away_punch' then 'Away from shop' end,
+    'date_from', r.date_from, 'date_to', r.date_to, 'half_day', r.half_day, 'leave_type', r.leave_type,
     'reason', r.reason, 'ref_code', r.ref_code, 'missed_at', r.missed_at, 'missed_kind', r.missed_kind, 'status', r.status,
     'decided_by_name', r.decided_by_name, 'decided_at', r.decided_at, 'decision_note', r.decision_note,
     'cancelled_by_name', r.cancelled_by_name, 'cancelled_at', r.cancelled_at, 'cancel_note', r.cancel_note,
@@ -1773,7 +1828,7 @@ begin
     'past_eod', r.status = 'pending' and r.due_at is not null and now() > r.due_at,
     'punch_at', e.at, 'punch_kind', e.kind, 'place', coalesce(r.place, e.place), 'office_m', coalesce(r.office_m, e.office_m),
     'verify', e.verify, 'flags', case when e.id is not null then to_jsonb(coalesce(e.flags, '{}')) end,
-    'selfie', case when r.event_id is not null then public._hr_selfie_brief(r.event_id, auth.uid()) end,
+    'selfie', v_sf,
     'reason_kind', r.reason_kind);
 end $$;
 
@@ -1782,7 +1837,8 @@ end $$;
 -- your route. Someone else's day: approvers only (with clock marks). v2.4:
 -- each punch gains place, office_m, verify, flags, reason_kind, reason_text,
 -- reason_ref, selfie (a photo arrived), selfie_late, selfie_skip, request_id
--- (still no coordinates); the day gains trips[].
+-- (still no coordinates); the day gains trips[] and field_staff (the
+-- person's); each request gains can_decide / can_cancel (as hr_requests_list).
 create or replace function public.hr_my_day(p_day date default null, p_email text default null)
 returns jsonb language plpgsql volatile security definer set search_path = public as $$
 declare
@@ -1842,9 +1898,10 @@ begin
                                             where e.at >= (s.value ->> 'start')::timestamptz
                                               and e.at <= coalesce((s.value ->> 'out')::timestamptz, (s.value ->> 'cap')::timestamptz))))),
     'visits', public._hr_visits(v_em, v_d, v_now, v_mine),
-    'requests', (select coalesce(jsonb_agg(public._hr_req_json(q) order by q.created_at), '[]'::jsonb)
+    'requests', (select coalesce(jsonb_agg(public._hr_req_json(q) || public._hr_req_acts(q, v_me, v_appr) order by q.created_at), '[]'::jsonb)
                    from public.hr_requests q where lower(q.employee_email) = v_em and v_d between q.date_from and q.date_to),
-    'trips', public._hr_day_trips(v_em, v_d, v_now));
+    'trips', public._hr_day_trips(v_em, v_d, v_now),
+    'field_staff', public._hr_is_field(v_t.id));
   if v_self then
     v_out := v_out || jsonb_build_object(
       'tracking', public._hr_tracking(v_em, v_t.id, v_now, public._hr_state(v_em, v_now)),
@@ -1921,7 +1978,8 @@ end $$;
 -- People are computed in email order (each person's days in date order) —
 -- the order every reader writes cached day km in, so two readers never
 -- deadlock — and answered in name order. v2.4: each person gains totals
--- (_hr_day_totals: an away-pending day is not present, late or half day).
+-- (_hr_day_totals: an away-pending day is not present, late or half day);
+-- each day gains trip_km (a person's trips are measured after their days).
 create or replace function public.hr_register(p_from date default null, p_to date default null, p_email text default null)
 returns jsonb language plpgsql volatile security definer set search_path = public as $$
 declare
@@ -1933,6 +1991,7 @@ declare
   v_t public.profiles;
   r record;
   v_days jsonb;
+  v_tk jsonb;
   v_people jsonb := '[]'::jsonb;
 begin
   if not public.has_module('neohr', 'lead') then
@@ -1948,6 +2007,13 @@ begin
             where case when v_t.id is not null then p.id = v_t.id else p.active and coalesce(p.is_staff, false) end
             order by lower(p.email), p.id loop
     v_days := public._hr_days(r.email, v_from, least(v_to, v_today), v_now, true);
+    -- each day gains trip_km (the travel allowance basis, as hr_my_month's days)
+    v_tk := public._hr_trip_km_days(r.email, v_from, least(v_to, v_today), v_now);
+    select coalesce(jsonb_agg(d.value || jsonb_build_object('trip_km',
+             coalesce((select (t.value ->> 'km')::numeric from jsonb_array_elements(v_tk -> 'days') as t(value)
+                        where (t.value ->> 'day')::date = (d.value ->> 'day')::date), 0)) order by d.ord), '[]'::jsonb)
+      into v_days
+      from jsonb_array_elements(v_days) with ordinality as d(value, ord);
     v_people := v_people || jsonb_build_array(jsonb_build_object('email', lower(r.email), 'name', r.full_name,
       'designation', r.designation, 'self', r.id = v_me.id, 'field_staff', public._hr_is_field(r.id),
       'days', v_days, 'totals', public._hr_day_totals(v_days)));
@@ -1958,11 +2024,13 @@ begin
 end $$;
 
 -- §1.2 — hr_dashboard's hr block for an approver (and anyone else who needs
--- it): the v2.3 board counts and pending_requests (v2.3 kinds only, never
--- your own), plus late_today, away_pending / reasons_pending (the ones you
--- may decide), past_eod (either, past due), unverified_today (today's phone
--- punches that need a look, not your own), unseen_photos (today's photos no
--- approver has opened, not your own) and on_trip.
+-- it): the v2.3 board counts and pending_requests (v2.3 kinds only, the ones
+-- you may decide — _hr_can_decide, D10: never your own, a tier 4 / 5
+-- account's only for tier 4+), plus on_leave, late_today, away_pending /
+-- reasons_pending (the ones you may decide), past_eod (either, past due),
+-- unverified_today (today's phone punches that need a look, not your own),
+-- unseen_photos (today's photos of punches still standing that no approver
+-- has opened, not your own) and on_trip.
 create or replace function public._hr_dash_hr(p_me public.profiles, p_now timestamptz)
 returns jsonb language plpgsql volatile set search_path = public as $$
 declare
@@ -1979,13 +2047,14 @@ begin
            'on_site', count(*) filter (where x.value ->> 'status' = 'on_site'),
            'absent', count(*) filter (where x.value ->> 'status' = 'absent'),
            'not_in_yet', count(*) filter (where x.value ->> 'status' = 'not_in_yet'),
+           'on_leave', count(*) filter (where x.value ->> 'status' = 'on_leave'),
            'late_today', count(*) filter (where coalesce((x.value ->> 'late_min')::int, 0) > 0),
            'on_trip', count(*) filter (where jsonb_typeof(x.value -> 'trip') = 'object'))
     into v_out
     from jsonb_array_elements(v_live) as x(value);
   select v_out || jsonb_build_object(
            'pending_requests', count(*) filter (where q.kind in ('late_start', 'early_leave', 'flexible_day', 'field_day', 'missed_punch', 'leave')
-                                                  and q.employee_email <> v_em),
+                                                  and public._hr_can_decide(p_me.id, q.employee_email)),
            'away_pending', count(*) filter (where q.kind = 'away_punch' and public._hr_can_decide(p_me.id, q.employee_email)),
            'reasons_pending', count(*) filter (where q.kind = 'punch_reason' and public._hr_can_decide(p_me.id, q.employee_email)),
            'past_eod', count(*) filter (where q.kind in ('punch_reason', 'away_punch') and q.due_at < p_now
@@ -2001,6 +2070,7 @@ begin
     'unseen_photos', (select count(*) from public.hr_punch_selfies s
                        where s.event_at >= public._hr_at(v_today, '00:00') and s.event_at < public._hr_at(v_today + 1, '00:00')
                          and s.employee_email <> v_em and public._hr_sees(p_me.id, s.employee_email)
+                         and exists (select 1 from public.attendance_events e where e.id = s.event_id and e.voided_at is null)
                          and not exists (select 1 from public.hr_selfie_views v where v.event_id = s.event_id)));
   return v_out;
 end $$;
@@ -2072,15 +2142,20 @@ end $hr$;
 do $hr$
 begin
 -- §1.3.8 — what the server made of a punch: {place, office_m, verify, flags,
--- request {id, kind, status} | null, trip, needs_selfie, dropped}. p_trip /
--- p_dropped come from this call; a replay reads everything from the stored
--- row (its trip: the one this punch started).
+-- request {ok: true, id, kind, status} | {ok: false, message} (the request
+-- could not be made: the punch carries the request_failed flag, so HR sees it
+-- in To check) | null, trip, needs_selfie, dropped}. p_trip / p_dropped come
+-- from this call; a replay reads everything from the stored row (its trip:
+-- the one this punch started).
 create or replace function public._hr_punch_check(p_ev public.attendance_events, p_trip jsonb, p_dropped jsonb)
 returns jsonb language sql stable set search_path = public as $$
   select jsonb_build_object('place', p_ev.place, 'office_m', p_ev.office_m, 'verify', p_ev.verify,
     'flags', to_jsonb(coalesce(p_ev.flags, '{}')),
-    'request', (select jsonb_build_object('id', q.id, 'kind', q.kind, 'status', q.status)
-                  from public.hr_requests q where q.id = p_ev.request_id),
+    'request', coalesce((select jsonb_build_object('ok', true, 'id', q.id, 'kind', q.kind, 'status', q.status)
+                           from public.hr_requests q where q.id = p_ev.request_id),
+                        case when p_ev.request_id is null and 'request_failed' = any (coalesce(p_ev.flags, '{}'))
+                             then jsonb_build_object('ok', false,
+                                                     'message', 'HR could not be asked about this punch — it is marked for HR to check.') end),
     'trip', coalesce(p_trip, (select jsonb_build_object('ok', true, 'id', t.id) from public.hr_trips t
                                where t.employee_email = p_ev.employee_email and t.start_source = 'punch_in'
                                  and t.started_at = p_ev.at and t.voided_at is null limit 1)),
@@ -2260,6 +2335,12 @@ begin
       end if;
     end if;
     if v_skip is not null then v_flags := v_flags || 'selfie_skip'::text; end if;
+    -- what the phone reported about itself (p.flags, kept in device_flags):
+    -- fake-GPS route points it dropped since the last punch, an emulator
+    if coalesce(v_x -> 'flags' ->> 'mock_route_points', '') ~ '^[0-9]{1,6}$' and (v_x -> 'flags' ->> 'mock_route_points')::int > 0 then
+      v_flags := v_flags || 'mock_route'::text;
+    end if;
+    if v_x -> 'flags' -> 'emulator' = 'true'::jsonb then v_flags := v_flags || 'emulator'::text; end if;
   exception when others then null;
   end;
   begin
@@ -2287,11 +2368,21 @@ begin
           v_rkind, v_rtext, v_rref, v_skip, case when v_new and coalesce(v_x ->> 'v', '') ~ '^[0-9]{1,9}$' then (v_x ->> 'v')::int end, v_sid)
   returning * into v_ev;
   perform public._hr_invalidate(v_em, v_at);
-  -- the request (never undoes the punch)
+  -- the request (never undoes the punch; a failure is reported in check.request
+  -- and marks the punch request_failed, so it is never silently counted)
   begin
     v_req := public._hr_punch_request(v_ev, v_field);
-  exception when others then v_req := null;
+  exception when others then
+    v_req := jsonb_build_object('ok', false);
+    raise log 'neohr _hr_punch_request failed for punch %: % (%)', v_ev.id, sqlerrm, sqlstate;
   end;
+  if v_req ->> 'ok' = 'false' then
+    begin
+      update public.attendance_events set flags = coalesce(flags, '{}') || 'request_failed'::text
+       where id = v_ev.id and not ('request_failed' = any (coalesce(flags, '{}')));
+    exception when others then null;
+    end;
+  end if;
   -- a trip started with the punch_in (p.trip)
   if p_kind = 'punch_in' and v_x ? 'trip' then
     begin
@@ -2577,13 +2668,14 @@ begin
   return jsonb_build_object('ok', true, 'request', public._hr_req_json(r));
 end $$;
 
--- 'mine' (my requests, v2.4 kinds included), 'pending' (approvers: everyone's
--- pending), 'all' (approvers: everyone's in a date range, default the last 31
--- days to 90 ahead) — those two keep to the v2.3 kinds for NeoHR 2.2 / Neo OS
--- 1.12. 'pending_v4' / 'all_v4' (NeoHR 2.3, Neo OS 1.12.1): the same with
--- punch_reason and away_punch, pending first, past end of day first, then
--- the oldest. can_decide follows _hr_can_decide; an away punch is never
--- can_cancel.
+-- 'mine' (my requests), 'pending' (approvers: everyone's pending), 'all'
+-- (approvers: everyone's in a date range, default the last 31 days to 90
+-- ahead) — all three keep to the v2.3 kinds for NeoHR 2.2 / Neo OS 1.12
+-- (spec §9). 'mine_v4', 'pending_v4' / 'all_v4' (NeoHR 2.3, Neo OS 1.12.1):
+-- the same with punch_reason and away_punch; pending_v4 / all_v4 pending
+-- first, past end of day first, then the oldest. An unknown scope keeps the
+-- v2.3 sentence (newer clients fall back on it). can_decide / can_cancel:
+-- _hr_req_acts (an away punch is never can_cancel).
 create or replace function public.hr_requests_list(p_scope text default 'mine', p_from date default null, p_to date default null)
 returns jsonb language plpgsql volatile security definer set search_path = public as $$
 declare
@@ -2596,18 +2688,14 @@ declare
   v_v4 boolean;
   v_out jsonb;
 begin
-  if v_scope not in ('mine', 'pending', 'all', 'pending_v4', 'all_v4') then raise exception 'NEO_GATE: The scope is mine, pending or all.'; end if;
-  if v_scope <> 'mine' and not v_appr then
+  if v_scope not in ('mine', 'pending', 'all', 'mine_v4', 'pending_v4', 'all_v4') then
+    raise exception 'NEO_GATE: The scope is mine, pending or all.';
+  end if;
+  if v_scope not in ('mine', 'mine_v4') and not v_appr then
     raise exception 'NEO_DENIED: Only a head or a NeoHR lead can see everyone''s requests.';
   end if;
   v_v4 := v_scope in ('pending_v4', 'all_v4');
-  select coalesce(jsonb_agg(public._hr_req_json(q) || jsonb_build_object(
-           'can_decide', v_appr and q.status = 'pending' and public._hr_can_decide(v_me.id, q.employee_email),
-           'can_cancel', q.kind <> 'away_punch'
-                         and ((q.employee_email = v_em and (q.status = 'pending'
-                                                            or (q.status = 'approved' and q.kind <> 'missed_punch' and q.date_from > v_today)))
-                              or (v_appr and q.employee_email <> v_em and q.status in ('pending', 'approved')
-                                  and not (q.status = 'approved' and q.kind = 'missed_punch'))))
+  select coalesce(jsonb_agg(public._hr_req_json(q) || public._hr_req_acts(q, v_me, v_appr)
          order by case when q.status = 'pending' then 0 else 1 end,
                   case when v_v4 and q.status = 'pending' and q.due_at is not null and q.due_at < now() then 0 else 1 end,
                   case when v_v4 then q.created_at end asc,
@@ -2615,8 +2703,10 @@ begin
     into v_out
     from (select * from public.hr_requests q
            where case v_scope
-                   when 'mine' then q.employee_email = v_em
+                   when 'mine' then q.employee_email = v_em and q.kind = any (v_old)
                                     and (p_from is null or q.date_to >= p_from) and (p_to is null or q.date_from <= p_to)
+                   when 'mine_v4' then q.employee_email = v_em
+                                       and (p_from is null or q.date_to >= p_from) and (p_to is null or q.date_from <= p_to)
                    when 'pending' then q.status = 'pending' and q.kind = any (v_old)
                    when 'pending_v4' then q.status = 'pending'
                    when 'all' then q.kind = any (v_old)
@@ -2933,13 +3023,17 @@ end $$;
 -- HR's look at a day (approvers; default today, India): every punch in / out
 -- of that India day the caller may see — flagged / unverified first, then by
 -- time — with the server's view of it, its request, its photo (thumb; full
--- size through hr_selfie_get) and the person's previous photo to compare.
--- Thumbs are not logged as views (full photos are).
--- → {now, day, punches:[{id, email, name, field_staff, kind, at, received_at,
---    source, place, office_m, verify, flags, reason_kind, reason_text,
+-- size through hr_selfie_get) and which photo of the person came before it
+-- (to compare: open it with hr_selfie_get — no second thumb here, it would
+-- double what every poll sends). Thumbs are not logged as views (full photos
+-- are).
+-- → {now, day, punches:[{id, event_id (= id), email, name, field_staff, kind,
+--    at, received_at, source, place, office_m, verify, flags, device_flags
+--    (what the phone reported about itself), reason_kind, reason_text,
 --    reason_ref, selfie_skip, unverified, request {id, kind, status} | null,
---    selfie {thumb_b64, late, taken_at, w, h, seen_by_me, seen_by_any} | null,
---    prev_selfie {event_id, event_at, thumb_b64} | null}], counts {punches, unverified}}
+--    selfie {thumb_b64, has_thumb, late, taken_at, w, h, seen_by_me,
+--    seen_by_any} | null, prev_selfie {event_id, event_at} | null}],
+--    counts {punches, unverified}}
 create or replace function public.hr_punch_checks(p_day date default null)
 returns jsonb language plpgsql volatile security definer set search_path = public as $$
 declare
@@ -2953,20 +3047,20 @@ begin
   end if;
   select coalesce(jsonb_agg(x.j order by x.unv desc, x.at, x.id), '[]'::jsonb) into v_rows
     from (select e.id, e.at, public._hr_unverified(e, v_now) as unv,
-                 jsonb_build_object('id', e.id, 'email', e.employee_email,
+                 jsonb_build_object('id', e.id, 'event_id', e.id, 'email', e.employee_email,
                    'name', (select p.full_name from public.profiles p where lower(p.email) = e.employee_email order by p.active desc limit 1),
                    'field_staff', public._hr_is_field(e.profile_id),
                    'kind', e.kind, 'at', e.at, 'received_at', e.received_at, 'source', e.source,
                    'place', e.place, 'office_m', e.office_m, 'verify', e.verify, 'flags', to_jsonb(coalesce(e.flags, '{}')),
+                   'device_flags', e.device_flags,
                    'reason_kind', e.reason_kind, 'reason_text', e.reason_text, 'reason_ref', e.reason_ref, 'selfie_skip', e.selfie_skip,
                    'unverified', public._hr_unverified(e, v_now),
                    'request', (select jsonb_build_object('id', q.id, 'kind', q.kind, 'status', q.status)
                                  from public.hr_requests q where q.id = e.request_id),
                    'selfie', public._hr_selfie_brief(e.id, v_me.id),
-                   'prev_selfie', (select jsonb_build_object('event_id', s.event_id, 'event_at', s.event_at,
-                                                             'thumb_b64', replace(encode(s.thumb, 'base64'), E'\n', ''))
+                   'prev_selfie', (select jsonb_build_object('event_id', s.event_id, 'event_at', s.event_at)
                                      from public.hr_punch_selfies s
-                                    where s.employee_email = e.employee_email and s.event_at < e.at and s.thumb is not null
+                                    where s.employee_email = e.employee_email and s.event_at < e.at
                                     order by s.event_at desc limit 1)) as j
             from public.attendance_events e
            where e.kind in ('punch_in', 'punch_out') and e.voided_at is null
@@ -3102,9 +3196,11 @@ end $$;
 --     cutoff that holds a punch_in gets a FINAL hr_day_km row from _hr_track.
 --     A day without one has no session to keep a km for, and is never tracked.
 --  1b) v2.4: every trip that started before the cutoff gets its session end
---     and its final km (before its points go); its coordinates are cleared.
+--     and its final km (before its points go), oldest first whoever it
+--     belongs to; its coordinates are cleared.
 --  2) A point goes once each of its two days is final or holds no punch_in,
---     in batches of 5000.
+--     in batches of 5000 — but never while it lies inside a trip that is not
+--     final yet (v2.4: a bounded call finalises at most 50 trips).
 --  3) Punch coordinates before the cutoff are nulled — in attendance_events
 --     and in the pre-v2.3 punch rows field_activity still holds.
 --  3b) v2.4: punch photos of punches before the cutoff, and their view log.
@@ -3165,10 +3261,11 @@ begin
       where not h.final;
     v_finals := v_finals + 1;
   end loop;
-  -- 1b. trips before the cutoff: their session end, their final km, no coordinates
+  -- 1b. trips before the cutoff: their session end, their final km, no
+  --     coordinates — the oldest first, whoever they belong to
   for t in select * from public.hr_trips x
             where x.started_at < v_cut_ts and not x.final
-            order by x.employee_email, x.started_at
+            order by x.started_at, x.id
             limit case when p_max_rows is null then null else 50 end loop
     if t.voided_at is null then
       perform pg_advisory_xact_lock(hashtext('neo_hr_att:' || t.employee_email));
@@ -3180,11 +3277,13 @@ begin
      where id = t.id;
     v_trips := v_trips + 1;
   end loop;
-  -- 2. the points each of whose two days is final or holds no punch_in
+  -- 2. the points each of whose two days is final or holds no punch_in — and
+  --    never a point inside a trip that is not final yet (a bounded call may
+  --    have left that trip for the next one: its km is measured on them)
   loop
     delete from public.location_points
      where id in (select x.id
-                    from (select lp.id, lower(lp.employee_email) as em, (lp.at at time zone 'Asia/Kolkata')::date as d
+                    from (select lp.id, lp.at, lower(lp.employee_email) as em, (lp.at at time zone 'Asia/Kolkata')::date as d
                             from public.location_points lp
                            where lp.at < v_cut_ts
                            order by lp.at
@@ -3192,7 +3291,12 @@ begin
                    where (exists (select 1 from public.hr_day_km h where h.employee_email = x.em and h.day = x.d and h.final)
                           or not public._hr_has_in(x.em, x.d))
                      and (exists (select 1 from public.hr_day_km h where h.employee_email = x.em and h.day = x.d - 1 and h.final)
-                          or not public._hr_has_in(x.em, x.d - 1)));
+                          or not public._hr_has_in(x.em, x.d - 1))
+                     and not exists (select 1 from public.hr_trips tr
+                                      where tr.employee_email = x.em and not tr.final and tr.voided_at is null
+                                        and tr.started_at <= x.at
+                                        and tr.started_at >= x.at - make_interval(hours => coalesce(v_set.max_session_h, 16))
+                                        and coalesce(tr.ended_at, tr.started_at + make_interval(hours => coalesce(v_set.max_session_h, 16))) >= x.at));
     get diagnostics v_k = row_count;
     v_n := v_n + v_k;
     exit when p_max_rows is not null or v_k < 5000;
