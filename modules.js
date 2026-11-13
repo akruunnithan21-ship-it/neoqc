@@ -53,7 +53,12 @@
     // person's logs, so only tier 3+ (heads) or a NeoHR lead (HR) opens it —
     // the same people the server lets read them (tech_activity,
     // work_log_team).
-    { id: 'neohr',    label: 'NeoHR',    icon: '👥', screenId: 'neohr-screen', mode: 'neohr',
+    // 1.12.2 — owner decision 2026-11-13: NeoHR is switched off for now.
+    // hidden: nobody opens it, the rail never draws it and it is never a
+    // landing screen (canOpen → false). The server pauses the phone's
+    // attendance at the same time (sql/neohr-pause.sql). To bring NeoHR back,
+    // remove `hidden` here and run sql/neohr-pause-rollback.sql.
+    { id: 'neohr',    label: 'NeoHR',    icon: '👥', screenId: 'neohr-screen', mode: 'neohr', hidden: true,
       needs: { anyOf: [{ tier: 3 }, { module: 'neohr', role: 'lead' }] } },
     // The gap above Bench / Settings. shell.js recognises { spacer: true }.
     { id: 'spacer',   spacer: true },
