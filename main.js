@@ -6,6 +6,7 @@ const { Worker } = require('worker_threads');
 const os = require('os');
 const { autoUpdater } = require('electron-updater');
 const log = require('electron-log');
+const cinebenchLib = require('./cinebench');
 
 // Configure auto updater logging
 autoUpdater.logger = log;
@@ -1368,80 +1369,36 @@ ipcMain.handle('sys:run-diagnostics', async (event, config) => {
       const isSingleCore = config && config.useCase === 'gaming';
       event.sender.send('sys:diag-log',
         `Running Cinebench R23 ALONE in ${isSingleCore ? 'Single-Core (Gaming)' : 'Multi-Core (Studio)'} mode — R23 runs its own full benchmark (~10 min). Stress tools start after it.`);
-      const cbLogPath = path.join(path.dirname(cbExe), 'cb.log');
-      if (fs.existsSync(cbLogPath)) { try { fs.unlinkSync(cbLogPath); } catch (e) {} }
-
-      // v1.8.3 — do NOT pass g_CinebenchMinimumTestDuration: in R23 that is a
-      // preset selector, not a seconds value, and an out-of-range number makes
-      // Cinebench abort ~3 s in without benchmarking.
-      const cbTestFlag = isSingleCore ? 'g_CinebenchCpu1Test=true' : 'g_CinebenchCpuXTest=true';
-      const cbCmd = `"${cbExe}" ${cbTestFlag} > "${cbLogPath}"`;
-
-      // Hang-guard only, deliberately INDEPENDENT of the stress `duration` (that
-      // governs the other tools, not R23). R23's own pass is ~10 min; 30 min never
-      // truncates a healthy run on a slow CPU while still bounding a real hang.
-      const cbCeilingSec = 1800;
-
-      await new Promise((cbResolve) => {
-        let settled = false;
-        const finish = () => { if (!settled) { settled = true; cinebenchDone = true; cbResolve(); } };
-
-        const cinebenchProc = spawn('cmd.exe', ['/c', cbCmd], {
-          cwd: path.dirname(cbExe),
-          windowsHide: true
-        });
-
-        const killTimeout = setTimeout(() => {
-          event.sender.send('sys:diag-log', `Cinebench exceeded its ${cbCeilingSec}s ceiling — terminating (no score will be reported).`);
-          try { spawn('taskkill', ['/F', '/IM', 'Cinebench.exe'], { windowsHide: true }); } catch (e) {}
-          finish();   // never let a hung Cinebench block the whole diagnostics run
-        }, cbCeilingSec * 1000);
-
-        // Without this, a spawn failure (missing exe, AV block) would hang the
-        // entire diagnostics run on this await forever.
-        cinebenchProc.on('error', (e) => {
-          clearTimeout(killTimeout);
-          event.sender.send('sys:diag-log', `[ERROR] Cinebench failed to start: ${e.message} — reporting NOT MEASURED.`);
-          cinebenchScore = null;
-          finish();
-        });
-
-        cinebenchProc.on('exit', () => {
-          clearTimeout(killTimeout);
-          event.sender.send('sys:diag-log', "Cinebench R23 CPU test completed. Parsing score...");
-
-          let outputStr = '';
-          if (fs.existsSync(cbLogPath)) {
-            try { outputStr = fs.readFileSync(cbLogPath, 'utf-8'); }
-            catch (e) { log.warn('Cinebench log read failed:', e.message); }
-          }
-
-          if (outputStr) {
-            // R23 prints "CB   42315 pts". Collect every number adjacent to
-            // CB / pts / score / points and take the LARGEST plausible one.
-            const nums = [];
-            const re = /(?:\bCB\b|score|points?|pts|result)\D{0,6}([\d,]{2,})|([\d,]{2,})\s*(?:pts|points)/ig;
-            let m;
-            while ((m = re.exec(outputStr)) !== null) {
-              const n = parseInt((m[1] || m[2] || '').replace(/,/g, ''), 10);
-              if (!isNaN(n) && n >= 50) nums.push(n);
-            }
-            if (nums.length) cinebenchScore = Math.max(...nums);
-            event.sender.send('sys:diag-log',
-              `Cinebench raw output (${outputStr.length} bytes): "${outputStr.replace(/\s+/g, ' ').trim().slice(0, 160)}"`);
-          }
-
-          // v1.8.1 — NO fabricated fallback. If R23 yielded no parseable score we
-          // report NOTHING (report shows NOT MEASURED), never a made-up figure.
-          if (cinebenchScore === 0) {
-            cinebenchScore = null;
-            event.sender.send('sys:diag-log', `Cinebench produced no parseable score — reporting NOT MEASURED (no estimate fabricated).`);
-          } else {
-            event.sender.send('sys:diag-log', `Cinebench score parsed: ${cinebenchScore} pts (${isSingleCore ? 'single' : 'multi'}-core) — measured on an otherwise idle machine.`);
-          }
-          finish();
-        });
+      // 1.12.5 — Cinebench is started DIRECTLY and writes its own log through
+      // g_logFile=. The old launch went through `cmd.exe /c "…" > cb.log`, and
+      // Node's quoting broke that command line, so Cinebench never started and
+      // every run ended in "no parseable score". cinebench.js run() launches it,
+      // watches the log, closes R23 once its result is in (R23 does not reliably
+      // quit by itself), and reads the score. See that file for the R23 details.
+      //
+      // The log lives in this app's own logs folder (next to main.log), not in
+      // the install folder, which may not be writable. It is kept after the run
+      // so a missing score can be checked by hand.
+      //
+      // The 1800 s ceiling is a hang guard only, deliberately INDEPENDENT of the
+      // stress `duration` (that governs the other tools, not R23). R23's own pass
+      // is ~10-11 min; 30 min never truncates a healthy run on a slow CPU.
+      const cb = await cinebenchLib.run({
+        exe: cbExe,
+        singleCore: isSingleCore,
+        logPath: path.join(app.getPath('logs'), 'cinebench-last.log'),
+        ceilingSec: 1800,
+        startupSec: 240,   // not rendering after 4 min = stuck starting up → relaunch once
+        retries: 1,
+        graceSec: 15,
+        onLog: (msg) => event.sender.send('sys:diag-log', msg),
+        logger: log,
       });
+      cinebenchScore = cb.score;   // null = NOT MEASURED; never an estimate
+      if (cb.score != null) {
+        event.sender.send('sys:diag-log', `Cinebench score: ${cb.score} pts (${isSingleCore ? 'single' : 'multi'}-core), measured on an otherwise idle machine.`);
+      }
+      cinebenchDone = true;
     }
     event.sender.send('sys:diag-log', "Cinebench phase complete — starting stress tools (Prime95 / FurMark / RAM / SSD).");
 

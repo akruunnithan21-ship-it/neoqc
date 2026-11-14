@@ -3176,7 +3176,7 @@ function renderDashboard() {
         <td><strong>${escapeHtmlLite(t.customerName)}</strong></td>
         <td>${escapeHtmlLite(t.technician)}</td>
         <td>${escapeHtmlLite(t.specs ? (window.NeoQcMatcher && window.NeoQcMatcher.cleanName ? window.NeoQcMatcher.cleanName(t.specs.cpu || 'System Build') : (t.specs.cpu || 'System Build')) : 'N/A')}</td>
-        <td class="font-mono">${t.diagnostics ? (t.diagnostics.cinebench || 'Not Run') : 'N/A'} pts</td>
+        <td class="font-mono">${t.diagnostics && t.diagnostics.cinebench ? t.diagnostics.cinebench + ' pts' : 'Not measured'}</td>
         <td>${t.completedAt ? new Date(t.completedAt).toLocaleDateString() : 'N/A'}</td>
         <td>
           <button class="text-btn print-row-btn">🖨️ Print</button>
@@ -4476,7 +4476,7 @@ function handleClientTicketSelect() {
 
   // Load status display depending on existing data
   const hasTemps = ticket.diagnostics.cpuTempAvg !== null;
-  const hasCb = ticket.diagnostics.cinebench !== null;
+  const hasCb = ticket.diagnostics.cinebench != null;   // undefined too, or it shows "Completed (undefined pts)"
   document.getElementById('c-diagnostics-status').innerHTML = `
     HWiNFO64: <strong style="color: ${hasTemps ? 'var(--status-completed)' : 'inherit'}">${hasTemps ? 'Calculated' : '[Idle]'}</strong> | 
     Cinebench R23: <strong style="color: ${hasCb ? 'var(--status-completed)' : 'inherit'}">${hasCb ? 'Completed (' + ticket.diagnostics.cinebench + ' pts)' : '[Idle]'}</strong> | 
@@ -8747,7 +8747,10 @@ async function executeDiagnosticsWorkflow(isModal) {
   document.getElementById(prefix + 'gpu-temp-max').value = res.gpuTempMax || '';
   document.getElementById(prefix + 'gpu-temp-avg').value = res.gpuTempAvg || '';
 
-  document.getElementById(prefix + 'cinebench-score').value = res.cinebenchScore || '';
+  // 1.12.5 — a run that measured no Cinebench score leaves the field alone, so an
+  // earlier real score on this build stays visible (and is not saved over).
+  const hasCbScore = res.cinebenchScore != null && res.cinebenchScore > 0;
+  if (hasCbScore) document.getElementById(prefix + 'cinebench-score').value = res.cinebenchScore;
   document.getElementById(prefix + 'furmark-score').value = res.furmarkScore || '';
   document.getElementById(prefix + 'ssd-read').value = res.ssdRead || '';
   document.getElementById(prefix + 'ssd-write').value = res.ssdWrite || '';
@@ -8780,7 +8783,9 @@ async function executeDiagnosticsWorkflow(isModal) {
 
   if (statusBox) {
     statusBox.innerHTML = `
-      Cinebench R23: <strong style="color: var(--status-completed)">Completed (${res.cinebenchScore} pts)</strong> | 
+      Cinebench R23: ${hasCbScore
+        ? `<strong style="color: var(--status-completed)">Completed (${res.cinebenchScore} pts)</strong>`
+        : `<strong style="color: var(--status-urgent)">Not measured (see console)</strong>`} |
       FurMark: <strong style="color: var(--status-completed)">Completed</strong> | 
       RAM: <strong style="color: ${res.ramPassed ? 'var(--status-completed)' : 'var(--status-urgent)'}">${res.ramPassed ? 'Passed' : 'Failed'}</strong>
     `;
@@ -8793,7 +8798,7 @@ async function executeDiagnosticsWorkflow(isModal) {
   appendConsoleLine(boxId, res.gpuTempAvg != null
     ? `[SYS] GPU avg ${res.gpuTempAvg}°C (min ${res.gpuTempMin}°C / max ${res.gpuTempMax}°C) over ${(res.gpuTempLog || []).length} samples.`
     : `[SYS] GPU temperature: no sensor samples captured (iGPU-only build or sensor not exposed).`);
-  appendConsoleLine(boxId, `[SYS] Cinebench R23: ${res.cinebenchScore} pts | FurMark: ${res.furmarkScore} pts.`);
+  appendConsoleLine(boxId, `[SYS] Cinebench R23: ${hasCbScore ? res.cinebenchScore + ' pts' : 'not measured'} | FurMark: ${res.furmarkScore != null ? res.furmarkScore + ' pts' : 'not measured'}.`);
   appendConsoleLine(boxId, `[SYS] SSD — Read: ${res.ssdRead} MB/s, Write: ${res.ssdWrite} MB/s.`);
   appendConsoleLine(boxId, `[SYS] RAM stress test: ${res.ramPassed ? "PASSED ✓" : "FAILED ✗"}${res.ramAllocatedMB != null ? ` (${res.ramAllocatedMB} MB, ${res.ramFaults || 0} faults)` : ''}.`);
 
@@ -8853,8 +8858,12 @@ async function executeDiagnosticsWorkflow(isModal) {
       ticket.diagnostics.gpuTempMax = res.gpuTempMax || null;
       ticket.diagnostics.gpuTempAvg = res.gpuTempAvg || null;
       ticket.diagnostics.gpuTempLog = res.gpuTempLog || null;
-      ticket.diagnostics.cinebench = res.cinebenchScore || null;
-      ticket.diagnostics.cinebenchMode = res.cinebenchMode || 'multi';
+      // 1.12.5 — only a run that measured a score replaces the saved one (and its
+      // mode). A run whose Cinebench failed used to wipe an earlier real score.
+      if (hasCbScore) {
+        ticket.diagnostics.cinebench = res.cinebenchScore;
+        ticket.diagnostics.cinebenchMode = res.cinebenchMode || 'multi';
+      }
       ticket.diagnostics.furmark = res.furmarkScore || null;
       ticket.diagnostics.ssdRead = res.ssdRead || null;
       ticket.diagnostics.ssdWrite = res.ssdWrite || null;

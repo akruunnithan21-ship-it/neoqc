@@ -1,0 +1,46 @@
+Output logged to       : file:///C:/Users/qc/AppData/Roaming/neo-qc/logs/cinebench-last.log
+Application start      : 11/14/26 at 15:58:08
+Executable             : 64 Bit
+Version / Build        : 23.200 / RBBenchmark330542
+Debugger               : not available
+Memory model           : release
+Startup path           : file:///C:/Program Files/NeoQC/resources/app.asar.unpacked/assets/diagnostics/Cinebench
+Application path       : file:///C:/Program Files/NeoQC/resources/app.asar.unpacked/assets/diagnostics/Cinebench/Cinebench.exe
+Application executable : file:///C:/Program Files/NeoQC/resources/app.asar.unpacked/assets/diagnostics/Cinebench/Cinebench.exe
+Resource path          : file:///C:/Program Files/NeoQC/resources/app.asar.unpacked/assets/diagnostics/Cinebench/resource
+Module path(s)         : file:///C:/Program Files/NeoQC/resources/app.asar.unpacked/assets/diagnostics/Cinebench/corelibs; file:///C:/Program Files/NeoQC/resources/app.asar.unpacked/assets/diagnostics/Cinebench/plugins; file:///C:/Users/qc/AppData/Roaming/Maxon/Cinebench_481AD812/plugins
+Temporary path         : file:///C:/Users/qc/AppData/Local/Temp
+Prefs path             : file:///C:/Users/qc/AppData/Roaming/Maxon/Cinebench_481AD812
+Global Prefs path      : file:///C:/Users/qc/AppData/Roaming/Maxon
+OS version             : Windows 10, 64 Bit, Professional Edition (build 26300)
+OS languages           : {en-US}
+App languages          : {en-US}
+Startup language       : en-US
+Processor              : 6(12)x AMD Ryzen 5 5625U with Radeon Graphics
+Computer name          : QC-BENCH-PC
+Unique OS identifier   : REDACTED [tpm]
+Thread Count           : 12
+CPU Speed (MHz)        : 2300.000
+Application Type       : Modular
+Command line arguments : "g_cinebenchCpuXTest=true" "g_logFile=C:\Users\qc\AppData\Roaming\neo-qc\logs\cinebench-last.log" "g_consoleWaitOnEnd=false" 
+
+Module path file:///C:/Program Files/NeoQC/resources/app.asar.unpacked/assets/diagnostics/Cinebench/plugins couldn't be found
+CINEBENCH started
+Drawport API initialized
+    Framework        : OpenGL
+    Vendor           : ATI Technologies Inc. (AMD)
+    Renderer         : AMD Radeon (TM) Graphics
+    Framework version: 4.6.0 Compatibility Profile Context 23.19.24.12.260610
+    Driver version   : 23.19.24.12-260612a-202329C-Clevo
+CINEBENCH AUTORUN
+Please wait until all tests are done!
+
+Running Multiple CPU Render Test...
+Minimum test duration: 600000.0 ms seconds.
+Rendering...
+Finalizing for 1842.0 ms
+Finalizing for 9152.1 ms
+Finalizing for 21906.1 ms
+Values: {1286.897} -> Avg/Deviation: 1286.897/0.000
+CB 1286.90 (0.00)
+ 
