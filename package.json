@@ -1,6 +1,6 @@
 {
   "name": "neo-qc",
-  "version": "1.12.3",
+  "version": "1.12.4",
   "description": "Neo OS — Neo Tokyo operations: builds, QC, service and RMA",
   "main": "main.js",
   "scripts": {

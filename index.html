@@ -992,6 +992,7 @@
                   <button type="button" id="btn-tech-withdraw" class="secondary-btn hidden">Withdraw offer</button>
                   <button type="button" id="btn-tech-release" class="secondary-btn hidden">Hand back…</button>
                   <button type="button" id="btn-tech-send" class="secondary-btn hidden">Send to build queue</button>
+                  <button type="button" id="btn-tech-test" class="secondary-btn hidden">🧪 Test on this PC</button>
                 </div>
                 <span id="form-tech-note" class="q-tech-note hidden"></span>
                 <details id="form-tech-history" class="q-tech-history hidden">
@@ -2612,19 +2613,19 @@
     <div class="glass-slab modal-card" style="max-width: 650px; width: 100%; padding: 30px; border-radius: 20px;">
       <div class="modal-header" style="border-bottom: 1px solid var(--glass-border); padding-bottom: 15px; margin-bottom: 20px;">
         <h2 style="font-family: 'Syncopate', sans-serif; font-size: 1.3rem; color: var(--primary-pink); letter-spacing: 0.05em; margin: 0;">NEO OS UPDATED</h2>
-        <span data-app-version style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; font-weight: 700; background: rgba(var(--primary-pink-rgb), 0.1); color: var(--primary-pink); padding: 4px 8px; border-radius: 4px;">v1.12.3</span>
+        <span data-app-version style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; font-weight: 700; background: rgba(var(--primary-pink-rgb), 0.1); color: var(--primary-pink); padding: 4px 8px; border-radius: 4px;">v1.12.4</span>
       </div>
       <div class="modal-body" style="font-size: 0.92rem; line-height: 1.6; color: var(--text-dark); max-height: 420px; overflow-y: auto; padding-right: 5px;">
-        <p style="margin-top: 0;"><strong>Builds are assigned, not claimed.</strong> Here's what's new in <strong data-app-version>v1.12.3</strong>:</p>
+        <p style="margin-top: 0;"><strong>QC can test any build.</strong> Here's what's new in <strong data-app-version>v1.12.4</strong>:</p>
         <ul style="padding-left: 20px; display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px;">
-          <li><strong>The Builds desk gives each build to a technician.</strong> Open the build and press <strong>Assign…</strong>. The build is theirs at once: there is no claiming, no offer to accept and no 4-hour clock. High-value builds still go only to senior builders.</li>
-          <li><strong>Technicians:</strong> a build given to you shows under <strong>My work</strong> and on your Bench straight away. If you can't do it, hand it back with a reason and it goes back to the Builds desk.</li>
-          <li><strong>Moving a build</strong> from one technician to another needs a reason, and it is kept in the build's history.</li>
-          <li><strong>Service is unchanged.</strong> Service tickets still use the Work queue as before. NeoHR stays switched off.</li>
+          <li><strong>Test on this PC.</strong> Open a build and press <strong>🧪 Test on this PC</strong> to go straight to its test bench: stress test, benchmarks, ports and sign-off. Do it on the build PC itself — the tests measure the PC Neo OS is running on.</li>
+          <li><strong>QC sees every build on the Bench,</strong> whoever it was given to. Technicians still see their own builds.</li>
+          <li><strong>Is this the right PC?</strong> Before a test run, Neo OS compares this PC's processor and graphics card with the build. If they don't match, it asks before saving results onto that build.</li>
+          <li><strong>Fixes:</strong> a save the server refuses no longer says "synced successfully", and drive benchmark results now reach the printed report.</li>
         </ul>
       </div>
       <div class="modal-footer" style="border-top: 1px solid var(--glass-border); padding-top: 15px; display: flex; justify-content: flex-end; margin-top: 20px;">
-        <button id="btn-close-changelog" data-app-version-label class="primary-pink-btn" style="padding: 10px 24px; font-weight: 700; font-size: 0.95rem;">Launch Neo OS v1.12.3</button>
+        <button id="btn-close-changelog" data-app-version-label class="primary-pink-btn" style="padding: 10px 24px; font-weight: 700; font-size: 0.95rem;">Launch Neo OS v1.12.4</button>
       </div>
     </div>
   </div>
@@ -2658,6 +2659,7 @@
   <script src="shared/service-catalog.js"></script>
   <script src="shared/service-demo.js"></script>
   <script src="shared/work-queue.js"></script>
+  <script src="shared/bench-match.js"></script>
   <script src="shared/hr-format.js"></script>
   <script src="app.js"></script>
   <script src="modules.js"></script>

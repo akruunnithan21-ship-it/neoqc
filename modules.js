@@ -63,7 +63,8 @@
     // The gap above Bench / Settings. shell.js recognises { spacer: true }.
     { id: 'spacer',   spacer: true },
     { id: 'bench',    label: 'Bench',    icon: '⚗', action: 'bench',
-      needs: { anyOf: [{ module: 'qc', role: 'tech' }, { tier: 2 }] }, group: 'end' },
+      // 1.12.4 — any Builds role (the desk included: QC tests every build), or tier 2+.
+      needs: { anyOf: [{ module: 'qc', role: 'desk' }, { tier: 2 }] }, group: 'end' },
     { id: 'settings', label: 'Settings', icon: '⚙', action: 'settings', needs: { any: true }, group: 'end' }
   ];
   REGISTRY.forEach(function (e) {

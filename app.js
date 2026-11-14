@@ -2863,7 +2863,9 @@ function technicianMatchesProfile(techName, profile) {
 function benchIsLead(profile) {
   if (!profile) return false;
   if (Number(profile.tier) >= 3) return true;
-  return profile === currentProfile && hasQcRole('lead');
+  // 1.12.4 — QC tests every build: the Builds desk role and QC leads see the
+  // whole floor on the Bench, not only the builds given to them.
+  return profile === currentProfile && canAssignBuilds();
 }
 
 function benchTicketsFor(profile) {
@@ -2899,7 +2901,7 @@ function renderBenchBoard() {
   if (subEl) {
     subEl.textContent = (benchLead || !currentProfile)
       ? 'All active builds on the floor.'
-      : `Builds ${(currentProfile.full_name || '').split(' ')[0] || 'you'} has claimed.`;
+      : `Builds given to ${(currentProfile.full_name || '').split(' ')[0] || 'you'}.`;
   }
   const showAllBtn = document.getElementById('btn-bench-showall');
   if (showAllBtn) showAllBtn.classList.toggle('hidden', !(benchLead && hasQcRole('lead')));
@@ -3922,6 +3924,7 @@ function renderTicketTechArea(ticketId) {
     statusEl.textContent = ticketId ? 'This build is no longer on this PC.' : 'New build — assign a technician after you save.';
     statusEl.dataset.tone = 'muted';
     Object.keys(TECH_BTN_ACT).forEach(id => techBtn(id, false));
+    techBtn('btn-tech-test', false);
     if (!ticketId) {
       techBtn('btn-tech-offer', canAssignBuilds(), { label: 'Assign…', disabled: true, title: TECH_SAVE_FIRST });
       say(TECH_SAVE_FIRST);
@@ -3951,6 +3954,11 @@ function renderTicketTechArea(ticketId) {
   techBtn('btn-tech-withdraw', lead && !done && live, { label: 'Withdraw offer' });
   techBtn('btn-tech-release', !done && assigned && (mine || lead), { label: mine ? 'Hand back…' : 'Take it back…' });
   techBtn('btn-tech-send', false);
+  // 1.12.4 — QC (or the build's own technician) opens the Bench test console
+  // on this build. The tests measure the PC Neo OS runs on: the build PC.
+  techBtn('btn-tech-test', !done && (benchIsLead(currentProfile) || mine), {
+    title: 'Opens the test bench for this build. Run it on the build PC itself.'
+  });
 
   let note = '';
   if (toMe) note = `Offered to you — accept by ${techClock(t.offer.expiresAt)}, or decline it from the Queue.`;
@@ -4009,6 +4017,56 @@ function setupTechAreaButtons() {
     b.dataset.bound = '1';
     b.addEventListener('click', (e) => { e.preventDefault(); onTechButton(TECH_BTN_ACT[bid]); });
   });
+  const test = document.getElementById('btn-tech-test');
+  if (test && !test.dataset.bound) {
+    test.dataset.bound = '1';
+    test.addEventListener('click', (e) => { e.preventDefault(); openBuildTestBench(editingTicketId); });
+  }
+}
+
+// 1.12.4 — "Test on this PC": from the edit ticket straight to the Bench test
+// console for this build (stress test, benchmarks, ports, sign-off). Unsaved
+// edits must be saved first, so nothing typed in the ticket is lost.
+function openBuildTestBench(id) {
+  if (!id) { showToast('Save the build first, then test it.', 'info'); return; }
+  if (ticketFormDirty) { showToast('Save your changes to this build first, then test it.', 'warning'); return; }
+  document.getElementById('ticket-modal').classList.remove('active');
+  editingTicketId = null;
+  ticketFormDirty = false;
+  hideConflictBanner();
+  const sel = document.getElementById('welcome-ticket-select');
+  if (sel) sel.value = id;
+  switchScreen('client-console', id);
+}
+
+// 1.12.4 — the tests measure THIS PC. Before a run, its processor and graphics
+// card are compared with the build's specs (shared/bench-match.js), so a run
+// on the wrong PC never lands on a customer's build without a question.
+let benchHwCache = null;
+async function benchThisPcHardware() {
+  if (benchHwCache) return benchHwCache;
+  try {
+    const hw = await ipcRenderer.invoke('sys:detect-hw');
+    if (hw && hw.cpu && !/failed to detect|detection error/i.test(String(hw.cpu))) benchHwCache = hw;
+    return hw || null;
+  } catch (e) {
+    console.warn('hardware check before the test run failed:', e && e.message);
+    return null;
+  }
+}
+
+async function confirmSamePcForBuild(ticketId) {
+  const t = (appState.tickets || []).find(x => x && x.id === ticketId);
+  const B = window.NeoBenchMatch;
+  if (!t || !B || typeof B.compare !== 'function') return true;
+  const r = B.compare(await benchThisPcHardware(), t.specs || {});
+  if (r.match !== false) return true;
+  const code = '#' + String(t.id).slice(-6).toUpperCase();
+  const lines = r.mismatches.map(m => `${m.part}: this PC has ${m.here}; the build should have ${m.build}.`).join('\n');
+  return showConfirm(
+    `This PC doesn't look like build ${code}${t.customerName ? ' (' + t.customerName + ')' : ''}.\n\n${lines}\n\n` +
+    'The results would be saved to that build. Run the tests on this PC anyway?',
+    { title: 'Is this the right PC?', okText: 'Run anyway', danger: true });
 }
 
 // "Queue history" — the build's work_events, newest first. Builds desk+ only
@@ -5395,10 +5453,11 @@ async function setupClientMode() {
     if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = '⏳ Syncing to cloud...'; }
     if (syncStatus) { syncStatus.textContent = '⏳ Uploading diagnostic data to cloud — please wait...'; syncStatus.className = 'client-sync-status syncing'; syncStatus.classList.remove('hidden'); }
 
+    // 1.12.4 — syncTicketToCloud answers false (it never throws) when the
+    // server refuses the write; that used to show "synced successfully".
     let syncOk = false;
     try {
-      await syncTicketToCloud(t);
-      syncOk = true;
+      syncOk = (await syncTicketToCloud(t)) === true;
     } catch(e) {
       syncOk = false;
     }
@@ -8548,6 +8607,21 @@ async function executeDiagnosticsWorkflow(isModal) {
 
   if (!btn) return;
 
+  // 1.12.4 — make sure this is the build's own PC before measuring it.
+  if (!isModal) {
+    const sel = document.getElementById('client-ticket-select');
+    const tid = sel ? sel.value : '';
+    if (tid) {
+      const before = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = '🔍 Checking this PC…';
+      const go = await confirmSamePcForBuild(tid);
+      btn.disabled = false;
+      btn.textContent = before;
+      if (!go) return;
+    }
+  }
+
   // v1.9.8 — start a fresh console capture for this run. The buffer is written
   // onto the ticket when the run finishes, so the admin can replay exactly what
   // the technician's machine printed.
@@ -8784,6 +8858,8 @@ async function executeDiagnosticsWorkflow(isModal) {
       ticket.diagnostics.furmark = res.furmarkScore || null;
       ticket.diagnostics.ssdRead = res.ssdRead || null;
       ticket.diagnostics.ssdWrite = res.ssdWrite || null;
+      // 1.12.4 — the per-drive table on the printed report (it was never saved).
+      ticket.diagnostics.driveBenchmarks = Array.isArray(res.driveBenchmarks) && res.driveBenchmarks.length ? res.driveBenchmarks : null;
       // v1.8.0 — clock telemetry + temp source
       ticket.diagnostics.cpuClockMin = res.cpuClockMin || null;
       ticket.diagnostics.cpuClockAvg = res.cpuClockAvg || null;
