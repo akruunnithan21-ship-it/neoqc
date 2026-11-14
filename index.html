@@ -634,6 +634,19 @@
                       <span class="portcert-group-title">Case / front-panel ports</span>
                       <span class="portcert-group-tag tag-case">these are what we certify</span>
                     </div>
+                    <!-- 1.12.5 — the cabinet's front panel (shared/case-ports.js): from the last
+                         build with the same cabinet, a known cabinet, or picked here. -->
+                    <div class="portcert-layout" style="display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin:2px 0 10px;">
+                      <label for="portcert-layout-select" style="font-size:0.8rem; font-weight:600;">Front panel</label>
+                      <select id="portcert-layout-select" class="settings-select">
+                        <option value="2a1c">2× USB-A + 1× USB-C</option>
+                        <option value="1a1c">1× USB-A + 1× USB-C</option>
+                        <option value="c">USB-C only</option>
+                        <option value="2a">2× USB-A, no USB-C</option>
+                        <option value="custom" disabled>Custom (edited below)</option>
+                      </select>
+                      <span id="portcert-layout-note" class="portcert-detail" style="flex:1 1 220px;"></span>
+                    </div>
                     <div id="portcert-case-list" class="portcert-list"></div>
                     <div class="portcert-add">
                       <select id="portcert-add-type" class="settings-select">
@@ -1096,6 +1109,14 @@
                 <label for="form-spec-ram">Memory (RAM) *</label>
                 <input type="text" id="form-spec-ram" required placeholder="Search or type RAM Model & Size...">
                 <div id="autocomplete-ram" class="autocomplete-list"></div>
+                <!-- 1.12.5 — how many sticks and how big each is (shared/ram-spec.js). Filled
+                     from the invoice (name × quantity) or the RAM name; the Bench checks it. -->
+                <div class="ram-sticks-row" style="display:flex; align-items:center; gap:6px; margin-top:6px; font-size:0.8rem; color:var(--text-muted);">
+                  <input type="number" id="form-spec-ram-sticks" min="1" max="8" step="1" placeholder="Sticks" style="width:72px;" aria-label="Number of RAM sticks">
+                  <span>sticks ×</span>
+                  <input type="number" id="form-spec-ram-gb" min="1" max="256" step="1" placeholder="GB" style="width:72px;" aria-label="GB per stick">
+                  <span>GB each</span>
+                </div>
               </div>
               <div class="form-group autocomplete-container">
                 <label for="form-spec-storage">SSD / Storage *</label>
@@ -2134,14 +2155,14 @@
           <tr><th>Component</th><th>Installed Configuration</th><th>Serial / Asset Number</th></tr>
         </thead>
         <tbody>
-          <tr><td><strong>Processor (CPU)</strong></td><td id="print-spec-cpu">--</td><td>—</td></tr>
+          <tr><td><strong>Processor (CPU)</strong></td><td id="print-spec-cpu">--</td><td id="print-serial-cpu">—</td></tr>
           <tr><td><strong>Integrated Graphics (iGPU)</strong></td><td id="print-spec-igpu">--</td><td>—</td></tr>
           <tr><td><strong>Discrete GPU</strong></td><td id="print-spec-gpu">--</td><td id="print-serial-gpu">—</td></tr>
           <tr><td><strong>System Memory (RAM)</strong></td><td id="print-spec-ram">--</td><td id="print-serial-ram">—</td></tr>
           <tr><td><strong>Solid State Drive (SSD)</strong></td><td id="print-spec-storage">--</td><td id="print-serial-ssd">—</td></tr>
           <tr><td><strong>Motherboard</strong></td><td id="print-spec-mobo">--</td><td id="print-serial-mobo">—</td></tr>
-          <tr><td><strong>CPU Cooler</strong></td><td id="print-spec-cooler">--</td><td>—</td></tr>
-          <tr><td><strong>Power Supply (PSU)</strong></td><td id="print-spec-psu">--</td><td>—</td></tr>
+          <tr><td><strong>CPU Cooler</strong></td><td id="print-spec-cooler">--</td><td id="print-serial-cooler">—</td></tr>
+          <tr><td><strong>Power Supply (PSU)</strong></td><td id="print-spec-psu">--</td><td id="print-serial-psu">—</td></tr>
           <tr><td><strong>Chassis / Cabinet</strong></td><td id="print-spec-case">--</td><td id="print-serial-cabinet">—</td></tr>
         </tbody>
       </table>
@@ -2613,19 +2634,20 @@
     <div class="glass-slab modal-card" style="max-width: 650px; width: 100%; padding: 30px; border-radius: 20px;">
       <div class="modal-header" style="border-bottom: 1px solid var(--glass-border); padding-bottom: 15px; margin-bottom: 20px;">
         <h2 style="font-family: 'Syncopate', sans-serif; font-size: 1.3rem; color: var(--primary-pink); letter-spacing: 0.05em; margin: 0;">NEO OS UPDATED</h2>
-        <span data-app-version style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; font-weight: 700; background: rgba(var(--primary-pink-rgb), 0.1); color: var(--primary-pink); padding: 4px 8px; border-radius: 4px;">v1.12.4</span>
+        <span data-app-version style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; font-weight: 700; background: rgba(var(--primary-pink-rgb), 0.1); color: var(--primary-pink); padding: 4px 8px; border-radius: 4px;">v1.12.5</span>
       </div>
       <div class="modal-body" style="font-size: 0.92rem; line-height: 1.6; color: var(--text-dark); max-height: 420px; overflow-y: auto; padding-right: 5px;">
-        <p style="margin-top: 0;"><strong>QC can test any build.</strong> Here's what's new in <strong data-app-version>v1.12.4</strong>:</p>
+        <p style="margin-top: 0;"><strong>Front USB test fixed, RAM sticks counted, and Cinebench works again.</strong> Here's what's new in <strong data-app-version>v1.12.5</strong>:</p>
         <ul style="padding-left: 20px; display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px;">
-          <li><strong>Test on this PC.</strong> Open a build and press <strong>🧪 Test on this PC</strong> to go straight to its test bench: stress test, benchmarks, ports and sign-off. Do it on the build PC itself — the tests measure the PC Neo OS is running on.</li>
-          <li><strong>QC sees every build on the Bench,</strong> whoever it was given to. Technicians still see their own builds.</li>
-          <li><strong>Is this the right PC?</strong> Before a test run, Neo OS compares this PC's processor and graphics card with the build. If they don't match, it asks before saving results onto that build.</li>
-          <li><strong>Fixes:</strong> a save the server refuses no longer says "synced successfully", and drive benchmark results now reach the printed report.</li>
+          <li><strong>Case Port Certification works again.</strong> It finds the drive much faster, sees fast USB-C sticks and SSDs, waits for the drive letter, and gives you a full minute to plug in. It won't pass the same socket twice, and it tells you if Windows says the socket is on the back.</li>
+          <li><strong>The front panel comes from the cabinet.</strong> The port list follows the last build with the same cabinet, a known cabinet, or the cabinet name. Pick <strong>2× USB-A + USB-C</strong>, <strong>1× USB-A + USB-C</strong>, <strong>USB-C only</strong> or <strong>2× USB-A</strong> in one click.</li>
+          <li><strong>RAM sticks.</strong> Each build now records how many RAM sticks and how big each one is, typed in or filled from the invoice (it reads the quantity: "2 PCS", 2 × 16 GB). The Bench checks it against the sticks actually installed.</li>
+          <li><strong>Cinebench works again.</strong> It was never actually starting, so every run said no score. The score now shows on the build and the report, and a failed run no longer wipes an earlier score.</li>
+          <li><strong>Scan Ports</strong> now lists mice, headsets and webcams, and names HDMI and DisplayPort outputs properly.</li>
         </ul>
       </div>
       <div class="modal-footer" style="border-top: 1px solid var(--glass-border); padding-top: 15px; display: flex; justify-content: flex-end; margin-top: 20px;">
-        <button id="btn-close-changelog" data-app-version-label class="primary-pink-btn" style="padding: 10px 24px; font-weight: 700; font-size: 0.95rem;">Launch Neo OS v1.12.4</button>
+        <button id="btn-close-changelog" data-app-version-label class="primary-pink-btn" style="padding: 10px 24px; font-weight: 700; font-size: 0.95rem;">Launch Neo OS v1.12.5</button>
       </div>
     </div>
   </div>
@@ -2660,6 +2682,8 @@
   <script src="shared/service-demo.js"></script>
   <script src="shared/work-queue.js"></script>
   <script src="shared/bench-match.js"></script>
+  <script src="shared/case-ports.js"></script>
+  <script src="shared/ram-spec.js"></script>
   <script src="shared/hr-format.js"></script>
   <script src="app.js"></script>
   <script src="modules.js"></script>

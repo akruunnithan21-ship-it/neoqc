@@ -162,6 +162,8 @@
   // "16GB", "6000MHz", "2TB", "GDDR7" (those carry letters, HSN codes don't).
   function cleanInvoiceName(line) {
     var l = stripRowNoise(line);
+    // 1.12.5 — a leading quantity "2 x Corsair …" (extractQty reads it).
+    l = l.replace(/^\s*\d{1,2}\s*[x×]\s+(?=[A-Za-z])/i, '');
     // Leading row index ("2 MSI …") — but never a spec unit ("16 GB …").
     l = l.replace(/^\s*\d{1,2}\s+(?!(?:gb|tb|mhz|ghz|w|watt|mm)\b)(?=[A-Za-z])/i, '');
     l = l.replace(/\bhsn\s*\/?\s*sac\b/ig, ' ');
@@ -169,9 +171,36 @@
     l = l.replace(/\b\d{1,2}\s*(yrs?|years?|months?|mo)\b/ig, ' '); // warranty "3yr"
     l = l.replace(/\b\d{1,3}\s*(pcs?|nos?|units?|qty)\b/ig, ' ');   // qty "1 PCS"
     l = l.replace(/\b\d{6,9}\b/g, ' ');                          // bare HSN/SAC codes
+    // 1.12.5 — 4-digit HSN headings for PC parts ("Cabinet 8473 1").
+    l = l.replace(/\b(?:8471|8473|8504|8523|8528|8542|8544)\b/g, ' ');
     l = l.replace(/\s*[|/\\]\s*/g, ' ');                         // leftover column pipes
     l = l.replace(/\s{2,}/g, ' ').replace(/^[\s\-–,]+|[\s\-–,]+$/g, '').trim();
+    // 1.12.5 — a quantity column glued after the product noun ("… DDR5 RAM 2").
+    l = l.replace(/\b(ram|memory|ssd|nvme|hdd|cabinet|case|chassis|processor|cpu|card|gpu|psu|supply|cooler|motherboard|board|fans?|kit)\s+\d{1,2}$/i, '$1');
     return l;
+  }
+
+  // 1.12.5 — how many of this item the invoice line sells. Read from the
+  // ORIGINAL line: "2 PCS" / "Qty: 2" / a leading "2 x", else the line total
+  // divided by the unit rate (with or without GST), else a lone 1–2 digit
+  // quantity column just before the first price. Defaults to 1.
+  var GST_FACTORS = [1, 1.05, 1.12, 1.18, 1.28];
+  function extractQty(orig, rate, total) {
+    var s = String(orig || '');
+    var m = s.match(/\b(\d{1,2})\s*(?:pcs?|nos?|units?)\b/i) ||
+            s.match(/\bqty\.?\s*:?\s*(\d{1,2})\b/i) ||
+            s.match(/^\s*(\d{1,2})\s*[x×]\s+[A-Za-z]/i);
+    if (m) { var q = parseInt(m[1], 10); if (q >= 1 && q <= 20) return q; }
+    if (rate && total && total > rate * 1.5) {
+      for (var i = 0; i < GST_FACTORS.length; i++) {
+        var r = total / (rate * GST_FACTORS[i]);
+        var n = Math.round(r);
+        if (n >= 2 && n <= 20 && Math.abs(r - n) < 0.005 * n) return n;
+      }
+    }
+    var c = s.match(/[A-Za-z)]\s+(\d{1,2})\s+(?:₹|rs\.?\s*|inr\s*)?\d{1,3}(?:,\d{2,3})+(?:\.\d{1,2})?/i);
+    if (c) { var q2 = parseInt(c[1], 10); if (q2 >= 1 && q2 <= 20) return q2; }
+    return 1;
   }
 
   // Pull the money figures off an ORIGINAL invoice line (before stripRowNoise
@@ -305,15 +334,19 @@
       }
     });
     if (leading.length && rows.length) rows[0].parts = leading.concat(rows[0].parts);
-    // Materialize each row: cleaned display text + de-dup identical text.
+    // Materialize each row: cleaned display text + its quantity. 1.12.5 — an
+    // identical line (the same RAM stick billed twice) adds its quantity to
+    // the first instead of being dropped.
     var seen = {}; var out = [];
     rows.forEach(function (row) {
       var joined = row.parts.join(' ');
       var text2 = cleanInvoiceName(joined);
       if (text2.length < 3) return;
+      var qty = extractQty(joined, row.rate, row.total);
       var k = text2.toLowerCase();
-      if (seen[k]) return; seen[k] = 1;
-      out.push({ text: text2, orig: joined, rate: row.rate, total: row.total });
+      if (seen[k] != null) { out[seen[k]].qty += qty; return; }
+      seen[k] = out.length;
+      out.push({ text: text2, orig: joined, rate: row.rate, total: row.total, qty: qty });
     });
     return out;
   }
@@ -384,6 +417,8 @@
         priceInr: invoicePrice,
         invoicePriceInr: invoicePrice,
         invoiceLineTotal: info.row.total,
+        // 1.12.5 — how many were bought (RAM: sticks = quantity × kit size).
+        quantity: info.row.qty || 1,
         catalogPriceInr: null,
         priceSource: invoicePrice != null ? 'invoice' : 'none',
         confidence: Math.min(1, 0.55 + chosenScore * 0.1),
@@ -414,6 +449,7 @@
     _isCandidate: isCandidate,
     _stripRowNoise: stripRowNoise,
     _cleanInvoiceName: cleanInvoiceName,
+    _extractQty: extractQty,
     _keywordScore: keywordScore,
     _rankCategories: rankCategories,
     extractSerial: extractSerial,

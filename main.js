@@ -1940,7 +1940,12 @@ function runPortTestScript(args) {
   });
 }
 
-ipcMain.handle('sys:port-snapshot2', async () => runPortTestScript(['-Mode', 'snapshot']));
+// 1.12.5 — optional parts ('devices', 'disks', 'audio', comma-separated): the
+// port test polls with 'devices' only (seconds instead of a full snapshot).
+ipcMain.handle('sys:port-snapshot2', async (event, parts) => {
+  const p = typeof parts === 'string' && /^[a-z]+(,[a-z]+)*$/.test(parts) ? parts : null;
+  return runPortTestScript(p ? ['-Mode', 'snapshot', '-Parts', p] : ['-Mode', 'snapshot']);
+});
 ipcMain.handle('sys:port-iotest', async (event, driveLetter, sizeMB) =>
   runPortTestScript(['-Mode', 'iotest', '-DriveLetter', String(driveLetter || ''), '-SizeMB', String(sizeMB || 48)]));
 

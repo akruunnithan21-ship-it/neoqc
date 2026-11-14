@@ -30,10 +30,23 @@ foreach ($c in (Get-CimInstance Win32_USBController)) {
 
 # ── Connected USB peripherals (exclude hubs/roots/host controllers) ──────
 $usbDevices = @()
-foreach ($d in (Get-PnpDevice -PresentOnly -Class USB -Status OK)) {
-  if ($d.FriendlyName -and $d.FriendlyName -notmatch 'Root Hub|Host Controller|Generic USB Hub|USB Composite') {
-    $usbDevices += $d.FriendlyName
+$usbAll = @(Get-PnpDevice -PresentOnly -Class USB -Status OK |
+  Where-Object { $_.FriendlyName -and $_.FriendlyName -notmatch 'Root Hub|Host Controller|Generic USB Hub|Generic SuperSpeed USB Hub' })
+# 1.12.5 — a mouse, headset or webcam is a "USB Composite Device"; name it by
+# its own descriptor instead of dropping it (one batched call keeps this fast).
+$busDesc = @{}
+if ($usbAll.Count) {
+  foreach ($p in @(Get-PnpDeviceProperty -InstanceId ($usbAll.InstanceId) -KeyName 'DEVPKEY_Device_BusReportedDeviceDesc' -EA SilentlyContinue)) {
+    if ($p.Data) { $busDesc[$p.InstanceId] = [string]$p.Data }
   }
+}
+foreach ($d in $usbAll) {
+  $n = $d.FriendlyName
+  if ($n -match 'USB Composite') {
+    if (-not $busDesc[$d.InstanceId]) { continue }
+    $n = $busDesc[$d.InstanceId]
+  }
+  $usbDevices += $n
 }
 $usbDevices = $usbDevices | Select-Object -Unique
 
@@ -62,7 +75,10 @@ $conn = Get-CimInstance -Namespace root\wmi -ClassName WmiMonitorConnectionParam
 $ids  = Get-CimInstance -Namespace root\wmi -ClassName WmiMonitorID
 for ($i = 0; $i -lt @($conn).Count; $i++) {
   $tech = $conn[$i].VideoOutputTechnology
-  $techName = if ($videoTech.ContainsKey([int64]$tech)) { $videoTech[[int64]$tech] } else { "Type $tech" }
+  # 1.12.5 — the table's small keys are Int32 and 'Internal' is Int64, so a
+  # typed ContainsKey missed every external output ("Type 5"). Compare values.
+  $techName = "Type $tech"
+  foreach ($k in $videoTech.Keys) { if ([int64]$k -eq [int64]$tech) { $techName = $videoTech[$k] } }
   $monName = ''
   if ($ids -and $ids[$i] -and $ids[$i].UserFriendlyName) {
     $monName = -join ($ids[$i].UserFriendlyName | Where-Object { $_ -ne 0 } | ForEach-Object { [char]$_ })

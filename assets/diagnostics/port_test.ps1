@@ -15,41 +15,76 @@
 # through it intact. No appearance = fail. That is the honest answer.
 #
 # Modes:
-#   -Mode snapshot
+#   -Mode snapshot [-Parts devices,disks,audio]   (1.12.5: only the parts asked
+#                   for — polling for a plugged-in device needs just 'devices')
 #   -Mode iotest -DriveLetter D [-SizeMB 48]
 
 param(
     [ValidateSet('snapshot','iotest')]
     [string]$Mode = 'snapshot',
     [string]$DriveLetter,
-    [int]$SizeMB = 48
+    [int]$SizeMB = 48,
+    [string]$Parts = 'devices,disks,audio'
 )
+$Want = @($Parts -split ',' | ForEach-Object { $_.Trim().ToLower() } | Where-Object { $_ })
 
 $ErrorActionPreference = 'SilentlyContinue'
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
+# Panel names for the _PLD "Panel" field (ACPI 6, bits 67-69 = byte 8, bits 3-5).
+$PanelNames = @('top', 'bottom', 'left', 'right', 'front', 'back', 'unknown', 'unknown')
+
 function Get-UsbSnapshot {
+    # 1.12.5 — every USB device node, whatever its class (a fast USB-C stick or
+    # SSD using UAS registers as SCSIAdapter, not USB) and whatever its state
+    # (a device that fails to start on a loose front-panel header is exactly
+    # what we want to see). Properties are read per device through the CIM
+    # method on Win32_PnPEntity: ~2 s for a dozen devices. (Get-PnpDeviceProperty
+    # took ~2 s PER CALL, ~40 s a snapshot; its batched form mislabels devices.)
+    $keys = @('DEVPKEY_Device_LocationInfo', 'DEVPKEY_Device_Parent',
+              'DEVPKEY_Device_BusReportedDeviceDesc', 'DEVPKEY_Device_PhysicalDeviceLocation')
     $devices = @()
-    foreach ($d in (Get-PnpDevice -PresentOnly -Class USB -Status OK)) {
-        $loc = (Get-PnpDeviceProperty -InstanceId $d.InstanceId -KeyName 'DEVPKEY_Device_LocationInfo' -EA SilentlyContinue).Data
-        # Skip host controllers — they are PCI devices, not sockets.
-        if (-not $loc -or $loc -like 'PCI bus*') { continue }
-        $parent = (Get-PnpDeviceProperty -InstanceId $d.InstanceId -KeyName 'DEVPKEY_Device_Parent' -EA SilentlyContinue).Data
-        $busDesc = (Get-PnpDeviceProperty -InstanceId $d.InstanceId -KeyName 'DEVPKEY_Device_BusReportedDeviceDesc' -EA SilentlyContinue).Data
+    if ($Want -contains 'devices') {
+    foreach ($e in @(Get-CimInstance Win32_PnPEntity -Filter "PNPDeviceID LIKE 'USB\\%'")) {
+        $r = Invoke-CimMethod -InputObject $e -MethodName GetDeviceProperties -Arguments @{ devicePropertyKeys = $keys } -EA SilentlyContinue
+        $h = @{}
+        foreach ($p in @($r.deviceProperties)) { if ($p) { $h[$p.KeyName] = $p.Data } }
+        $loc = [string]$h['DEVPKEY_Device_LocationInfo']
+        # Only the node sitting directly on a hub port ("Port_#0004.Hub_#0001"):
+        # not host controllers, root hubs, or a composite device's interfaces.
+        if ($loc -notlike 'Port_#*') { continue }
+        $parent = [string]$h['DEVPKEY_Device_Parent']
+        # Where the firmware says this socket is (ACPI _PLD). Often right on
+        # laptops and good boards, sometimes missing or wrong on desktop front
+        # headers, so it is shown as a hint, never used to pass or fail a port.
+        $panel = $null; $visible = $null
+        $pld = $h['DEVPKEY_Device_PhysicalDeviceLocation']
+        if ($pld -is [byte[]] -and $pld.Length -ge 9) {
+            $visible = [bool]($pld[8] -band 1)
+            $panel = $PanelNames[($pld[8] -shr 3) -band 7]
+        }
+        $code = [int]$e.ConfigManagerErrorCode
         $devices += [ordered]@{
-            instanceId  = $d.InstanceId
-            name        = $d.FriendlyName
-            busDesc     = $busDesc
+            instanceId  = $e.PNPDeviceID
+            name        = $e.Name
+            class       = $e.PNPClass
+            # 'OK', or the Device Manager problem code (10 = could not start, 43 = descriptor failed …)
+            status      = if ($code -eq 0) { 'OK' } else { "Error $code" }
+            busDesc     = $h['DEVPKEY_Device_BusReportedDeviceDesc']
             location    = $loc
             parent      = $parent
             # Socket fingerprint: the hub + port the device sits on. Two different
             # physical sockets always differ here.
             socketKey   = "$parent|$loc"
+            panel       = $panel
+            userVisible = $visible
         }
+    }
     }
 
     # USB mass-storage → drive letter, so we can push real data through the port.
     $usbDisks = @()
+    if ($Want -contains 'disks') {
     foreach ($disk in (Get-Disk | Where-Object { $_.BusType -eq 'USB' })) {
         $letters = @()
         foreach ($p in (Get-Partition -DiskNumber $disk.Number -EA SilentlyContinue)) {
@@ -63,16 +98,20 @@ function Get-UsbSnapshot {
             driveLetters = $letters
         }
     }
+    }
 
     # Audio endpoints — a headphone/mic jack plug-in shows up as a new endpoint
     # (or an endpoint changing state) on drivers with jack-presence detection.
     $audio = @()
+    if ($Want -contains 'audio') {
     foreach ($e in (Get-PnpDevice -PresentOnly -Class AudioEndpoint -Status OK)) {
         $audio += [ordered]@{ instanceId = $e.InstanceId; name = $e.FriendlyName }
+    }
     }
 
     return [ordered]@{
         takenAt     = (Get-Date).ToString('o')
+        parts       = @($Want)
         usbDevices  = @($devices)
         usbDisks    = @($usbDisks)
         audioEndpoints = @($audio)

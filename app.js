@@ -1611,6 +1611,25 @@ const CATEGORY_TO_SPEC_FIELD = {
   case: 'form-spec-case', cooler: 'form-spec-cooler-model'
 };
 
+// 1.12.5 — the RAM stick fields. mode 'load': show what the ticket has;
+// 'import': the invoice decides (it overwrites); 'auto': fill from the RAM name
+// only what the technician hasn't typed. Auto-filled values stay replaceable.
+function setRamSticksFields(sticks, gb, mode) {
+  [['form-spec-ram-sticks', sticks], ['form-spec-ram-gb', gb]].forEach(([id, v]) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    if (mode === 'auto' && el.value !== '' && el.dataset.auto !== '1') return;
+    if (mode === 'auto' && (v == null || v === '')) return;
+    el.value = (v == null || v === '') ? '' : String(v);
+    el.dataset.auto = (mode === 'load') ? '' : '1';
+  });
+}
+function readRamSticksField(id, max) {
+  const el = document.getElementById(id);
+  const n = el ? Number(el.value) : NaN;
+  return (isFinite(n) && n >= 1 && n <= max) ? Math.round(n * 10) / 10 : null;
+}
+
 // Fill one target spec field from an invoice match. Mirrors what an autocomplete
 // pick does: sets input.value + specFieldMatches[fieldId]. Returns a status
 // string ('filled' | 'skipped-awaiting' | 'no-field').
@@ -1633,6 +1652,11 @@ function fillTargetSpecFromInvoice(category, entry) {
   }
 
   input.value = entry.displayName || entry.matchedName || entry.rawLine;
+  // 1.12.5 — RAM: sticks = quantity bought × kit size, size per stick from the name.
+  if (category === 'ram' && window.NeoRamSpec) {
+    const exp = window.NeoRamSpec.expected(input.value, entry.quantity);
+    if (exp.sticks || exp.perStickGB) setRamSticksFields(exp.sticks, exp.perStickGB, 'import');
+  }
   if (entry.sku) {
     specFieldMatches[fieldId] = {
       sku: entry.sku, priceInr: entry.priceInr, category: category,
@@ -3456,6 +3480,7 @@ function openTicketModal(ticketId = null) {
   document.getElementById('form-spec-cpu').value = '';
   document.getElementById('form-spec-gpu').value = '';
   document.getElementById('form-spec-ram').value = '';
+  setRamSticksFields(null, null, 'load');
   document.getElementById('form-spec-storage').value = '';
   document.getElementById('form-spec-psu').value = '';
   document.getElementById('form-spec-case').value = '';
@@ -3520,7 +3545,7 @@ function openTicketModal(ticketId = null) {
       invoiceSerials = _v.invoiceSerials || {};
       cvState = _v.components || {};
       if (!Object.keys(cvState).length && ticket.serials) {
-        const legacyMap = { motherboard: 'motherboard', gpu: 'gpu', ram: 'ram', storage: 'ssd', case: 'cabinet' };
+        const legacyMap = { motherboard: 'motherboard', cpu: 'cpu', gpu: 'gpu', ram: 'ram', storage: 'ssd', psu: 'psu', cooler: 'cooler', case: 'cabinet' };
         Object.keys(legacyMap).forEach(k => {
           const val = ticket.serials[legacyMap[k]];
           if (val) cvState[k] = { scan: val, box: '' };
@@ -3546,6 +3571,7 @@ function openTicketModal(ticketId = null) {
       document.getElementById('form-spec-cpu').value = ticket.specs ? (ticket.specs.cpu || '') : '';
       document.getElementById('form-spec-gpu').value = ticket.specs ? (ticket.specs.gpu || '') : '';
       document.getElementById('form-spec-ram').value = ticket.specs ? (ticket.specs.ram || '') : '';
+      setRamSticksFields(ticket.specs && ticket.specs.ramSticks, ticket.specs && ticket.specs.ramStickGB, 'load');
       document.getElementById('form-spec-storage').value = ticket.specs ? (ticket.specs.storage || '') : '';
       document.getElementById('form-spec-psu').value = ticket.specs ? (ticket.specs.psu || '') : '';
       document.getElementById('form-spec-case').value = ticket.specs ? (ticket.specs.case || '') : '';
@@ -4359,16 +4385,21 @@ function handleClientTicketSelect() {
   // Populate target specs (part codes stripped for display)
   const cleanSpec = (s) => (window.NeoQcMatcher && window.NeoQcMatcher.cleanName ? window.NeoQcMatcher.cleanName(s || '') : (s || '')) || '--';
   // Case-port certification list for THIS ticket (defaults on first open).
-  casePorts = (ticket.diagnostics && Array.isArray(ticket.diagnostics.casePorts) && ticket.diagnostics.casePorts.length)
-    ? ticket.diagnostics.casePorts
-    : portCertDefaults();
+  if (ticket.diagnostics && Array.isArray(ticket.diagnostics.casePorts) && ticket.diagnostics.casePorts.length) {
+    casePorts = ticket.diagnostics.casePorts;
+    casePortsNote = 'Saved on this build.';
+  } else {
+    casePorts = portCertDefaultsFor(ticket);
+  }
   renderCasePorts();
   try { renderMoboPorts(ticket.diagnostics && ticket.diagnostics.portScan); } catch (_) {}
 
   document.getElementById('c-target-mobo').textContent = cleanSpec(ticket.specs && ticket.specs.mobo);
   document.getElementById('c-target-cpu').textContent = cleanSpec(ticket.specs && ticket.specs.cpu);
   document.getElementById('c-target-gpu').textContent = cleanSpec(ticket.specs && ticket.specs.gpu);
-  document.getElementById('c-target-ram').textContent = cleanSpec(ticket.specs && ticket.specs.ram);
+  document.getElementById('c-target-ram').textContent = cleanSpec(ticket.specs && ticket.specs.ram) +
+    ((ticket.specs && ticket.specs.ramSticks && ticket.specs.ramStickGB && window.NeoRamSpec)
+      ? '  ·  ' + window.NeoRamSpec.text(ticket.specs.ramSticks, ticket.specs.ramStickGB) : '');
   document.getElementById('c-target-storage').textContent = cleanSpec(ticket.specs && ticket.specs.storage);
   
   let coolerText = '';
@@ -4789,6 +4820,12 @@ async function handleTicketFormSubmit(e) {
     ssd: document.getElementById('serial-ssd').value,
     cabinet: document.getElementById('serial-cabinet').value
   };
+  // 1.12.5 — CPU, PSU and cooler have no hidden legacy input, so their scans
+  // never reached this map: ticket search and the duplicate-serial check could
+  // not see them. Take them straight from Component Verification.
+  CV_COMPONENTS.forEach(c => {
+    if (!c.legacy) serials[c.key] = String((cvState[c.key] || {}).scan || '').trim();
+  });
 
   // Determine current status
   let status = 'awaiting';
@@ -4869,6 +4906,9 @@ async function handleTicketFormSubmit(e) {
     cpu: specCpu,
     gpu: specGpu,
     ram: specRam,
+    // 1.12.5 — how many sticks and the size of each (null when not known).
+    ramSticks: readRamSticksField('form-spec-ram-sticks', 8),
+    ramStickGB: readRamSticksField('form-spec-ram-gb', 256),
     storage: specStorage,
     coolerType: specCoolerType,
     coolerModel: specCoolerModel,
@@ -9469,6 +9509,17 @@ function checkSpecsMatch() {
     if (!target)            { setChip(c.cat, '', '—'); return; }                        // nothing to verify
     if (!detectionRan)      { setChip(c.cat, 'pending', 'awaiting detect'); awaiting.push(c.label); return; }
     if (!detected)          { setChip(c.cat, 'unknown', 'not detected');  notDetected.push(c.label); return; }
+    // 1.12.5 — RAM: the stick count and size per stick decide, when both the
+    // build (specs.ramSticks / ramStickGB) and Windows (each module) say.
+    if (c.cat === 'ram' && window.NeoRamSpec && specs.ramSticks && specs.ramStickGB && inv && Array.isArray(inv.ramModules) && inv.ramModules.length) {
+      var rc = window.NeoRamSpec.compare({ sticks: specs.ramSticks, perStickGB: specs.ramStickGB }, inv.ramModules);
+      if (rc.state === 'match') { setChip('ram', 'match', '✓ ' + rc.foundText); return; }
+      if (rc.state === 'mismatch') {
+        setChip('ram', 'mismatch', '✗ ' + rc.foundText + ' found');
+        mismatches.push('RAM (expected ' + rc.expectedText + ', found ' + rc.foundText + ')');
+        return;
+      }
+    }
     if (tokenMatch(target, detected)) { setChip(c.cat, 'match', '✓ match'); return; }
     if (c.genGuard && ddrGenConflict(target, detected)) { setChip(c.cat, 'mismatch', '✗ DDR gen'); mismatches.push(c.label + ' (DDR generation)'); return; }
     if (c.fallback === 'capacity' && capacityMatches(target, detected)) { setChip(c.cat, 'size', '✓ size ' + Math.round(capacityGB(target)) + ' GB'); return; }
@@ -9959,6 +10010,22 @@ function editingClientTicketId() {
   return sel ? sel.value : null;
 }
 
+// 1.12.5 — the expected front ports come from the build's cabinet
+// (shared/case-ports.js): the last build with the same cabinet, a known
+// cabinet, the cabinet name, else 2× USB-A + 1× USB-C.
+let casePortsNote = '';
+function portsFromTemplate(list) {
+  const base = Date.now().toString(36);
+  return (list || []).map((p, i) => ({ id: 'p' + base + i, type: p.type, label: p.label, status: 'untested' }));
+}
+function portCertDefaultsFor(ticket) {
+  const P = window.NeoCasePorts;
+  if (!P) { casePortsNote = ''; return portCertDefaults(); }
+  const r = P.pick(ticket && ticket.specs && ticket.specs.case, appState.tickets || [], ticket && ticket.id);
+  casePortsNote = r.note || '';
+  return portsFromTemplate(r.ports);
+}
+
 function portCertDefaults() {
   return [
     { id: 'p1', type: 'usb-a', label: 'Front USB-A #1', status: 'untested' },
@@ -9991,6 +10058,11 @@ function renderCasePorts() {
       </div>`;
     }).join('');
   }
+  const P = window.NeoCasePorts;
+  const layoutSel = document.getElementById('portcert-layout-select');
+  if (layoutSel && P) layoutSel.value = P.layoutOf(casePorts);
+  const layoutNote = document.getElementById('portcert-layout-note');
+  if (layoutNote) layoutNote.textContent = casePortsNote || '';
   const passed = casePorts.filter(p => p.status === 'pass').length;
   if (summary) {
     summary.textContent = `${passed} / ${casePorts.length} certified`;
@@ -10025,9 +10097,16 @@ function snapshotKeys(snap) {
   return set;
 }
 
-async function portTakeSnapshot() {
-  const r = await ipcRenderer.invoke('sys:port-snapshot2');
+// parts: 'devices' | 'disks' | 'audio' (comma-separated); omitted = all three.
+// 1.12.5 — the poll asks for 'devices' only, which takes seconds, not tens of seconds.
+async function portTakeSnapshot(parts) {
+  const r = await ipcRenderer.invoke('sys:port-snapshot2', parts || undefined);
   return (r && r.ok) ? r.data : null;
+}
+
+function portRunnerHide() {
+  const r = document.getElementById('portcert-runner');
+  if (r) r.classList.add('hidden');
 }
 
 async function startPortTest(portId) {
@@ -10038,7 +10117,11 @@ async function startPortTest(portId) {
   const nextBtn = document.getElementById('btn-portcert-next');
   if (runner) runner.classList.remove('hidden');
 
-  portCertRunner = { portId, phase: 'baseline', cancelled: false };
+  // A test already running for another port ends here (1.12.5: it used to keep
+  // polling and then crash on the new runner).
+  if (portCertRunner && !portCertRunner.done) portCertRunner.cancelled = true;
+  const run = { portId, phase: 'baseline', cancelled: false };
+  portCertRunner = run;
 
   if (meta.dataCapable) {
     portStep(`<strong>Step 1 — unplug the test drive.</strong><br>Make sure your test pendrive/SSD is <em>not</em> connected anywhere, then press Continue.`, 10);
@@ -10046,13 +10129,15 @@ async function startPortTest(portId) {
     portStep(`<strong>Step 1 — unplug your headphones.</strong><br>Make sure nothing is in <em>${escapeHtmlLite(port.label)}</em>, then press Continue.`, 10);
   }
   if (nextBtn) nextBtn.textContent = 'Continue';
-  portCertRunner.onNext = async () => {
+  run.onNext = async () => {
+    run.onNext = null;   // one baseline per test, however often Continue is pressed
     portStep('Taking a baseline snapshot of connected devices…', 25);
-    const base = await portTakeSnapshot();
+    const base = await portTakeSnapshot(meta.dataCapable ? 'devices,disks' : 'audio');
+    if (portCertRunner !== run || run.cancelled) return;
     if (!base) { finishPortTest(port, false, 'Could not read device list from Windows.'); return; }
-    portCertRunner.baseline = base;
-    portCertRunner.baseKeys = snapshotKeys(base);
-    portCertRunner.baseAudio = new Set((base.audioEndpoints || []).map(a => a.instanceId));
+    run.baseline = base;
+    run.baseKeys = snapshotKeys(base);
+    run.baseAudio = new Set((base.audioEndpoints || []).map(a => a.instanceId));
 
     if (meta.dataCapable) {
       portStep(`<strong>Step 2 — plug the drive into “${escapeHtmlLite(port.label)}” now.</strong><br>Use that exact socket. Detecting…`, 45);
@@ -10065,49 +10150,88 @@ async function startPortTest(portId) {
   };
 }
 
+function portNewLetter(snap, baseline) {
+  const baseLetters = new Set();
+  ((baseline && baseline.usbDisks) || []).forEach(d => (d.driveLetters || []).forEach(l => baseLetters.add(l)));
+  let letter = null;
+  ((snap && snap.usbDisks) || []).forEach(d => (d.driveLetters || []).forEach(l => { if (!baseLetters.has(l)) letter = l; }));
+  return letter;
+}
+
+// What Windows' firmware table says about the socket (a hint, never a verdict:
+// desktop boards often leave front headers unmarked or mark them wrongly).
+function portPanelNote(dev) {
+  if (!dev || !dev.panel || dev.panel === 'unknown') return '';
+  if (dev.panel === 'back') return ' Windows lists this socket on the back panel — make sure the drive is in the front port.';
+  return ` Windows lists this socket on the ${dev.panel} panel.`;
+}
+
+// 1.12.5 — bound to ITS runner: a cancelled or replaced test stops quietly
+// instead of reading the next test's state. 60 s to plug in (the snapshot used
+// to take ~40 s, so the old 30 s window gave one look); devices of every class
+// and state; the drive letter is waited for; one socket can't pass twice.
 async function pollForPortDevice(port, meta) {
-  const DEADLINE = 30000, INTERVAL = 1200;
+  const run = portCertRunner;
+  const live = () => !!run && portCertRunner === run && !run.cancelled;
+  const DEADLINE = 60000, INTERVAL = 600;
   const started = Date.now();
   while (Date.now() - started < DEADLINE) {
-    if (portCertRunner && portCertRunner.cancelled) return;
     await new Promise(r => setTimeout(r, INTERVAL));
-    const snap = await portTakeSnapshot();
+    if (!live()) return;
+    const snap = await portTakeSnapshot(meta.dataCapable ? 'devices' : 'audio');
+    if (!live()) return;
     if (!snap) continue;
 
     if (meta.dataCapable) {
-      const fresh = (snap.usbDevices || []).filter(d => !portCertRunner.baseKeys.has(d.instanceId));
-      if (fresh.length) {
-        const dev = fresh[0];
-        // Which drive letter did it bring? That's what we push data through.
-        const disks = snap.usbDisks || [];
-        const baseLetters = new Set();
-        (portCertRunner.baseline.usbDisks || []).forEach(d => (d.driveLetters || []).forEach(l => baseLetters.add(l)));
-        let letter = null;
-        disks.forEach(d => (d.driveLetters || []).forEach(l => { if (!baseLetters.has(l)) letter = l; }));
+      const fresh = (snap.usbDevices || []).filter(d => !run.baseKeys.has(d.instanceId));
+      if (!fresh.length) continue;
+      const dev = fresh.find(d => !d.status || d.status === 'OK') || fresh[0];
+      const where = 'socket ' + (dev.location || '?');
+      port.socketKey = dev.socketKey;
+      port.deviceName = dev.busDesc || dev.name;
+      port.panel = dev.panel || null;
 
-        port.socketKey = dev.socketKey;
-        port.deviceName = dev.busDesc || dev.name;
-
-        if (!letter) {
-          finishPortTest(port, false,
-            `Device detected on socket ${dev.location || '?'} but Windows gave it no drive letter — the port powers the device but data isn’t usable.`);
-          return;
-        }
-        portStep(`Detected on socket <code>${escapeHtmlLite(dev.location || '?')}</code> (${escapeHtmlLite(letter)}:). Writing and reading back real data…`, 75);
-        const io = await ipcRenderer.invoke('sys:port-iotest', letter, 48);
-        if (!io || !io.ok || !io.data || !io.data.ok) {
-          const err = (io && io.data && io.data.error) || (io && io.error) || 'I/O test failed';
-          finishPortTest(port, false, `Device appeared but data transfer failed: ${err}`);
-          return;
-        }
-        const d = io.data;
-        port.writeMBps = d.writeMBps; port.readMBps = d.readMBps;
-        finishPortTest(port, true,
-          `Verified on socket ${dev.location || '?'} — wrote & read back ${d.testedMB} MB intact · ${d.writeMBps} MB/s write, ${d.readMBps} MB/s read`);
+      if (dev.status && dev.status !== 'OK') {
+        finishPortTest(port, false, `Windows saw a device on ${where} but it did not start (${dev.status}). Check the front-panel USB header cable.`);
         return;
       }
+      const twin = casePorts.find(p => p !== port && p.status === 'pass' && p.socketKey && p.socketKey === dev.socketKey);
+      if (twin) {
+        finishPortTest(port, false, `That is the same socket that passed as “${twin.label}”. Plug the drive into “${port.label}” and test again.`);
+        return;
+      }
+
+      // Which drive letter did it bring? That's what we push data through.
+      // Mounting can lag the device by a few seconds, so wait for it.
+      let letter = null;
+      const letterBy = Date.now() + 20000;
+      while (!letter && Date.now() < letterBy) {
+        portStep(`Found <strong>${escapeHtmlLite(port.deviceName || 'a USB device')}</strong> on <code>${escapeHtmlLite(dev.location || '?')}</code>. Waiting for its drive letter…`, 60);
+        const disks = await portTakeSnapshot('disks');
+        if (!live()) return;
+        letter = portNewLetter(disks, run.baseline);
+        if (!letter) await new Promise(r => setTimeout(r, 800));
+      }
+      if (!letter) {
+        finishPortTest(port, false,
+          `Device detected on ${where} but Windows gave it no drive letter within 20 s. Use a formatted pendrive; if it still has no letter, the port powers the device but data isn’t usable.`);
+        return;
+      }
+      portStep(`Detected on socket <code>${escapeHtmlLite(dev.location || '?')}</code> (${escapeHtmlLite(letter)}:). Writing and reading back real data…`, 75);
+      const io = await ipcRenderer.invoke('sys:port-iotest', letter, 48);
+      if (!live()) return;
+      if (!io || !io.ok || !io.data || !io.data.ok) {
+        const err = (io && io.data && io.data.error) || (io && io.error) || 'I/O test failed';
+        finishPortTest(port, false, `Device appeared but data transfer failed: ${err}`);
+        return;
+      }
+      const d = io.data;
+      port.writeMBps = d.writeMBps; port.readMBps = d.readMBps;
+      finishPortTest(port, true,
+        `Verified on ${where} — wrote & read back ${d.testedMB} MB intact · ${d.writeMBps} MB/s write, ${d.readMBps} MB/s read.` + portPanelNote(dev));
+      return;
     } else {
-      const freshAudio = (snap.audioEndpoints || []).filter(a => !portCertRunner.baseAudio.has(a.instanceId));
+      const freshAudio = (snap.audioEndpoints || []).filter(a => !run.baseAudio.has(a.instanceId));
       if (freshAudio.length) {
         port.deviceName = freshAudio[0].name;
         finishPortTest(port, true, `Jack detected the plug — Windows registered “${freshAudio[0].name}”.`);
@@ -10115,9 +10239,10 @@ async function pollForPortDevice(port, meta) {
       }
     }
   }
+  if (!live()) return;
   finishPortTest(port, false, meta.dataCapable
-    ? 'Nothing appeared within 30 s. This port is not delivering a working connection (check the internal header cable).'
-    : 'No jack-detection event within 30 s. Either the jack is not wired, or this audio driver does not report jack presence.');
+    ? 'Nothing appeared within 60 s. This port is not delivering a working connection (check the internal header cable).'
+    : 'No jack-detection event within 60 s. Either the jack is not wired, or this audio driver does not report jack presence.');
 }
 
 function finishPortTest(port, passed, detail) {
@@ -10131,8 +10256,7 @@ function finishPortTest(port, passed, detail) {
   const nextBtn = document.getElementById('btn-portcert-next');
   if (nextBtn) { nextBtn.textContent = 'Done'; nextBtn.disabled = false; }
   portCertRunner = { done: true, onNext: () => {
-    const r = document.getElementById('portcert-runner');
-    if (r) r.classList.add('hidden');
+    portRunnerHide();
     portCertRunner = null;
   }};
 }
@@ -10168,8 +10292,35 @@ document.addEventListener('DOMContentLoaded', () => {
   if (cancelBtn) cancelBtn.addEventListener('click', () => {
     if (portCertRunner) portCertRunner.cancelled = true;
     portCertRunner = null;
-    const r = document.getElementById('portcert-runner');
-    if (r) r.classList.add('hidden');
+    portRunnerHide();
+    const nb = document.getElementById('btn-portcert-next');
+    if (nb) nb.disabled = false;
+  });
+  // 1.12.5 — switch the cabinet's front panel in one click.
+  const layoutSel = document.getElementById('portcert-layout-select');
+  if (layoutSel) layoutSel.addEventListener('change', async () => {
+    const P = window.NeoCasePorts;
+    const v = layoutSel.value;
+    if (!P || !P.LAYOUTS[v]) return;
+    const tested = casePorts.some(p => p.status && p.status !== 'untested');
+    if (tested && !(await showConfirm(`Switch the front panel to “${P.LAYOUTS[v].label}”? The port results on this build so far are cleared.`,
+        { title: 'Change front panel', okText: 'Switch', danger: true }))) { renderCasePorts(); return; }
+    if (portCertRunner) { portCertRunner.cancelled = true; portCertRunner = null; portRunnerHide(); }
+    casePorts = portsFromTemplate(P.presetPorts(v));
+    casePortsNote = 'Picked by hand: ' + P.LAYOUTS[v].label + '.';
+    renderCasePorts(); portCertSave();
+  });
+  // 1.12.5 — RAM sticks: fill from the RAM name while the technician hasn't
+  // typed them; a typed value is never overwritten.
+  const ramName = document.getElementById('form-spec-ram');
+  if (ramName) ramName.addEventListener('change', () => {
+    if (!window.NeoRamSpec) return;
+    const exp = window.NeoRamSpec.expected(ramName.value, null);
+    if (exp.sticks || exp.perStickGB) setRamSticksFields(exp.sticks, exp.perStickGB, 'auto');
+  });
+  ['form-spec-ram-sticks', 'form-spec-ram-gb'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener('input', () => { el.dataset.auto = ''; });
   });
 });
 
