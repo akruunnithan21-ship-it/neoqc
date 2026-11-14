@@ -223,16 +223,16 @@ test('buildAssignText: every state, with its tone', function () {
   assert.deepStrictEqual(txt({ technician: '', technicianEmail: null, queuedAt: iso(NOW - 10 * MIN), status: 'awaiting',
                                offer: { toEmail: 'amal.c@x', toName: 'Amal C Abi', expiresAt: iso(NOW + 12 * MIN + 30 * SEC) } }),
     { label: 'Offered to Amal · 12m left', tone: 'warn' });
+  // 1.12.3: builds have no queue — a build with nobody waits on the Builds
+  // desk, whether or not an old row still carries a queued time.
   assert.deepStrictEqual(txt({ technician: '', queuedAt: iso(NOW - 50 * MIN), status: 'awaiting' }),
-    { label: 'In the build queue · claim within 3h 10m', tone: 'ok' });
-  assert.deepStrictEqual(txt({ queuedAt: iso(NOW - 3.5 * HOUR), status: 'awaiting' }),
-    { label: 'In the build queue · claim within 30m', tone: 'warn' });
+    { label: 'No technician yet', tone: 'warn' });
   assert.deepStrictEqual(txt({ queuedAt: iso(NOW - 5 * HOUR), status: 'awaiting' }),
-    { label: 'In the build queue · overdue — the app is offering it', tone: 'late' });
-  assert.deepStrictEqual(txt({ technician: null, queuedAt: null, status: 'awaiting' }), { label: 'Not sent to the floor yet', tone: 'muted' });
-  // An expired offer reads as the queue again.
+    { label: 'No technician yet', tone: 'warn' });
+  assert.deepStrictEqual(txt({ technician: null, queuedAt: null, status: 'awaiting' }), { label: 'No technician yet', tone: 'warn' });
+  // An expired offer reads as "no technician yet".
   assert.strictEqual(txt({ queuedAt: iso(NOW - HOUR), status: 'awaiting', offer: { toName: 'Amal', expiresAt: iso(NOW - MIN) } }).label,
-    'In the build queue · claim within 3h 00m');
+    'No technician yet');
   // A lead's reassignment offer is shown next to who has it now.
   assert.strictEqual(txt({ technician: 'Adhil', technicianEmail: 'adhil.m@x', assignedVia: 'claim', assignedAt: iso(NOW - HOUR),
                            offer: { toEmail: 'amal.c@x', toName: 'Amal', expiresAt: iso(NOW + 20 * MIN) } }).label,

@@ -2494,6 +2494,33 @@
     return res;
   }
 
+  // 1.12.3 — builds have no queue: the Builds desk (or a lead) gives a build
+  // to a technician directly. expected = the technician email the caller saw
+  // ('' / null = nobody), so a change made meanwhile is never overwritten.
+  // A reason is needed only when the build moves from someone to someone else.
+  // {ok:true, item} | {ok:true, unchanged:true, item} | {ok:false, reason:'changed', by, by_email, at}
+  async function buildAssign(ticketId, email, reason, expected) {
+    liveWritable();
+    var i = requireId(ticketId == null ? ticketId : String(ticketId), 'build');
+    var to = clean(email);
+    if (!to) throw new Error('NEO_GATE: Choose who builds it.');
+    var res = await rpc('build_assign', { p_ticket_id: i, p_email: to, p_reason: clean(reason), p_expected: clean(expected) });
+    emit('work');
+    return res;
+  }
+
+  // Who the desk can give a build to: {now, people:[{email, name, build_pool,
+  // build_level, qc_role, points, jobs, capacity_points, max_jobs, builds}]}.
+  async function buildTechList() {
+    readable();
+    if (!profile()) throw new Error('NEO_DENIED: Sign in first.');
+    var res = await rpc('build_tech_list', {}, READ_MS);
+    noteOffset(res, Date.now());
+    var f = (res && typeof res === 'object' && !Array.isArray(res)) ? res : {};
+    if (!Array.isArray(f.people)) f.people = [];
+    return f;
+  }
+
   async function myWorkProfile() {
     readable();
     if (!profile()) throw new Error('NEO_DENIED: Sign in first.');
@@ -3228,6 +3255,8 @@
     workAlertResolve: workAlertResolve,
     workOffsetMs: workOffsetMs,
     buildQueueSend: buildQueueSend,
+    buildAssign: buildAssign,
+    buildTechList: buildTechList,
     myWorkProfile: myWorkProfile,
 
     // NeoHR (reads only)

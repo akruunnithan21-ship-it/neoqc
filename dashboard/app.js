@@ -1829,8 +1829,9 @@ function boardColumn(t) {
 
   // 6. The floor has accepted it: parts being checked in, a technician
   //    assigned (by name or by email), or it is waiting in the build queue
-  //    (1.11: queued but not claimed yet still counts as on the floor). A
-  //    website quote has none of these until it is sent to the build queue.
+  //    (1.11: queued but not claimed yet still counts as on the floor; since
+  //    1.12.3 nothing is queued). A website quote has none of these until the
+  //    Builds desk assigns a technician in Neo OS.
   //    missing_components_toggle is deliberately NOT a signal — the create
   //    payload sets it true, and using it here would empty the Quote column.
   if (procAny || ticketAssignee(t) || ticketInBuildQueue(t)) return 'procurement';
@@ -2060,9 +2061,11 @@ async function onBoardClick(e) {
 // claim window — and nothing else; the website never writes those columns.
 let boardQueueSending = {};   // 'build:<id>' → true while build_queue_send is in flight
 
+// Neo OS 1.12.3 (owner decision 2026-11-13): builds have no queue. The Builds
+// desk assigns each build to a technician in Neo OS, so the website no longer
+// offers [Send to build queue] (the server answers 'no_queue' anyway).
 function canSendToBuildQueue(t) {
-  return ticketQueueLive && !!currentProfile && Number(currentProfile.tier) >= 3 &&
-    (t.type || 'build') === 'build' && ticketIsQuote(t);
+  return false;
 }
 
 // The board's one status line: answers from the server, in plain words.
@@ -2345,7 +2348,7 @@ async function qbCreateTicket() {
     qbResetDraft();
     qbCreateStatus('<strong>Ticket created.</strong> Customer receipt code <strong>' + escHtml(code) +
       '</strong> — they can track it on this site. It is now in the Pipeline under <strong>Quote</strong>, ' +
-      'and moves to Procurement once it is sent to the build queue.', 'ok');
+      'and moves to Procurement once the Builds desk assigns a technician in Neo OS.', 'ok');
     // Stays disabled: a second click would create a duplicate ticket.
     if (btn) btn.textContent = 'Ticket ' + code + ' created';
   } catch (err) {

@@ -108,6 +108,9 @@
   // Builds are the 'qc' module; service is 'service'.
   function moduleOf(kind) { return kind === 'build' ? 'qc' : 'service'; }
   function isLeadOf(kind) { return hasRole(moduleOf(kind), 'lead'); }
+  // 1.12.3 — who gives builds out: the Builds desk role itself, or a lead. A
+  // technician outranks the desk but never assigns (that would be a claim).
+  function canAssignBuilds() { var r = roleFor('qc'); return r === 'desk' || r === 'lead'; }
   function canReadKind(kind) { return hasRole(moduleOf(kind), 'desk'); }
   function isLeadAny() { return isLeadOf('build') || isLeadOf('service'); }
   function pools() {
@@ -713,11 +716,9 @@
       acts.push(btn('decline', it, 'Decline…'));
     } else if (ctx === 'open') {
       if (it.can_claim) acts.push(btn('claim', it, 'Claim', 'primary-pink-btn'));
-      if (lead) {
-        if (!build) acts.push(btn('offer', it, live ? 'Change offer…' : 'Offer to…'));
-        else if (live) acts.push(btn('withdraw', it, 'Withdraw offer'));
-        else acts.push(btn('offer', it, 'Offer to…'));
-      }
+      if (lead && !build) acts.push(btn('offer', it, live ? 'Change offer…' : 'Offer to…'));
+      if (build && live && lead) acts.push(btn('withdraw', it, 'Withdraw offer'));
+      if (build && !live && canAssignBuilds()) acts.push(btn('assign', it, 'Assign…'));
       if (!build || canOpenBuilds()) acts.push(btn('open', it, 'Open', 'text-btn'));
     } else if (ctx === 'mine') {
       if (build) acts.push(btn('bench', it, 'Open bench', 'primary-pink-btn'));
@@ -756,7 +757,10 @@
     var busy = !!st.inflight[akey];
     var it = { kind: kind, id: a.item_id };
     var acts = '';
-    if (isLeadOf(kind) && a.item_id != null) acts += btn('offer', it, 'Offer to…');
+    if (a.item_id != null) {
+      if (kind === 'build' && canAssignBuilds()) acts += btn('assign', it, 'Assign…');
+      else if (kind !== 'build' && isLeadOf(kind)) acts += btn('offer', it, 'Offer to…');
+    }
     acts += '<button type="button" class="text-btn q-btn" data-q-act="dismiss" data-q-alert="' + esc(a.id) + '"' + (busy ? ' disabled' : '') + '>' + (busy ? 'Working…' : 'Dismiss') + '</button>';
     return '<div class="q-alert q-alert-' + (ALERT_LABEL[a.kind] ? a.kind : 'other') + '">' +
       '<div class="q-alert-top"><span class="q-kind q-kind-' + (kind === 'build' ? 'build' : 'service') + '">' + esc(kind === 'build' ? 'Build' : 'Service') + '</span>' +
@@ -818,19 +822,16 @@
   }
 
   function notSentRow(t) {
-    var pend = pendingSends().indexOf(t.id) !== -1;
     var it = { kind: 'build', id: t.id };
-    var busy = !!st.inflight[busyKey('build', t.id)];
     var specs = t.specs || {};
-    var canSend = hasRole('qc', 'desk');
+    var canAssign = canAssignBuilds();
     return '<div class="q-card q-k-build q-card-quote" data-q-kind="build" data-q-id="' + esc(t.id) + '">' +
       '<div class="q-card-top"><span class="q-kind q-kind-build">Build</span><span class="q-code">' + esc(String(t.id || '').slice(-6).toUpperCase()) + '</span></div>' +
       '<div class="q-title">' + esc(t.customerName || 'Build') + '</div>' +
       '<div class="q-sub">' + esc([specs.cpu, specs.gpu].filter(Boolean).join(' · ') || 'Specs not set') + '</div>' +
       (t.deadline ? '<div class="q-meta">Due ' + esc(fmtWhen(t.deadline, true)) + '</div>' : '') +
       '<div class="q-actions">' +
-        (pend && !busy ? '<span class="q-why">Sending to the build queue…</span>' : '') +
-        (canSend ? btn('send', it, 'Send to build queue', 'primary-pink-btn') : '') +
+        (canAssign ? btn('assign', it, 'Assign…', 'primary-pink-btn') : '<span class="q-why">The Builds desk assigns it.</span>') +
         (canOpenBuilds() ? btn('open', it, 'Open', 'text-btn') : '') +
       '</div>' +
     '</div>';
@@ -897,9 +898,9 @@
     }
     if (!st.mineOnly) {
       var hint = (p.build || p.service)
-        ? 'Claim what suits you. Anything not claimed within ' + st.feed.claim_hours + ' hours is offered to whoever has the most room.'
-        : 'Technicians claim from here. Anything not claimed within ' + st.feed.claim_hours + ' hours is offered by the app.';
-      html.push(section('open', 'Open queue', hint, open.length, cards(open, 'open', now, 'Nothing is waiting. New builds and service tickets appear here.')));
+        ? 'Service tickets: claim what suits you. Anything not claimed within ' + st.feed.claim_hours + ' hours is offered to whoever has the most room. Builds are given out by the Builds desk.'
+        : 'Service technicians claim from here. Anything not claimed within ' + st.feed.claim_hours + ' hours is offered by the app. Builds are given out by the Builds desk.';
+      html.push(section('open', 'Open queue', hint, open.length, cards(open, 'open', now, 'Nothing is waiting. New service tickets appear here.')));
       if (leadAny && reassign.length) {
         html.push(section('reassign', 'Being reassigned', 'Offered to someone else while its technician still has it.', reassign.length, cards(reassign, 'reassign', now)));
       }
@@ -910,7 +911,7 @@
     if (!st.mineOnly) {
       var ns = notSentList();
       if (ns.length) {
-        html.push(section('notsent', 'Not sent to the floor', 'Builds saved as quotes (usually from the website). Send one to the build queue when it is going ahead.',
+        html.push(section('notsent', 'Builds with no technician', 'The Builds desk gives each build to a technician. It shows in their work straight away.',
           ns.length, '<div class="q-cards">' + ns.map(notSentRow).join('') + '</div>'));
       }
     }
@@ -1063,7 +1064,7 @@
   }
 
   // Offer dialog, shared by the queue and the ticket modal (app.js).
-  // Service: service.js's own Offer dialog (C12). Build: ours, on work_team.
+  // Service: service.js's own Offer dialog (C12). Build: the Assign dialog (1.12.3).
   function offerDialog(kind, id) {
     var key = busyKey(kind, id);
     if (kind === 'service') {
@@ -1077,7 +1078,7 @@
       toast('Open the ticket in Service to offer it to someone.', 'info');
       return Promise.resolve(false);
     }
-    return buildOfferDialog(id, key);
+    return buildAssignDialog(id, key);
   }
 
   function personLabel(p, tier, info) {
@@ -1091,28 +1092,29 @@
     return label;
   }
 
-  async function buildOfferDialog(id, key) {
+  // 1.12.3 — the Builds desk gives a build to a technician. No accept step:
+  // the build is theirs at once. Moving it from someone needs a reason.
+  async function buildAssignDialog(id, key) {
     key = key || busyKey('build', id);
     var who = whoKey();
     var d = D(), ui = UI();
-    if (!isLeadOf('build')) { toast('Only a Builds lead can offer work to a technician.', 'warning'); return false; }
-    if (!needFn(d, 'workTeam') || !needFn(d, 'workOffer')) return false;
+    if (!canAssignBuilds()) { toast('Only the Builds desk or a Builds lead can assign builds.', 'warning'); return false; }
+    if (!needFn(d, 'buildTechList') || !needFn(d, 'buildAssign')) return false;
     if (!ui || typeof ui.dialog !== 'function') { toast('Dialogs are not available — restart Neo OS.', 'error'); return false; }
     if (st.inflight[key]) return false;
     var info = itemInfo('build', id);
+    var t = localTicket(id);
+    var holder = info.assigneeName || (t && String(t.technician || '').trim()) || '';
+    var moving = !!(info.expected || holder);
     setBusy(key, true);
     var team;
-    try { team = normaliseTeam(await d.workTeam()); }
-    catch (e) { setBusy(key, false); if (who === whoKey()) toastErr(e, 'Could not load the team:'); return false; }
+    try { team = normaliseTeam(await d.buildTechList()); }
+    catch (e) { setBusy(key, false); if (who === whoKey()) toastErr(e, 'Could not load the technicians:'); return false; }
     setBusy(key, false);
     if (who !== whoKey()) return false;
     if (team.now) st.offsetMs = computeOffset(team.now, Date.now());
     var people = team.people.map(function (p) {
-      var probe = p;
-      // A server without the role keys (pre-C12) must not grey everyone out:
-      // the server re-checks every offer anyway.
-      if (probe.qc_role === undefined) probe = Object.assign({}, p, { qc_role: num(p.tier) >= 3 ? 'lead' : 'tech' });
-      var why = whyNot(probe, 'build', info.tier);
+      var why = whyNot(p, 'build', info.tier);
       return { p: p, why: why, room: num(p.capacity_points) - num(p.points) };
     });
     people.sort(function (a, b) {
@@ -1124,22 +1126,15 @@
     body.className = 'q-dlg ops-grid';
     var lead = document.createElement('p');
     lead.className = 'ops-dialog-msg ops-span2';
-    lead.textContent = (info.assigneeName ? 'Now with ' + info.assigneeName + '. They keep it until the person you choose accepts. ' : '') +
-      'The person you choose has until about ' + hhmm(nowMs() + OFFER_MINUTES * 60000) + ' to accept or decline.' +
+    lead.textContent = (moving ? 'Now with ' + holder + '. ' : '') +
+      'The person you choose has it at once; it shows in their work straight away.' +
       (info.tier >= 4 ? ' This is a high-value build: only senior builders can take it.' : '');
     body.appendChild(lead);
-    if (info.offer) {
-      var warn = document.createElement('div');
-      warn.className = 'ops-banner ops-banner-warn ops-span2';
-      warn.textContent = 'Offered to ' + (info.offer.to_name || info.offer.to_email || 'someone') + ' until ' + hhmm(tsMs(info.offer.expires_at)) +
-        '. Offering it to someone else withdraws that offer first.';
-      body.appendChild(warn);
-    }
     var sel = document.createElement('select');
     sel.className = 'q-offer-person';
     var ph = document.createElement('option');
     ph.value = '';
-    ph.textContent = people.length ? '— Choose a person —' : 'Nobody is in the build pool yet';
+    ph.textContent = people.length ? '— Choose a technician —' : 'Nobody is in the build pool yet';
     sel.appendChild(ph);
     people.forEach(function (x) {
       var o = document.createElement('option');
@@ -1149,42 +1144,35 @@
       o.disabled = !!x.why || !!mine;
       sel.appendChild(o);
     });
-    body.appendChild(field('Offer to', sel, 'Greyed-out people cannot take this build; the reason is on their line.'));
+    body.appendChild(field('Technician', sel, 'Greyed-out people cannot take this build; the reason is on their line.'));
     var ta = document.createElement('textarea');
     ta.maxLength = 300;
     ta.rows = 3;
-    ta.placeholder = 'Why them? They will see this.';
-    body.appendChild(field('Reason', ta, 'Required. Up to 300 characters.'));
+    ta.placeholder = moving ? 'Why move it? Both of them can see this.' : 'Optional: anything they should know.';
+    body.appendChild(field(moving ? 'Reason' : 'Note', ta, moving ? 'Required when moving a build. Up to 300 characters.' : 'Optional. Up to 300 characters.'));
 
     var ok = await ui.dialog({
-      title: 'Offer ' + info.code + ' to a technician',
+      title: (moving ? 'Move ' : 'Assign ') + info.code + ' to a technician',
       sub: info.title,
       body: body,
-      okText: info.offer ? 'Withdraw and offer' : 'Offer',
-      busyText: 'Offering…',
+      okText: moving ? 'Move' : 'Assign',
+      busyText: moving ? 'Moving…' : 'Assigning…',
       onOk: async function () {
         var k = key;
         if (who !== whoKey()) return false;
         var email = sel.value;
         var reason = String(ta.value || '').trim();
-        if (!email) return 'Choose who to offer it to.';
-        if (!reason) return 'Say why you’re offering it to them.';
-        if (reason.length > 300) return 'Keep the reason under 300 characters.';
+        if (!email) return 'Choose who builds it.';
+        if (moving && !reason) return 'Say why you’re moving it.';
+        if (reason.length > 300) return 'Keep it under 300 characters.';
         st.inflight[k] = true;
         try {
-          if (info.offer && lower(info.offer.to_email) !== email) {
-            var w = await d.workOffer('build', id, '', '', info.expected);
-            if (who !== whoKey()) return false;
-            if (w && w.ok === false) return resultText(w);
-          }
-          var res = await d.workOffer('build', id, email, reason, info.expected);
+          var res = await d.buildAssign(id, email, reason, info.expected || '');
           if (who !== whoKey()) return false;
           if (res && res.ok === false) return resultText(res);
           var chosen = people.filter(function (x) { return lower(x.p.email) === email; })[0];
           var nm = chosen ? (chosen.p.name || chosen.p.email) : email;
-          var exp = tsMs(res && res.item && res.item.offer && res.item.offer.expires_at);
-          if (!isFinite(exp)) exp = nowMs() + OFFER_MINUTES * 60000;
-          toast(res && res.unchanged ? nm + ' already has this build.' : 'Offered to ' + nm + ' — they have until ' + hhmm(exp) + ' to accept.', 'success');
+          toast(res && res.unchanged ? nm + ' already has this build.' : info.code + ' is with ' + nm + ' now.', 'success');
           return true;
         } finally {
           delete st.inflight[k];
@@ -1205,7 +1193,8 @@
     var info = itemInfo('build', id);
     var done = false;
     try {
-      if (act === 'offer') return buildOfferDialog(id, key);
+      // 1.12.3: builds are assigned, never offered.
+      if (act === 'assign' || act === 'offer') return buildAssignDialog(id, key);
 
       if (act === 'claim' || act === 'accept') {
         if (!needFn(d, act === 'claim' ? 'workClaim' : 'workRespond')) return false;
@@ -1245,7 +1234,7 @@
         if (!needFn(d, 'workRelease')) return false;
         done = await reasonAction({
           title: 'Hand back ' + info.code, sub: info.title, label: 'Why are you handing it back?',
-          text: 'It goes back to the build queue for someone else to claim.',
+          text: 'It goes back to the Builds desk, who give it to someone else.',
           okText: 'Hand back', busyText: 'Handing back…', danger: true,
           required: 'Say why you’re handing it back.'
         }, async function (reason) {
@@ -1253,7 +1242,7 @@
           var r = await d.workRelease('build', id, reason);
           if (who !== whoKey()) return false;
           if (r && r.ok === false) return resultText(r);
-          toast(info.code + ' is back in the build queue.', 'info');
+          toast(info.code + ' is back with the Builds desk.', 'info');
           return true;
         });
         return done;

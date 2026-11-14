@@ -184,7 +184,7 @@
       <div id="bench-empty" class="bench-empty hidden">
         <div class="bench-empty-icon">🧰</div>
         <h3>No builds on your bench</h3>
-        <p>Claim a build from the Queue, or accept one offered to you, and it appears here automatically.</p>
+        <p>When the Builds desk gives you a build, it appears here automatically.</p>
         <button type="button" id="btn-bench-showall" class="secondary-btn">Show all active builds</button>
       </div>
 
@@ -980,7 +980,7 @@
                   <button type="button" id="btn-change-deadline" class="secondary-btn" style="padding: 6px 12px; font-size: 0.8rem; display: none;">Change</button>
                 </div>
               </div>
-              <!-- v1.11 — who builds it comes from the work queue (app.js
+              <!-- 1.12.3 — who builds it: the Builds desk assigns it (app.js
                    renderTicketTechArea). The buttons act on the SAVED build
                    through the server, never as part of Save. -->
               <div class="form-group q-tech-group">
@@ -988,14 +988,14 @@
                 <div id="form-tech-status" class="q-tech-status" data-tone="muted" role="status" aria-live="polite" aria-labelledby="form-tech-label">—</div>
                 <div class="q-tech-btns">
                   <button type="button" id="btn-tech-claim" class="secondary-btn hidden">Claim</button>
-                  <button type="button" id="btn-tech-offer" class="secondary-btn hidden">Offer to…</button>
+                  <button type="button" id="btn-tech-offer" class="secondary-btn hidden">Assign…</button>
                   <button type="button" id="btn-tech-withdraw" class="secondary-btn hidden">Withdraw offer</button>
                   <button type="button" id="btn-tech-release" class="secondary-btn hidden">Hand back…</button>
                   <button type="button" id="btn-tech-send" class="secondary-btn hidden">Send to build queue</button>
                 </div>
                 <span id="form-tech-note" class="q-tech-note hidden"></span>
                 <details id="form-tech-history" class="q-tech-history hidden">
-                  <summary>Queue history</summary>
+                  <summary>Assignment history</summary>
                   <ol id="form-tech-history-list"></ol>
                 </details>
               </div>
@@ -1724,7 +1724,7 @@
 
             <div class="settings-section">
               <div class="settings-section-title">Workflow Defaults</div>
-              <p class="settings-field-note" style="margin:0 0 8px;">Technicians now claim builds from the Queue. Manage people in Settings → General → People (tier 4+).</p>
+              <p class="settings-field-note" style="margin:0 0 8px;">The Builds desk assigns each build to a technician. Manage people in Settings → General → People (tier 4+).</p>
               <label class="settings-toggle-row">
                 <div class="settings-toggle-info">
                   <span class="settings-toggle-label">Notification Sounds</span>
@@ -1944,7 +1944,7 @@
 
             <div class="settings-section">
               <div class="settings-section-title">Technicians</div>
-              <p class="settings-field-note" style="margin:0;">Technicians now claim builds from the Queue. Manage people in Settings → General → People (tier 4+).</p>
+              <p class="settings-field-note" style="margin:0;">The Builds desk assigns each build to a technician. Manage people in Settings → General → People (tier 4+).</p>
             </div>
 
             <div class="settings-section sensitive-config-card" id="admin-credentials-card">
@@ -2612,18 +2612,19 @@
     <div class="glass-slab modal-card" style="max-width: 650px; width: 100%; padding: 30px; border-radius: 20px;">
       <div class="modal-header" style="border-bottom: 1px solid var(--glass-border); padding-bottom: 15px; margin-bottom: 20px;">
         <h2 style="font-family: 'Syncopate', sans-serif; font-size: 1.3rem; color: var(--primary-pink); letter-spacing: 0.05em; margin: 0;">NEO OS UPDATED</h2>
-        <span data-app-version style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; font-weight: 700; background: rgba(var(--primary-pink-rgb), 0.1); color: var(--primary-pink); padding: 4px 8px; border-radius: 4px;">v1.12.2</span>
+        <span data-app-version style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; font-weight: 700; background: rgba(var(--primary-pink-rgb), 0.1); color: var(--primary-pink); padding: 4px 8px; border-radius: 4px;">v1.12.3</span>
       </div>
       <div class="modal-body" style="font-size: 0.92rem; line-height: 1.6; color: var(--text-dark); max-height: 420px; overflow-y: auto; padding-right: 5px;">
-        <p style="margin-top: 0;"><strong>NeoHR is switched off for now.</strong> Here's what's new in <strong data-app-version>v1.12.2</strong>:</p>
+        <p style="margin-top: 0;"><strong>Builds are assigned, not claimed.</strong> Here's what's new in <strong data-app-version>v1.12.3</strong>:</p>
         <ul style="padding-left: 20px; display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px;">
-          <li><strong>NeoHR is paused.</strong> The NeoHR screen is no longer on the left rail. Nothing has been deleted: past attendance, requests, routes and travel allowance are kept, and they come back when NeoHR is switched on again.</li>
-          <li><strong>The NeoHR phone app.</strong> It no longer takes punch-ins, breaks or trips, and it stops recording routes. Anyone who is still punched in can punch out.</li>
-          <li><strong>Everything else works as before.</strong> Builds, Service, RMA, the Queue and the Bench are unchanged.</li>
+          <li><strong>The Builds desk gives each build to a technician.</strong> Open the build and press <strong>Assign…</strong>. The build is theirs at once: there is no claiming, no offer to accept and no 4-hour clock. High-value builds still go only to senior builders.</li>
+          <li><strong>Technicians:</strong> a build given to you shows under <strong>My work</strong> and on your Bench straight away. If you can't do it, hand it back with a reason and it goes back to the Builds desk.</li>
+          <li><strong>Moving a build</strong> from one technician to another needs a reason, and it is kept in the build's history.</li>
+          <li><strong>Service is unchanged.</strong> Service tickets still use the Work queue as before. NeoHR stays switched off.</li>
         </ul>
       </div>
       <div class="modal-footer" style="border-top: 1px solid var(--glass-border); padding-top: 15px; display: flex; justify-content: flex-end; margin-top: 20px;">
-        <button id="btn-close-changelog" data-app-version-label class="primary-pink-btn" style="padding: 10px 24px; font-weight: 700; font-size: 0.95rem;">Launch Neo OS v1.12.2</button>
+        <button id="btn-close-changelog" data-app-version-label class="primary-pink-btn" style="padding: 10px 24px; font-weight: 700; font-size: 0.95rem;">Launch Neo OS v1.12.3</button>
       </div>
     </div>
   </div>

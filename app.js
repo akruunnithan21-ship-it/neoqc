@@ -653,10 +653,10 @@ function setupBuildTimer() {
 }
 
 // ══════════════════════════════════════════════════════════════════════════
-//  WHO BUILDS IT — the work queue (v1.11)
-//  The app no longer picks technicians. A new build goes to the build queue
-//  (rpc build_queue_send) and a technician claims it; anything not claimed in
-//  4 hours is offered by the server to whoever has the most room. A build's
+//  WHO BUILDS IT — assigned by the Builds desk (1.12.3)
+//  Owner decision 2026-11-13: builds left the technician queue. Nobody claims
+//  a build and nothing is offered; the Builds desk (or a lead) gives each one
+//  to a technician (rpc build_assign) and it is theirs at once. A build's
 //  technician, technician_email, assigned_*, queued_at, offer_* and
 //  declined_emails are SERVER-OWNED: written only by the work_* RPCs, never by
 //  syncTicketToCloud (the tickets guard ignores them from a plain upsert), and
@@ -709,7 +709,7 @@ function ticketOfferLive(t, now) {
 // {label, tone} for the ticket modal, the Builds card chip, the hover peek
 // and the Overview row. tone: 'ok' | 'warn' | 'late' | 'muted'.
 function buildTechInfo(t) {
-  if (!t) return { label: 'Not sent to the floor yet', tone: 'muted' };
+  if (!t) return { label: 'No technician yet', tone: 'warn' };
   const now = queueNowMs();
   const W = window.NeoQcWork;
   if (W && typeof W.buildAssignText === 'function') {
@@ -730,16 +730,9 @@ function buildTechInfo(t) {
     if (t.assignedAt && window.NeoQcUI && typeof window.NeoQcUI.fmtRelative === 'function') {
       try { ago = ' · ' + window.NeoQcUI.fmtRelative(t.assignedAt, now); } catch (e) { ago = ''; }
     }
-    return { label: `Claimed by ${name || t.technicianEmail}${ago}`, tone: 'ok' };
+    return { label: `${t.assignedVia === 'claim' ? 'Claimed by' : 'Assigned to'} ${name || t.technicianEmail}${ago}`, tone: 'ok' };
   }
-  if (t.queuedAt) {
-    const q = Date.parse(t.queuedAt);
-    const due = Number.isFinite(q) ? q + 4 * 3600000 : NaN;
-    if (Number.isFinite(due) && now >= due) return { label: 'In the build queue · overdue — the app is offering it', tone: 'late' };
-    if (Number.isFinite(due)) return { label: `In the build queue · claim within ${workFmtLeft(due - now)}`, tone: due - now <= 3600000 ? 'warn' : 'ok' };
-    return { label: 'In the build queue', tone: 'ok' };
-  }
-  return { label: 'Not sent to the floor yet', tone: 'muted' };
+  return { label: 'No technician yet', tone: 'warn' };
 }
 
 function hasQcRole(min) {
@@ -747,6 +740,17 @@ function hasQcRole(min) {
   if (!currentProfile) return false;
   if (M && typeof M.hasRole === 'function') { try { return !!M.hasRole('qc', min); } catch (e) { return false; } }
   return Number(currentProfile.tier) >= 3;   // no registry: the v1.9.6 rule, never wider
+}
+
+// 1.12.3 — the Builds desk role itself, or a lead (tier 3+ included). A
+// technician outranks the desk but never assigns: that would be a claim.
+function canAssignBuilds() {
+  const M = window.NeoQcModules;
+  if (!currentProfile) return false;
+  if (M && typeof M.roleFor === 'function') {
+    try { const r = M.roleFor('qc'); return r === 'desk' || r === 'lead'; } catch (e) { return false; }
+  }
+  return Number(currentProfile.tier) >= 3;
 }
 
 function myWorkPools() {
@@ -1994,8 +1998,9 @@ async function loadDatabase() {
   // Securely initialize missing properties to prevent runtime script crashes
   if (!appState.tickets) appState.tickets = [];
   // v1.11 — builds this PC created whose build_queue_send has not landed yet
-  // (WQ-C1). Kept OUTSIDE the ticket objects, so no merge or mapper can drop it.
-  if (!Array.isArray(appState.pendingQueueSends)) appState.pendingQueueSends = [];
+  // (WQ-C1). 1.12.3: builds have no queue, so anything left from 1.12.2 is
+  // dropped; the Builds desk assigns those builds instead.
+  appState.pendingQueueSends = [];
   // v1.11 — the per-PC technician list is gone (technicians claim from the
   // queue; people are managed in Settings → People). An old db.json may still
   // carry it; nothing reads it.
@@ -2778,7 +2783,7 @@ function populateTechFilter() {
     .filter(Boolean)))
     .sort((a, b) => a.localeCompare(b));
   const opts = [['all', 'All Technicians']].concat(names.map(n => [n, n]),
-    [[TECH_FILTER_QUEUE, 'In the queue'], [TECH_FILTER_QUOTE, 'Not sent to the floor']]);
+    [[TECH_FILTER_QUEUE, 'No technician yet']]);
   const sig = opts.map(o => o[0]).join('\u0001');
   const cur = sel.value || 'all';
   if (sel.dataset.sig !== sig) {
@@ -2796,8 +2801,9 @@ function populateTechFilter() {
 
 function ticketMatchesTechFilter(t, f) {
   if (!f || f === 'all') return true;
-  if (f === TECH_FILTER_QUEUE) return isQueuedBuildTicket(t);
-  if (f === TECH_FILTER_QUOTE) return isQuoteBuildTicket(t);
+  if (f === TECH_FILTER_QUEUE || f === TECH_FILTER_QUOTE) {
+    return !!t && !ticketIsAssigned(t) && t.status !== 'completed';
+  }
   return String((t && t.technician) || '').trim() === f;
 }
 
@@ -3839,10 +3845,10 @@ let techAreaTimer = null;
 let techActionBusy = false;
 let techHistorySeq = 0;
 const TECH_BTN_ACT = {
-  'btn-tech-claim': 'claim', 'btn-tech-offer': 'offer', 'btn-tech-withdraw': 'withdraw',
+  'btn-tech-claim': 'claim', 'btn-tech-offer': 'assign', 'btn-tech-withdraw': 'withdraw',
   'btn-tech-release': 'release', 'btn-tech-send': 'send'
 };
-const TECH_SAVE_FIRST = 'Save first — new builds go to the build queue automatically.';
+const TECH_SAVE_FIRST = 'Save the build first, then assign a technician.';
 // When this PC itself just changed a build through the queue, the realtime
 // echo of that change is not "another device" (no conflict banner).
 const ownQueueActionAt = {};
@@ -3912,14 +3918,12 @@ function renderTicketTechArea(ticketId) {
   const say = (text) => { if (noteEl) { noteEl.textContent = text || ''; noteEl.classList.toggle('hidden', !text); } };
   ensureTechAreaTimer();
   const t = ticketId ? (appState.tickets || []).find(x => x.id === ticketId) : null;
-  const pools = myWorkPools();
   if (!t) {
-    statusEl.textContent = ticketId ? 'This build is no longer on this PC.' : 'New build — it goes to the build queue when you save.';
+    statusEl.textContent = ticketId ? 'This build is no longer on this PC.' : 'New build — assign a technician after you save.';
     statusEl.dataset.tone = 'muted';
     Object.keys(TECH_BTN_ACT).forEach(id => techBtn(id, false));
     if (!ticketId) {
-      techBtn('btn-tech-claim', pools.build, { label: 'Claim', disabled: true, title: TECH_SAVE_FIRST });
-      techBtn('btn-tech-offer', hasQcRole('lead'), { label: 'Offer to…', disabled: true, title: TECH_SAVE_FIRST });
+      techBtn('btn-tech-offer', canAssignBuilds(), { label: 'Assign…', disabled: true, title: TECH_SAVE_FIRST });
       say(TECH_SAVE_FIRST);
     } else {
       say('');
@@ -3935,27 +3939,22 @@ function renderTicketTechArea(ticketId) {
   const done = t.status === 'completed';
   const live = ticketOfferLive(t, now);
   const toMe = live && String(t.offer.toEmail || '').trim().toLowerCase() === me;
-  const queued = isQueuedBuildTicket(t);
-  const quote = isQuoteBuildTicket(t);
   const assigned = ticketIsAssigned(t);
   const mine = !!t.technicianEmail && String(t.technicianEmail).trim().toLowerCase() === me;
   const lead = hasQcRole('lead');
-  const desk = hasQcRole('desk');
-  const why = myBuildWhyNot(buildTierOfTicket(t));
-  const claimable = !done && queued && pools.build && (!live || toMe);
+  const assigner = canAssignBuilds();
 
-  techBtn('btn-tech-claim', claimable, {
-    label: toMe ? 'Accept offer' : 'Claim', disabled: !!why, title: why ? workWhySentence(why, true) : ''
-  });
-  techBtn('btn-tech-offer', lead && !done && !live, { label: assigned ? 'Offer to someone else…' : 'Offer to…' });
+  // 1.12.3: no claiming and no offers. A build left over with a live offer
+  // from 1.12.2 can still be accepted by that person or withdrawn by a lead.
+  techBtn('btn-tech-claim', !done && toMe, { label: 'Accept offer' });
+  techBtn('btn-tech-offer', assigner && !done && !live, { label: assigned ? 'Move to someone else…' : 'Assign…' });
   techBtn('btn-tech-withdraw', lead && !done && live, { label: 'Withdraw offer' });
-  techBtn('btn-tech-release', !done && assigned && (mine || lead), { label: mine ? 'Hand back…' : 'Back to the queue…' });
-  techBtn('btn-tech-send', desk && quote, { label: 'Send to build queue' });
+  techBtn('btn-tech-release', !done && assigned && (mine || lead), { label: mine ? 'Hand back…' : 'Take it back…' });
+  techBtn('btn-tech-send', false);
 
   let note = '';
   if (toMe) note = `Offered to you — accept by ${techClock(t.offer.expiresAt)}, or decline it from the Queue.`;
-  else if (claimable && why) note = workWhySentence(why, true);
-  else if (quote && !desk) note = 'Someone on the Builds desk sends it to the build queue.';
+  else if (!assigned && !done && !assigner) note = 'The Builds desk assigns a technician.';
   else if (live && t.offer.reason && lead) note = `Offer reason: ${t.offer.reason}`;
   say(note);
 }
@@ -5026,11 +5025,7 @@ async function handleTicketFormSubmit(e) {
     else appState.tickets[index] = updatedTicket;
   } else {
     appState.tickets.push(updatedTicket);
-    // WQ-C1 — queued for build_queue_send BEFORE its first upload, outside
-    // the ticket object, so neither a failed upload nor the realtime echo of
-    // our own insert can lose it. drainPendingQueueSends() retries it.
-    if (!Array.isArray(appState.pendingQueueSends)) appState.pendingQueueSends = [];
-    if (!appState.pendingQueueSends.includes(id)) appState.pendingQueueSends.push(id);
+    // 1.12.3: a new build is not sent to a queue; the Builds desk assigns it.
   }
 
   await saveDatabase();

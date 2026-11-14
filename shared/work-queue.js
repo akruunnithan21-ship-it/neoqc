@@ -319,13 +319,9 @@
     }
     if (b.status === 'completed') return { label: 'No technician recorded', tone: 'muted' };
     if (live) return { label: 'Offered to ' + offerTo + ' · ' + fmtLeft(left) + ' left', tone: 'warn' };
-    if (isQueuedBuild(t)) {
-      var risk = claimRisk(t, now);
-      if (risk === 2) return { label: 'In the build queue · overdue — the app is offering it', tone: 'late' };
-      var due = claimDueMs(t);
-      return { label: 'In the build queue · claim within ' + fmtLeft(due - now), tone: risk === 1 ? 'warn' : 'ok' };
-    }
-    return { label: 'Not sent to the floor yet', tone: 'muted' };
+    // 1.12.3 (owner decision 2026-11-13): builds have no queue. The Builds
+    // desk assigns each one, so a build with nobody is waiting on the desk.
+    return { label: 'No technician yet', tone: 'warn' };
   }
 
   // ── eligibility (mirrors _work_why_not / _work_why_text) ──────────────────
