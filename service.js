@@ -2035,7 +2035,7 @@
     } else if (formBase.hidden !== contactHidden(job)) {
       host.hidden = false;
       host.innerHTML = (formBase.hidden ? 'This ticket has been taken from the queue. '
-                                        : 'This ticket went back to the queue. ') +
+                                        : 'This ticket went back to be assigned. ') +
         '<button type="button" class="sv-linkbtn" data-mact="reload-form">Reload the form</button>';
     } else if (formBase.stage !== job.stage) {
       host.hidden = false;
@@ -4466,7 +4466,7 @@
     var list = techList().slice().sort(function (a, b) { return String(a.name || '').localeCompare(String(b.name || '')); });
     var opts = [{ value: '', label: 'No suggestion' }].concat(list.map(function (t) { return { value: t.email, label: techOptLabel(t, job) }; }));
     var cur = job.suggested_tech_email || '';
-    var html = '<p class="sv-hint">The ticket still goes to the queue. The person you name sees it under “For you” in the queue.</p>' +
+    var html = '<p class="sv-hint">It still needs assigning. The person you name sees it under “Asked for you”.</p>' +
       selectField('Technician', 'svd-tech', opts, cur, { wide: true }) +
       field('Why them? (optional)', 'svd-reason', job.suggest_reason || '', { wide: true, placeholder: 'e.g. Served this customer before' });
     var node = dlgNode('suggest', html);

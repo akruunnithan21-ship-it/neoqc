@@ -4106,7 +4106,7 @@ async function onTechButton(act) {
   if (techActionBusy) return;
   const Q = window.NeoQcQueue;
   if (!Q || typeof Q.buildAction !== 'function') {
-    showToast('The work queue is not available on this PC — restart Neo OS.', 'error');
+    showToast('Assigning is not available on this PC — restart Neo OS.', 'error');
     return;
   }
   techActionBusy = true;
@@ -4207,7 +4207,7 @@ async function loadTicketQueueHistory(ticketId) {
   } catch (e) {
     if (seq !== techHistorySeq || editingTicketId !== id) return;
     list.textContent = '';
-    line(e && e.message === 'DEMO_READONLY' ? 'Not shown while demo data is on.' : 'Could not load the queue history: ' + opsErrText(e));
+    line(e && e.message === 'DEMO_READONLY' ? 'Not shown while demo data is on.' : 'Could not load the assignment history: ' + opsErrText(e));
     return;
   }
   if (seq !== techHistorySeq || editingTicketId !== id) return;
@@ -6033,7 +6033,7 @@ function renderOpsSettings() {
   // Static markup only; every person and preset is added with DOM calls below.
   host.innerHTML =
     '<div class="settings-section-title">Operations</div>' +
-    '<p class="settings-section-desc">Service, RMA, builds and the work queue. These take effect straight away — no need to press Save.</p>' +
+    '<p class="settings-section-desc">Service, RMA and builds. These take effect straight away — no need to press Save.</p>' +
     (canDemo
       ? '<label class="settings-toggle-row">' +
           '<div class="settings-toggle-info">' +
@@ -6049,7 +6049,7 @@ function renderOpsSettings() {
     (canAdmin
       ? '<div class="settings-field" id="settings-ops-people" style="margin-top:14px;">' +
           '<div class="settings-label">People</div>' +
-          '<p class="q-people-help">Who works here and what they can do. A person’s <strong>designation</strong> picks a preset of roles and pools; anything you set by hand for them wins. <strong>Desk</strong> takes work in and moves it on; <strong>Tech</strong> can also claim work; <strong>Lead</strong> can also offer work to people, set priority and waive fees. A <strong>NeoHR</strong> lead (for HR) sees everyone’s work logs and field activity. Tier 3 and above are leads everywhere automatically. The <strong>pools</strong> decide who claims builds and service jobs from the Queue. A change takes effect for that person at their next sign-in or app restart.</p>' +
+          '<p class="q-people-help">Who works here and what they can do. A person’s <strong>designation</strong> picks a preset of roles and pools; anything you set by hand for them wins. <strong>Desk</strong> takes work in, moves it on and assigns it; <strong>Tech</strong> works on it and can assign it too; <strong>Lead</strong> can also set priority and waive fees. A <strong>NeoHR</strong> lead (for HR) sees everyone’s work logs and field activity. Tier 3 and above are leads everywhere automatically. The <strong>pools</strong> mark who usually takes builds and service jobs. A change takes effect for that person at their next sign-in or app restart.</p>' +
           '<p class="q-people-help" id="settings-ops-people-add"><strong>Adding someone:</strong> </p>' +
           '<div class="q-people-bar">' +
             '<input type="text" id="settings-ops-people-search" class="settings-input" placeholder="Search people by name, email or designation…" autocomplete="off" spellcheck="false">' +
@@ -6416,9 +6416,9 @@ async function editOpsPerson(r, D) {
   else if (self) body.appendChild(opsNode('p', 'ops-hint', 'Your own roles are changed by someone senior to you.'));
   body.appendChild(opsNode('p', 'ops-hint', 'NeoHR: Lead sees everyone’s work logs and field activity (the NeoHR screen here, and the Team view on the phone). Presets never change it.'));
 
-  body.appendChild(opsNode('div', 'ops-section-title', 'Work queue'));
-  const chkBP = opsCheck('Build pool — can claim builds from the Queue', !!r.build_pool);
-  const chkSP = opsCheck('Service pool — can claim service jobs from the Queue', !!r.service_pool);
+  body.appendChild(opsNode('div', 'ops-section-title', 'Work'));
+  const chkBP = opsCheck('Build pool — usually takes builds', !!r.build_pool);
+  const chkSP = opsCheck('Service pool — usually takes service jobs', !!r.service_pool);
   body.appendChild(chkBP.label);
   body.appendChild(chkSP.label);
   const wq = opsNode('div', 'q-dlg-grid3');
@@ -6496,7 +6496,7 @@ async function editOpsPerson(r, D) {
       if (patch.designation !== undefined && chkPreset.input.checked) patch.apply_preset = true;
       if (!Object.keys(patch).length) { opsSay('Nothing changed.'); return true; }
       if (patch.active === false || patch.is_staff === false) {
-        const ok = await showConfirm('Turn off ' + who + '? Everything they hold goes back to the queue, and offers to them end.',
+        const ok = await showConfirm('Turn off ' + who + '? Everything they hold goes back to be assigned again.',
           { title: 'Turn off ' + who, okText: 'Turn off', danger: true });
         if (!ok) return false;
       }
@@ -6605,7 +6605,7 @@ async function editOpsPreset(p, D) {
   });
   body.appendChild(roles);
   body.appendChild(opsNode('p', 'ops-hint', '— means no role: applying the preset removes that module from the person. Tier 3 and above stay leads everywhere.'));
-  body.appendChild(opsNode('div', 'ops-section-title', 'Work queue'));
+  body.appendChild(opsNode('div', 'ops-section-title', 'Work'));
   const chkBP = opsCheck('Build pool', !!cur.build_pool);
   const chkSP = opsCheck('Service pool', !!cur.service_pool);
   body.appendChild(chkBP.label);

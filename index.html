@@ -254,7 +254,7 @@
         <div class="stats-summary-bar" id="stats-summary-bar">
           <div class="stat-pill">
             <div class="stat-pill-value" id="stat-active">0</div>
-            <div class="stat-pill-label">🔨 Build Queue</div>
+            <div class="stat-pill-label">🔨 Active Builds</div>
           </div>
           <div class="stat-pill">
             <div class="stat-pill-value" id="stat-completed">0</div>
@@ -2618,20 +2618,20 @@
     <div class="glass-slab modal-card" style="max-width: 650px; width: 100%; padding: 30px; border-radius: 20px;">
       <div class="modal-header" style="border-bottom: 1px solid var(--glass-border); padding-bottom: 15px; margin-bottom: 20px;">
         <h2 style="font-family: 'Syncopate', sans-serif; font-size: 1.3rem; color: var(--primary-pink); letter-spacing: 0.05em; margin: 0;">NEO OS UPDATED</h2>
-        <span data-app-version style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; font-weight: 700; background: rgba(var(--primary-pink-rgb), 0.1); color: var(--primary-pink); padding: 4px 8px; border-radius: 4px;">v1.12.5</span>
+        <span data-app-version style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; font-weight: 700; background: rgba(var(--primary-pink-rgb), 0.1); color: var(--primary-pink); padding: 4px 8px; border-radius: 4px;">v1.12.6</span>
       </div>
       <div class="modal-body" style="font-size: 0.92rem; line-height: 1.6; color: var(--text-dark); max-height: 420px; overflow-y: auto; padding-right: 5px;">
-        <p style="margin-top: 0;"><strong>Front USB test fixed, RAM sticks counted, and Cinebench works again.</strong> Here's what's new in <strong data-app-version>v1.12.5</strong>:</p>
+        <p style="margin-top: 0;"><strong>No more queue: you pick the technician.</strong> Here's what's new in <strong data-app-version>v1.12.6</strong>:</p>
         <ul style="padding-left: 20px; display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px;">
-          <li><strong>Case Port Certification works again.</strong> It finds the drive much faster, sees fast USB-C sticks and SSDs, waits for the drive letter, and gives you a full minute to plug in. It won't pass the same socket twice, and it tells you if Windows says the socket is on the back.</li>
-          <li><strong>The front panel comes from the cabinet.</strong> The port list follows the last build with the same cabinet, a known cabinet, or the cabinet name. Pick <strong>2× USB-A + USB-C</strong>, <strong>1× USB-A + USB-C</strong>, <strong>USB-C only</strong> or <strong>2× USB-A</strong> in one click.</li>
-          <li><strong>RAM sticks.</strong> Each build now records how many RAM sticks and how big each one is, typed in or filled from the invoice (it reads the quantity: "2 PCS", 2 × 16 GB). The Bench checks it against the sticks actually installed.</li>
-          <li><strong>Cinebench works again.</strong> It was never actually starting, so every run said no score. The score now shows on the build and the report, and a failed run no longer wipes an earlier score.</li>
-          <li><strong>Scan Ports</strong> now lists mice, headsets and webcams, and names HDMI and DisplayPort outputs properly.</li>
+          <li><strong>Every serial on the QC report.</strong> The CPU, CPU cooler and power supply serials now print too, as well as every RAM stick.</li>
+          <li><strong>The Queue is gone.</strong> Nothing is claimed or offered any more, and nothing is handed out automatically.</li>
+          <li><strong>Assigned Technician is back.</strong> Pick or change who builds it right in the build ticket, new builds included; it's set when you save. Builds with no technician have an <strong>Assign…</strong> button on their card. Anyone with a Builds role can do it.</li>
+          <li><strong>Service tickets:</strong> <strong>Assign…</strong> and <strong>Move…</strong> replace "Offer to…" and "Claim". The technician has it at once. Anyone with a Service role can do it.</li>
+          <li><strong>Procurement</strong> (the incoming parts check) is no longer in the ticket.</li>
         </ul>
       </div>
       <div class="modal-footer" style="border-top: 1px solid var(--glass-border); padding-top: 15px; display: flex; justify-content: flex-end; margin-top: 20px;">
-        <button id="btn-close-changelog" data-app-version-label class="primary-pink-btn" style="padding: 10px 24px; font-weight: 700; font-size: 0.95rem;">Launch Neo OS v1.12.5</button>
+        <button id="btn-close-changelog" data-app-version-label class="primary-pink-btn" style="padding: 10px 24px; font-weight: 700; font-size: 0.95rem;">Launch Neo OS v1.12.6</button>
       </div>
     </div>
   </div>
