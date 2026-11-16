@@ -41,9 +41,10 @@
   //   { anyOf: [ {module, role} | {tier}, … ] }   any ONE of them
   var REGISTRY = [
     { id: 'overview', label: 'Overview', icon: '◎', screenId: 'overview-screen', mode: 'overview', needs: { any: true } },
-    // The one work queue (builds + service). Shows customer first names and
-    // areas, so never { any: true }: build desk or service desk and up.
-    { id: 'queue',    label: 'Queue',    icon: '⏱', screenId: 'queue-screen',    mode: 'queue',
+    // The work queue (1.11) is gone: builds left it in 1.12.3 and service in
+    // 1.12.5 (sql/service-direct-assign.sql). The desk assigns every job, so
+    // the screen is hidden: nobody opens it and it is never a landing screen.
+    { id: 'queue',    label: 'Queue',    icon: '⏱', screenId: 'queue-screen',    mode: 'queue', hidden: true,
       needs: { anyOf: [{ module: 'qc', role: 'desk' }, { module: 'service', role: 'desk' }] } },
     { id: 'builds',   label: 'Builds',   icon: '🖥', screenId: 'staff-screen',    mode: 'staff',    needs: { module: 'qc', role: 'desk' } },
     { id: 'service',  label: 'Service',  icon: '🔧', screenId: 'service-screen',  mode: 'service',  needs: { module: 'service', role: 'desk' } },

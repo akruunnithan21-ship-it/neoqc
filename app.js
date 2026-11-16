@@ -753,6 +753,11 @@ function canAssignBuilds() {
   return Number(currentProfile.tier) >= 3;
 }
 
+// 1.12.5 — manual assigning, as before the queue: anyone with a Builds role
+// (desk, tech or lead) picks the technician in the ticket. canAssignBuilds()
+// stays the desk/lead test the Bench uses to show the whole floor.
+function canPickBuildTech() { return hasQcRole('desk'); }
+
 function myWorkPools() {
   const M = window.NeoQcModules;
   if (M && typeof M.pools === 'function') {
@@ -2621,6 +2626,8 @@ function resetSessionCaches() {
 }
 
 function startWorkQueueBackground() {
+  // 1.12.5 — no queue: nothing ticks offers or polls the queue any more.
+  return;
   const Q = window.NeoQcQueue;
   if (!currentProfile || !Q || typeof Q.startBackground !== 'function') return;
   try { Q.startBackground(); } catch (e) { console.warn('work queue background failed to start:', e && e.message); }
@@ -3130,6 +3137,7 @@ function renderDashboard() {
             <span class="tech-chip-dot"></span>
             ${escapeHtmlLite(techInfo.label)}
           </span>
+          ${canPickBuildTech() && t.status !== 'completed' && !ticketIsAssigned(t) ? '<button type="button" class="secondary-btn card-assign-btn" style="margin-left:6px;padding:2px 10px;font-size:0.75rem;">Assign…</button>' : ''}
         </div>
         
         <div class="card-progress-section">
@@ -3175,6 +3183,16 @@ function renderDashboard() {
       `;
 
       card.addEventListener('click', () => openTicketModal(t.id));
+      // 1.12.5 — assign straight from the list (Builds desk / lead).
+      const assignBtn = card.querySelector('.card-assign-btn');
+      if (assignBtn) assignBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const Q = window.NeoQcQueue;
+        if (!Q || typeof Q.buildAction !== 'function') { showToast('Assigning is not available on this PC — restart Neo OS.', 'error'); return; }
+        Promise.resolve(Q.buildAction('assign', t.id))
+          .then(ok => ok ? refreshTicketFromCloud(t.id).catch(() => {}).then(() => renderDashboard()) : null)
+          .catch(err => showToast('That did not work: ' + opsErrText(err), 'error', 8000));
+      });
       attachTicketPeek(card, t);
       grid.appendChild(card);
     });
@@ -3515,6 +3533,7 @@ function openTicketModal(ticketId = null) {
 
   // v1.11 — who builds it is the work queue's business: the box shows where
   // the build stands and offers the actions this person may take on it.
+  resetTechPicker();
   renderTicketTechArea(ticketId);
   loadTicketQueueHistory(ticketId);
 
@@ -3841,19 +3860,16 @@ function updateTicketModalChrome(ticketId) {
   }
 
   // Journey stepper: mark every stage up to the current one as reached.
-  // v1.9.7 — added a Procurement stage between Parts and Assembly.
-  const order = ['awaiting', 'procurement', 'building', 'qc', 'completed'];
+  // 1.12.6 — the Procurement stage is gone (indexes follow the buttons).
+  const order = ['awaiting', 'building', 'qc', 'completed'];
   let reachedIdx = 0;
   if (t) {
     const buildPct = calculateBuildPercentage(t) || 0;
     const qcPct = calculateQcPercentage(t) || 0;
-    const proc = (t.specs && t.specs.__procurement) || {};
-    const procDone = !!(proc.received && proc.undamaged && proc.matches);
-    if (t.status === 'completed') reachedIdx = 4;
-    else if (qcPct > 0 || buildPct >= 100) reachedIdx = 3;
-    else if (buildPct > 0 || t.status === 'building') reachedIdx = 2;
-    else if (procDone) reachedIdx = 2;   // parts checked in → Assembly is up next
-    else reachedIdx = 1;                  // ticket created → Procurement in progress
+    if (t.status === 'completed') reachedIdx = 3;
+    else if (qcPct > 0 || buildPct >= 100) reachedIdx = 2;
+    else if (buildPct > 0 || t.status === 'building') reachedIdx = 1;
+    else reachedIdx = 0;                  // ticket created → parts on the way
   }
   document.querySelectorAll('#tmh-journey .tmj-step').forEach((el, i) => {
     el.classList.toggle('done', !!t && i < reachedIdx);
@@ -3951,12 +3967,8 @@ function renderTicketTechArea(ticketId) {
     statusEl.dataset.tone = 'muted';
     Object.keys(TECH_BTN_ACT).forEach(id => techBtn(id, false));
     techBtn('btn-tech-test', false);
-    if (!ticketId) {
-      techBtn('btn-tech-offer', canAssignBuilds(), { label: 'Assign…', disabled: true, title: TECH_SAVE_FIRST });
-      say(TECH_SAVE_FIRST);
-    } else {
-      say('');
-    }
+    fillTechPicker(null, !ticketId);
+    say('');
     return;
   }
   const info = buildTechInfo(t);
@@ -3976,7 +3988,10 @@ function renderTicketTechArea(ticketId) {
   // 1.12.3: no claiming and no offers. A build left over with a live offer
   // from 1.12.2 can still be accepted by that person or withdrawn by a lead.
   techBtn('btn-tech-claim', !done && toMe, { label: 'Accept offer' });
-  techBtn('btn-tech-offer', assigner && !done && !live, { label: assigned ? 'Move to someone else…' : 'Assign…' });
+  // 1.12.5 — the Assigned Technician dropdown (sent on Save) assigns and
+  // changes who builds it, for anyone with a Builds role.
+  fillTechPicker(t, canPickBuildTech() && !done && !live);
+  techBtn('btn-tech-offer', false);
   techBtn('btn-tech-withdraw', lead && !done && live, { label: 'Withdraw offer' });
   techBtn('btn-tech-release', !done && assigned && (mine || lead), { label: mine ? 'Hand back…' : 'Take it back…' });
   techBtn('btn-tech-send', false);
@@ -3988,9 +4003,86 @@ function renderTicketTechArea(ticketId) {
 
   let note = '';
   if (toMe) note = `Offered to you — accept by ${techClock(t.offer.expiresAt)}, or decline it from the Queue.`;
-  else if (!assigned && !done && !assigner) note = 'The Builds desk assigns a technician.';
+  else if (!assigned && !done && !canPickBuildTech()) note = 'No technician yet.';
   else if (live && t.offer.reason && lead) note = `Offer reason: ${t.offer.reason}`;
   say(note);
+}
+
+// 1.12.5 — the Technician picker in the ticket (Builds desk / lead). Filled
+// once per modal open from build_tech_list; the choice goes to build_assign
+// after the build reaches the cloud (assignPickedTech), because the server
+// owns who builds it. Greyed-out people can't take this build (the reason is
+// on their line); the server re-checks either way.
+let techPickSeq = 0;
+function resetTechPicker() {
+  const sel = document.getElementById('form-tech-pick');
+  if (!sel) return;
+  techPickSeq++;
+  sel.dataset.loaded = '';
+  sel.innerHTML = '';
+  sel.classList.add('hidden');
+}
+
+async function fillTechPicker(t, show) {
+  const sel = document.getElementById('form-tech-pick');
+  if (!sel) return;
+  show = !!show && canPickBuildTech();
+  sel.classList.toggle('hidden', !show);
+  if (!show || sel.dataset.loaded) return;
+  sel.dataset.loaded = 'loading';
+  const seq = ++techPickSeq;
+  sel.innerHTML = '<option value="">Loading technicians…</option>';
+  let people = [];
+  try {
+    const D = window.NeoQcData;
+    const res = D && typeof D.buildTechList === 'function' ? await D.buildTechList() : null;
+    people = ((res && res.people) || []).filter(p => p && p.email);
+  } catch (e) {
+    if (seq !== techPickSeq) return;
+    sel.dataset.loaded = '';
+    sel.innerHTML = '<option value="">Could not load the technicians — reopen the build</option>';
+    return;
+  }
+  if (seq !== techPickSeq) return;
+  sel.dataset.loaded = '1';
+  const W = window.NeoQcWork;
+  const imp = (document.getElementById('form-build-importance') || {}).value;
+  const tier = t ? buildTierOfTicket(t) : (BUILD_TIER_BY_IMPORTANCE[imp] || 1);
+  const opts = people.map(p => {
+    let why = null;
+    if (W && typeof W.whyNot === 'function') { try { why = W.whyNot(p, 'build', tier) || null; } catch (e) {} }
+    // Manual assigning: the build pool and senior-only rules no longer block a choice.
+    if (why === 'no_pool' || why === 'senior') why = null;
+    const level = p.build_level ? ' — ' + p.build_level : '';
+    const whyText = why ? ' — ' + (workWhySentence(why, false) || why) : '';
+    return `<option value="${escapeHtmlLite(String(p.email).toLowerCase())}"${why ? ' disabled' : ''}>${escapeHtmlLite((p.name || p.email) + level + whyText)}</option>`;
+  });
+  sel.innerHTML = `<option value="">${people.length ? '— Choose a technician —' : 'No technicians found'}</option>` + opts.join('');
+  const cur = String((t && t.technicianEmail) || '').trim().toLowerCase();
+  if (cur && people.some(p => String(p.email).toLowerCase() === cur)) sel.value = cur;
+}
+
+// After Save: give the build to the technician picked in the ticket.
+async function assignPickedTech(id, email, uploaded, current) {
+  if (!uploaded) {
+    showToast('The technician was not set: the build has not reached the cloud yet. Open it and choose them again once it has.', 'warning', 9000);
+    return;
+  }
+  const D = window.NeoQcData;
+  if (!D || typeof D.buildAssign !== 'function') { showToast('The technician was not set — restart Neo OS and try again.', 'error'); return; }
+  try {
+    ownQueueActionAt[id] = Date.now();
+    const res = await D.buildAssign(id, email, current ? 'Changed in the build ticket' : '', current || '');
+    if (res && res.ok === false) {
+      showToast('The technician was not set: someone else assigned this build first.', 'warning', 8000);
+    } else {
+      showToast('✓ Technician assigned.', 'success');
+    }
+    try { await refreshTicketFromCloud(id); } catch (e) {}
+    renderDashboard();
+  } catch (e) {
+    showToast('The technician was not set: ' + opsErrText(e), 'error', 9000);
+  }
 }
 
 // While the ticket is open its countdown text stays current; the timer stops
@@ -5126,6 +5218,12 @@ async function handleTicketFormSubmit(e) {
     // 1.12.3: a new build is not sent to a queue; the Builds desk assigns it.
   }
 
+  // 1.12.5 — the technician picked in the ticket, sent once the build is up.
+  const pickEl = document.getElementById('form-tech-pick');
+  const curTech = String((existingTicket && existingTicket.technicianEmail) || '').trim().toLowerCase();
+  let pickedTech = pickEl && !pickEl.classList.contains('hidden') ? String(pickEl.value || '').trim().toLowerCase() : '';
+  if (pickedTech === curTech) pickedTech = '';   // unchanged
+
   await saveDatabase();
   const uploaded = await syncTicketToCloud(updatedTicket);
   document.getElementById('ticket-modal').classList.remove('active');
@@ -5137,12 +5235,12 @@ async function handleTicketFormSubmit(e) {
 
   if (isNewTicket) {
     showToast(uploaded
-      ? '✓ Ticket created — it goes to the build queue for a technician to claim.'
-      : '✓ Ticket created on this PC. It goes to the build queue once it reaches the cloud.', uploaded ? 'success' : 'warning', uploaded ? 5000 : 9000);
-    drainPendingQueueSends().catch(e => console.warn('build queue send failed:', e && e.message));
+      ? (pickedTech ? '✓ Ticket created.' : '✓ Ticket created — the Builds desk assigns a technician.')
+      : '✓ Ticket created on this PC. It reaches the cloud once the connection is back.', uploaded ? 'success' : 'warning', uploaded ? 5000 : 9000);
   } else {
     showToast(uploaded ? '✓ Ticket saved.' : '✓ Saved on this PC, but it could not reach the cloud. Save it again once the connection is back.', uploaded ? 'success' : 'warning', uploaded ? 5000 : 9000);
   }
+  if (pickedTech) assignPickedTech(updatedTicket.id, pickedTech, uploaded, curTech);
   } catch (err) {
     // Never fail silently — surface the reason so a save problem is visible.
     console.error('Ticket save failed:', err);

@@ -1615,7 +1615,7 @@
   async function assignJob(jobId, email, reason, expected) {
     writable();
     requireId(jobId, 'ticket');
-    var why = need(reason, 'Give a reason for the assignment.');
+    var why = clean(reason);   // 1.12.5: needed only when moving (the server says so)
     var cached = jobsById[jobId];
     var exp = arguments.length >= 4 ? (expected || null) : ((cached && cached.assignee_email) || null);
     var res = await rpc('service_assign', { p_job_id: jobId, p_email: clean(email), p_reason: why, p_expected: exp });

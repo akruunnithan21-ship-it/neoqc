@@ -548,7 +548,7 @@
           ballText: ball === 'customer' ? 'Waiting on customer'
                   : ball === 'third_party' ? ((part && part.stage === 'returning') ? 'With the courier' : ('Waiting on ' + waitingOn))
                   : ball === 'nobody' ? 'Closed' : 'With us',
-          tech: j.assignee || (queued ? 'In the queue' : 'Unassigned'),
+          tech: j.assignee || 'No technician yet',
           code: j.public_code || '',
           ageMs: now - since,
           late: risk === 2 && !closed,

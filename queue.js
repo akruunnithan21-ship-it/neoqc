@@ -110,7 +110,8 @@
   function isLeadOf(kind) { return hasRole(moduleOf(kind), 'lead'); }
   // 1.12.3 — who gives builds out: the Builds desk role itself, or a lead. A
   // technician outranks the desk but never assigns (that would be a claim).
-  function canAssignBuilds() { var r = roleFor('qc'); return r === 'desk' || r === 'lead'; }
+  // 1.12.5 — manual assigning restored: anyone with a Builds role assigns.
+  function canAssignBuilds() { var r = roleFor('qc'); return r === 'desk' || r === 'tech' || r === 'lead'; }
   function canReadKind(kind) { return hasRole(moduleOf(kind), 'desk'); }
   function isLeadAny() { return isLeadOf('build') || isLeadOf('service'); }
   function pools() {
@@ -1098,7 +1099,7 @@
     key = key || busyKey('build', id);
     var who = whoKey();
     var d = D(), ui = UI();
-    if (!canAssignBuilds()) { toast('Only the Builds desk or a Builds lead can assign builds.', 'warning'); return false; }
+    if (!canAssignBuilds()) { toast('You need a Builds role to assign builds.', 'warning'); return false; }
     if (!needFn(d, 'buildTechList') || !needFn(d, 'buildAssign')) return false;
     if (!ui || typeof ui.dialog !== 'function') { toast('Dialogs are not available — restart Neo OS.', 'error'); return false; }
     if (st.inflight[key]) return false;
@@ -1115,6 +1116,7 @@
     if (team.now) st.offsetMs = computeOffset(team.now, Date.now());
     var people = team.people.map(function (p) {
       var why = whyNot(p, 'build', info.tier);
+      if (why === 'no_pool' || why === 'senior') why = null;   // manual assigning: no pool / senior gate
       return { p: p, why: why, room: num(p.capacity_points) - num(p.points) };
     });
     people.sort(function (a, b) {
@@ -1128,7 +1130,7 @@
     lead.className = 'ops-dialog-msg ops-span2';
     lead.textContent = (moving ? 'Now with ' + holder + '. ' : '') +
       'The person you choose has it at once; it shows in their work straight away.' +
-      (info.tier >= 4 ? ' This is a high-value build: only senior builders can take it.' : '');
+      '';
     body.appendChild(lead);
     var sel = document.createElement('select');
     sel.className = 'q-offer-person';
@@ -1149,7 +1151,7 @@
     ta.maxLength = 300;
     ta.rows = 3;
     ta.placeholder = moving ? 'Why move it? Both of them can see this.' : 'Optional: anything they should know.';
-    body.appendChild(field(moving ? 'Reason' : 'Note', ta, moving ? 'Required when moving a build. Up to 300 characters.' : 'Optional. Up to 300 characters.'));
+    body.appendChild(field(moving ? 'Reason' : 'Note', ta, 'Optional. Up to 300 characters.'));
 
     var ok = await ui.dialog({
       title: (moving ? 'Move ' : 'Assign ') + info.code + ' to a technician',
@@ -1163,11 +1165,10 @@
         var email = sel.value;
         var reason = String(ta.value || '').trim();
         if (!email) return 'Choose who builds it.';
-        if (moving && !reason) return 'Say why you’re moving it.';
         if (reason.length > 300) return 'Keep it under 300 characters.';
         st.inflight[k] = true;
         try {
-          var res = await d.buildAssign(id, email, reason, info.expected || '');
+          var res = await d.buildAssign(id, email, reason || (moving ? 'Moved from the Builds list' : ''), info.expected || '');
           if (who !== whoKey()) return false;
           if (res && res.ok === false) return resultText(res);
           var chosen = people.filter(function (x) { return lower(x.p.email) === email; })[0];

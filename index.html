@@ -157,7 +157,7 @@
         <span class="nav-title">NEO TOKYO // TESTING CLIENT</span>
       </div>
       <div class="nav-controls">
-        <button type="button" id="btn-welcome-service" class="secondary-btn hidden" title="Open the service queue">🔧 Service queue</button>
+        <button type="button" id="btn-welcome-service" class="secondary-btn hidden" title="Open Service">🔧 Service</button>
         <button type="button" id="btn-welcome-exit" class="secondary-btn hidden" title="Back to your home screen">← Back</button>
       </div>
     </header>
@@ -956,8 +956,7 @@
         </div>
         <!-- The build journey, always in view while you scroll the ticket. -->
         <div id="tmh-journey" class="tmh-journey" aria-label="Build journey">
-          <button type="button" class="tmj-step" data-stage="awaiting" data-target="#procurement-section" title="Jump to Procurement"><i></i><span>Parts</span></button>
-          <button type="button" class="tmj-step" data-stage="procurement" data-target="#procurement-section" title="Jump to Procurement"><i></i><span>Procurement</span></button>
+          <button type="button" class="tmj-step" data-stage="awaiting" data-target="#awaiting-parts-group" title="Jump to Parts"><i></i><span>Parts</span></button>
           <button type="button" class="tmj-step" data-stage="building" data-target="#assembly-section" title="Jump to Assembly"><i></i><span>Assembly</span></button>
           <button type="button" class="tmj-step" data-stage="qc" data-target="#qc-testing-section" title="Jump to QC"><i></i><span>QC</span></button>
           <button type="button" class="tmj-step" data-stage="completed" data-target="#diagnostics-section" title="Jump to Diagnostics"><i></i><span>Ready</span></button>
@@ -997,14 +996,14 @@
                    renderTicketTechArea). The buttons act on the SAVED build
                    through the server, never as part of Save. -->
               <div class="form-group q-tech-group">
-                <label id="form-tech-label">Technician</label>
+                <label id="form-tech-label">Assigned Technician</label>
                 <div id="form-tech-status" class="q-tech-status" data-tone="muted" role="status" aria-live="polite" aria-labelledby="form-tech-label">—</div>
+                <!-- 1.12.5 — the Builds desk picks who builds it right here, new
+                     builds included; it is sent when the build is saved. -->
+                <select id="form-tech-pick" class="hidden" aria-labelledby="form-tech-label"></select>
                 <div class="q-tech-btns">
-                  <button type="button" id="btn-tech-claim" class="secondary-btn hidden">Claim</button>
                   <button type="button" id="btn-tech-offer" class="secondary-btn hidden">Assign…</button>
-                  <button type="button" id="btn-tech-withdraw" class="secondary-btn hidden">Withdraw offer</button>
                   <button type="button" id="btn-tech-release" class="secondary-btn hidden">Hand back…</button>
-                  <button type="button" id="btn-tech-send" class="secondary-btn hidden">Send to build queue</button>
                   <button type="button" id="btn-tech-test" class="secondary-btn hidden">🧪 Test on this PC</button>
                 </div>
                 <span id="form-tech-note" class="q-tech-note hidden"></span>
@@ -1045,7 +1044,7 @@
                   <option value="build">New PC Build</option>
                 </select>
               </div>
-              <div class="form-group">
+              <div class="form-group" id="awaiting-parts-group">
                 <label for="form-missing-components-toggle">Awaiting Components?</label>
                 <div class="input-toggle-row">
                   <input type="checkbox" id="form-missing-components-toggle">
@@ -1148,24 +1147,9 @@
             <div id="config-synergy-warnings" class="synergy-warnings hidden"></div>
           </div>
 
-          <!-- PROCUREMENT — INCOMING PARTS CHECK (v1.9.7) -->
-          <!-- Recorded by procurement when parts arrive: part numbers + serials that
-               weren't on the sales invoice, plus a basic incoming-QC check. Kept
-               SEPARATE from the technician's build-time serial scan (Component
-               Verification below), so that later scan is a second verification. -->
-          <div id="procurement-section" class="form-section margin-top">
-            <div class="section-header-row">
-              <h3>📦 Procurement — Incoming Parts Check</h3>
-              <span id="procurement-summary-badge" class="cv-gate-tag">Incoming QC</span>
-            </div>
-            <p class="proc-hint">Filled in by procurement as parts arrive — part numbers and serials not on the sales invoice, plus a quick incoming inspection. The technician re-scans serials later as a second check.</p>
-            <div id="procurement-rows"></div>
-            <div class="proc-checklist">
-              <label><input type="checkbox" id="proc-check-received"> All ordered parts received</label>
-              <label><input type="checkbox" id="proc-check-undamaged"> No physical damage on arrival</label>
-              <label><input type="checkbox" id="proc-check-matches"> Parts match the invoice</label>
-            </div>
-          </div>
+          <!-- 1.12.6 — the Procurement (incoming parts check) section was removed
+               from the ticket. Goods-in data already saved (specs.__procurement)
+               is kept on each ticket and still feeds the report's serials. -->
 
           <!-- COMPONENT CONDITION / DAMAGE REPORT -->
           <!-- v1.5.1 — customer-supplied / transferred parts. Not purchased on

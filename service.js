@@ -383,6 +383,9 @@
   function isLead() { return rank() >= 3; }
   function isTechPlus() { return rank() >= 2; }
   function isDeskPlus() { return rank() >= 1; }
+  // 1.12.5 — manual assigning restored: anyone with a Service role (desk,
+  // tech or lead) picks the technician.
+  function canAssign() { return isDeskPlus(); }
   function me() {
     var d = D(), p = null;
     try { p = d && typeof d.me === 'function' ? d.me() : null; } catch (e) {}
@@ -474,7 +477,7 @@
     return '';
   }
   function canClaim(job, now) {
-    return !!job && inQueue(job) && isTechPlus() && inPool() && !offerOther(job, now) && !offeredToMe(job, now);
+    return false;   // 1.12.5: nobody claims; the Service desk assigns
   }
   // "Offered to Amal · 18m left" — the minutes tick (1 s while on screen).
   function offerChipHtml(job, now) {
@@ -929,7 +932,7 @@
   function toolbarHtml() {
     return '' +
       '<div class="sv2-seg" role="group" aria-label="View">' +
-        segBtn('board', 'Board') + segBtn('queue', 'Queue', 'sv2-qcount') + segBtn('visits', 'Visits', 'sv2-vcount') +
+        segBtn('board', 'Board') + segBtn('queue', 'To assign', 'sv2-qcount') + segBtn('visits', 'Visits', 'sv2-vcount') +
       '</div>' +
       '<div class="sv2-types" role="group" aria-label="Type of work">' +
         typeChip('all', 'All') + typeChip('in_store', 'In-store') + typeChip('on_site', 'On-site') + typeChip('remote', 'Remote') +
@@ -1301,7 +1304,7 @@
   function updateStat(k) {
     var stat = byId('sv-stat');
     if (!stat) return;
-    stat.textContent = k.open + ' open · ' + k.late + ' late' + (k.queue ? ' · ' + k.queue + ' in the queue' : '');
+    stat.textContent = k.open + ' open · ' + k.late + ' late' + (k.queue ? ' · ' + k.queue + ' with no technician' : '');
     stat.classList.toggle('has-breach', k.late > 0);
   }
   function updateCounts(k) {
@@ -1312,7 +1315,7 @@
     var tiles = [
       ['open', 'Open', k.open, 't-open', 'shop', 'Show everything'],
       ['late', 'Late', k.late, 't-late', 'late', 'Show only late tickets'],
-      ['queue', 'In the queue', k.queue, 't-queue', 'queue', 'Open the queue'],
+      ['queue', 'No technician', k.queue, 't-queue', 'queue', 'Show tickets with no technician'],
       ['customer', 'Waiting on customer', k.customer, 't-cust', 'customer', 'Show only tickets waiting on the customer'],
       ['visits', 'Visits today', k.visits, 't-visits', 'vendor', 'Open today’s visits'],
       ['ready', 'Ready to collect', k.ready, 't-ready', 'ready', 'Show only tickets ready to collect']
@@ -1395,7 +1398,7 @@
           if (key !== lastKey) {
             lastKey = key;
             var n = list.filter(function (x) { return lower(x.assignee || (x.assignee_email ? staffName(x.assignee_email) : '')) === key; }).length;
-            head = '<div class="sv2-group">' + esc(name || 'In the queue') + ' <span class="sv2-group-n">' + n + '</span></div>';
+            head = '<div class="sv2-group">' + esc(name || 'No technician yet') + ' <span class="sv2-group-n">' + n + '</span></div>';
           }
           return head + cardHtml(j, now);
         }).join('');
@@ -1479,7 +1482,7 @@
       tech = '<span class="sv-k">Tech</span> ' + esc(job.assignee || staffName(job.assignee_email));
     } else if (job.stage !== 'closed') {
       var chip = offerChipHtml(job);
-      tech = '<span class="sv2-inq">In the queue</span>' +
+      tech = '<span class="sv2-inq">No technician yet</span>' +
         (chip ? ' ' + chip
               : job.suggested_tech_email ? ' <span class="sv2-star" title="Requested technician">★ ' + esc(staffName(job.suggested_tech_email)) + '</span>' : '');
     } else tech = '<span class="sv-k">Tech</span> —';
@@ -1546,15 +1549,15 @@
       return (ms(a.assigned_at) || 0) - (ms(b.assigned_at) || 0);
     });
     var html = '';
-    if (!isTechPlus()) html += '<p class="sv-hint sv2-lead-line">Technicians take tickets from here. You can see who is waiting and for how long.</p>';
-    else if (!inPool()) html += '<p class="sv-hint sv2-lead-line">' + esc(noPoolText()) +
-      (isLead() ? ' Offer a ticket to a technician instead — they have a short time to accept it.' : ' Ask a lead to add you to it.') + '</p>';
+    html += '<p class="sv-hint sv2-lead-line">' + (canAssign()
+      ? 'Assign each ticket to a technician — it is theirs at once.'
+      : 'These tickets are waiting for a technician.') + '</p>';
     html += '<div class="sv2-queue">' +
-      qcol('For you', 'Offered to you — answer before it runs out — or asked for you by name.', forMe, 'mine', now) +
-      qcol('Open queue', 'Most urgent first, then the longest waiting. Not claimed in 4 hours, the app offers it to the best free technician.', rest, 'open', now) +
-      qcol('Claimed — no visit time', 'On-site tickets that still need a time agreed with the customer.', noTime, 'notime', now) +
+      qcol('Asked for you', 'The customer asked for you by name. The Service desk assigns it.', forMe, 'mine', now) +
+      qcol('No technician yet', 'Most urgent first, then the longest waiting.', rest, 'open', now) +
+      qcol('Assigned — no visit time', 'On-site tickets that still need a time agreed with the customer.', noTime, 'notime', now) +
     '</div>';
-    if (isLead()) {
+    if (canAssign()) {
       var needs = q.filter(function (j) { return qRisk(j, now) === 2; })
                    .sort(function (a, b) { return queueAgeHours(b, now) - queueAgeHours(a, now); });
       html += needsPanelHtml(needs, now);
@@ -1594,7 +1597,7 @@
       foot = (isMine(job) || isLead() || isDeskPlus())
         ? '<button type="button" class="secondary-btn sv2-small" data-open-job="' + esc(job.id) + '" data-tab="visit">Set the time</button>' : '';
     } else {
-      ageTxt = '<span class="sv2-qage' + (qr === 2 ? ' late' : qr === 1 ? ' soon' : '') + '">' + esc(fmtHours(queueAgeHours(job, now))) + ' in the queue' +
+      ageTxt = '<span class="sv2-qage' + (qr === 2 ? ' late' : qr === 1 ? ' soon' : '') + '">' + esc(fmtHours(queueAgeHours(job, now))) + ' waiting' +
         (qr === 2 ? ' — late' : qr === 1 ? ' — due soon' : '') + '</span>';
       foot = queueFootHtml(job);
     }
@@ -1617,8 +1620,8 @@
     if (canClaim(job)) {
       return '<button type="button" class="primary-pink-btn sv2-claim" data-claim="' + id + '"' + (claiming[job.id] ? ' disabled' : '') + '>' + (claiming[job.id] ? 'Claiming…' : 'Claim') + '</button>';
     }
-    if (isLead() && !offerOther(job)) {
-      return '<button type="button" class="secondary-btn sv2-small" data-offer="' + id + '"' + (busy ? ' disabled' : '') + '>Offer to…</button>';
+    if (canAssign()) {
+      return '<button type="button" class="secondary-btn sv2-small" data-offer="' + id + '"' + (busy ? ' disabled' : '') + '>Assign…</button>';
     }
     if (!isTechPlus()) return '<span class="sv2-waiting">Waiting for a technician</span>';
     return '<span class="sv2-waiting">' + esc(claimWhy(job) || 'Waiting for a technician') + '</span>';
@@ -1626,7 +1629,7 @@
   function needsPanelHtml(list, now) {
     return '<section class="sv2-needs" aria-label="Needs assigning">' +
       '<div class="sv2-qhead"><span class="sv2-qtitle">Needs assigning</span><span class="sv-col-count' + (list.length ? ' has-breach' : '') + '">' + list.length + '</span></div>' +
-      '<div class="sv2-qhint">Nobody claimed these in 4 hours. The app offers each to the best free technician; you can offer one yourself. Only leads see this.</div>' +
+      '<div class="sv2-qhint">These have waited longest for a technician. Assign each one.</div>' +
       (list.length ? '<div class="sv2-needs-list">' + list.map(function (j) {
         var o = liveOffer(j);
         return '<div class="sv2-needs-row" data-job="' + esc(j.id) + '" role="button" tabindex="0">' +
@@ -1637,7 +1640,7 @@
           (j.suggested_tech_email ? '<span class="sv2-star">★ ' + esc(staffName(j.suggested_tech_email)) + '</span>' : '') +
           offerChipHtml(j) +
           (o ? '<button type="button" class="secondary-btn sv2-small" data-withdraw="' + esc(j.id) + '"' + (responding[j.id] ? ' disabled' : '') + '>Withdraw offer</button>'
-             : '<button type="button" class="secondary-btn sv2-small" data-offer="' + esc(j.id) + '"' + (responding[j.id] ? ' disabled' : '') + '>Offer to…</button>') +
+             : '<button type="button" class="secondary-btn sv2-small" data-offer="' + esc(j.id) + '"' + (responding[j.id] ? ' disabled' : '') + '>Assign…</button>') +
         '</div>';
       }).join('') + '</div>' : '<div class="sv-empty">Nothing has waited too long.</div>') +
     '</section>';
@@ -1925,7 +1928,7 @@
         (isMine(job) ? ' <span class="sv2-you">you</span>' : '') +
         (job.assigned_via && VIA[job.assigned_via] ? ' <span class="sv2-via">' + esc(VIA[job.assigned_via]) + '</span>' : '') + '</span>';
     } else if (!closed) {
-      who = '<span class="sv2-who q"><span class="sv2-who-k">In the queue</span> ' + esc(fmtHours(queueAgeHours(job, now))) +
+      who = '<span class="sv2-who q"><span class="sv2-who-k">No technician yet</span> ' + esc(fmtHours(queueAgeHours(job, now))) +
         (job.suggested_tech_email ? ' <span class="sv2-star" title="Requested technician">★ ' + esc(staffName(job.suggested_tech_email)) + '</span>' : '') + '</span>';
     } else {
       who = '<span class="sv2-who"><span class="sv2-who-k">Closed</span> ' + esc(fmtDateTime(job.closed_at)) + '</span>';
@@ -1939,19 +1942,15 @@
     if (!closed && offeredToMe(job)) {
       b += '<button type="button" class="primary-pink-btn sv2-small" data-act="accept"' + (busy ? ' disabled' : '') + '>Accept</button>' +
            '<button type="button" class="secondary-btn sv2-small" data-act="decline"' + (busy ? ' disabled' : '') + '>Decline…</button>';
-    } else if (!closed && inQueue(job) && isTechPlus() && inPool()) {
-      var other = offerOther(job);
-      b += '<button type="button" class="primary-pink-btn sv2-small" data-act="claim"' +
-        (claiming[job.id] || other ? ' disabled' : '') + (other ? ' title="' + esc(offerUntilText(other)) + '"' : '') + '>Claim</button>';
     }
     if (!closed && job.assignee_email && (isMine(job) || isLead())) {
       var onRoad = (job.stage === 'en_route' || job.stage === 'on_site') && !isLead();
       b += '<button type="button" class="secondary-btn sv2-small" data-act="release"' + (onRoad ? ' disabled title="You are on the way or on site — ask a lead to hand it back."' : '') + '>Release…</button>';
     }
-    if (!closed && isLead()) {
+    if (!closed && canAssign()) {
       b += liveOffer(job)
         ? '<button type="button" class="secondary-btn sv2-small" data-act="withdraw"' + (busy ? ' disabled' : '') + '>Withdraw offer</button>'
-        : '<button type="button" class="secondary-btn sv2-small" data-act="offer"' + (busy ? ' disabled' : '') + '>Offer to…</button>';
+        : '<button type="button" class="secondary-btn sv2-small" data-act="offer"' + (busy ? ' disabled' : '') + '>' + (job.assignee_email ? 'Move…' : 'Assign…') + '</button>';
     }
     if (!contactHidden(job)) {
       b += '<button type="button" class="secondary-btn sv2-small" data-act="wa" aria-haspopup="menu" aria-expanded="' + (waMenuOpen ? 'true' : 'false') + '">Message ▾</button>';
@@ -4332,70 +4331,57 @@
   // accept. Anyone may be offered it — open or held by someone else (they
   // keep it until the other person accepts). No 75 % wait: an offer always
   // needs the technician's yes.
+  // 1.12.5 — service left the queue: the Service desk (or a lead) assigns a
+  // ticket and it is the technician's at once (rpc service_assign). Nobody
+  // claims and nothing is offered. Moving it from someone needs a reason.
   async function offerDialog(jobIdArg) {
     var jobId = jobIdArg;                          // bound once
     var d = D();
     var job = jobById(jobId);
     if (!d || !job) return;
-    if (!isLead()) { toast('Only a lead can offer work to a technician.', 'warning'); return; }
+    if (!canAssign()) { toast('You need a Service role to assign tickets.', 'warning'); return; }
     if (job.stage === 'closed') { toast('This ticket is closed.', 'info'); return; }
     if (responding[jobId]) return;
-    if (typeof d.workOffer !== 'function') { toast('The data layer did not load. Restart the app.', 'error'); return; }
-    var cur = liveOffer(job);
-    // WQ-C8: compare-and-set against the assignee this dialog showed, so an
-    // offer never lands on a ticket somebody claimed while it was open.
-    var expected = job.assignee_email || null;
-    var cost = jobCost(job);
+    if (typeof d.assignJob !== 'function') { toast('The data layer did not load. Restart the app.', 'error'); return; }
+    var expected = job.assignee_email || null;     // compare-and-set: the assignee this dialog showed
+    var moving = !!expected;
     var list = techList().slice().sort(function (a, b) { return String(a.name || '').localeCompare(String(b.name || '')); });
     var pre = '';
-    if (job.suggested_tech_email) {
+    if (job.suggested_tech_email && lower(job.suggested_tech_email) !== lower(expected)) {
       var sug = list.find(function (t) { return lower(t.email) === lower(job.suggested_tech_email); });
-      if (sug && !techWhy(sug) && lower(sug.email) !== lower(expected) && !(cur && lower(cur.email) === lower(sug.email))) pre = sug.email;
+      if (sug) pre = sug.email;
     }
     var opts = '<option value="">— Choose a technician —</option>' + list.map(function (t) {
-      var why = techWhy(t);
-      var off = !!why || lower(t.email) === lower(expected);
+      var off = lower(t.email) === lower(expected);
       return '<option value="' + esc(t.email) + '"' + (off ? ' disabled' : '') + (t.email === pre ? ' selected' : '') + '>' +
-        esc(offerOptLabel(t, job, cost) + (why ? ' — ' + why : '')) + '</option>';
+        esc(techOptLabel(t, job)) + '</option>';
     }).join('');
-    var until = fmtTime(new Date(srvNow() + 30 * MIN).toISOString());
     var html = jobSummaryHtml(job) +
-      (job.assignee_email ? '<p class="sv-hint">Now with ' + esc(job.assignee || staffName(job.assignee_email)) +
-        '. They keep it until the person you choose accepts; both names go in the history.</p>' : '') +
-      (cur ? '<div class="ops-banner ops-banner-warn sv2-banner">' + esc(offerUntilText(cur)) + ' Offering it to someone else withdraws that offer first.</div>' : '') +
-      (list.length ? '' : '<div class="ops-banner ops-banner-warn sv2-banner">Nobody is in the service pool yet. Add technicians to it in Settings → People.</div>') +
+      (moving ? '<p class="sv-hint">Now with ' + esc(job.assignee || staffName(job.assignee_email)) + '. Both names go in the history.</p>' : '') +
+      (list.length ? '' : '<div class="ops-banner ops-banner-warn sv2-banner">Nobody can take service tickets yet. Give technicians the Service Tech role in Settings → People.</div>') +
       '<label class="sv-field sv-span2"><span>Technician</span><select id="svd-tech" class="settings-select">' + opts + '</select></label>' +
-      '<p class="sv-hint">They have until about ' + esc(until) + ' to accept. If they decline or don’t answer, the leads are told and it goes back to the queue.</p>' +
-      field('Why this person?', 'svd-reason', '', { textarea: true, wide: true, rows: 2, placeholder: 'e.g. Closest to the site, free this afternoon' });
+      '<p class="sv-hint">The person you choose has it at once; it shows in their work straight away.</p>' +
+      field('Note (optional)', 'svd-reason', '', { textarea: true, wide: true, rows: 2,
+        placeholder: moving ? 'Why it moves — both of them can see this.' : 'e.g. Closest to the site, free this afternoon' });
     var node = dlgNode('offer', html);
     await openDialog({
-      title: 'Offer ' + (job.public_code || 'this ticket'), body: node, okText: cur ? 'Withdraw and offer' : 'Offer',
+      title: (moving ? 'Move ' : 'Assign ') + (job.public_code || 'this ticket'), body: node, okText: moving ? 'Move' : 'Assign',
       onOk: async function (root) {
         var s = scopeOf(root, node, 'offer');
         var email = nval(s, '#svd-tech');
         if (!email) return 'Pick a technician.';
         if (lower(email) === lower(expected)) return 'They already have it.';
-        if (cur && lower(email) === lower(cur.email)) return 'It is already offered to them.';
         var reason = nval(s, '#svd-reason');
-        if (!reason) return 'Say why you’re offering it to them — it goes in the history.';
         if (reason.length > 300) return 'Keep the reason under 300 characters.';
         var res = null;
         markResponding(jobId, true);
-        try {
-          if (cur) {
-            var w = await d.workOffer('service', jobId, null, null, expected);
-            if (w && w.ok === false) res = w;
-          }
-          if (!res) res = await d.workOffer('service', jobId, email, reason, expected);
-        } catch (e) { demoToast(e); return errMsg(e); }
+        try { res = await d.assignJob(jobId, email, reason || (moving ? 'Moved in the service ticket' : ''), expected); }
+        catch (e) { demoToast(e); return errMsg(e); }
         finally { markResponding(jobId, false); }
         var code = job.public_code || 'The ticket';
         if (res && res.ok === false) toast(answerText(code, res), 'warning');
         else if (res && res.unchanged) toast('They already have ' + code + '.', 'info');
-        else {
-          var exp = res && res.item && res.item.offer && res.item.offer.expires_at;
-          toast(code + ' offered to ' + staffName(email) + (exp ? ' until ' + fmtTime(exp) : '') + '.', 'success');
-        }
+        else toast(code + ' is with ' + staffName(email) + ' now.', 'success');
         afterQueueWrite(jobId);
         return true;
       }
@@ -4438,15 +4424,15 @@
     if (typeof d.workRelease !== 'function') { toast('The data layer did not load. Restart the app.', 'error'); return; }
     var booked = job.stage === 'scheduled' || job.stage === 'session_booked';
     var word = typeOf(job) === 'remote' ? 'session' : 'visit';
-    var html = '<p>' + (isMine(job) ? 'It goes back to the queue for someone else to take.'
-                                    : 'Takes it off ' + esc(job.assignee || staffName(job.assignee_email)) + ' and puts it back in the queue.') + '</p>' +
+    var html = '<p>' + (isMine(job) ? 'It goes back to the Service desk to give to someone else.'
+                                    : 'Takes it off ' + esc(job.assignee || staffName(job.assignee_email)) + ' and sends it back to the Service desk.') + '</p>' +
       (booked ? '<div class="ops-banner ops-banner-warn sv2-banner">The booked ' + word + (ms(job.visit_start) != null ? ' (' + esc(whenShort(job.visit_start)) + ')' : '') +
                 ' is cancelled and the customer’s page goes back to “We have your request”. Tell the customer.</div>' : '') +
       (onRoad ? '<div class="ops-banner ops-banner-warn sv2-banner">They are on the way or on site right now.</div>' : '') +
       field('Why are you handing it back?', 'svd-reason', '', { textarea: true, wide: true, rows: 3, placeholder: 'e.g. Needs a part I cannot get today' });
     var node = dlgNode('release', html);
     await openDialog({
-      title: 'Hand back ' + (job.public_code || 'this ticket'), body: node, okText: 'Put it back in the queue', danger: booked || onRoad,
+      title: 'Hand back ' + (job.public_code || 'this ticket'), body: node, okText: 'Hand back', danger: booked || onRoad,
       onOk: async function (root) {
         var s = scopeOf(root, node, 'release');
         var reason = nval(s, '#svd-reason');
@@ -4456,7 +4442,7 @@
         try { res = await d.workRelease('service', jobId, reason); }
         catch (e) { demoToast(e); return errMsg(e); }
         if (res && res.ok === false) toast(answerText(job.public_code || 'The ticket', res), 'warning');
-        else toast((job.public_code || 'The ticket') + ' is back in the queue.', 'success');
+        else toast((job.public_code || 'The ticket') + ' is back with the Service desk.', 'success');
         scheduleRender();
         if (openJobId === jobId) { paintJobHeader(); refreshMoveIfIdle(jobId); }
         return true;
