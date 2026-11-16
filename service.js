@@ -1956,6 +1956,19 @@
       b += '<button type="button" class="secondary-btn sv2-small" data-act="wa" aria-haspopup="menu" aria-expanded="' + (waMenuOpen ? 'true' : 'false') + '">Message ▾</button>';
     }
     if (job.public_code) b += '<button type="button" class="secondary-btn sv2-small" data-act="copy">Copy tracking link</button>';
+    // 1.12.7 — Convert to RMA: the ticket-level way into “Send for RMA…”, and
+    // the ticket's RMA cases, each one click from the RMA screen.
+    if (!closed && isDeskPlus()) b += '<button type="button" class="secondary-btn sv2-small" data-act="rma">Convert to RMA…</button>';
+    var rmaUnits = unitsOfJob(job.id);
+    if (rmaUnits.length) {
+      var canRma = canOpenRma();
+      who += ' ' + rmaUnits.map(function (u) {
+        var txt = u.public_code + ' · ' + (u.stage === 'closed' ? 'Closed' : rmaLabel(u.stage));
+        return canRma
+          ? '<button type="button" class="sv2-unit-pill b-' + rmaBall(u) + '" data-act="open-rma" data-unit="' + esc(u.id) + '" title="Open in RMA">' + esc(txt) + ' ↗</button>'
+          : '<span class="sv2-unit-pill b-' + rmaBall(u) + '">' + esc(txt) + '</span>';
+      }).join(' ');
+    }
     host.innerHTML = '<div class="sv2-act-who">' + who + '</div><div class="sv2-act-btns">' + b + '</div>' + (waMenuOpen ? waMenuHtml(job) : '');
     if (chip) ensureTick();
   }
@@ -1988,6 +2001,8 @@
     else if (act === 'wa') { waMenuOpen = !waMenuOpen; paintActions(); }
     else if (act === 'wa-pick') { waMenuOpen = false; paintActions(); sendTemplate(b.getAttribute('data-tpl')); }
     else if (act === 'copy') copyLink();
+    else if (act === 'rma') convertToRma(openJobId);
+    else if (act === 'open-rma') openRmaUnit(b.getAttribute('data-unit'));
   }
 
   function tabsFor(job) {
@@ -3207,6 +3222,31 @@
     var def = (C && C.DEFAULT_HANDLING_FEE) || 300;
     var m = (C && C.HANDLING_FEE_BY_KIND) || {};
     return m[kind] != null ? m[kind] : def;
+  }
+  // 1.12.7 — Convert to RMA from the ticket header. One item goes straight to
+  // the RMA form; with several, pick which (the main item is preselected).
+  async function convertToRma(jobIdArg) {
+    var jobId = jobIdArg;                          // bound once
+    var job = jobById(jobId);
+    if (!job) return;
+    if (job.stage === 'closed') { toast('This ticket is closed.', 'info'); return; }
+    var items = itemsOf(jobId);
+    if (!items.length) { toast('Add the item on the Items tab first, then convert it to an RMA.', 'info'); return; }
+    var pick = items.length === 1 ? items[0].id : '';
+    if (!pick) {
+      var primary = items.find(function (x) { return x.is_primary; }) || items[0];
+      var opts = items.map(function (it) {
+        return { value: it.id, label: (it.label || kindLabel(it.kind)) + (it.serial ? ' · ' + it.serial : '') + (it.is_primary ? ' (main item)' : '') };
+      });
+      var node = dlgNode('rmapick', '<p class="sv-hint">Which item goes for RMA? The ticket stays open and can wait for it.</p>' +
+        '<div class="sv-grid">' + selectField('Item', 'svd-item', opts, primary.id, { wide: true }) + '</div>');
+      await openDialog({
+        title: 'Convert ' + (job.public_code || 'this ticket') + ' to RMA', body: node, okText: 'Next',
+        onOk: function (root) { pick = nval(scopeOf(root, node, 'rmapick'), '#svd-item'); return pick ? true : 'Choose the item.'; }
+      });
+      if (!pick || openJobId !== jobId) return;
+    }
+    sendRmaDialog(pick);
   }
   async function sendRmaDialog(itemId) {
     var jobId = openJobId;                         // bound once

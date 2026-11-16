@@ -517,3 +517,7 @@ body.dark-mode .sv2-chip.on { color: #ff6b9a; background: rgba(var(--primary-pin
   .sv2-job-actions { flex-direction: column; align-items: flex-start; }
   .sv2-wa-menu { left: 10px; right: auto; }
 }
+
+/* 1.12.7 — a ticket header RMA pill is a button that opens the case in RMA. */
+button.sv2-unit-pill { border: 0; font-family: inherit; cursor: pointer; }
+button.sv2-unit-pill:hover { text-decoration: underline; }
