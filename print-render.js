@@ -131,13 +131,65 @@
     return items;
   }
 
+  // ─── Serial numbers for the spec table ────────────────────────────────
+  // A part's serial can sit in three places on a ticket:
+  //   1. specs.__verify.components[key] — the technician's build-time scan in
+  //      Component Verification: all eight parts, plus extra RAM sticks
+  //      (extraScans);
+  //   2. ticket.serials — the flat map. Up to 1.12.4 it only ever held five
+  //      parts (motherboard, ram, gpu, ssd, cabinet);
+  //   3. specs.__procurement.components[key].serial — the goods-in capture.
+  // The report used to read only (2), and had no serial cell at all for the
+  // CPU, cooler or PSU, so those serials never printed however they were
+  // entered. Now every row reads (1) and (2) together, and falls back to (3)
+  // when neither holds anything for that part.
+  var SERIAL_ROWS = [
+    { row: 'cpu',     verify: 'cpu',         flat: ['cpu'] },
+    { row: 'gpu',     verify: 'gpu',         flat: ['gpu'] },
+    { row: 'ram',     verify: 'ram',         flat: ['ram'] },
+    { row: 'ssd',     verify: 'storage',     flat: ['ssd', 'storage'] },
+    { row: 'mobo',    verify: 'motherboard', flat: ['mobo', 'motherboard'] },
+    { row: 'cooler',  verify: 'cooler',      flat: ['cooler'] },
+    { row: 'psu',     verify: 'psu',         flat: ['psu'] },
+    { row: 'cabinet', verify: 'case',        flat: ['cabinet', 'case'] }
+  ];
+
+  // { cpu: ['ABC'], ram: ['S1', 'S2'], ... } — every row present, [] when none.
+  function reportSerials(ticket) {
+    var specs = (ticket && ticket.specs) || {};
+    var flat = (ticket && ticket.serials) || {};
+    var comps = (specs.__verify && specs.__verify.components) || {};
+    var proc = (specs.__procurement && specs.__procurement.components) || {};
+    var out = {};
+    SERIAL_ROWS.forEach(function (r) {
+      var list = [], seen = {};
+      function add(v) {
+        var s = String(v == null ? '' : v).trim();
+        // Same serial, different punctuation or case, is still one serial.
+        var k = s.toUpperCase().replace(/[^A-Z0-9]/g, '');
+        if (!k || seen[k]) return;
+        seen[k] = true;
+        list.push(s);
+      }
+      var c = comps[r.verify] || {};
+      add(c.scan);
+      if (Array.isArray(c.extraScans)) c.extraScans.forEach(add);
+      // The flat map stores several RAM sticks as one comma-joined string.
+      r.flat.forEach(function (key) {
+        String(flat[key] == null ? '' : flat[key]).split(',').forEach(add);
+      });
+      if (!list.length) add((proc[r.verify] || {}).serial);
+      out[r.row] = list;
+    });
+    return out;
+  }
+
   // ─── Main populate ────────────────────────────────────────────────────
 
   function populate(ticket, settings, ppiRow) {
     settings = settings || {};
     var d = ticket.diagnostics || {};
     var specs = ticket.specs || {};
-    var serials = ticket.serials || {};
 
     var checklist = populateChecklist(ticket);
 
@@ -232,11 +284,10 @@
     setText('print-spec-psu', cleanName(specs.psu) || '--');
     setText('print-spec-case', cleanName(specs.case || specs.cabinet) || '--');
 
-    setText('print-serial-gpu', serials.gpu || '—');
-    setText('print-serial-ram', serials.ram || '—');
-    setText('print-serial-ssd', serials.ssd || '—');
-    setText('print-serial-mobo', serials.mobo || serials.motherboard || '—');
-    setText('print-serial-cabinet', serials.cabinet || '—');
+    var partSerials = reportSerials(ticket);
+    SERIAL_ROWS.forEach(function (r) {
+      setText('print-serial-' + r.row, partSerials[r.row].join(', ') || '—');
+    });
 
     // Prefer the ticket's multi-part awaiting list (v1.4.4+). Fall back to
     // legacy top-level string fields. Format cleanly for the customer copy.
@@ -874,7 +925,7 @@
     setText('print-footer-contact', settings.shopContact || 'Neo Tokyo Kochi QA Lab');
   }
 
-  var api = { populate: populate, buildSparkline: buildSparkline };
+  var api = { populate: populate, buildSparkline: buildSparkline, reportSerials: reportSerials };
   // ALWAYS set the browser global when a window exists (Electron UMD gotcha
   // — see shared/matcher.js). The either/or version of this block is exactly
   // why installed v1.3.0 printed an all-dashes skeleton report: `module` is
