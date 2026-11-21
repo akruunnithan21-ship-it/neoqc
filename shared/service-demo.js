@@ -154,6 +154,7 @@
 
     var jobs = [], items = [], units = [], intakes = [], events = [], rmaEvents = [], customers = [];
     var shipments = [], shipmentItems = [];
+    var quotes = [];
     var J = {}, U = {}, I = {}, CU = {};
 
     // ── vendors ─────────────────────────────────────────────────────────────
@@ -212,6 +213,10 @@
         // password itself never reaches the demo (or any cache); in demo mode
         // NeoQcData.getDevicePassword answers a placeholder.
         has_device_password: false,
+        // sql/service-v2.6.sql (1.13): the typed name of an 'Other' category.
+        category_other: null,
+        // sql/service-v2.9.sql (1.13): the handover's bill and who collected it.
+        bill_total: null, collected_by_name: null, collected_by_phone: null,
         // sql/work-queue.sql (v2.2): the live offer (30 minutes to accept), who
         // declined or ignored one in this queue cycle, and the last auto-offer try.
         offered_to_email: null, offered_to_name: null, offer_kind: null, offer_by_email: null, offer_by_name: null,
@@ -455,7 +460,7 @@
       public_code: 'NT-DEMO2A7K', created_at: ago(22 * H), received_at: ago(22 * H),
       job_kind: 'repair_own', stage: 'diagnosing', stage_since: ago(9 * H),
       category: 'repair', priority: 'high', priority_reason: 'Graphics card artifacts',
-      fault_keys: ['gpu_artifacts', 'random_restart'], est_minutes: 120,
+      fault_keys: ['gpu_artifacts', 'random_restart'], est_minutes: 160,
       reported_fault: 'Lines on the screen in games, and it restarts by itself a few times a day.',
       has_customer_data: true, data_consent: 'customer_backed_up', accessories: ['Power cable'], powers_on: true,
       condition_note: 'Scratches on the top panel.', has_device_password: true
@@ -481,7 +486,7 @@
       public_code: 'NT-DEMO3F9C', created_at: ago(1.6 * D), received_at: ago(1.6 * D),
       stage: 'received', stage_since: ago(1.6 * D),
       category: 'repair', priority: 'high', priority_reason: 'Laptop screen broken or flickering',
-      fault_keys: ['laptop_screen', 'physical_damage'], est_minutes: 60,
+      fault_keys: ['laptop_screen', 'physical_damage'], est_minutes: 80,
       reported_fault: 'Laptop fell off the table. The screen has lines and a crack in the corner.',
       has_customer_data: true, data_consent: 'customer_accepts_risk', accessories: ['Charger', 'Bag'], powers_on: true,
       has_device_password: true,
@@ -503,7 +508,7 @@
       public_code: 'NT-DEMO4H6M', created_at: ago(6 * D), received_at: ago(6 * D),
       stage: 'quoted', stage_since: ago(4.1 * D),
       category: 'repair', priority: 'high', priority_reason: 'No power',
-      fault_keys: ['no_power'], est_minutes: 60,
+      fault_keys: ['no_power'], est_minutes: 80,
       reported_fault: 'PC does not turn on at all. No lights, no fans.',
       diagnosis: 'Board does not power on with a known-good PSU. VRM area is shorted to ground. Needs a new B660 board.',
       has_customer_data: false, data_consent: 'no_important_data', accessories: ['Power cable'], powers_on: false
@@ -519,6 +524,17 @@
       body: 'Quote ₹8,400: MSI PRO B660M-A board ₹7,600 plus ₹800 labour. Sent on WhatsApp.'
     }));
     move('meera', 4.1 * D, 'diagnosing', 'quoted', 'vinayak', 'Quote sent: ₹8,400 for a replacement motherboard, fitted and tested.');
+    // 1.13 (sql/service-v2.8.sql): the same quote, itemised, waiting for her answer.
+    quotes.push({
+      id: 'demo_q_meera1', job_id: 'demo_s_meera', version: 1, status: 'sent',
+      lines: [
+        { n: 1, kind: 'part', text: 'MSI PRO B660M-A motherboard', qty: 1, price: 7600, amount: 7600 },
+        { n: 2, kind: 'labour', text: 'Fitting and testing', qty: 1, price: 800, amount: 800 }
+      ],
+      total: 8400, approved_total: null, gst_included: true, note: 'Board in stock at Prime ABGB, 2 days.',
+      sent_at: ago(4.1 * D), sent_by_email: STAFF.vinayak.email, sent_by_name: STAFF.vinayak.full_name,
+      decided_at: null, decided_by_email: null, decided_by_name: null, decided_via: null, decision_note: null
+    });
     sev('meera', 2 * D, 'note', extend(by('anagha'), { body: 'Called. She will confirm after talking to her husband.' }));
 
     // 4. Sandeep V — ready to collect for 2.4 days.
@@ -527,7 +543,7 @@
       job_kind: 'repair_own', stage: 'ready', stage_since: ago(2.4 * D), ready_at: ago(2.4 * D), outcome: 'repaired',
       promised_at: ago(2.5 * D),
       category: 'maintenance', priority: 'normal', priority_reason: 'Overheating',
-      fault_keys: ['overheating', 'cleaning_maintenance'], est_minutes: 60,
+      fault_keys: ['overheating', 'cleaning_maintenance'], est_minutes: 80,
       reported_fault: 'Gets very hot and loud in games, then the games stutter.',
       work_done: 'Cleaned the dust, replaced the CPU thermal paste and the rear exhaust fan. Load temperature down from 94 °C to 71 °C.',
       data_consent: 'no_important_data', accessories: ['Power cable'], powers_on: true
@@ -556,7 +572,7 @@
       job_kind: 'warranty_rma', stage: 'at_vendor', stage_since: ago(16 * D),
       waiting_party: 'ASUS', next_chase_at: ago(2 * D), promised_at: ahead(3 * D),
       category: 'warranty_claim', priority: 'high', priority_reason: 'No display, Power supply fault',
-      fault_keys: ['no_display', 'psu_fault'], est_minutes: 60,
+      fault_keys: ['no_display', 'psu_fault'], est_minutes: 80,
       reported_fault: 'Burning smell, then no display. The fans still spin.',
       diagnosis: 'Antec PSU failed (burnt smell). RTX 4070 Ti gives no output on a known-good bench. Both raised for RMA.',
       has_customer_data: true, data_consent: 'customer_backed_up', accessories: ['Power cable', 'Wi-Fi antenna'], powers_on: false
@@ -575,7 +591,7 @@
       stage: 'on_site', stage_since: ago(2 * H),
       category: 'networking', priority: 'high',
       priority_reason: 'No internet / LAN not working, Network or router setup, Business site, 4 machines',
-      fault_keys: ['no_internet', 'network_setup'], est_minutes: 90,
+      fault_keys: ['no_internet', 'network_setup'], est_minutes: 120,
       reported_fault: 'Since the power cut on Monday none of the 4 office PCs get internet. The router keeps restarting.',
       window_start: ago(4 * H), window_end: ahead(4 * H), window_note: 'Office hours. Ask for Joseph at reception.',
       visit_start: ago(2 * H + 20 * MIN), visit_end: ahead(40 * MIN), visit_count: 1,
@@ -605,7 +621,7 @@
       public_code: 'NT-DEMOA6W2', created_at: ago(26 * H), service_type: 'on_site', channel: 'whatsapp',
       stage: 'en_route', stage_since: ago(25 * MIN),
       category: 'os_software', priority: 'high', priority_reason: "Won't boot into Windows",
-      fault_keys: ['wont_boot_os'], est_minutes: 60,
+      fault_keys: ['wont_boot_os'], est_minutes: 80,
       reported_fault: 'Reception PC is stuck on "Preparing Automatic Repair". Our billing software is on it.',
       has_customer_data: true, data_consent: 'customer_backed_up',
       window_start: dayAt(0, 14, 0), window_end: dayAt(0, 17, 0), window_note: 'The clinic is closed from 1 to 2 pm for lunch.',
@@ -634,7 +650,7 @@
       stage: 'parts_on_order', stage_since: ago(3 * D),
       waiting_party: 'Rashi Peripherals', next_chase_at: ahead(1 * D), promised_at: ahead(2 * D),
       category: 'repair', priority: 'high', priority_reason: 'No power, Power supply fault',
-      fault_keys: ['no_power', 'psu_fault'], est_minutes: 60,
+      fault_keys: ['no_power', 'psu_fault'], est_minutes: 80,
       reported_fault: 'Home PC is completely dead since the storm.',
       diagnosis: 'PSU dead (no 12 V on the 24-pin). Board and CPU are fine on our tester PSU.',
       visit_count: 1,
@@ -666,7 +682,7 @@
       public_code: 'NT-DEMOD9Y4', created_at: ago(40 * MIN), service_type: 'remote', channel: 'whatsapp',
       stage: 'logged', stage_since: ago(40 * MIN),
       category: 'os_software', priority: 'normal', priority_reason: 'Driver problems',
-      fault_keys: ['windows_activation', 'driver_crash'], est_minutes: 45,
+      fault_keys: ['windows_activation', 'driver_crash'], est_minutes: 60,
       reported_fault: 'Windows says it is not activated after the board was replaced. The touchpad driver also stopped working.',
       suggested_tech_email: STAFF.adhil.email, suggest_reason: 'Served this customer before',
       remote_tool: 'anydesk',
@@ -684,7 +700,7 @@
       service_type: 'in_store', converted_from: 'remote', channel: 'phone',
       stage: 'received', stage_since: ago(5 * H),
       category: 'os_software', priority: 'normal', priority_reason: 'Virus, malware or pop-ups',
-      fault_keys: ['virus_malware', 'slow'], est_minutes: 60,
+      fault_keys: ['virus_malware', 'slow'], est_minutes: 80,
       reported_fault: 'Pop-ups everywhere and the laptop is very slow.',
       diagnosis: 'Malware reinstalls itself from a scheduled task, and the drive shows 1,100 reallocated sectors.',
       has_customer_data: true, data_consent: 'customer_accepts_risk',
@@ -709,7 +725,7 @@
       public_code: 'NT-DEMOF3G7', created_at: ago(3 * H), service_type: 'on_site', channel: 'phone',
       stage: 'logged', stage_since: ago(3 * H),
       category: 'networking', priority: 'normal', priority_reason: 'Network or router setup',
-      fault_keys: ['network_setup'], est_minutes: 90, needed_by: ahead(4 * D),
+      fault_keys: ['network_setup'], est_minutes: 120, needed_by: ahead(4 * D),
       reported_fault: 'New fibre connection. Wants Wi-Fi to reach all three floors before he starts working from home.',
       window_start: dayAt(1, 10, 0), window_end: dayAt(1, 13, 0), window_note: 'Weekend mornings are also fine.',
       site_address: 'Villa 12, Green Meadows, Kakkanad', site_area: 'Kakkanad', site_pincode: '682030',
@@ -724,7 +740,7 @@
       public_code: 'NT-DEMOG4H9', created_at: ago(3.2 * H), received_at: ago(3.2 * H),
       stage: 'received', stage_since: ago(3.2 * H),
       category: 'repair', priority: 'high', priority_reason: 'No power',
-      fault_keys: ['no_power'], est_minutes: 60,
+      fault_keys: ['no_power'], est_minutes: 80,
       reported_fault: 'Desktop does not turn on since yesterday. Brought the monitor too, to test with.',
       data_consent: 'no_important_data', accessories: ['Power cable', 'HDMI / DP cable'], powers_on: false
     }));
@@ -741,7 +757,7 @@
       public_code: 'NT-DEMOH6J2', created_at: ago(1.5 * H), service_type: 'on_site', channel: 'whatsapp',
       stage: 'logged', stage_since: ago(1.5 * H),
       category: 'installation', priority: 'high', priority_reason: 'Wi-Fi or Bluetooth not working, Business site',
-      fault_keys: ['printer_setup', 'wifi_issue'], est_minutes: 45,
+      fault_keys: ['printer_setup', 'wifi_issue'], est_minutes: 60,
       reported_fault: 'Billing printer stopped printing after the Wi-Fi router was changed.',
       suggested_tech_email: STAFF.athul.email, suggest_reason: 'Set up their network last month',
       window_start: dayAt(1, 15, 0), window_end: dayAt(1, 18, 0), window_note: 'Between the lunch and dinner rush.',
@@ -1150,7 +1166,8 @@
       techs: techs,
       customers: customers,
       shipments: shipments,
-      shipment_items: shipmentItems
+      shipment_items: shipmentItems,
+      quotes: quotes
     };
 
     // "Thu, 23 Oct, 2:30 pm" in local time, for event bodies.

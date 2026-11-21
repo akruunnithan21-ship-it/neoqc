@@ -4,14 +4,16 @@
   One scrolling form, not a wizard. Someone is standing at the counter (or on
   the phone, or in a WhatsApp chat) and the desk needs to see the whole ticket
   at once and fill it in whatever order the customer talks. Sections, in order:
-    1 how it came in · 2 where the work is · 3 the customer (phone first)
+    1 how it came in · 2 where the work is · 3 the customer (name, then phone)
     4 items received (in-store) or a device line (on-site / remote)
     5 the fault · 6 data and passwords (in-store) or the visit / session
     details · 7 who should take it
 
   Rules this file lives by:
-    - The phone comes first because it is the one thing that identifies a
-      returning customer. Lookups are debounced and every response is checked
+    - The phone is the one thing that identifies a returning customer. The
+      name sits above it (1.13, owner's request: that is the order people
+      give them in), and a looked-up name never overwrites a typed one.
+      Lookups are debounced and every response is checked
       against the number that is in the box NOW — a slow reply for a number
       that was since corrected must never fill in somebody else's name.
     - A ticket is created exactly once. client_request_id is minted when the
@@ -55,7 +57,7 @@
     CATEGORIES: {
       repair: 'Repair', warranty_claim: 'Warranty claim', upgrade: 'Upgrade', installation: 'Installation',
       data_recovery: 'Data recovery', os_software: 'OS / software', networking: 'Networking',
-      maintenance: 'Maintenance', diagnosis_only: 'Diagnosis only'
+      maintenance: 'Maintenance', diagnosis_only: 'Diagnosis only', other: 'Other'
     },
     PRIORITIES: { low: { label: 'Low', rank: 0 }, normal: { label: 'Normal', rank: 1 }, high: { label: 'High', rank: 2 }, urgent: { label: 'Urgent', rank: 3 } },
     ITEM_KINDS: {
@@ -104,6 +106,20 @@
   var FALLBACK_ACCESSORIES = ['Power cable', 'Charger', 'Bag', 'Box', 'Keyboard', 'Mouse', 'Wi-Fi antenna', 'HDMI / DP cable', 'Drive', 'Manual'];
   var FALLBACK_CONDITIONS = ['No visible damage', 'Scratches', 'Dents', 'Cracked panel', 'Missing screws', 'Broken clip', 'Liquid marks', 'Burn marks', 'Seal broken', 'Dusty'];
   var TRAY_OPTS = { roles: ['condition', 'damage', 'serial_label'], defaultRole: 'condition', minPhotos: 0, label: 'Condition photos' };
+  // 1.13: the fault picker and section 7.
+  var PK_EMPTY = 'Pick the problem \u2014 its category comes with it';
+  var PK_UNITS = [                    // est_minutes is at most 100000 on the server
+    { value: 'm', label: 'Minutes', mins: 1, max: 999 },
+    { value: 'h', label: 'Hours', mins: 60, max: 999 },
+    { value: 'd', label: 'Days', mins: 1440, max: 60 }
+  ];
+  var CUSTOM_MAX = 10;                // added problems per ticket
+  // 1.13 items: these parts can't be saved without a serial or a label photo.
+  var SERIAL_KINDS = ['gpu', 'psu', 'ssd', 'ram', 'motherboard'];
+  var ACC_MAX = 30, ACC_LEN = 80;     // service_items.accessories: 30 entries of 80 characters
+  var PHOTO_ROLES_CONDITION = ['condition', 'damage'];
+  var CATNAME_MAX = 60;               // service_jobs.category_other
+  var REMARKS_MAX = 500;
 
   var F = null;          // the open form; replaced wholesale by every open()
   var formSeq = 0;       // generation counter; async work compares F.token with the one it started under
@@ -219,14 +235,6 @@
     return p && Number(p.tier) >= 3 ? 'lead' : null;
   }
   function isLead() { return serviceRole() === 'lead'; }
-  // "I'll take it myself" is for service-pool members only (v1.11, WQ-A1/C3):
-  // the server drops assign_self for anyone else, so the box is not offered
-  // to them. Being a lead does not put anyone in the pool.
-  function canTakeSelf() {
-    var M = window.NeoQcModules;
-    if (!M || typeof M.pools !== 'function') return false;
-    try { return M.pools().service === true; } catch (e) { return false; }
-  }
   function isDemo() {
     var d = D();
     try { return !!(d && typeof d.isDemo === 'function' && d.isDemo()); } catch (e) { return false; }
@@ -317,6 +325,7 @@
   function fmtMinutes(m) {
     m = Math.round(Number(m) || 0);
     if (m <= 0) return '\u2014';
+    if (m >= 1440 && m % 1440 === 0) { var dd = m / 1440; return dd + (dd === 1 ? ' day' : ' days'); }
     if (m < 60) return m + ' min';
     var hh = Math.floor(m / 60), mm = m % 60;
     return hh + ' h' + (mm ? ' ' + mm + ' min' : '');
@@ -444,7 +453,7 @@
   function chipsHtml(group, options, selected, cfg) {
     cfg = cfg || {};
     var sel = Array.isArray(selected) ? selected : (selected == null ? [] : [selected]);
-    return '<div class="svi-chips" role="group" data-group="' + esc(group) + '"' +
+    return '<div class="svi-chips' + (cfg.cls ? ' ' + esc(cfg.cls) : '') + '" role="group" data-group="' + esc(group) + '"' +
       (cfg.multi ? ' data-multi="1"' : '') + (cfg.optional ? ' data-optional="1"' : '') +
       (cfg.label ? ' aria-label="' + esc(cfg.label) + '"' : '') + '>' +
       options.map(function (o) {
@@ -472,6 +481,77 @@
     g.querySelectorAll('.svi-chip').forEach(function (b) {
       b.setAttribute('aria-pressed', want.indexOf(b.getAttribute('data-value')) !== -1 ? 'true' : 'false');
     });
+    syncDd(scope);
+  }
+
+  // ── tick-box dropdowns (1.13) ──────────────────────────────────────────────
+  // A button that opens a list of tick-boxes. The list IS a chip group (the
+  // same data-chip-group / aria-pressed contract), so reading it, presets and
+  // the condition-remarks link work exactly as they did when it was chips.
+  // Solid colours from svi tokens, so the list reads in light and dark alike.
+  function ddHtml(group, label, options, selected, placeholder, extraHtml) {
+    return '<div class="svi-field svi-dd" data-dd="' + esc(group) + '">' +
+      '<span>' + esc(label) + '</span>' +
+      '<button type="button" class="svi-dd-btn" aria-haspopup="true" aria-expanded="false" aria-label="' + esc(label) + '" data-ph="' + esc(placeholder) + '">' +
+        '<span class="svi-dd-val is-empty">' + esc(placeholder) + '</span>' +
+        '<span class="svi-dd-caret" aria-hidden="true"></span>' +
+      '</button>' +
+      '<div class="svi-dd-pop hidden">' +
+        chipsHtml(group, options, selected, { multi: true, label: label, cls: 'svi-dd-list' }) +
+        (extraHtml || '') +
+        '<div class="svi-dd-foot"><button type="button" class="secondary-btn svi-btn-sm svi-dd-done">Done</button></div>' +
+      '</div>' +
+    '</div>';
+  }
+  // Writes each dropdown's button text from its ticked boxes.
+  function syncDd(scope) {
+    if (!scope || !scope.querySelectorAll) return;
+    var list = Array.prototype.slice.call(scope.querySelectorAll('.svi-dd'));
+    if (scope.classList && scope.classList.contains('svi-dd')) list.push(scope);
+    list.forEach(function (dd) {
+      if (dd.classList.contains('svi-pk')) return;          // syncPicker writes that one
+      var btn = dd.querySelector('.svi-dd-btn'), out = dd.querySelector('.svi-dd-val');
+      if (!btn || !out) return;
+      var picked = [];
+      dd.querySelectorAll('.svi-dd-list .svi-chip[aria-pressed="true"]').forEach(function (b) { picked.push(String(b.textContent || '').trim()); });
+      out.textContent = picked.length ? picked.join(', ') : (btn.getAttribute('data-ph') || '');
+      out.classList.toggle('is-empty', !picked.length);
+    });
+  }
+  function openDd(dd, focusFirst) {
+    if (!dd) return;
+    closeAllDd(dd);
+    var pop = dd.querySelector('.svi-dd-pop'), btn = dd.querySelector('.svi-dd-btn');
+    if (!pop || !btn) return;
+    pop.classList.remove('hidden');
+    dd.classList.add('is-open');
+    btn.setAttribute('aria-expanded', 'true');
+    try { pop.scrollIntoView({ block: 'nearest' }); } catch (e) { /* old engine */ }
+    var search = pop.querySelector('.svi-pk-q');
+    if (search) { search.focus(); return; }
+    if (focusFirst) {
+      var first = pop.querySelector('.svi-chip[aria-pressed="true"]') || pop.querySelector('.svi-chip');
+      if (first) first.focus();
+    }
+  }
+  function closeDd(dd, focusBtn) {
+    if (!dd || !dd.classList.contains('is-open')) return;
+    var pop = dd.querySelector('.svi-dd-pop'), btn = dd.querySelector('.svi-dd-btn');
+    if (pop) pop.classList.add('hidden');
+    dd.classList.remove('is-open');
+    if (btn) {
+      btn.setAttribute('aria-expanded', 'false');
+      if (focusBtn) btn.focus();
+    }
+  }
+  function closeAllDd(except) {
+    var root = rootEl();
+    if (!root) return;
+    root.querySelectorAll('.svi-dd.is-open').forEach(function (dd) { if (dd !== except) closeDd(dd, false); });
+  }
+  function openDdEl() {
+    var root = rootEl();
+    return root ? root.querySelector('.svi-dd.is-open') : null;
   }
 
   // ── icons (inline SVG, no fonts) ───────────────────────────────────────────
@@ -528,10 +608,6 @@
         '<span class="svi-type-sug">Suggested from the fault</span>' +
       '</button>';
     }).join('');
-    var cats = mapOf('CATEGORIES');
-    var catOpts = '<option value="">Auto \u2014 decided by the fault</option>' + Object.keys(cats).map(function (k) {
-      return '<option value="' + esc(k) + '">' + esc(categoryLabel(k)) + '</option>';
-    }).join('');
     var prioOpts = '<option value="">Auto</option>' + PRIO_KEYS.map(function (k) {
       return '<option value="' + k + '">' + esc(prioLabel(k)) + '</option>';
     }).join('');
@@ -542,7 +618,7 @@
       '<div class="modal-header svi-head">' +
         '<div class="svi-head-text">' +
           '<h2 id="svi-title">New service ticket</h2>' +
-          '<div id="svi-sub" class="svi-sub">Phone first \u2014 it tells us if they have been here before.</div>' +
+          '<div id="svi-sub" class="svi-sub">The customer\u2019s name, then their phone \u2014 the phone tells us if they have been here before.</div>' +
         '</div>' +
         '<button type="button" id="svi-close" class="close-btn" aria-label="Close" title="Close">&times;</button>' +
       '</div>' +
@@ -569,8 +645,8 @@
           // 3 — customer
           '<section class="svi-sec" data-sec="customer" id="svi-sec-customer">' + secHead(3, 'Customer') +
             '<div class="svi-grid">' +
-              fieldHtml('Phone', inputHtml('svi-phone', { type: 'tel', inputmode: 'numeric', maxlength: 20, placeholder: 'Mobile, e.g. 98470 12345 (add +971… for abroad)' }), { req: true }) +
               fieldHtml('Name', inputHtml('svi-name', { maxlength: 120, placeholder: 'As the customer gives it' }), { req: true }) +
+              fieldHtml('Phone', inputHtml('svi-phone', { type: 'tel', inputmode: 'numeric', maxlength: 20, placeholder: 'Mobile, e.g. 98470 12345 (add +971… for abroad)' }), { req: true }) +
               fieldHtml('Email', inputHtml('svi-email', { type: 'email', maxlength: 160 }), { opt: 'optional' }) +
               '<label class="svi-check svi-check-tight"><input type="checkbox" id="svi-business"> Business customer</label>' +
             '</div>' +
@@ -591,10 +667,31 @@
             fieldHtml('Device', inputHtml('svi-device', { maxlength: 160, placeholder: 'e.g. Office desktop, HP laptop, Wi-Fi router' }), { opt: 'optional' }) +
           '</section>' +
 
-          // 5 — fault
+          // 5 — fault (1.13): one wide picker. Every category is a column with
+          // its problems and their usual times; "Not in the list?" adds a
+          // problem of any category, or a new category, with its own estimate.
           '<section class="svi-sec" data-sec="fault">' + secHead(5, 'Fault') +
-            '<div id="svi-faults" class="svi-faults"></div>' +
-            fieldHtml('In the customer\u2019s words', '<textarea id="svi-fault-text" rows="3" maxlength="2000" placeholder="What they say is wrong, in their words"></textarea>', { opt: 'needed unless you pick a fault above', wide: true }) +
+            '<div class="svi-field svi-dd svi-pk" data-dd="fault" id="svi-pk">' +
+              '<span>Category and problem <em class="opt">pick one or more \u2014 each shows how long it usually takes</em></span>' +
+              '<button type="button" class="svi-dd-btn svi-pk-btn" id="svi-pk-btn" aria-haspopup="true" aria-expanded="false" aria-label="Category and problem">' +
+                '<span class="svi-dd-val is-empty" id="svi-pk-val">' + esc(PK_EMPTY) + '</span>' +
+                '<span class="svi-dd-caret" aria-hidden="true"></span>' +
+              '</button>' +
+              '<div class="svi-dd-pop svi-pk-pop hidden">' +
+                '<div class="svi-pk-top">' +
+                  '<input type="search" id="svi-pk-q" class="svi-pk-q" maxlength="60" placeholder="Search the problems, e.g. display, wifi, battery" aria-label="Search the problems" autocomplete="off" spellcheck="false">' +
+                '</div>' +
+                '<div id="svi-pk-none" class="svi-pk-none hidden" role="status"></div>' +
+                '<div id="svi-faults" class="svi-pk-cats"></div>' +
+                otherFormHtml() +
+                '<div class="svi-dd-foot svi-pk-foot">' +
+                  '<span id="svi-pk-hidden" class="svi-pk-hidden"></span>' +
+                  '<button type="button" class="secondary-btn svi-btn-sm svi-dd-done">Done</button>' +
+                '</div>' +
+              '</div>' +
+            '</div>' +
+            '<div id="svi-picked" class="svi-picked" aria-live="polite"></div>' +
+            fieldHtml('In the customer\u2019s words', '<textarea id="svi-fault-text" rows="3" maxlength="2000" placeholder="What they say is wrong, in their words"></textarea>', { opt: 'needed unless you pick a problem above', wide: true }) +
             '<div class="svi-err" data-err="fault" role="alert"></div>' +
             '<div id="svi-summary" class="svi-summary" aria-live="polite"></div>' +
             '<div class="svi-grid">' +
@@ -603,7 +700,6 @@
                 fieldHtml('Why this priority?', inputHtml('svi-prio-reason', { maxlength: 200, placeholder: 'e.g. Customer travels tomorrow' }), { cls: 'hidden', id: 'svi-prio-reason-wrap' }) +
               '</div>' +
               '<p id="svi-prio-desk" class="svi-hint svi-span2">The priority is worked out from the fault and the customer. A lead can change it.</p>' +
-              fieldHtml('Category', '<select id="svi-category" class="settings-select">' + catOpts + '</select>') +
               fieldHtml('Customer needs it by', inputHtml('svi-needed-by', { type: 'date', min: today }), { opt: 'optional' }) +
             '</div>' +
             '<div class="svi-err" data-err="needed" role="alert"></div>' +
@@ -662,14 +758,13 @@
             '</div>' +
           '</section>' +
 
-          // 7 — who
-          '<section class="svi-sec" data-sec="who">' + secHead(7, 'Who should take it?') +
+          // 7 — who (1.13): assigned straight away. There is no queue.
+          '<section class="svi-sec" data-sec="who">' + secHead(7, 'Assign a technician') +
             '<div class="svi-grid">' +
-              fieldHtml('Suggest a technician', '<select id="svi-tech" class="settings-select"></select>', { opt: 'optional \u2014 the ticket still goes to the queue' }) +
-              fieldHtml('Why them?', inputHtml('svi-tech-reason', { maxlength: 200, placeholder: 'e.g. Served this customer before' }), { opt: 'optional' }) +
+              fieldHtml('Technician', '<select id="svi-tech" class="settings-select"></select>', { opt: 'optional \u2014 you can assign it from the ticket later' }) +
+              fieldHtml('Remarks', '<textarea id="svi-remarks" rows="2" maxlength="' + REMARKS_MAX + '" placeholder="Anything the technician should know"></textarea>', { opt: 'optional \u2014 staff only' }) +
             '</div>' +
-            '<label class="svi-check hidden" id="svi-self-wrap"><input type="checkbox" id="svi-self"> I\u2019ll take it myself</label>' +
-            '<div id="svi-who-hint" class="svi-note">A technician claims it from the queue.</div>' +
+            '<div id="svi-who-hint" class="svi-note"></div>' +
           '</section>' +
 
         '</fieldset>' +
@@ -703,15 +798,22 @@
     var src = (p.purchase_source === 'neo_tokyo' || p.purchase_source === 'elsewhere' || p.purchase_source === 'unknown') ? p.purchase_source : null;
     var pw = p.powers_on === true ? 'yes' : (p.powers_on === false ? 'no' : null);
     var accs = accessoryLabels();
-    var accSel = Array.isArray(p.accessories) ? p.accessories.filter(function (a) { return accs.indexOf(a) !== -1; }) : [];
-    var accOpts = accs.map(function (a) { return { value: a, label: a }; });
+    var given = Array.isArray(p.accessories) ? p.accessories.map(String).filter(Boolean) : [];
+    // 1.13: anything typed under "Other…" earlier is offered (ticked) too.
+    var accOpts = accs.concat(given.filter(function (a) { return accs.indexOf(a) === -1; })).map(function (a) { return { value: a, label: a }; });
+    var accSel = given;
+    var needSerial = SERIAL_KINDS.indexOf(kind) !== -1;
+    var serialOn = needSerial || !!p.serial;
     var condOpts = conditionLabels().map(function (c) { return { value: c, label: c, cls: isNoDamage(c) ? 'svi-chip-ok' : '' }; });
     var today = todayYmd();
     return '' +
       '<div class="svi-item-head">' +
         '<span class="svi-item-n"></span>' +
+        '<span class="svi-item-sum" aria-hidden="true"></span>' +
+        '<button type="button" class="secondary-btn svi-btn-sm svi-item-tg hidden" data-act="item-toggle" aria-expanded="true">Done</button>' +
         '<button type="button" class="svi-item-x" aria-label="Remove this item" title="Remove this item">&times;</button>' +
       '</div>' +
+      '<div class="svi-item-body">' +
       '<div class="svi-grid">' +
         fieldHtml('What is it?', '<select class="settings-select" data-f="kind">' + kindOptions(kind) + '</select>') +
         fieldHtml('Make / model', inputHtml(null, { f: 'label', maxlength: 160, value: p.label || '', placeholder: 'e.g. ASUS TUF A15, or Gaming PC (white case)' }), { opt: 'optional' }) +
@@ -738,15 +840,35 @@
         fieldHtml('Invoice number', inputHtml(null, { f: 'invoice', maxlength: 60, value: p.invoice_no || '' }), { opt: 'optional' }) +
         fieldHtml('Purchase date', inputHtml(null, { type: 'date', f: 'pdate', max: today, value: ymdOf(p.purchase_date) }), { opt: 'optional' }) +
       '</div>' +
+      // 1.13: the serial behind a tick box. A part (SERIAL_KINDS) has it ticked
+      // and can't untick it: it needs the serial or a photo of the label.
       '<div class="svi-grid">' +
-        fieldHtml('Serial (as printed on the label)', inputHtml(null, { f: 'serial', maxlength: 80, value: p.serial || '' }), { opt: 'optional' }) +
+        '<div class="svi-serial">' +
+          '<label class="svi-check svi-serial-tick"><input type="checkbox" data-f="has_serial"' + (serialOn ? ' checked' : '') + (needSerial ? ' disabled' : '') + '> ' +
+            '<span>Serial number</span> <em class="svi-serial-need' + (needSerial ? '' : ' hidden') + '">needed for this part</em></label>' +
+          '<div class="svi-serial-body' + (serialOn ? '' : ' hidden') + '">' +
+            '<div class="svi-find-row">' +
+              inputHtml(null, { f: 'serial', maxlength: 80, value: p.serial || '', placeholder: 'As printed on the label' }) +
+              '<button type="button" class="secondary-btn svi-btn-sm" data-act="serial-photo">Add label photo</button>' +
+            '</div>' +
+            '<input type="file" class="hidden" data-f="serial-file" accept="image/*" multiple tabindex="-1" aria-hidden="true">' +
+            '<div class="svi-note" data-role="serial-photos"></div>' +
+          '</div>' +
+        '</div>' +
         '<div class="svi-q svi-q-inline"><span class="svi-q-l">Powers on?</span>' + chipsHtml('powers', POWER_OPTS, pw, { optional: true, label: 'Powers on?' }) + '</div>' +
       '</div>' +
       '<div class="svi-sug hidden" data-role="serial-sug" role="status"></div>' +
-      '<div class="svi-q"><span class="svi-q-l">Came with</span>' + chipsHtml('acc', accOpts, accSel, { multi: true, label: 'Came with' }) + '</div>' +
-      '<div class="svi-q"><span class="svi-q-l">Condition</span>' + chipsHtml('cond', condOpts, [], { multi: true, label: 'Condition' }) + '</div>' +
-      fieldHtml('Condition remarks', '<textarea data-f="remarks" rows="2" maxlength="1000" placeholder="Existing scratches, dents, missing screws\u2026">' + esc(p.condition_remarks || '') + '</textarea>', { opt: 'the chips above add to this' }) +
+      '<div class="svi-grid svi-dd-row">' +
+        ddHtml('acc', 'Came with', accOpts, accSel, 'Only the device — tick what came with it',
+          '<div class="svi-dd-other">' +
+            inputHtml(null, { f: 'acc-other', maxlength: ACC_LEN, placeholder: 'Something else, e.g. USB dongle' }) +
+            '<button type="button" class="secondary-btn svi-btn-sm" data-act="acc-add">Add</button>' +
+          '</div>') +
+        ddHtml('cond', 'Condition', condOpts, [], 'Tick what you can see on it') +
+      '</div>' +
+      fieldHtml('Condition remarks', '<textarea data-f="remarks" rows="2" maxlength="1000" placeholder="Existing scratches, dents, missing screws\u2026">' + esc(p.condition_remarks || '') + '</textarea>', { opt: 'what you tick under Condition is added here' }) +
       '<div class="svi-item-tray"></div>' +
+      '</div>' +
       '<div class="svi-err" data-err="item" role="alert"></div>';
   }
 
@@ -772,9 +894,9 @@
     var token = F.token;
     setTimeout(function () {
       if (!F || F.token !== token) return;
-      var el = byId('svi-phone');
-      if (el && !el.value) el.focus();
-      else { var n = byId('svi-name'); if (n) n.focus(); }
+      var n = byId('svi-name');
+      if (n && !n.value) n.focus();
+      else { var el = byId('svi-phone'); if (el) el.focus(); }
     }, 120);
     return true;
   }
@@ -844,6 +966,12 @@
       if (F.noteState === 'failed') {
         return { title: 'Note not saved', msg: 'The \u201cAccepted without photos\u201d note didn\u2019t save. Close anyway?', ok: 'Close anyway', cancel: 'Stay' };
       }
+      if (F.assignState === 'failed') {
+        return { title: 'Not assigned', msg: 'The ticket wasn\u2019t assigned to ' + ((F.assignTo && F.assignTo.name) || 'the technician') + '. Close anyway? Assign it from the ticket.', ok: 'Close anyway', cancel: 'Stay' };
+      }
+      if (F.remarksState === 'failed') {
+        return { title: 'Remarks not saved', msg: 'The remarks didn\u2019t save. If you close now they are gone \u2014 retry first, or add them as a note on the ticket.', ok: 'Close without them', cancel: 'Stay' };
+      }
       return null;
     }
     if (F.dirty) {
@@ -894,6 +1022,12 @@
       inHand: true, inHandTouched: false,
       businessTouched: false,
       faults: [],
+      // 1.13: problems typed under "Not in the list?", the category the desk
+      // chose when the picks span several, and "show all problems".
+      custom: [], customSeq: 0, mainCat: null, pkAll: false,
+      // 1.13: assigned and remarked straight after the create.
+      assignTo: null, assignState: null, assignError: '',
+      remarks: '', remarksState: null, remarksError: '',
       computed: { priority: 'normal', reasons: [], est: null, checklist: [] },
       lookup: { phone: '', seq: 0, timer: null, result: null },
       trays: {}, itemSeq: 0, builds: {}, techFromLookup: null,
@@ -920,7 +1054,7 @@
     if (Array.isArray(p.fault_keys)) {
       F.faults = p.fault_keys.filter(function (k) { return !!faultByKey(k); });
     }
-    if (p.category && mapOf('CATEGORIES')[p.category]) byId('svi-category').value = p.category;
+    if (p.category && mapOf('CATEGORIES')[p.category]) F.mainCat = p.category;
 
     var items = Array.isArray(p.items) ? p.items.slice(0, MAX_ITEMS) : [];
     if (items.length) {
@@ -935,7 +1069,7 @@
     setType(F.type, false);
     syncInHand();
     renderTechs();
-    syncSelfVisibility();
+    syncWho();
     syncPrioControls();
     renderFaults();
     onFaultsChanged();
@@ -966,7 +1100,8 @@
       build: cardField(card, 'build'),
       invoice: cardField(card, 'invoice'),
       pdate: cardField(card, 'pdate'),
-      serial: cardField(card, 'serial'),
+      serial: serialOn(card) ? cardField(card, 'serial') : '',
+      serialOn: serialOn(card),
       powers: pw === 'yes' ? true : (pw === 'no' ? false : null),
       accessories: readChips(card, 'acc') || [],
       remarks: cardField(card, 'remarks')
@@ -1006,6 +1141,8 @@
     F.trays[key] = tray;
     syncSource(card);
     syncCondChips(card);
+    syncSerial(card);
+    if (byUser) itemCards().forEach(function (c) { if (c !== card && cardHasWork(c)) setCollapsed(c, true); });
     renumber();
     if (byUser) {
       markDirty(card);
@@ -1052,6 +1189,10 @@
       if (n) n.textContent = 'Item ' + (i + 1) + (i === 0 && cards.length > 1 ? ' \u00b7 main item' : '');
       var x = c.querySelector('.svi-item-x');
       if (x) x.classList.toggle('hidden', cards.length < 2);
+      var tg = c.querySelector('.svi-item-tg');
+      if (tg) tg.classList.toggle('hidden', cards.length < 2);
+      if (cards.length < 2) setCollapsed(c, false);
+      else if (c.classList.contains('is-collapsed')) paintItemSum(c);
     });
     var add = byId('svi-add-item');
     if (add) add.disabled = cards.length >= MAX_ITEMS;
@@ -1073,6 +1214,7 @@
     g.querySelectorAll('.svi-chip').forEach(function (b) {
       b.setAttribute('aria-pressed', hasPart(text, b.getAttribute('data-value')) ? 'true' : 'false');
     });
+    syncDd(card);
   }
 
   function toggleCondition(card, label) {
@@ -1087,6 +1229,91 @@
     if (!F || F.created) return;
     var any = Object.keys(F.trays).some(function (k) { return F.trays[k] && F.trays[k].count() > 0; });
     if (any) { F.dirty = true; F.deepDirty = true; F.itemsTouched = true; }
+    itemCards().forEach(function (c) { syncSerial(c); if (c.classList.contains('is-collapsed')) paintItemSum(c); });
+  }
+
+  // ── 1.13 items: serial box, "Other…" accessories, folding ─────────────────
+  function photosOf(card, roles) {
+    var tray = card && F.trays[card.getAttribute('data-item')];
+    if (!tray) return 0;
+    try { return tray.files().filter(function (f) { return !roles || roles.indexOf(f.role) !== -1; }).length; } catch (e) { return 0; }
+  }
+  function serialOn(card) {
+    var box = card.querySelector('[data-f="has_serial"]');
+    return !!(box && box.checked);
+  }
+  // A part's box is ticked and locked; anything else keeps what the desk
+  // chose. The body (serial + label photo) shows while the box is ticked.
+  function syncSerial(card) {
+    var box = card.querySelector('[data-f="has_serial"]');
+    if (!box) return;
+    var need = SERIAL_KINDS.indexOf(cardField(card, 'kind')) !== -1;
+    if (need) box.checked = true;
+    box.disabled = need;
+    var em = card.querySelector('.svi-serial-need');
+    if (em) em.classList.toggle('hidden', !need);
+    var body = card.querySelector('.svi-serial-body');
+    if (body) body.classList.toggle('hidden', !box.checked);
+    var note = card.querySelector('[data-role="serial-photos"]');
+    if (note) {
+      var n = photosOf(card, ['serial_label']);
+      note.textContent = n ? (n === 1 ? '1 label photo added — it is in the photos below.' : n + ' label photos added — they are in the photos below.')
+        : (need ? 'Type the serial, or add a photo of the label if it can’t be read.' : '');
+    }
+  }
+  function addSerialPhotos(card, input) {
+    var tray = card && F.trays[card.getAttribute('data-item')];
+    var files = input && input.files ? Array.prototype.slice.call(input.files) : [];
+    if (!files.length) return;
+    if (!tray) { status('The photo tray isn’t loaded, so the label photo can’t be added here.', 'err'); input.value = ''; return; }
+    tray.addFiles(files, 'serial_label');
+    input.value = '';
+    markDirty(card);
+    clearFieldError(card.querySelector('[data-f="serial"]'));
+    syncSerial(card);
+  }
+  function addAccOther(card) {
+    var input = card && card.querySelector('[data-f="acc-other"]');
+    var g = chipGroup(card, 'acc');
+    if (!input || !g) return;
+    var v = String(input.value || '').trim().replace(/\s+/g, ' ');
+    if (!v) { input.focus(); return; }
+    var have = Array.prototype.map.call(g.querySelectorAll('.svi-chip'), function (b) { return b.getAttribute('data-value'); });
+    var same = have.filter(function (a) { return a.toLowerCase() === v.toLowerCase(); })[0];
+    if (same) {
+      var b0 = g.querySelector('.svi-chip[data-value="' + cssAttr(same) + '"]');
+      if (b0) b0.setAttribute('aria-pressed', 'true');
+    } else {
+      if (have.length >= ACC_MAX) { status('An item can list up to ' + ACC_MAX + ' things it came with.', 'err'); return; }
+      g.appendChild(h('button', { type: 'button', cls: 'svi-chip', 'data-chip-group': 'acc', 'data-value': v, 'aria-pressed': 'true', text: v }));
+    }
+    input.value = '';
+    markDirty(card);
+    syncDd(card);
+    input.focus();
+  }
+  // One line that says what the folded item is.
+  function itemSumText(card) {
+    var d = cardData(card);
+    var src = { neo_tokyo: 'Neo Tokyo', elsewhere: 'Bought elsewhere', unknown: 'Not sure where from' }[d.source] || '';
+    var photos = photosOf(card, null);
+    return [kindLabel(d.kind), d.label, src, d.serial ? 'S/N ' + d.serial : '',
+      d.accessories.length ? 'with ' + d.accessories.join(', ') : '',
+      d.remarks ? (d.remarks.length > 60 ? d.remarks.slice(0, 57) + '…' : d.remarks) : '',
+      photos ? (photos === 1 ? '1 photo' : photos + ' photos') : 'no photos'
+    ].filter(Boolean).join(' · ');
+  }
+  function paintItemSum(card) {
+    var s = card.querySelector('.svi-item-sum');
+    if (s) s.textContent = card.classList.contains('is-collapsed') ? itemSumText(card) : '';
+  }
+  function setCollapsed(card, on) {
+    if (!card) return;
+    if (on) closeAllDd(null);
+    card.classList.toggle('is-collapsed', !!on);
+    var tg = card.querySelector('.svi-item-tg');
+    if (tg) { tg.textContent = on ? 'Edit' : 'Done'; tg.setAttribute('aria-expanded', on ? 'false' : 'true'); }
+    paintItemSum(card);
   }
 
   // ── linking a past build (SPEC-AMENDMENTS A20) ─────────────────────────────
@@ -1457,7 +1684,7 @@
     var sel = byId('svi-tech');
     if (sel && F.techFromLookup && sel.value === F.techFromLookup) sel.value = '';
     F.techFromLookup = null;
-    clearAuto(byId('svi-tech-reason'));
+    syncWho();
     var lk = byId('svi-lookup');
     if (lk) lk.textContent = '';
     onMapsChanged();
@@ -1603,7 +1830,7 @@
       if (j.service_type && j.service_type !== 'in_store') bits.push(typeLabel(j.service_type));
       if (j.device_label) bits.push(String(j.device_label));
       if (j.created_at) bits.push('since ' + fmtDay(j.created_at));
-      bits.push(j.assignee ? 'with ' + String(j.assignee) : 'in the queue');
+      bits.push(j.assignee ? 'with ' + String(j.assignee) : 'no technician yet');
       var openBtn = h('button', { type: 'button', cls: 'secondary-btn svi-btn-sm', 'data-act': 'open-job', text: 'Open' });
       openBtn.setAttribute('data-id', String(j.id || ''));
       openBtn.setAttribute('data-code', code);
@@ -1642,7 +1869,7 @@
           h('span', { text: name + ' served them' + (times > 1 ? ' ' + times + '\u00d7' : '') + (pt.last_at ? ' \u00b7 last ' + fmtDay(pt.last_at) : '') })
         ]);
         if (techs.some(function (t) { return t.email.toLowerCase() === String(pt.email).toLowerCase(); })) {
-          var chip = h('button', { type: 'button', cls: 'svi-chip svi-chip-sm', 'data-act': 'suggest-tech', text: 'Suggest ' + (firstName(name) || name) });
+          var chip = h('button', { type: 'button', cls: 'svi-chip svi-chip-sm', 'data-act': 'suggest-tech', text: 'Assign ' + (firstName(name) || name) });
           chip.setAttribute('data-email', String(pt.email));
           line.appendChild(chip);
         }
@@ -1688,12 +1915,9 @@
     if (!sel.querySelector('option[value="' + cssAttr(email) + '"]')) renderTechs();
     sel.value = email;
     if (sel.value !== email) { toast('That technician isn\u2019t on the list right now.', 'warning'); return; }
-    var self = byId('svi-self');
-    if (self && self.checked) { self.checked = false; syncSelf(); }
-    var reason = byId('svi-tech-reason');
-    autoFill(reason, 'Served this customer before');
     F.techFromLookup = email;
     markDirty(sel);
+    syncWho();
   }
   function cssAttr(v) { return String(v).replace(/["\\]/g, '\\$&'); }
 
@@ -1795,13 +2019,24 @@
     return f.kinds.some(function (k) { return !!kinds[k]; });
   }
 
+  // ── the fault picker (1.13) ──────────────────────────────────────────────
+  // One wide dropdown: every category is a column of its problems, each with
+  // its usual time. Known problems are F.faults (catalogue keys, as before).
+  // "Not in the list?" adds F.custom rows: { id, cat, catName, text, est }
+  // with the desk's own estimate (minutes); cat 'other' is a new category,
+  // named in catName (one per ticket — the ticket stores one category).
+  function pkCatName(c) {
+    if (c === '_other') return 'Other problems';
+    return categoryLabel(c) || c;
+  }
   function renderFaults() {
     if (!F) return;
     var host = byId('svi-faults');
     if (!host) return;
     var list = faults();
     if (!list.length) {
-      host.innerHTML = '<div class="svi-note">The fault list isn\u2019t loaded. Describe the fault in the customer\u2019s words below.</div>';
+      host.innerHTML = '<div class="svi-note">The problem list isn’t loaded. Use “Not in the list?” below, or write the fault in the customer’s words.</div>';
+      syncPicker();
       return;
     }
     var kinds = currentKinds();
@@ -1816,12 +2051,11 @@
         if (Array.isArray(ok)) { applicable = {}; ok.forEach(function (f) { if (f && f.key) applicable[f.key] = true; }); }
       } catch (e) { applicable = null; }
     }
-    // A fault already picked always stays visible, so nothing selected can hide.
-    var shown = list.filter(function (f) {
-      if (!f || !f.key) return false;
-      if (F.faults.indexOf(f.key) !== -1) return true;
-      return applicable ? !!applicable[f.key] : faultApplies(f, kinds);
-    });
+    var fits = function (f) { return applicable ? !!applicable[f.key] : faultApplies(f, kinds); };
+    var all = list.filter(function (f) { return f && f.key; });
+    // A problem already picked always stays visible, so nothing picked can hide.
+    var shown = all.filter(function (f) { return F.pkAll || F.faults.indexOf(f.key) !== -1 || fits(f); });
+    var hiddenN = all.filter(function (f) { return !fits(f) && F.faults.indexOf(f.key) === -1; }).length;
     var cats = mapOf('CATEGORIES');
     var order = Object.keys(cats);
     var groups = {};
@@ -1832,12 +2066,69 @@
     var keys = order.filter(function (k) { return groups[k]; });
     if (groups._other) keys.push('_other');
     host.innerHTML = keys.map(function (c) {
-      var opts = groups[c].map(function (f) {
-        return { value: f.key, label: f.label || f.key, title: f.est_minutes ? 'Usually ' + fmtMinutes(f.est_minutes) : '' };
-      });
-      return '<div class="svi-fgroup"><div class="svi-fgroup-h">' + esc(c === '_other' ? 'Other' : categoryLabel(c)) + '</div>' +
-        chipsHtml('fault', opts, F.faults, { multi: true, label: c === '_other' ? 'Other faults' : categoryLabel(c) }) + '</div>';
+      var name = pkCatName(c);
+      // A long list (Repair) spans the full width, its problems in a grid.
+      return '<div class="svi-pk-col' + (groups[c].length > 9 ? ' is-wide' : '') + '" data-cat="' + esc(c) + '">' +
+        '<div class="svi-pk-col-h">' + esc(name) + '</div>' +
+        '<div class="svi-chips svi-pk-list" role="group" data-group="fault" data-multi="1" aria-label="' + esc(name) + '">' +
+          groups[c].map(function (f) {
+            var on = F.faults.indexOf(f.key) !== -1;
+            return '<button type="button" class="svi-chip svi-pk-opt" data-chip-group="fault" data-value="' + esc(f.key) + '" aria-pressed="' + (on ? 'true' : 'false') + '">' +
+              '<span class="svi-pk-t">' + esc(f.label || f.key) + '</span>' +
+              '<span class="svi-pk-time">' + esc(f.est_minutes ? fmtMinutes(f.est_minutes) : '') + '</span>' +
+            '</button>';
+          }).join('') +
+        '</div>' +
+        (c !== '_other' ? '<button type="button" class="svi-pk-more" data-act="pk-other" data-cat="' + esc(c) + '">+ Something else in ' + esc(name) + '</button>' : '') +
+      '</div>';
     }).join('');
+    var note = byId('svi-pk-hidden');
+    if (note) {
+      note.textContent = '';
+      if (hiddenN && !F.pkAll) {
+        note.appendChild(document.createTextNode((hiddenN === 1 ? '1 problem that doesn’t fit ' : hiddenN + ' problems that don’t fit ') +
+          (F.type === 'remote' ? 'a remote session' : 'this device') + (hiddenN === 1 ? ' is hidden. ' : ' are hidden. ')));
+        note.appendChild(h('button', { type: 'button', cls: 'svi-linkbtn', 'data-act': 'pk-all', text: 'Show all' }));
+      } else if (F.pkAll && hiddenN) {
+        note.appendChild(h('button', { type: 'button', cls: 'svi-linkbtn', 'data-act': 'pk-fit', text: 'Show only the ones that fit' }));
+      }
+    }
+    applyPkSearch();
+    syncPicker();
+  }
+
+  // Filters the columns by the search box: every word must appear in the
+  // problem, its category or its keywords. A column with no match hides.
+  function applyPkSearch() {
+    var host = byId('svi-faults'), qEl = byId('svi-pk-q'), none = byId('svi-pk-none');
+    if (!host) return;
+    var q = qEl ? String(qEl.value || '').trim().toLowerCase() : '';
+    var words = q ? q.split(/\s+/) : [];
+    var anyShown = false;
+    host.querySelectorAll('.svi-pk-col').forEach(function (col) {
+      var catTxt = pkCatName(col.getAttribute('data-cat')).toLowerCase();
+      var any = false;
+      col.querySelectorAll('.svi-pk-opt').forEach(function (b) {
+        var f = faultByKey(b.getAttribute('data-value'));
+        var hay = ((f && f.label) || '') + ' ' + catTxt + ' ' + ((f && Array.isArray(f.keywords)) ? f.keywords.join(' ') : '');
+        hay = hay.toLowerCase();
+        var hit = !words.length || words.every(function (w) { return hay.indexOf(w) !== -1; });
+        b.classList.toggle('hidden', !hit);
+        if (hit) any = true;
+      });
+      var more = col.querySelector('.svi-pk-more');
+      if (more) more.classList.toggle('hidden', !!words.length);
+      col.classList.toggle('hidden', !any);
+      if (any) anyShown = true;
+    });
+    if (none) {
+      none.textContent = '';
+      none.classList.toggle('hidden', !(words.length && !anyShown));
+      if (words.length && !anyShown) {
+        none.appendChild(document.createTextNode('Nothing in the list matches “' + q + '”. '));
+        none.appendChild(h('button', { type: 'button', cls: 'svi-linkbtn', 'data-act': 'pk-use-q', text: 'Add it as a new problem' }));
+      }
+    }
   }
 
   function toggleFault(chip) {
@@ -1852,34 +2143,197 @@
     if (!F) return;
     clearSectionErrors('fault');
     maybeSuggestType();
-    syncCategoryAuto();
+    syncPicker();
     updateSummary();
   }
 
-  function derivedCategory() {
-    var cats = mapOf('CATEGORIES');
-    if (F.preset && F.preset.category && cats[F.preset.category]) return F.preset.category;
-    var best = null, bestRank = -1;
+  // The picked problems, known and typed: known ones first, each list in
+  // the order it was picked.
+  function pickedRows() {
+    var rows = [];
     F.faults.forEach(function (k) {
       var f = faultByKey(k);
-      if (!f || !f.category || !cats[f.category]) return;
-      var r = PRIO_RANK[f.priority] != null ? PRIO_RANK[f.priority] : 1;
-      if (r > bestRank) { best = f.category; bestRank = r; }
+      rows.push({ key: k, cat: (f && f.category) || null, label: (f && f.label) || k, est: (f && Number(f.est_minutes)) || 0,
+        rank: f && PRIO_RANK[f.priority] != null ? PRIO_RANK[f.priority] : 1 });
+    });
+    (F.custom || []).forEach(function (c) {
+      rows.push({ cid: c.id, cat: c.cat, catName: c.catName, label: c.text, est: c.est, rank: 1, custom: true });
+    });
+    return rows;
+  }
+  function rowCatText(r) {
+    if (r.cat === 'other') return r.catName || 'Other';
+    return r.cat ? (categoryLabel(r.cat) || r.cat) : 'Other';
+  }
+  // The button's text and the list of picked problems under it.
+  function syncPicker() {
+    if (!F) return;
+    var rows = pickedRows();
+    var val = byId('svi-pk-val');
+    if (val) {
+      val.textContent = rows.length
+        ? (rows.length === 1 ? '1 problem picked — add another or change it' : rows.length + ' problems picked — add another or change them')
+        : PK_EMPTY;
+      val.classList.toggle('is-empty', !rows.length);
+    }
+    var box = byId('svi-picked');
+    if (!box) return;
+    box.textContent = '';
+    rows.forEach(function (r) {
+      box.appendChild(h('div', { cls: 'svi-pk-row' + (r.custom ? ' is-custom' : '') }, [
+        h('span', { cls: 'svi-pk-cat', text: rowCatText(r) }),
+        h('span', { cls: 'svi-pk-name', text: r.label }),
+        h('span', { cls: 'svi-pk-rtime', text: r.est ? (r.custom ? fmtMinutes(r.est) + ' · your estimate' : 'usually ' + fmtMinutes(r.est)) : '' }),
+        h('button', { type: 'button', cls: 'svi-pk-x', 'data-act': 'pk-remove', 'data-key': r.key || null, 'data-cid': r.cid || null,
+          'aria-label': 'Remove ' + r.label, title: 'Remove', text: '×' })
+      ]));
+    });
+  }
+  function removePicked(el) {
+    var key = el.getAttribute('data-key'), cid = el.getAttribute('data-cid');
+    if (key) {
+      var i = F.faults.indexOf(key);
+      if (i !== -1) F.faults.splice(i, 1);
+      var root = rootEl();
+      var chip = root && root.querySelector('.svi-pk-opt[data-value="' + cssAttr(key) + '"]');
+      if (chip) chip.setAttribute('aria-pressed', 'false');
+    } else if (cid) {
+      F.custom = F.custom.filter(function (c) { return c.id !== cid; });
+    }
+    markDirty(byId('svi-pk'));
+    onFaultsChanged();
+    var btn = byId('svi-pk-btn');
+    if (btn) btn.focus();
+  }
+
+  // ── "Not in the list?" ─────────────────────────────────────────────────────
+  function otherFormHtml() {
+    var cats = mapOf('CATEGORIES');
+    var catOpts = Object.keys(cats).filter(function (k) { return k !== 'other'; }).map(function (k) {
+      return { value: k, label: categoryLabel(k) };
+    });
+    catOpts.push({ value: 'other', label: 'New category…', cls: 'svi-pk-newcat' });
+    return '<div class="svi-pk-of" id="svi-pk-of">' +
+      '<div class="svi-pk-of-h">Not in the list? Add the problem with your own estimate.</div>' +
+      '<div class="svi-q"><span class="svi-q-l">Category</span>' + chipsHtml('pkcat', catOpts, null, { label: 'Category of the new problem' }) + '</div>' +
+      '<label class="svi-field svi-pk-of-name hidden"><span>New category <em>required</em></span>' +
+        inputHtml('svi-pk-catname', { maxlength: CATNAME_MAX, placeholder: 'e.g. Laptop body repair' }) + '</label>' +
+      '<div class="svi-pk-of-row">' +
+        '<label class="svi-field svi-pk-of-text"><span>Problem</span>' + inputHtml('svi-pk-text', { maxlength: 160, placeholder: 'What is wrong, in a few words' }) + '</label>' +
+        '<label class="svi-field svi-pk-of-est"><span>Estimate</span>' + inputHtml('svi-pk-est', { type: 'number', min: 1, max: 999, step: 1, inputmode: 'numeric', placeholder: 'e.g. 2' }) + '</label>' +
+        '<div class="svi-q svi-pk-of-unit"><span class="svi-q-l">In</span>' + chipsHtml('pkunit', PK_UNITS, 'h', { label: 'Estimate in' }) + '</div>' +
+        '<button type="button" class="primary-pink-btn svi-btn-sm svi-pk-add" data-act="pk-add">Add</button>' +
+      '</div>' +
+      '<div class="svi-pk-of-err svi-err" role="alert"></div>' +
+    '</div>';
+  }
+  function syncPkCat() {
+    var form = byId('svi-pk-of');
+    if (!form) return;
+    var isNew = readChips(form, 'pkcat') === 'other';
+    var wrap = form.querySelector('.svi-pk-of-name');
+    if (wrap) wrap.classList.toggle('hidden', !isNew);
+    // One new category per ticket: offer the name already used.
+    var nameEl = byId('svi-pk-catname');
+    var used = (F.custom || []).filter(function (c) { return c.cat === 'other'; })[0];
+    if (isNew && nameEl && used && !nameEl.value) nameEl.value = used.catName;
+  }
+  function startOther(cat, text) {
+    var form = byId('svi-pk-of');
+    if (!form) return;
+    if (cat) setChips(form, 'pkcat', cat);
+    syncPkCat();
+    var t = byId('svi-pk-text');
+    if (t && text != null) t.value = text;
+    var err = form.querySelector('.svi-pk-of-err');
+    if (err) err.textContent = '';
+    try { form.scrollIntoView({ block: 'nearest' }); } catch (e) { /* old engine */ }
+    var needName = readChips(form, 'pkcat') === 'other' && !String((byId('svi-pk-catname') || {}).value || '').trim();
+    var focus = needName ? byId('svi-pk-catname') : (t && t.value ? byId('svi-pk-est') : t);
+    if (focus) focus.focus();
+  }
+  function addCustomProblem() {
+    var form = byId('svi-pk-of');
+    if (!form || !F) return;
+    var err = form.querySelector('.svi-pk-of-err');
+    var v = function (id) { var e = byId(id); return e ? String(e.value || '').trim() : ''; };
+    var cat = readChips(form, 'pkcat');
+    var name = v('svi-pk-catname').replace(/\s+/g, ' ');
+    var text = v('svi-pk-text').replace(/\s+/g, ' ');
+    var raw = v('svi-pk-est');
+    var unit = readChips(form, 'pkunit') || 'h';
+    var u = PK_UNITS.filter(function (x) { return x.value === unit; })[0] || PK_UNITS[1];
+    var n = /^\d+$/.test(raw) ? parseInt(raw, 10) : NaN;
+    var used = F.custom.filter(function (c) { return c.cat === 'other'; })[0];
+    var msg = '', bad = null;
+    if (!cat) { msg = 'Pick its category, or “New category…”.'; bad = form.querySelector('.svi-chips[data-group="pkcat"]'); }
+    else if (cat === 'other' && !name) { msg = 'Type the name of the new category.'; bad = byId('svi-pk-catname'); }
+    else if (cat === 'other' && used && used.catName.toLowerCase() !== name.toLowerCase()) {
+      msg = 'A ticket has one new category at most. This one already has “' + used.catName + '” — use that name, or pick a category from the list.';
+      bad = byId('svi-pk-catname');
+    }
+    else if (!text) { msg = 'Say what the problem is.'; bad = byId('svi-pk-text'); }
+    else if (isNaN(n) || n < 1 || n > u.max) { msg = 'Give the estimate as a whole number of ' + u.label.toLowerCase() + ', from 1 to ' + u.max + '.'; bad = byId('svi-pk-est'); }
+    else if (F.custom.length >= CUSTOM_MAX) { msg = 'That’s ' + CUSTOM_MAX + ' added problems already — write the rest in the customer’s words.'; }
+    else if (F.custom.some(function (c) { return c.text.toLowerCase() === text.toLowerCase(); })) { msg = 'That problem is already added.'; bad = byId('svi-pk-text'); }
+    if (msg) {
+      if (err) err.textContent = msg;
+      if (bad) {
+        bad.classList.add('svi-invalid');
+        if (bad.tagName === 'INPUT') bad.focus();
+      }
+      return;
+    }
+    if (err) err.textContent = '';
+    form.querySelectorAll('.svi-invalid').forEach(function (x) { x.classList.remove('svi-invalid'); });
+    F.custom.push({ id: 'c' + (++F.customSeq), cat: cat, catName: cat === 'other' ? name : '', text: text, est: n * u.mins });
+    var t = byId('svi-pk-text'), e = byId('svi-pk-est');
+    if (t) t.value = '';
+    if (e) e.value = '';
+    markDirty(form);
+    onFaultsChanged();
+    if (t) t.focus();
+  }
+
+  // ── the ticket's category ──────────────────────────────────────────────────
+  // The categories of the picked problems, in the order picked.
+  function pickedCats() {
+    var out = [];
+    pickedRows().forEach(function (r) { if (r.cat && out.indexOf(r.cat) === -1) out.push(r.cat); });
+    return out;
+  }
+  // From the most urgent picked problem (a typed one counts as normal), the
+  // first picked on a tie, unless the desk chose among the picked categories.
+  function derivedCategory() {
+    var cats = mapOf('CATEGORIES');
+    var picked = pickedCats();
+    if (F.mainCat && picked.indexOf(F.mainCat) !== -1) return F.mainCat;
+    if (!picked.length) return (F.preset && F.preset.category && cats[F.preset.category]) ? F.preset.category : null;
+    var best = null, bestRank = -1;
+    pickedRows().forEach(function (r) {
+      if (!r.cat || (r.cat !== 'other' && !cats[r.cat])) return;
+      if (r.rank > bestRank) { best = r.cat; bestRank = r.rank; }
     });
     return best;
   }
-  function syncCategoryAuto() {
-    var sel = byId('svi-category');
-    var opt = sel && sel.querySelector('option[value=""]');
-    if (!opt) return;
-    var d = derivedCategory();
-    opt.textContent = d ? 'Auto \u2014 ' + categoryLabel(d) : 'Auto \u2014 decided by the fault';
-  }
   function currentCategory() {
-    var sel = byId('svi-category');
-    var v = sel ? sel.value : '';
-    return v || derivedCategory() || null;
+    return derivedCategory() || null;
   }
+  // The typed name of this ticket's new category, if it has one.
+  function otherName() {
+    var c = (F.custom || []).filter(function (x) { return x.cat === 'other'; })[0];
+    return c ? c.catName : null;
+  }
+  function categoryOther() {
+    return currentCategory() === 'other' ? otherName() : null;
+  }
+  // The longest of the picked problems' times (known or typed), or null.
+  function estimateMinutes() {
+    var best = 0;
+    pickedRows().forEach(function (r) { if (r.est > best) best = r.est; });
+    return best || null;
+  }
+
 
   function neededByIso() {
     var el = byId('svi-needed-by');
@@ -1930,9 +2384,8 @@
       try { pr = cat.computePriority(keys, priorityCtx()); } catch (e) { pr = null; }
     }
     if (!pr || PRIO_RANK[pr.priority] == null) pr = { priority: 'normal', reasons: (pr && pr.reasons) || [] };
-    var est = null, checklist = [];
+    var est = estimateMinutes(), checklist = [];
     if (keys.length && cat) {
-      try { est = typeof cat.estMinutes === 'function' ? cat.estMinutes(keys) : null; } catch (e) { est = null; }
       try { checklist = typeof cat.mergeChecklists === 'function' ? (cat.mergeChecklists(keys) || []) : []; } catch (e) { checklist = []; }
     }
     F.computed = {
@@ -1954,12 +2407,32 @@
     }
     host.appendChild(prRow);
 
-    if (!keys.length) {
-      host.appendChild(h('div', { cls: 'svi-sum-row svi-sum-muted', text: 'Pick a fault to see the typical time and the checklist.' }));
+    // The ticket's category: from the picks. When they span several
+    // categories the desk can choose which one the ticket files under.
+    var catNow = currentCategory();
+    var pcats = pickedCats();
+    var catRow = h('div', { cls: 'svi-sum-row' }, [
+      h('span', { cls: 'svi-sum-k', text: 'Category' }),
+      h('span', { cls: 'svi-sum-v', text: catNow ? (catNow === 'other' ? (categoryOther() || 'New category') : categoryLabel(catNow)) : 'Repair (nothing picked yet)' })
+    ]);
+    if (pcats.length > 1) {
+      var pick = h('span', { cls: 'svi-pk-mains' }, [h('span', { cls: 'svi-reason', text: 'File it under:' })]);
+      pcats.forEach(function (c) {
+        var on = c === catNow;
+        pick.appendChild(h('button', { type: 'button', cls: 'svi-chip svi-chip-sm', 'data-act': 'pk-main', 'data-cat': c,
+          'aria-pressed': on ? 'true' : 'false', text: c === 'other' ? (otherName() || 'New category') : categoryLabel(c) }));
+      });
+      catRow.appendChild(pick);
+    }
+    host.appendChild(catRow);
+
+    if (!est) {
+      host.appendChild(h('div', { cls: 'svi-sum-row svi-sum-muted', text: 'Pick a problem to see the estimate and the checklist.' }));
     } else {
       var timeRow = h('div', { cls: 'svi-sum-row' }, [
-        h('span', { cls: 'svi-sum-k', text: 'Typical time' }),
-        h('span', { cls: 'svi-sum-v', text: est ? fmtMinutes(est) : '\u2014' })
+        h('span', { cls: 'svi-sum-k', text: 'Estimate' }),
+        h('span', { cls: 'svi-sum-v', text: 'about ' + fmtMinutes(est) }),
+        h('span', { cls: 'svi-reason', text: 'tell the customer when to expect our update' })
       ]);
       if (F.computed.checklist.length) {
         var det = h('details', { cls: 'svi-check-list' }, [
@@ -2002,27 +2475,31 @@
     var cur = sel.value;
     var techs = techList();
     sel.textContent = '';
-    sel.appendChild(h('option', { value: '', text: techs.length ? 'No suggestion' : 'No technician list yet' }));
+    sel.appendChild(h('option', { value: '', text: techs.length ? 'Not assigned yet' : 'No technician list yet' }));
+    var mine = String((me() || {}).email || '').toLowerCase();
     techs.forEach(function (t) {
-      var txt = t.name + ' \u2014 ' + t.open + ' open' +
+      var txt = t.name + (mine && t.email.toLowerCase() === mine ? ' (me)' : '') + ' \u2014 ' + t.open + ' open' +
         (F && F.type === 'on_site' ? ', ' + t.visits + (t.visits === 1 ? ' visit' : ' visits') + ' today' : '');
       sel.appendChild(h('option', { value: t.email, text: txt }));
     });
     if (cur && techs.some(function (t) { return t.email === cur; })) sel.value = cur;
   }
 
-  function syncSelfVisibility() {
-    var wrap = byId('svi-self-wrap');
-    if (wrap) wrap.classList.toggle('hidden', !canTakeSelf());
-    syncSelf();
+  // The technician picked in section 7, or null.
+  function pickedTech() {
+    var sel = byId('svi-tech');
+    var email = sel ? String(sel.value || '') : '';
+    if (!email) return null;
+    var t = techList().filter(function (x) { return x.email === email; })[0];
+    return { email: email, name: t ? t.name : email };
   }
-  function syncSelf() {
-    var self = byId('svi-self');
-    var on = !!(self && self.checked && canTakeSelf());
-    var sel = byId('svi-tech'), reason = byId('svi-tech-reason'), hint = byId('svi-who-hint');
-    if (sel) sel.disabled = on;
-    if (reason) reason.disabled = on;
-    if (hint) hint.textContent = on ? 'It will be assigned to you as soon as it\u2019s created.' : 'A technician claims it from the queue.';
+  function syncWho() {
+    var hint = byId('svi-who-hint');
+    if (!hint) return;
+    var t = pickedTech();
+    hint.textContent = t
+      ? 'It will be assigned to ' + t.name + ' as soon as the ticket is created.'
+      : 'Nobody yet \u2014 it shows under \u201cNo technician\u201d on the board until someone assigns it.';
   }
 
   // ── validation ─────────────────────────────────────────────────────────────
@@ -2087,10 +2564,22 @@
         if ((d.source === 'neo_tokyo' || d.source === 'elsewhere') && d.pdate && d.pdate > today) {
           add('item', 'The purchase date is in the future.', card.querySelector('[data-f="pdate"]'), card);
         }
+        // 1.13: a ticked serial box needs the serial or a photo of the label
+        // (a part's box is always ticked).
+        if (d.serialOn && !d.serial && !photosOf(card, ['serial_label'])) {
+          add('item', SERIAL_KINDS.indexOf(d.kind) !== -1
+            ? 'A ' + kindLabel(d.kind).toLowerCase() + ' needs its serial \u2014 type it, or add a photo of the label.'
+            : 'Type the serial or add a photo of the label \u2014 or untick Serial number.', card.querySelector('[data-f="serial"]'), card);
+        }
+        // 1.13: a device left with us has at least one condition photo.
+        if (F.inHand && F.trays[card.getAttribute('data-item')] && !photosOf(card, PHOTO_ROLES_CONDITION)) {
+          add('item', 'Add at least one condition photo of this item (Condition or Damage).', card.querySelector('.svi-item-tray'), card);
+        }
       });
     }
 
-    if (!F.faults.length && !val('svi-fault-text')) add('fault', 'Pick a fault, or write what the customer says is wrong.', byId('svi-fault-text'));
+    if (!F.faults.length && !F.custom.length && !val('svi-fault-text')) add('fault', 'Pick a problem, or write what the customer says is wrong.', byId('svi-pk-btn'));
+    if (currentCategory() === 'other' && !categoryOther()) add('fault', 'Name the new category under \u201cNot in the list?\u201d.', byId('svi-pk-btn'));
     var nb = val('svi-needed-by');
     if (nb && nb < todayYmd()) add('needed', 'The \u201cneeds it by\u201d date has already passed.', byId('svi-needed-by'));
     if (isLead()) {
@@ -2133,7 +2622,7 @@
     errs.forEach(function (e) {
       var box = e.card ? e.card.querySelector('.svi-err[data-err="item"]') : root.querySelector('.svi-err[data-err="' + e.key + '"]');
       if (box) box.textContent = box.textContent ? box.textContent + ' ' + e.msg : e.msg;
-      if (e.card) e.card.classList.add('has-error');
+      if (e.card) { e.card.classList.add('has-error'); setCollapsed(e.card, false); }
       if (e.el && e.el.classList) { e.el.classList.add('svi-invalid'); e.el.setAttribute('aria-invalid', 'true'); }
     });
     status(errs.length === 1 ? errs[0].msg : 'Fix the ' + errs.length + ' highlighted fields.', 'err');
@@ -2156,14 +2645,17 @@
     var type = F.type;
     var keys = F.faults.slice();
     var words = val('svi-fault-text');
-    var reported = words || faultLabels(keys).join(', ');
+    // 1.13: a problem typed under "Not in the list?" has no catalogue key, so
+    // it is written into the reported fault, one line each, with its estimate.
+    var typed = F.custom.map(function (c) {
+      return c.text + ' (' + (c.cat === 'other' ? c.catName : categoryLabel(c.cat)) + ', estimate ' + fmtMinutes(c.est) + ')';
+    });
+    var reported = [words].concat(typed).filter(Boolean).join('\n') || faultLabels(keys).join(', ');
     // SPEC-GAP: there is no column for "machines on site"; it drives priority,
     // and the technician needs to know it before leaving, so it rides on the
     // reported fault where the visit card shows it.
     if (type === 'on_site' && machinesVal() > 1) reported += (reported ? '\n' : '') + 'Machines on site: ' + machinesVal();
     var pr = currentPriority();
-    var selfOn = canTakeSelf() && !!(byId('svi-self') || {}).checked;
-    var tech = selfOn ? '' : val('svi-tech');
     var consent = type === 'in_store' ? readChips(rootEl(), 'data_consent') : null;
 
     var p = {
@@ -2191,11 +2683,10 @@
       has_customer_data: consent ? consent !== 'no_important_data' : null,
       data_consent: consent || null,
       needed_by: neededByIso(),
-      est_minutes: keys.length ? (F.computed.est || null) : null,
+      est_minutes: estimateMinutes(),
       in_hand: type === 'in_store' ? !!F.inHand : false,
-      assign_self: selfOn,
-      suggested_tech_email: tech || null,
-      suggest_reason: tech ? (val('svi-tech-reason') || null) : null,
+      // 1.13: no suggestion and no self-take here. The technician picked in
+      // section 7 is assigned with service_assign once the ticket exists.
       items: [],
       accessories: [],
       condition_note: null,
@@ -2246,6 +2737,9 @@
       p.site_lat = ll ? ll.lat : null;
       p.site_lng = ll ? ll.lng : null;
     }
+    // Sent only for a new category, so every other ticket's create is
+    // exactly what a server without sql/service-other-category.sql takes.
+    if (p.category === 'other') p.category_other = categoryOther();
     if (type === 'remote') {
       p.remote_tool = readChips(rootEl(), 'remote_tool') || null;
       p.remote_session_ref = val('svi-rm-session') || null;
@@ -2297,19 +2791,18 @@
     if (!d || typeof d.createJob !== 'function') { status('The service data layer isn\u2019t loaded. Restart the app and try again.', 'err'); return false; }
     if (isDemo()) { toast(DEMO_MSG, 'warning'); status('Demo data is on, so the ticket wasn\u2019t created.', 'err'); return false; }
 
+    // 1.13: photos are required (validate), so there is no "accept without
+    // photos" any more; the note machinery stays for its Retry only.
     var withoutPhotos = false;
-    if (F.type === 'in_store' && F.inHand && totalPhotos() === 0) {
-      var ok = await confirmBox('No condition photos. Accept without photos?',
-        { title: 'No condition photos', okText: 'Accept without photos', cancelText: 'Add photos' });
-      if (!F || F.token !== token) return false;
-      if (!ok) { status('Add condition photos to the item, then create the ticket.', ''); return false; }
-      withoutPhotos = true;
-    }
 
     // Recompute now: a lookup reply (repeat visit) or a date may have changed
     // the priority since the summary was last painted.
     updateSummary();
     var payload = buildPayload();
+    // Section 7 (1.13) is applied once the ticket exists: the technician
+    // through service_assign, the remarks as a staff-only note.
+    var assignTo = pickedTech();
+    var remarks = String((byId('svi-remarks') || {}).value || '').trim();
     // Read now, held apart from the payload: it is never sent with the create.
     var pw = readPassword();
     var by = myName();
@@ -2344,6 +2837,11 @@
     F.busy = false;
     F.dirty = false;
     F.submitted = payload;
+    // A replayed create (duplicate) made nothing new: never re-assign it.
+    F.assignTo = res.duplicate ? null : assignTo;
+    F.assignState = F.assignTo ? 'queued' : null;
+    F.remarks = res.duplicate ? '' : remarks;
+    F.remarksState = F.remarks ? 'queued' : null;
     // From here the password lives only in F.pw (memory) until it is saved.
     F.pw = pw || null;
     F.pwState = pw ? 'queued' : null;
@@ -2360,6 +2858,10 @@
     // The password first, before the photos: it is the one thing on this
     // screen that exists nowhere else.
     if (F.pw) await savePassword(token, jobId);
+    if (!F || F.token !== token) return true;
+    if (F.assignTo) await saveAssign(token, jobId);
+    if (!F || F.token !== token) return true;
+    if (F.remarks) await saveRemarks(token, jobId);
     if (!F || F.token !== token) return true;
     if (withoutPhotos) await writeNoPhotoNote(token, jobId, by);
     if (!F || F.token !== token) return true;
@@ -2445,6 +2947,74 @@
     }).filter(function (s) { return !!s.tray; });
   }
 
+  // 1.13: section 7's technician, assigned the moment the ticket exists.
+  // expected = null: the ticket was just made, so nobody has it yet; if
+  // somebody assigned it in between, the server says so and nothing moves.
+  async function saveAssign(token, jobId) {
+    if (!F || F.token !== token || !F.assignTo || F.assignState === 'saving') return;
+    var d = D();
+    if (!d || typeof d.assignJob !== 'function') {
+      F.assignState = 'failed'; F.assignError = 'This version of the app can\u2019t assign from here.'; paintAssign(); return;
+    }
+    F.assignState = 'saving'; F.assignError = ''; paintAssign();
+    try {
+      var r = await d.assignJob(jobId, F.assignTo.email, null, null);
+      if (!F || F.token !== token) return;
+      if (r && r.ok === false) {
+        F.assignState = r.reason === 'changed' && r.by ? 'other' : 'failed';
+        F.assignError = r.reason === 'changed' ? 'It was assigned to ' + (r.by || 'someone else') + ' in the meantime.' : 'The server didn\u2019t assign it.';
+        F.assignOther = r.by || '';
+      } else {
+        F.assignState = 'saved';
+      }
+      paintAssign();
+    } catch (e) {
+      if (!F || F.token !== token) { lateToast(token, 'The new ticket wasn\u2019t assigned: ' + errText(e), 'error'); return; }
+      F.assignState = 'failed'; F.assignError = errText(e); paintAssign();
+    }
+  }
+  async function saveRemarks(token, jobId) {
+    if (!F || F.token !== token || !F.remarks || F.remarksState === 'saving') return;
+    var d = D();
+    if (!d || typeof d.addNote !== 'function') {
+      F.remarksState = 'failed'; F.remarksError = 'The data layer isn\u2019t loaded.'; paintAssign(); return;
+    }
+    F.remarksState = 'saving'; F.remarksError = ''; paintAssign();
+    try {
+      await d.addNote(jobId, 'Remarks at intake: ' + F.remarks, false);
+      if (!F || F.token !== token) return;
+      F.remarksState = 'saved'; paintAssign();
+    } catch (e) {
+      if (!F || F.token !== token) { lateToast(token, 'The remarks on the new ticket didn\u2019t save: ' + errText(e), 'error'); return; }
+      F.remarksState = 'failed'; F.remarksError = errText(e); paintAssign();
+    }
+  }
+  function paintAssign() {
+    var box = byId('svi-done-assign');
+    if (!box || !F) return;
+    box.textContent = '';
+    var who = F.assignTo ? F.assignTo.name : '';
+    var st = F.assignState;
+    if (st === 'queued' || st === 'saving') box.appendChild(h('div', { cls: 'svi-note', text: 'Assigning it to ' + who + '\u2026' }));
+    else if (st === 'saved') box.appendChild(h('div', { cls: 'svi-note ok', text: 'Assigned to ' + who + '.' }));
+    else if (st === 'other') box.appendChild(h('div', { cls: 'svi-note', text: F.assignError }));
+    else if (st === 'failed') {
+      box.appendChild(h('div', { cls: 'svi-warn' }, [
+        h('div', { cls: 'svi-warn-main', text: 'It wasn\u2019t assigned to ' + who + ': ' + (F.assignError || 'unknown error') }),
+        h('button', { type: 'button', cls: 'secondary-btn svi-btn-sm', 'data-act': 'retry-assign', text: 'Retry' })
+      ]));
+    }
+    var rs = F.remarksState;
+    if (rs === 'queued' || rs === 'saving') box.appendChild(h('div', { cls: 'svi-note', text: 'Saving the remarks\u2026' }));
+    else if (rs === 'saved') box.appendChild(h('div', { cls: 'svi-note ok', text: 'Remarks saved on the ticket (staff only).' }));
+    else if (rs === 'failed') {
+      box.appendChild(h('div', { cls: 'svi-warn' }, [
+        h('div', { cls: 'svi-warn-main', text: 'The remarks didn\u2019t save: ' + (F.remarksError || 'unknown error') }),
+        h('button', { type: 'button', cls: 'secondary-btn svi-btn-sm', 'data-act': 'retry-remarks', text: 'Retry' })
+      ]));
+    }
+  }
+
   async function writeNoPhotoNote(token, jobId, by) {
     var d = D();
     if (!F || F.token !== token) return;
@@ -2523,7 +3093,7 @@
     var head = h('div', { cls: 'svi-done-head' }, [
       h('div', { cls: 'svi-done-k', text: res.duplicate ? 'Already created' : 'Ticket created' }),
       h('div', { cls: 'svi-done-code', text: res.public_code || '\u2014' }),
-      h('div', { cls: 'svi-done-sub', text: [typeLabel(p.service_type), res.stage ? stageLabel(res.stage) : '', p.assign_self ? 'assigned to you' : 'in the queue'].filter(Boolean).join(' \u00b7 ') }),
+      h('div', { cls: 'svi-done-sub', text: [typeLabel(p.service_type), res.stage ? stageLabel(res.stage) : '', F.assignTo ? 'for ' + F.assignTo.name : 'no technician yet'].filter(Boolean).join(' \u00b7 ') }),
       h('p', { cls: 'svi-hint', text: 'Give the customer this code. They can track the ticket with it and the last 4 digits of their phone number.' })
     ]);
     box.appendChild(head);
@@ -2539,6 +3109,7 @@
       ]));
     }
     box.appendChild(h('div', { id: 'svi-done-pw' }));
+    box.appendChild(h('div', { id: 'svi-done-assign' }));
     box.appendChild(h('div', { id: 'svi-done-note' }));
     box.appendChild(h('div', { id: 'svi-done-up' }));
     var actions = h('div', { cls: 'svi-done-actions' }, [
@@ -2549,6 +3120,7 @@
     ]);
     box.appendChild(actions);
     paintPassword();
+    paintAssign();
     paintNote();
     paintUploads();
     var body = byId('svi-body');
@@ -2696,7 +3268,8 @@
       customer_name: p.customer_name,
       customer_phone: p.customer_phone,
       device_label: p.items && p.items[0] ? p.items[0].label : null,
-      reported_fault: p.reported_fault
+      reported_fault: p.reported_fault,
+      est_minutes: p.est_minutes || null     // 1.13: the WhatsApp message gives the estimate
     };
     return Object.assign(base, cached || {});
   }
@@ -2780,9 +3353,11 @@
       grp.querySelectorAll('.svi-chip').forEach(function (b) { b.setAttribute('aria-pressed', b === chip ? 'true' : 'false'); });
     }
     clearFieldError(grp);
+    if (grp.closest('.svi-dd')) syncDd(grp.closest('.svi-dd'));
     if (group === 'channel') { setChannel(chip.getAttribute('data-value'), true); return; }
     if (group === 'inhand') { F.inHand = readChips(rootEl(), 'inhand') !== 'no'; F.inHandTouched = true; syncInHand(); return; }
     if (group === 'source' && card) { syncSource(card); updateSummary(); }
+    if (group === 'pkcat') syncPkCat();
   }
 
   function onAct(el) {
@@ -2798,6 +3373,20 @@
       return;
     }
     if (act === 'suggest-tech') { suggestTech(el.getAttribute('data-email')); return; }
+    var itemCard = el.closest('.svi-item');
+    if (itemCard && !F.created) {
+      if (act === 'item-toggle') { setCollapsed(itemCard, !itemCard.classList.contains('is-collapsed')); return; }
+      if (act === 'acc-add') { addAccOther(itemCard); return; }
+      if (act === 'serial-photo') { var fi = itemCard.querySelector('[data-f="serial-file"]'); if (fi) fi.click(); return; }
+    }
+    if (!F.created) {
+      if (act === 'pk-remove') { removePicked(el); return; }
+      if (act === 'pk-other') { startOther(el.getAttribute('data-cat'), null); return; }
+      if (act === 'pk-add') { addCustomProblem(); return; }
+      if (act === 'pk-use-q') { startOther(null, String((byId('svi-pk-q') || {}).value || '').trim()); return; }
+      if (act === 'pk-all' || act === 'pk-fit') { F.pkAll = act === 'pk-all'; renderFaults(); return; }
+      if (act === 'pk-main') { F.mainCat = el.getAttribute('data-cat'); markDirty(el); updateSummary(); return; }
+    }
     var card = el.closest('.svi-item');
     if (card && !F.created) {
       var bst = buildState(card.getAttribute('data-item'));
@@ -2826,13 +3415,19 @@
     if (act === 'retry-pw') { if (F.created) savePassword(F.token, F.created.id); return; }
     if (act === 'show-pw') { togglePwShown(); return; }
     if (act === 'retry-uploads') { if (F.created) runUploads(F.token, F.created.id); return; }
-    if (act === 'retry-note') { if (F.created) writeNoPhotoNote(F.token, F.created.id, F.noteBy || myName()); }
+    if (act === 'retry-note') { if (F.created) writeNoPhotoNote(F.token, F.created.id, F.noteBy || myName()); return; }
+    if (act === 'retry-assign') { if (F.created) saveAssign(F.token, F.created.id); return; }
+    if (act === 'retry-remarks') { if (F.created) saveRemarks(F.token, F.created.id); }
   }
 
   function onClick(e) {
     if (!F) return;
     var t = e.target;
     if (!t || !t.closest) return;
+    var dd = t.closest('.svi-dd');
+    closeAllDd(dd);                                     // a click anywhere else closes an open list
+    if (dd && t.closest('.svi-dd-btn')) { if (dd.classList.contains('is-open')) closeDd(dd, false); else openDd(dd, false); return; }
+    if (dd && t.closest('.svi-dd-done')) { closeDd(dd, true); return; }
     if (t.closest('.svi-tray')) return;                 // the tray handles its own buttons
     if (t.closest('#svi-close') || t.closest('#svi-cancel') || t.closest('#svi-done-close')) { close(); return; }
     if (t.closest('#svi-create')) { submit(false); return; }
@@ -2854,6 +3449,7 @@
     if (!F || F.created) return;
     var t = e.target;
     if (!t || !t.closest || t.closest('.svi-tray')) return;
+    if (t.id === 'svi-pk-q') { applyPkSearch(); return; }
     markDirty(t);
     clearFieldError(t);
     if (t.getAttribute('data-auto') === '1') t.removeAttribute('data-auto');
@@ -2884,14 +3480,11 @@
     clearFieldError(t);
     switch (t.id) {
       case 'svi-business': F.businessTouched = true; t.removeAttribute('data-auto'); updateSummary(); return;
-      case 'svi-self': syncSelf(); return;
-      case 'svi-tech': {
+      case 'svi-tech':
         // Picked by hand now: it is no longer "the one from their history".
         F.techFromLookup = null;
-        var reason = byId('svi-tech-reason');
-        if (reason && reason.getAttribute('data-auto') === '1') clearAuto(reason);
+        syncWho();
         return;
-      }
       case 'svi-prio': syncPrioControls(); updateSummary(); return;
       case 'svi-needed-by': updateSummary(); return;
       case 'svi-site-maps': onMapsChanged(); return;
@@ -2900,7 +3493,9 @@
     if (card) {
       F.itemsTouched = true;
       var f = t.getAttribute('data-f');
-      if (f === 'kind') { renderFaults(); updateSummary(); }
+      if (f === 'kind') { syncSerial(card); renderFaults(); updateSummary(); }
+      if (f === 'has_serial') { syncSerial(card); if (serialOn(card)) { var si = card.querySelector('[data-f="serial"]'); if (si) si.focus(); } }
+      if (f === 'serial-file') addSerialPhotos(card, t);
       if (f === 'pdate') updateSummary();
     }
   }
@@ -2908,7 +3503,40 @@
   // Scanner rule: Enter in an input never submits or closes anything.
   // Textareas keep their newlines; a focused button still activates.
   function onKeydown(e) {
+    // Arrow keys in a tick-box dropdown: Down on the button opens it, then
+    // Up / Down move through the list (Space or Enter ticks, Esc closes).
+    var t = e.target;
+    var dd = t && t.closest ? t.closest('.svi-dd') : null;
+    if (dd && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
+      if (t.classList.contains('svi-dd-btn')) { e.preventDefault(); openDd(dd, true); return; }
+      if (t.id === 'svi-pk-q') {
+        if (e.key === 'ArrowDown') {
+          var firstOpt = Array.prototype.filter.call(dd.querySelectorAll('.svi-pk-opt'), function (b) { return b.offsetParent !== null; })[0];
+          if (firstOpt) { e.preventDefault(); firstOpt.focus(); }
+        }
+        return;
+      }
+      var opts = Array.prototype.filter.call(dd.querySelectorAll('.svi-dd-pop .svi-dd-list .svi-chip, .svi-dd-pop .svi-pk-opt, .svi-dd-pop .svi-dd-done'),
+        function (b) { return b.offsetParent !== null; });
+      var i = opts.indexOf(t);
+      if (i !== -1) {
+        e.preventDefault();
+        var j = i + (e.key === 'ArrowDown' ? 1 : -1);
+        if (j >= 0 && j < opts.length) opts[j].focus();
+        return;
+      }
+    }
     if (e.key !== 'Enter') return;
+    if (t && t.getAttribute && t.getAttribute('data-f') === 'acc-other') {
+      e.preventDefault();
+      addAccOther(t.closest('.svi-item'));
+      return;
+    }
+    if (t && t.closest && t.closest('#svi-pk-of') && (t.tagName || '').toUpperCase() === 'INPUT') {
+      e.preventDefault();
+      addCustomProblem();
+      return;
+    }
     var tag = (e.target && e.target.tagName || '').toUpperCase();
     if (tag === 'TEXTAREA' || tag === 'BUTTON') return;
     e.preventDefault();
@@ -2927,7 +3555,23 @@
     if (!modal || !modal.classList.contains('active')) return;
     if (topOverlay() !== modal) return;
     e.preventDefault();
+    var dd = openDdEl();
+    if (dd) { closeDd(dd, true); return; }      // Esc closes an open list first, not the form
     close();
+  }
+
+  // Tabbing out of an open list, or pressing anywhere outside it, closes it.
+  function onFocusOut(e) {
+    var dd = e.target && e.target.closest ? e.target.closest('.svi-dd.is-open') : null;
+    var next = e.relatedTarget;
+    if (!dd || !next || dd.contains(next)) return;
+    closeDd(dd, false);
+  }
+  function onDocDown(e) {
+    if (!F) return;
+    var t = e.target;
+    if (t && t.closest && t.closest('.svi-dd')) return;
+    closeAllDd(null);
   }
 
   function bindOnce(root) {
@@ -2938,10 +3582,12 @@
       root.addEventListener('change', onChange);
       root.addEventListener('keydown', onKeydown);
       root.addEventListener('focusin', onFocusIn);
+      root.addEventListener('focusout', onFocusOut);
     }
     if (!keysBound) {
       keysBound = true;
       document.addEventListener('keydown', onDocKey);
+      document.addEventListener('mousedown', onDocDown, true);
     }
   }
 

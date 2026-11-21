@@ -406,7 +406,10 @@ var CHECK_MAP = {
   'rma_cases.return_method': S.RETURN_METHODS, 'rma_cases.stage': S.RMA_ORDER, 'rma_cases.disposition': S.RMA_DISPOSITIONS,
   'rma_cases.data_handling': S.DATA_HANDLING,
   'rma_shipments.mode': S.SHIPMENT_MODES,
-  'service_media.role': S.MEDIA_ROLES
+  'service_media.role': S.MEDIA_ROLES,
+  // 1.13 (service-v2.8.sql, service-v2.9.sql)
+  'service_quotes.status': S.QUOTE_STATUSES, 'service_quotes.decided_via': S.QUOTE_VIA,
+  'service_payments.method': S.PAYMENT_METHODS
 };
 
 // v2.1: the shop never backs up data. Three answers are offered, the two
@@ -430,6 +433,11 @@ test('v2.1 data answers: three offered, two legacy, all five valid on both sides
   sameSet(Object.keys(last), Object.keys(first), 'the follow-up _vocab_list has the same lists as v2');
   Object.keys(first).forEach(function (k) {
     if (k === 'data_consent') return;
+    // service-v2.6.sql (1.13) adds 'other' to the categories, and only that.
+    if (k === 'category' && last[k].indexOf('other') !== -1) {
+      assert.deepStrictEqual(last[k], first[k].concat(['other']), "v2.6 changed _vocab_list('category') beyond adding 'other'");
+      return;
+    }
     assert.deepStrictEqual(last[k], first[k], "the follow-up changed _vocab_list('" + k + "') — copy v2's body, change one line");
   });
   sameSet(last.data_consent, Object.keys(S.DATA_CONSENTS), "_vocab_list('data_consent') after the follow-ups");

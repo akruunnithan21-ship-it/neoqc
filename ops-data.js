@@ -553,6 +553,8 @@
     staffList = []; techList = [];
     mediaById = {};
     demoData = null;
+    quotesByJob = {};
+    paymentsByJob = {};
     writeStamp = {};
     pinnedJobs = {}; pinnedUnits = {};
     lastSnapshot = { jobs: 0, units: 0 };
@@ -1116,6 +1118,9 @@
     var jobList = Object.keys(jobsById).map(function (k) { return jobsById[k]; });
     techList = Array.isArray(d.techs) ? d.techs : demoTechs(staffList, jobList, now);
     demoData = { events: asArray(d.events), rma_events: asArray(d.rma_events), media: asArray(d.media), customers: asArray(d.customers) };
+    quotesByJob = {};
+    paymentsByJob = {};
+    asArray(d.quotes).forEach(function (q) { if (q && q.job_id) (quotesByJob[q.job_id] = quotesByJob[q.job_id] || []).push(q); });
     mediaById = {};
     loaded = true;
     errorsByKind = {};
@@ -1679,6 +1684,93 @@
       try { await fetchJobsInto([String(r.data.job_id)], true); } catch (e) { quiet('jobs')(e); }
     }
     return itemById[itemId];
+  }
+
+  // ── quotes (1.13, sql/service-v2.8.sql) ──────────────────────────────────
+  // Read per ticket when its panel needs them (newest first); written only
+  // through the two RPCs, which also move the ticket and return it.
+  var quotesByJob = {};
+  async function quotes(jobId) {
+    requireId(jobId, 'ticket');
+    if (demoFlag) return (quotesByJob[jobId] || []).slice();
+    var c = readable();
+    var r = await timed(c.from('service_quotes').select('*').eq('job_id', jobId)
+      .order('version', { ascending: false }).limit(50), READ_MS);
+    if (r && r.error) throw asError(r.error);
+    quotesByJob[jobId] = (r && r.data) || [];
+    return quotesByJob[jobId].slice();
+  }
+  function cachedQuotes(jobId) { return (quotesByJob[jobId] || []).slice(); }
+  function keepQuote(q) {
+    if (!q || !q.job_id) return;
+    var list = (quotesByJob[q.job_id] || []).filter(function (x) { return x.id !== q.id; });
+    // A new quote replaces one still waiting (the server marks it withdrawn).
+    if (q.status === 'sent') list = list.map(function (x) { return x.status === 'sent' ? Object.assign({}, x, { status: 'withdrawn' }) : x; });
+    list.push(q);
+    list.sort(function (a, b) { return (Number(b.version) || 0) - (Number(a.version) || 0); });
+    quotesByJob[q.job_id] = list;
+  }
+  // lines: [{ kind, text, qty, price }]; prices include GST.
+  async function sendQuote(jobId, from, lines, diagnosis, note, promisedAt) {
+    writable();
+    requireId(jobId, 'ticket');
+    if (!Array.isArray(lines) || !lines.length) throw new Error('NEO_GATE: Add at least one line to the quote.');
+    var res = await rpc('service_quote_send', {
+      p_job_id: jobId, p_from: clean(from), p_lines: lines, p_diagnosis: clean(diagnosis),
+      p_note: clean(note), p_promised_at: promisedAt || null
+    });
+    if (res && res.quote) keepQuote(res.quote);
+    await applyJobResult(jobId, res);
+    emit('quotes');
+    return res;
+  }
+  // approved: the line numbers (n) the customer said yes to; [] declines it.
+  async function decideQuote(jobId, quoteId, approved, via, note) {
+    writable();
+    requireId(jobId, 'ticket');
+    requireId(quoteId, 'quote');
+    var res = await rpc('service_quote_decide', {
+      p_quote_id: quoteId, p_approved: (approved || []).map(Number), p_via: clean(via), p_note: clean(note)
+    });
+    if (res && res.quote) keepQuote(res.quote);
+    await applyJobResult(jobId, res);
+    emit('quotes');
+    return res;
+  }
+
+  // ── handover (1.13, sql/service-v2.9.sql) ─────────────────────────────────
+  var paymentsByJob = {};
+  async function payments(jobId) {
+    requireId(jobId, 'ticket');
+    if (demoFlag) return (paymentsByJob[jobId] || []).slice();
+    var c = readable();
+    var r = await timed(c.from('service_payments').select('*').eq('job_id', jobId)
+      .order('received_at', { ascending: true }).limit(50), READ_MS);
+    if (r && r.error) throw asError(r.error);
+    paymentsByJob[jobId] = (r && r.data) || [];
+    return paymentsByJob[jobId].slice();
+  }
+  function cachedPayments(jobId) { return (paymentsByJob[jobId] || []).slice(); }
+  // o: { outcome, billTotal, payments: [{ amount, method, reference }],
+  //      collectedBy, collectedPhone, workDone, note }. Closes the ticket.
+  async function handover(jobId, from, o) {
+    writable();
+    requireId(jobId, 'ticket');
+    o = o || {};
+    var bill = Number(o.billTotal);
+    if (!isFinite(bill) || bill < 0) throw new Error('NEO_GATE: Give the bill total incl. GST — ₹0 if there is no charge.');
+    var res = await rpc('service_handover', {
+      p_job_id: jobId, p_from: clean(from), p_outcome: clean(o.outcome), p_bill_total: Math.round(bill * 100) / 100,
+      p_payments: (o.payments || []).map(function (p) {
+        return { amount: Math.round(Number(p.amount) * 100) / 100, method: clean(p.method), reference: clean(p.reference) };
+      }),
+      p_collected_by: clean(o.collectedBy), p_collected_phone: clean(o.collectedPhone),
+      p_work_done: clean(o.workDone), p_note: clean(o.note)
+    });
+    if (res && Array.isArray(res.payments)) paymentsByJob[jobId] = res.payments;
+    await applyJobResult(jobId, res);
+    emit('jobs');
+    return res;
   }
 
   async function addNote(jobId, body, visible) {
@@ -3214,6 +3306,13 @@
     addItem: addItem,
     updateItem: updateItem,
     addNote: addNote,
+    quotes: quotes,
+    cachedQuotes: cachedQuotes,
+    sendQuote: sendQuote,
+    decideQuote: decideQuote,
+    payments: payments,
+    cachedPayments: cachedPayments,
+    handover: handover,
     setDevicePassword: setDevicePassword,
     getDevicePassword: getDevicePassword,
     fieldActivity: fieldActivity,

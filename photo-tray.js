@@ -22,7 +22,8 @@
       tray.files()   [{file, role, remark, previewUrl, error}]
       tray.count() / clear() / destroy() / onChange(fn) -> unsubscribe
       tray.retain(failed)  keep exactly these entries (by file), with their errors
-      tray.addFiles(fileList), tray.lock(bool), tray.isShort(), tray.roles()
+      tray.addFiles(fileList, role?), tray.lock(bool), tray.isShort(), tray.roles()
+        (role: one of the tray's roles for the added photos; else the default)
     uploadAll(tray, {jobId?|caseId?, itemId?}, onProgress(done, total, info))
       -> {ok: n, failed: [{file, role, remark, error}]}
     gallery(host, rows, {editable, onRemark, onVisible, onDelete, canDelete,
@@ -472,7 +473,7 @@
       return true;
     }
 
-    function addFiles(list, source) {
+    function addFiles(list, source, asRole) {
       if (T.destroyed) return 0;
       if (isDisabled()) { say('Photos can’t be added right now.', 'err'); return 0; }
       var files = Array.prototype.slice.call(list || []);
@@ -500,8 +501,8 @@
           continue;
         }
         f = withType(f, kind);
-        var role = defaultRole;
-        if (kind === 'pdf') role = PDF_ROLES[defaultRole] ? defaultRole : pdfRoles[0];
+        var role = (asRole && roles.indexOf(asRole) !== -1) ? asRole : defaultRole;
+        if (kind === 'pdf') role = PDF_ROLES[role] ? role : pdfRoles[0];
         var entry = {
           id: 'pe' + (++entrySeq),
           file: f,
@@ -738,7 +739,7 @@
         updateCount();
         emit();
       },
-      addFiles: function (list) { return addFiles(list, 'pick'); },
+      addFiles: function (list, role) { return addFiles(list, 'pick', role); },
       lock: function (on) {
         T.locked = !!on;
         root.classList.toggle('is-locked', T.locked || T.busy);

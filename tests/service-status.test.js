@@ -296,15 +296,39 @@ test('waitingSentence reads naturally for the new stages', function () {
 
 // ═══ 2. Vocabulary ════════════════════════════════════════════════════════
 
+test('1.13: every legal stage of every type is in exactly one step', function () {
+  Object.keys(S.STAGES_BY_TYPE).forEach(function (t) {
+    var legal = S.STAGES_BY_TYPE[t];
+    var covered = [];
+    S.STEPS_BY_TYPE[t].forEach(function (s) { covered = covered.concat(s.stages); });
+    legal.forEach(function (st) {
+      assert.strictEqual(covered.filter(function (x) { return x === st; }).length, 1, t + ': ' + st + ' in one step');
+    });
+    covered.forEach(function (st) { assert.ok(legal.indexOf(st) !== -1, t + ': ' + st + ' is a legal stage'); });
+  });
+  assert.strictEqual(S.stepsFor({ service_type: 'in_store', stage: 'logged' }).current, 0);
+  assert.strictEqual(S.stepsFor({ service_type: 'in_store', stage: 'parts_on_order' }).steps[S.stepsFor({ service_type: 'in_store', stage: 'parts_on_order' }).current].key, 'repair');
+  assert.strictEqual(S.stepsFor({ service_type: 'in_store', stage: 'closed' }).current, 6);
+  assert.strictEqual(S.stepsFor({ service_type: 'remote', stage: 'in_session' }).steps[2].key, 'in_session');
+  assert.strictEqual(S.stepsFor({ stage: 'diagnosing' }).type, 'in_store', 'no type reads as in-store');
+});
+
+test('1.13: quote vocabulary matches sql/service-v2.8.sql', function () {
+  assert.deepStrictEqual(Object.keys(S.QUOTE_STATUSES), ['sent', 'approved', 'partly_approved', 'declined', 'withdrawn']);
+  assert.deepStrictEqual(Object.keys(S.QUOTE_VIA), ['counter', 'phone', 'whatsapp', 'other']);
+  assert.deepStrictEqual(Object.keys(S.QUOTE_LINE_KINDS), ['part', 'labour', 'other']);
+  assert.strictEqual(S.QUOTE_MAX_LINES, 30);
+});
+
 test('vocabulary keys and labels match the spec', function () {
   assert.deepStrictEqual(S.TYPES, {
     in_store: { label: 'In-store', icon: 'store' }, on_site: { label: 'On-site', icon: 'pin' }, remote: { label: 'Remote', icon: 'remote' }
   });
   assert.deepStrictEqual(S.CHANNELS, { walk_in: 'Walk-in', phone: 'Phone', whatsapp: 'WhatsApp', website: 'Website', courier: 'Courier', staff: 'Staff' });
   assert.deepStrictEqual(Object.keys(S.CATEGORIES), ['repair', 'warranty_claim', 'upgrade', 'installation', 'data_recovery',
-    'os_software', 'networking', 'maintenance', 'diagnosis_only']);
+    'os_software', 'networking', 'maintenance', 'diagnosis_only', 'other']);   // 'other': 1.13, server v2.6
   assert.deepStrictEqual(Object.keys(S.CATEGORIES).map(function (k) { return S.CATEGORIES[k]; }),
-    ['Repair', 'Warranty claim', 'Upgrade', 'Installation', 'Data recovery', 'OS / software', 'Networking', 'Maintenance', 'Diagnosis only']);
+    ['Repair', 'Warranty claim', 'Upgrade', 'Installation', 'Data recovery', 'OS / software', 'Networking', 'Maintenance', 'Diagnosis only', 'Other']);
   assert.deepStrictEqual(S.PRIORITIES, { low: { label: 'Low', rank: 0 }, normal: { label: 'Normal', rank: 1 },
     high: { label: 'High', rank: 2 }, urgent: { label: 'Urgent', rank: 3 } });
   assert.deepStrictEqual(Object.keys(S.ITEM_KINDS), ['pc', 'laptop', 'gpu', 'psu', 'ram', 'ssd', 'hdd', 'motherboard', 'cpu',

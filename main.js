@@ -879,11 +879,16 @@ ipcMain.on('win:close', () => {
 });
 
 // IPC Handler: Print as PDF (Save Report to File Dialog)
-ipcMain.handle('sys:print-pdf', async (event, filename) => {
+ipcMain.handle('sys:print-pdf', async (event, arg) => {
   if (!mainWindow) return { success: false };
+  // 1.13: a string is the QC report's file name (as before); an object can
+  // also carry the dialog title (the service delivery receipt).
+  const opts = (arg && typeof arg === 'object') ? arg : { filename: arg };
+  const filename = typeof opts.filename === 'string' ? opts.filename : '';
+  const title = typeof opts.title === 'string' && opts.title ? opts.title.slice(0, 120) : 'Save Quality Control Report as PDF';
   try {
     const result = await dialog.showSaveDialog(mainWindow, {
-      title: 'Save Quality Control Report as PDF',
+      title: title,
       defaultPath: filename || 'QC-Report.pdf',
       filters: [{ name: 'PDF Files', extensions: ['pdf'] }]
     });
