@@ -313,6 +313,26 @@ test('1.13: every legal stage of every type is in exactly one step', function ()
   assert.strictEqual(S.stepsFor({ stage: 'diagnosing' }).type, 'in_store', 'no type reads as in-store');
 });
 
+test('1.14: the board puts every open stage of every type in exactly one column', function () {
+  Object.keys(S.STAGES_BY_TYPE).forEach(function (t) {
+    var rows = S.BOARD_ROWS.filter(function (r) { return r.types.indexOf(t) !== -1; });
+    assert.strictEqual(rows.length, 1, t + ' is on exactly one row');
+    S.STAGES_BY_TYPE[t].forEach(function (st) {
+      var cell = S.boardCellOf({ service_type: t, stage: st });
+      if (st === 'closed') { assert.deepStrictEqual(cell, { row: 'closed', col: null }); return; }
+      assert.ok(cell && cell.row === rows[0].key, t + ': ' + st + ' has a cell');
+      var hits = rows[0].cols.filter(function (c) { return c.stages.indexOf(st) !== -1; }).length;
+      assert.strictEqual(hits, 1, t + ': ' + st + ' is in one column');
+    });
+  });
+  assert.deepStrictEqual(S.boardCellOf({ service_type: 'in_store', stage: 'parts_on_order' }), { row: 'shop', col: 'repair' });
+  assert.deepStrictEqual(S.boardCellOf({ service_type: 'remote', stage: 'in_session' }), { row: 'field', col: 'working' });
+  assert.deepStrictEqual(S.boardCellOf({ stage: 'received' }), { row: 'shop', col: 'received' }, 'no type reads as in-store');
+  // The shop row's columns are the step bar's steps, in order, minus Collected.
+  assert.deepStrictEqual(S.BOARD_ROWS[0].cols.map(function (c) { return c.label; }),
+    S.STEPS_BY_TYPE.in_store.slice(0, -1).map(function (s) { return s.label; }));
+});
+
 test('1.13: quote vocabulary matches sql/service-v2.8.sql', function () {
   assert.deepStrictEqual(Object.keys(S.QUOTE_STATUSES), ['sent', 'approved', 'partly_approved', 'declined', 'withdrawn']);
   assert.deepStrictEqual(Object.keys(S.QUOTE_VIA), ['counter', 'phone', 'whatsapp', 'other']);
