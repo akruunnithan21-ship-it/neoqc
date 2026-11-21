@@ -1968,6 +1968,10 @@
       b += '<button type="button" class="secondary-btn sv2-small" data-act="wa" aria-haspopup="menu" aria-expanded="' + (waMenuOpen ? 'true' : 'false') + '">Message ▾</button>';
     }
     if (job.public_code) b += '<button type="button" class="secondary-btn sv2-small" data-act="copy">Copy tracking link</button>';
+    // 1.14.1 — the customer's own page for this ticket (app.js openCustomerView).
+    if (job.public_code && !contactHidden(job) && window.NeoServiceCustomerView) {
+      b += '<button type="button" class="secondary-btn sv2-small" data-act="customer-view">Customer view</button>';
+    }
     // 1.12.7 — Convert to RMA: the ticket-level way into “Send for RMA…”, and
     // the ticket's RMA cases, each one click from the RMA screen.
     if (!closed && isDeskPlus()) b += '<button type="button" class="secondary-btn sv2-small" data-act="rma">Convert to RMA…</button>';
@@ -2013,6 +2017,10 @@
     else if (act === 'wa') { waMenuOpen = !waMenuOpen; paintActions(); }
     else if (act === 'wa-pick') { waMenuOpen = false; paintActions(); sendTemplate(b.getAttribute('data-tpl')); }
     else if (act === 'copy') copyLink();
+    else if (act === 'customer-view') {
+      var cvJob = jobById(openJobId);
+      if (cvJob && window.NeoServiceCustomerView) window.NeoServiceCustomerView.open(cvJob.public_code, cvJob.customer_phone);
+    }
     else if (act === 'rma') convertToRma(openJobId);
     else if (act === 'open-rma') openRmaUnit(b.getAttribute('data-unit'));
   }
@@ -3083,7 +3091,7 @@
         (bal > 0.004 ? '<tr class="svr-due"><th>Balance due</th><td class="num">' + esc(money(bal)) + '</td></tr>' : '') +
       '</table>' +
       (C && C.REPAIR_WARRANTY_TEXT ? '<p class="svr-warranty"><strong>Repair warranty:</strong> ' + esc(C.REPAIR_WARRANTY_TEXT) + '</p>' : '') +
-      '<p class="svr-track">Your ticket: ' + esc(job.public_code || '') + ' · ' + esc(trackLink(job.public_code || '')) + '</p>' +
+      receiptTrackHtml(job.public_code || '') +
       '<div class="svr-sign"><div><div class="svr-line"></div>Customer signature</div><div><div class="svr-line"></div>For ' + esc(shop.name) + ' · ' + esc(staff) + '</div></div>' +
     '</div>';
   }
@@ -5571,6 +5579,19 @@
     if (C && typeof C.trackLink === 'function') { try { var l = C.trackLink(code); if (l) return String(l); } catch (e) {} }
     return TRACK_BASE + encodeURIComponent(code);
   }
+  // The receipt's "Your ticket" line, with a QR code once service.neotokyo.in
+  // is live (1.14.1). Until then, exactly the line it always printed.
+  function receiptTrackHtml(code) {
+    var line = 'Your ticket: ' + esc(code) + ' · ' + esc(trackLink(code));
+    var C = window.NeoQcCatalog;
+    var qr = (C && typeof C.customerSiteLive === 'function' && C.customerSiteLive() && typeof C.qrSvg === 'function')
+      ? C.qrSvg(trackLink(code)) : '';
+    if (!qr) return '<p class="svr-track">' + line + '</p>';
+    return '<div style="display:flex;align-items:center;gap:12px;margin-top:6px;">' +
+      '<div style="width:24mm;height:24mm;flex:none;">' + qr + '</div>' +
+      '<p class="svr-track" style="margin:0;">' + line + '<br>Scan to follow it online. Open it with the last 4 digits of your phone number.</p></div>';
+  }
+
   async function copyLink() {
     var job = jobById(openJobId);
     if (!job || !job.public_code) return;

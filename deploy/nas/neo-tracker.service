@@ -1,0 +1,28 @@
+[Unit]
+Description=Neo Tokyo customer tracker (service.neotokyo.in, served on 127.0.0.1:8097)
+After=network.target
+
+[Service]
+Type=simple
+User=neo_tokyo
+Group=neo_tokyo
+WorkingDirectory=/home/neo_tokyo/neo-tracker
+Environment=PORT=8097
+Environment=HOST=127.0.0.1
+ExecStart=/usr/local/bin/node /home/neo_tokyo/neo-tracker/server.js
+Restart=always
+RestartSec=3
+
+# It only reads ./site and answers on the loopback address.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target

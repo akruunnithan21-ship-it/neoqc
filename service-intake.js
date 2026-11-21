@@ -48,6 +48,13 @@
   var DEMO_MSG = 'Demo data is read-only. Turn it off in Settings to work on real tickets.';
   var TRACK_URL = 'https://neoqctracker.netlify.app/?view=service&code=';
   var DAY = 86400000;
+  // The address lives in shared/service-catalog.js (one setting that moves to
+  // service.neotokyo.in when that site is up); TRACK_URL is the fallback.
+  function trackLinkFor(code) {
+    var C = window.NeoQcCatalog;
+    if (C && typeof C.trackLink === 'function') { try { return C.trackLink(code); } catch (e) { /* fall back */ } }
+    return TRACK_URL + encodeURIComponent(code);
+  }
 
   // Labels used when shared/service-status.js is older than this file. The
   // shared module is the source of truth; these only keep the form usable.
@@ -3278,7 +3285,7 @@
     var code = String(j.public_code || '');
     var name = firstName(j.customer_name);
     return 'Hello' + (name ? ' ' + name : '') + ', this is Neo Tokyo. We have logged your service request ' + code + '.\n' +
-      'Track it here: ' + TRACK_URL + encodeURIComponent(code) + '\n' +
+      'Track it here: ' + trackLinkFor(code) + '\n' +
       'Use the last 4 digits of this phone number to open it.';
   }
 

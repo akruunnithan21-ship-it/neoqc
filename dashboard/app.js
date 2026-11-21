@@ -2712,7 +2712,18 @@ async function qbCreateTicket() {
     var f = firstName(full);
     return f ? 'Hi ' + f + ',' : 'Hello,';
   }
-  function trackUrl(code) { return TRACK_BASE + encodeURIComponent(code || ''); }
+  // The address lives in shared/service-catalog.js. Served from
+  // service.neotokyo.in itself, the new site is live by definition.
+  function trackUrl(code) {
+    var C = window.NeoQcCatalog;
+    if (C && typeof C.trackLink === 'function') {
+      try {
+        if (location.hostname === 'service.neotokyo.in' && !C.customerSiteLive()) C.setCustomerSiteLive(true);
+        return C.trackLink(code || '');
+      } catch (e) { /* fall back */ }
+    }
+    return TRACK_BASE + encodeURIComponent(code || '');
+  }
 
   // ── errors ───────────────────────────────────────────────────────────────
   // Server errors prefixed NEO_ carry a human sentence after the colon (SPEC

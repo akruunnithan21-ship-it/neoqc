@@ -984,6 +984,12 @@
               <div class="form-group">
                 <label for="form-customer-name">Customer Name *</label>
                 <input type="text" id="form-customer-name" required placeholder="Neo Tokyo Customer">
+                <!-- 1.14.1 — the customer website opens a build with the last 4
+                     digits of this number (tickets.customer_phone). Required for
+                     a new build; an older build can have it added. -->
+                <label for="form-customer-phone" style="margin-top:8px;">Customer Mobile <span id="form-customer-phone-req">*</span></label>
+                <input type="tel" id="form-customer-phone" inputmode="tel" autocomplete="off" maxlength="20" placeholder="98470 12345 (+ code if not Indian)" aria-describedby="form-customer-phone-hint">
+                <span id="form-customer-phone-hint" class="dr-muted" style="font-size:0.72rem;">The customer tracks this build online with the last 4 digits of this number.</span>
               </div>
               <div class="form-group">
                 <label for="form-deadline">Deadline *</label>
@@ -1626,6 +1632,10 @@
         <div class="modal-footer">
           <button type="button" id="btn-print-report" class="secondary-btn text-pink hidden">🖨️ Print QC Report</button>
           <button type="button" id="btn-save-pdf" class="secondary-btn text-pink hidden">💾 Save as PDF</button>
+          <!-- 1.14.1 — the customer's side of this build (service.neotokyo.in). -->
+          <button type="button" id="btn-track-copy" class="secondary-btn hidden" title="Copy the customer's tracking link">🔗 Tracking link</button>
+          <button type="button" id="btn-track-wa" class="secondary-btn hidden" title="Send the tracking link to the customer on WhatsApp">💬 WhatsApp</button>
+          <button type="button" id="btn-customer-view" class="secondary-btn hidden" title="Open the customer's page for this build, phone digits filled in">👁️ Customer view</button>
           <div class="footer-actions">
             <button type="button" id="btn-delete-ticket" class="secondary-btn text-crimson hidden">🗑️ Delete</button>
             <button type="button" id="btn-cancel-ticket" class="secondary-btn">Cancel</button>
@@ -2557,6 +2567,13 @@
       </div>
     </div>
 
+    <!-- 1.14.1 — where the customer follows this PC online. Shown only once
+         service.neotokyo.in is live (print-render.js). -->
+    <div id="print-track" class="print-track hidden">
+      <div id="print-track-qr" class="print-track-qr"></div>
+      <p class="print-track-text"><strong>Track this PC online</strong><br>Scan the code, or open <span id="print-track-link"></span><br>and enter the last 4 digits of your phone number.</p>
+    </div>
+
     <div class="print-page-footline">
       <span>NEO TOKYO — Value Analysis &amp; Report Provenance</span>
       
@@ -2664,6 +2681,7 @@
   <!-- v1.11: tech-assign.js (client-side auto-assign) is gone; the work queue
        is server-side, with its shared rules in shared/work-queue.js. -->
   <script src="shared/service-status.js"></script>
+  <script src="vendor/qrcode-generator/qrcode.js"></script>
   <script src="shared/service-catalog.js"></script>
   <script src="shared/service-demo.js"></script>
   <script src="shared/work-queue.js"></script>

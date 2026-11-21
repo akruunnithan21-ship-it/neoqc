@@ -1976,6 +1976,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   applyThemeChoice(themeChoiceFromSettings(appState.settings));
   setSplashStatus('Preparing workspace…');
   setupEventListeners();
+  startCustomerSiteCheck();
   setupAuthListeners();
   setupFlagsAndBell();
   setupBenchBoard();
@@ -3544,6 +3545,7 @@ function openTicketModal(ticketId = null) {
       document.getElementById('form-ticket-id').value = ticket.id;
       document.getElementById('form-created-at').value = ticket.createdAt;
       document.getElementById('form-customer-name').value = ticket.customerName;
+      setCustomerPhoneField(ticket.customerPhone || '', false);
       document.getElementById('form-deadline').value = formatDateTimeLocal(ticket.deadline);
       document.getElementById('form-deadline').disabled = true;
       document.getElementById('btn-change-deadline').style.display = 'block';
@@ -3718,6 +3720,7 @@ function openTicketModal(ticketId = null) {
       document.getElementById('btn-save-pdf').classList.remove('hidden');
       // v1.11 — deleting a build is for Builds leads only (tier 3+ are leads).
       deleteBtn.classList.toggle('hidden', !hasQcRole('lead'));
+      refreshCustomerButtons();
       updateModalDiagnosticsStatus();
 
       // Populate Client Telemetry elements removed (redundant telemetry sections deleted in v1.0.9)
@@ -3746,6 +3749,7 @@ function openTicketModal(ticketId = null) {
     title.textContent = "Create Service Ticket";
     document.getElementById('form-ticket-id').value = '';
     document.getElementById('form-created-at').value = '';
+    setCustomerPhoneField('', true);
 
     // Clear diagnostics panels from any previously opened ticket
     renderSavedDiagnosticsPanels(null);
@@ -3776,6 +3780,7 @@ function openTicketModal(ticketId = null) {
     printBtn.classList.add('hidden');
     document.getElementById('btn-save-pdf').classList.add('hidden');
     deleteBtn.classList.add('hidden');
+    refreshCustomerButtons();
     updateModalDiagnosticsStatus();
 
     // Auto-detect system specs if option is enabled
@@ -4833,6 +4838,15 @@ async function handleTicketFormSubmit(e) {
     document.getElementById('form-customer-name').focus();
     return;
   }
+  // 1.14.1 — the customer's mobile: the customer website opens the build with
+  // its last 4 digits. Required for a new build; an older build may stay
+  // without one until someone adds it.
+  const _phoneCheck = checkCustomerPhoneField(!document.getElementById('form-ticket-id').value);
+  if (_phoneCheck.error) {
+    showToast(_phoneCheck.error, 'warning');
+    document.getElementById('form-customer-phone').focus();
+    return;
+  }
 
   try {
   const id = document.getElementById('form-ticket-id').value || 't_' + Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
@@ -4952,6 +4966,9 @@ async function handleTicketFormSubmit(e) {
     createdAt,
     type: ticketType,
     customerName,
+    // Normalised digits with the country code (shared/service-catalog.js
+    // normPhone); kept as it was when the field is left empty.
+    customerPhone: _phoneCheck.phone || (existingTicket && existingTicket.customerPhone) || '',
     deadline,
     missingComponentsToggle,
     missingComponents,
@@ -7428,6 +7445,14 @@ function setupEventListeners() {
     }
   });
 
+  // 1.14.1 — the customer's side of the build (service.neotokyo.in)
+  document.getElementById('btn-track-copy').addEventListener('click', copyBuildTrackLink);
+  document.getElementById('btn-track-wa').addEventListener('click', sendBuildWhatsApp);
+  document.getElementById('btn-customer-view').addEventListener('click', () => {
+    const t = currentModalTicket();
+    if (t) openCustomerView(buildTrackCode(t), t.customerPhone);
+  });
+
   // Admin Quality Control Checklist - Windows Activation License Auto-Detect
   const btnAdminDetect = document.getElementById('btn-admin-detect-license');
   if (btnAdminDetect) {
@@ -7864,6 +7889,9 @@ async function syncTicketToCloud(ticket) {
         updated_at: ticket.updatedAt || new Date().toISOString(),
         type: ticket.type,
         customer_name: ticket.customerName,
+        // 1.14.1 — sent only when known, so an empty value never wipes a number
+        // the website's New Build form saved (older Neo Service leaves it out).
+        ...(ticket.customerPhone ? { customer_phone: ticket.customerPhone } : {}),
         deadline: ticket.deadline,
         missing_components_toggle: ticket.missingComponentsToggle,
         missing_components: ticket.missingComponents,
@@ -8065,6 +8093,7 @@ function mapDbRowToTicket(dbRow) {
     updatedAt: dbRow.updated_at || dbRow.created_at,
     type: dbRow.type,
     customerName: dbRow.customer_name,
+    customerPhone: dbRow.customer_phone || '',
     deadline: dbRow.deadline,
     technician: dbRow.technician,
     missingComponentsToggle: dbRow.missing_components_toggle,
@@ -10792,3 +10821,134 @@ document.addEventListener('DOMContentLoaded', () => {
     else if (e.target.classList.contains('cat-e-del')) catEditorDelete(sku, row);
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 1.14.1 — THE CUSTOMER WEBSITE (service.neotokyo.in)
+// The customer's mobile on a build, its tracking link, WhatsApp, and the
+// Customer view. The website address and the switch-over from the old site
+// live in shared/service-catalog.js (one setting: trackLink, canTrackByLink,
+// checkCustomerSite); nothing here hard-codes an address.
+// ═══════════════════════════════════════════════════════════════════════════
+
+function customerCatalog() { return window.NeoQcCatalog || null; }
+
+// The 6-character build code the customer types (the last 6 of the id).
+function buildTrackCode(ticket) { return ticket && ticket.id ? String(ticket.id).slice(-6).toUpperCase() : ''; }
+
+function currentModalTicket() { return editingTicketId ? appState.tickets.find(t => t.id === editingTicketId) : null; }
+
+// Show the saved number (international digits) the way people read it.
+function formatPhoneForField(digits) {
+  const d = String(digits || '').replace(/\D/g, '');
+  if (d.length === 12 && d.startsWith('91')) return d.slice(2, 7) + ' ' + d.slice(7);
+  return d ? '+' + d : '';
+}
+
+function setCustomerPhoneField(digits, isNew) {
+  const input = document.getElementById('form-customer-phone');
+  const req = document.getElementById('form-customer-phone-req');
+  const hint = document.getElementById('form-customer-phone-hint');
+  if (input) input.value = formatPhoneForField(digits);
+  if (req) req.classList.toggle('hidden', !isNew);
+  if (hint) {
+    hint.textContent = isNew || digits
+      ? 'The customer tracks this build online with the last 4 digits of this number.'
+      : 'No number on this build yet: add it so the customer sees their full QC report online.';
+  }
+}
+
+// → { phone: normalised digits or '', error: a message or null }
+function checkCustomerPhoneField(isNew) {
+  const raw = (document.getElementById('form-customer-phone').value || '').trim();
+  const C = customerCatalog();
+  if (!raw) {
+    return isNew
+      ? { phone: '', error: "Enter the customer's mobile number: they need it to follow the build online." }
+      : { phone: '', error: null };
+  }
+  if (C && typeof C.isValidPhone === 'function' && !C.isValidPhone(raw)) {
+    return { phone: '', error: "That mobile number doesn't look right. Use 10 digits, or + and the country code." };
+  }
+  return { phone: C && typeof C.normPhone === 'function' ? C.normPhone(raw) : raw.replace(/\D/g, ''), error: null };
+}
+
+// Asks service.neotokyo.in whether it is up, now and every hour. Once it has
+// answered, tracking links and QR codes use it (and build links appear).
+function startCustomerSiteCheck() {
+  const C = customerCatalog();
+  if (!C || typeof C.checkCustomerSite !== 'function') return;
+  const run = () => C.checkCustomerSite().then(() => refreshCustomerButtons()).catch(() => {});
+  run();
+  setInterval(run, 60 * 60 * 1000);
+}
+
+function toggleHidden(id, show) { const el = document.getElementById(id); if (el) el.classList.toggle('hidden', !show); }
+
+// The three footer buttons of the build window. A build code opens by link only
+// on the new site, so they stay hidden until it is live: no dead links.
+function refreshCustomerButtons() {
+  const t = currentModalTicket();
+  const C = customerCatalog();
+  const code = buildTrackCode(t);
+  const linkable = !!(t && C && typeof C.canTrackByLink === 'function' && C.canTrackByLink(code));
+  const hasPhone = !!(t && C && t.customerPhone && C.phoneOk(C.normPhone(t.customerPhone)));
+  toggleHidden('btn-track-copy', linkable);
+  toggleHidden('btn-track-wa', linkable && hasPhone);
+  toggleHidden('btn-customer-view', linkable && hasPhone);
+}
+
+// The browser clipboard first; then the main process ('sys:clipboard-write',
+// needed from Electron 44, where the renderer lost the clipboard module); then
+// the renderer module on older Electron.
+async function copyPlainText(text) {
+  try { await navigator.clipboard.writeText(text); return true; } catch (e) { /* next */ }
+  try { const r = await ipcRenderer.invoke('sys:clipboard-write', String(text)); if (r !== false) return true; } catch (e) { /* no such handler: older build */ }
+  try { require('electron').clipboard.writeText(text); return true; } catch (e) { return false; }
+}
+
+async function copyBuildTrackLink() {
+  const t = currentModalTicket();
+  const C = customerCatalog();
+  if (!t || !C) return;
+  const link = C.trackLink(buildTrackCode(t));
+  if (await copyPlainText(link)) showToast('Tracking link copied: ' + link, 'success');
+  else showToast('Could not copy. The link is ' + link, 'warning', 9000);
+}
+
+function buildWhatsAppText(t, link) {
+  const first = String(t.customerName || '').trim().split(/\s+/)[0] || '';
+  const hello = first ? 'Hi ' + first + ',' : 'Hello,';
+  const lead = t.status === 'completed'
+    ? ' your PC from Neo Tokyo Kochi is ready to collect. Its quality report is on the page below.'
+    : ' you can follow your PC build at Neo Tokyo Kochi live, from parts to testing.';
+  return hello + lead + '\nCode: ' + buildTrackCode(t) + '\nTrack it here: ' + link +
+    '\nUse the last 4 digits of this phone number to open it.\n— Neo Tokyo';
+}
+
+function sendBuildWhatsApp() {
+  const t = currentModalTicket();
+  const C = customerCatalog();
+  if (!t || !C) return;
+  const phone = C.normPhone(t.customerPhone || '');
+  if (!C.phoneOk(phone)) { showToast("Add the customer's mobile number and save the build first.", 'warning'); return; }
+  const url = 'https://wa.me/' + phone + '?text=' + encodeURIComponent(buildWhatsAppText(t, C.trackLink(buildTrackCode(t))));
+  try { require('electron').shell.openExternal(url); } catch (e) { showToast('Could not open WhatsApp.', 'error'); }
+}
+
+// The customer's page for any code (build, NT- or RM-), with the phone digits
+// filled in, in its own window (main.js 'customer-view:open'). Shared with the
+// service and RMA screens through window.NeoServiceCustomerView.
+async function openCustomerView(code, phone) {
+  const C = customerCatalog();
+  const digits = String(phone || '').replace(/\D/g, '');
+  if (!C || !code) return;
+  if (!C.canTrackByLink(code)) { showToast('The customer page for builds opens once service.neotokyo.in is live.', 'info'); return; }
+  if (digits.length < 4) { showToast('This ticket has no phone number to open the customer page with.', 'warning'); return; }
+  try {
+    const r = await ipcRenderer.invoke('customer-view:open', { url: C.trackLink(code), last4: digits.slice(-4), code: String(code) });
+    if (!r || !r.ok) showToast((r && r.error) || 'Could not open the customer view.', 'error');
+  } catch (e) {
+    showToast('Could not open the customer view.', 'error');
+  }
+}
+window.NeoServiceCustomerView = { open: openCustomerView };

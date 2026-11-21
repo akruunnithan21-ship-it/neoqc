@@ -593,6 +593,22 @@
 }
 #print-report-container .print-two-col > div { padding-right: 8px; }
 
+/* ─── Tracking link and QR (1.14.1, service.neotokyo.in) ────────────────────── */
+#print-report-container .print-track {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid #ddd;
+  break-inside: avoid;
+}
+#print-report-container .print-track.hidden { display: none; }
+#print-report-container .print-track-qr:empty { display: none; }
+#print-report-container .print-track-qr svg { display: block; width: 22mm; height: 22mm; }
+#print-report-container .print-track-text { margin: 0; font-size: 8.5pt; line-height: 1.45; color: #333; }
+#print-report-container .print-track-text span { font-weight: 600; }
+
 /* ─── Footer / signatures ───────────────────────────────────────────────── */
 
 #print-report-container .print-footer {

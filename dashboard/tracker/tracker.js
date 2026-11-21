@@ -567,12 +567,21 @@
   function swap(fn) {
     if (!booted || inTransition || !document.startViewTransition || reduced() || document.hidden) { fn(); return; }
     inTransition = true;
+    var ran = false;
+    var once = function () { if (!ran) { ran = true; fn(); } };
     var vt;
-    try { vt = document.startViewTransition(fn); } catch (e) { inTransition = false; fn(); return; }
+    try { vt = document.startViewTransition(once); } catch (e) { inTransition = false; once(); return; }
     var done = function () { inTransition = false; };
     vt.finished.then(done, done);
     vt.ready.catch(function () { /* skipped: the update still ran */ });
     vt.updateCallbackDone.catch(function () { /* reported by the callback itself */ });
+    // A window that can't draw a frame (in the background, minimised) would
+    // hold the update until it is shown: skip the animation instead.
+    setTimeout(function () {
+      if (ran) return;
+      try { vt.skipTransition(); } catch (e) { /* already done */ }
+      once();
+    }, 700);
   }
   function ticketPath(code) { return '/t/' + encodeURIComponent(code) + (DEMO_MODE ? '?demo' : ''); }
   function homePath() { return '/' + (DEMO_MODE ? '?demo' : ''); }

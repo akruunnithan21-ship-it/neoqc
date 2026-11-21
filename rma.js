@@ -59,6 +59,13 @@
   var DAY = 86400000;
   var DEMO_MSG = 'Demo data is read-only. Turn it off in Settings to work on real tickets.';
   var TRACK_URL = 'https://neoqctracker.netlify.app/?view=service&code=';
+  // The address lives in shared/service-catalog.js (one setting that moves to
+  // service.neotokyo.in when that site is up); TRACK_URL is the fallback.
+  function trackLinkFor(code) {
+    var C = window.NeoQcCatalog;
+    if (C && typeof C.trackLink === 'function') { try { return C.trackLink(code); } catch (e) { /* fall back */ } }
+    return TRACK_URL + encodeURIComponent(code);
+  }
 
   function el(id) { return document.getElementById(id); }
   function setText(id, t) { var e = el(id); if (e) e.textContent = t == null ? '' : String(t); }
@@ -696,7 +703,7 @@
       rma_back: 'Neo Tokyo: your ' + what + ' is back from the manufacturer. We will update you shortly.',
       rma_ready: 'Neo Tokyo: your ' + what + ' is ready.'
     }[name] || ('Neo Tokyo: an update on your ' + what + '.');
-    return line + '\nCode: ' + code + '\nTrack it here: ' + TRACK_URL + encodeURIComponent(code) +
+    return line + '\nCode: ' + code + '\nTrack it here: ' + trackLinkFor(code) +
            '\nUse the last 4 digits of this phone number to open it.';
   }
   function waSend(phone, text) {
@@ -1623,6 +1630,8 @@
     if (w && isHolding(u)) b.push(['release', 'Release from ticket…', 'secondary-btn']);
     if (trackingPhone(u)) b.push(['message', 'Message on WhatsApp…', 'secondary-btn']);
     b.push(['copy-link', 'Copy tracking link', 'secondary-btn']);
+    // 1.14.1 — the customer's own page for this part (app.js openCustomerView).
+    if (u.public_code && trackingPhone(u) && window.NeoServiceCustomerView) b.push(['customer-view', 'Customer view', 'secondary-btn']);
     if (canPrint()) b.push(['print-label', 'Print label', 'secondary-btn']);
     host.innerHTML = b.map(function (x) {
       return '<button type="button" class="' + x[2] + ' rma-act" data-act="' + x[0] + '">' + esc(x[1]) + '</button>';
@@ -2595,7 +2604,8 @@
         case 'stock-replace': dlgStockReplace(); break;
         case 'release': dlgRelease(); break;
         case 'message': dlgMessage(u.id, templateForStage(u.stage)); break;
-        case 'copy-link': copyText(TRACK_URL + encodeURIComponent(u.public_code || ''), 'Tracking link'); break;
+        case 'copy-link': copyText(trackLinkFor(u.public_code || ''), 'Tracking link'); break;
+        case 'customer-view': if (window.NeoServiceCustomerView) window.NeoServiceCustomerView.open(u.public_code, trackingPhone(u)); break;
         case 'print-label': printLabels([labelFromUnit(u)]); break;
         case 'fee-quote': dlgFee('quote'); break;
         case 'fee-accept': dlgFee('accept'); break;

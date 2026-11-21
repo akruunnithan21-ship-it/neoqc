@@ -923,6 +923,21 @@
     // ── Footer ──
     setText('print-footer-tech', ticket.technician || '--');
     setText('print-footer-contact', settings.shopContact || 'Neo Tokyo Kochi QA Lab');
+
+    // ── Where the customer follows this PC online (1.14.1) ──
+    // Printed only once service.neotokyo.in is live: paper outlives a link,
+    // so a report never carries an address that is being retired.
+    var trackBox = $('print-track');
+    if (trackBox) {
+      var Cat = (typeof window !== 'undefined') ? window.NeoQcCatalog : null;
+      var live = !!(Cat && typeof Cat.customerSiteLive === 'function' && Cat.customerSiteLive());
+      var link = live ? Cat.trackLink(shortId) : '';
+      var qr = $('print-track-qr');
+      // qrSvg builds the SVG from our own link text; empty without the QR library.
+      if (qr) qr.innerHTML = live && typeof Cat.qrSvg === 'function' ? Cat.qrSvg(link) : '';
+      setText('print-track-link', link.replace(/^https:\/\//, ''));
+      trackBox.classList.toggle('hidden', !live);
+    }
   }
 
   var api = { populate: populate, buildSparkline: buildSparkline, reportSerials: reportSerials };

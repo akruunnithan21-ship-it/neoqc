@@ -25,7 +25,9 @@ var TYPES = {
 function send(res, file) {
   fs.readFile(file, function (err, buf) {
     if (err) { res.writeHead(404, { 'Content-Type': 'text/plain' }); res.end('Not found'); return; }
-    res.writeHead(200, { 'Content-Type': TYPES[path.extname(file).toLowerCase()] || 'application/octet-stream', 'Cache-Control': 'no-cache' });
+    var headers = { 'Content-Type': TYPES[path.extname(file).toLowerCase()] || 'application/octet-stream', 'Cache-Control': 'no-cache' };
+    if (path.basename(file) === 'ping.json') headers['Access-Control-Allow-Origin'] = '*';
+    res.writeHead(200, headers);
     res.end(buf);
   });
 }

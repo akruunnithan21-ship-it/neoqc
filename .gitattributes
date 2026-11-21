@@ -1,0 +1,5 @@
+# Files that run on the NAS (Linux) keep Unix line endings in every checkout,
+# whatever core.autocrlf says: systemd misreads a unit file with CRLF endings.
+deploy/nas/neo-tracker.service text eol=lf
+deploy/nas/server.js text eol=lf
+deploy/nas/*.sh text eol=lf

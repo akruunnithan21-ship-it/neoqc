@@ -464,6 +464,61 @@ ipcMain.handle('app:get-version', () => {
   try { return app.getVersion(); } catch (e) { return null; }
 });
 
+// 1.14.1 — Customer view: the customer's tracking page for one ticket, opened
+// with the phone digits filled in, so staff see exactly what the customer sees.
+// A plain browser window: no Node access, sandboxed, its own in-memory session
+// (nothing the page stores outlives the app), and only the customer website's
+// own addresses may load in it. Other links open in the system browser.
+const CUSTOMER_VIEW_ORIGINS = ['https://service.neotokyo.in', 'https://neoqctracker.netlify.app'];
+ipcMain.handle('customer-view:open', async (event, arg) => {
+  let win = null;
+  try {
+    const target = new URL(String((arg && arg.url) || ''));
+    const last4 = String((arg && arg.last4) || '');
+    const code = String((arg && arg.code) || '').replace(/[^A-Za-z0-9-]/g, '').slice(0, 20);
+    if (!CUSTOMER_VIEW_ORIGINS.includes(target.origin)) return { ok: false, error: 'That is not the customer website.' };
+    if (!/^\d{4}$/.test(last4)) return { ok: false, error: 'This ticket has no phone number to open the customer page with.' };
+
+    win = new BrowserWindow({
+      width: 480, height: 880, minWidth: 360,
+      parent: mainWindow || undefined,
+      autoHideMenuBar: true,
+      title: 'Customer view' + (code ? ' · ' + code : ''),
+      webPreferences: { nodeIntegration: false, contextIsolation: true, sandbox: true, partition: 'customer-view' }
+    });
+    win.on('page-title-updated', (e) => e.preventDefault());
+    const openOutside = (u) => { try { if (new URL(u).protocol === 'https:') shell.openExternal(u); } catch (e) { /* ignore */ } };
+    win.webContents.setWindowOpenHandler(({ url }) => { openOutside(url); return { action: 'deny' }; });
+    win.webContents.on('will-navigate', (e, url) => {
+      let same = false;
+      try { same = new URL(url).origin === target.origin; } catch (err) { same = false; }
+      if (!same) { e.preventDefault(); openOutside(url); }
+    });
+    // Fill the digits once the page is ready: the new site (#pin, form #lookup)
+    // or the old one (#svc-phone-input). "Remember on this phone" is switched
+    // off so nothing is kept in the window's session.
+    win.webContents.once('did-finish-load', () => {
+      const fill = '(function (d) {' +
+        'var pin = document.getElementById("pin"), form = document.getElementById("lookup");' +
+        'if (pin && form) {' +
+        '  var keep = document.getElementById("remember"); if (keep) keep.checked = false;' +
+        '  pin.value = d; pin.dispatchEvent(new Event("input", { bubbles: true }));' +
+        '  if (form.requestSubmit) form.requestSubmit(); else { var b = document.getElementById("submit"); if (b) b.click(); }' +
+        '  return true; }' +
+        'var old = document.getElementById("svc-phone-input"), go = document.getElementById("svc-lookup-btn");' +
+        'if (old && go) { old.value = d; go.click(); return true; }' +
+        'return false; })(' + JSON.stringify(last4) + ')';
+      win.webContents.executeJavaScript(fill).catch(() => {});
+    });
+    await win.loadURL(target.toString());
+    return { ok: true };
+  } catch (e) {
+    log.warn('Customer view failed:', e && e.message);
+    if (win && !win.isDestroyed()) win.close();
+    return { ok: false, error: 'Could not open the customer page. Check the internet connection.' };
+  }
+});
+
 // Health of the last db:read — the renderer queries this via `db:health`
 // right after boot so a corrupt or missing local database is never a silent
 // blank slate (a technician could otherwise "start over" on top of recoverable

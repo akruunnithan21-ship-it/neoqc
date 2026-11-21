@@ -60,10 +60,40 @@ Until step 1 runs, build lookups fall back to `get_ticket_public` and show the
 limited view (status and dates, no name or QC report).
 
 Builds made before step 1 have no phone on file: they show the limited view
-whatever digits are typed, with a button to ask the shop to add the number. From
-this release the website's New Build form saves the phone. **The desktop app's
-ticket form does not have a phone field yet**: builds created there stay limited
-until it does.
+whatever digits are typed, with a button to ask the shop to add the number. Both
+the website's New Build form and Neo Service's build form (1.14.1) save the phone;
+Neo Service requires it for a new build.
+
+## Neo Service and the website (1.14.1)
+
+- **One address setting.** `shared/service-catalog.js` builds every tracking
+  link (`trackLink`) for Neo Service, the staff website and the WhatsApp
+  templates. Until https://service.neotokyo.in answers `/ping.json` with
+  `{"site":"neo-service"}`, links keep the old Netlify address (which opens NT-
+  and RM- codes but not build codes). Neo Service asks at start and every hour
+  (`checkCustomerSite`); once the site has answered, the switch is kept on that
+  PC. The staff website switches when it is itself served from service.neotokyo.in.
+- **Builds** (ticket window footer): 🔗 Tracking link, 💬 WhatsApp (to the
+  customer's mobile, with the "ready to collect" wording once QC is complete) and
+  👁️ Customer view. They appear once the site is live, since a build code can't
+  open on the old address.
+- **Customer view** (builds, repairs, warranty parts): `main.js`
+  `customer-view:open` opens the customer page in a sandboxed window with its own
+  in-memory session, fills the last 4 digits, and switches "Remember on this
+  phone" off. Only the two customer-site addresses can load in it.
+- **QC report and delivery receipt** print the tracking address, and a QR code
+  when `vendor/qrcode-generator/qrcode.js` is loaded, only once the site is live:
+  paper outlives a link.
+- `customer_phone` is sent to the database only when Neo Service has one, so an
+  empty field (or an older Neo Service) never wipes a saved number.
+
+## Hosting on the NAS (service.neotokyo.in)
+
+Like the planner: `deploy/nas/server.js` serves a copy of `dashboard/` on the NAS
+at 127.0.0.1:8097 (systemd service `neo-tracker`), and the developers' Cloudflare
+tunnel, whose connector already runs on the NAS, publishes it as
+https://service.neotokyo.in. Build the folder to copy with
+`deploy/nas/make-package.ps1`; install and update steps are in `deploy/nas/README.md`.
 
 ## Local preview
 

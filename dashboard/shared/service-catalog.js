@@ -26,7 +26,20 @@
   'use strict';
 
   var HOUR = 3600000;
-  var TRACK_BASE = 'https://neoqctracker.netlify.app/?view=service&code=';
+
+  // ── The customer website: one setting for every tracking link and QR ─────
+  // Neo Service, the staff website and every WhatsApp template build their
+  // links with trackLink() below. service.neotokyo.in is used once it has
+  // answered its ping (checkCustomerSite); until then links keep the old
+  // address, which opens repair and warranty codes but not build codes. Once
+  // the new site has answered, the switch is kept (on this PC), so a short
+  // outage never flips links back to an address that is being retired.
+  var CUSTOMER_SITE = 'https://service.neotokyo.in';
+  var TRACK_BASE = 'https://neoqctracker.netlify.app/?view=service&code=';   // the old address
+  var SITE_KEY = 'neo-service:customer-site-live';
+  var siteLive = (function () {
+    try { return !!(global.localStorage && global.localStorage.getItem(SITE_KEY) === '1'); } catch (e) { return false; }
+  })();
   var PHONE_LINE = 'Use the last 4 digits of this phone number to open it.';
   var SHOP = 'Neo Tokyo';
   // The shop's data rule, in the customer's words. (No "please": the message
@@ -524,7 +537,46 @@
     return f ? 'Hi ' + f + ',' : 'Hello,';
   }
 
-  function trackLink(code) { return TRACK_BASE + encodeURIComponent(trim(code)); }
+  function trackLink(code) {
+    var c = trim(code);
+    return siteLive ? CUSTOMER_SITE + '/t/' + encodeURIComponent(c.toUpperCase()) : TRACK_BASE + encodeURIComponent(c);
+  }
+  // A build code (6 characters) opens by link only on the new site.
+  function canTrackByLink(code) { return siteLive || /^(NT|RM)-/i.test(trim(code)); }
+  function customerSiteLive() { return siteLive; }
+  function setCustomerSiteLive(on) {
+    siteLive = !!on;
+    try { if (global.localStorage) global.localStorage.setItem(SITE_KEY, siteLive ? '1' : '0'); } catch (e) { /* not kept */ }
+    return siteLive;
+  }
+  // Asks service.neotokyo.in whether it is up: Neo Service at start and every
+  // hour. Only a real answer from the site switches links on; anything else
+  // keeps the current setting.
+  function checkCustomerSite(fetchImpl) {
+    var f = fetchImpl || (typeof fetch === 'function' ? fetch : null);
+    if (!f || siteLive) return Promise.resolve(siteLive);
+    return Promise.resolve()
+      .then(function () { return f(CUSTOMER_SITE + '/ping.json', { cache: 'no-store' }); })
+      .then(function (r) { return r && r.ok ? r.json() : null; })
+      .then(function (j) { return (j && j.site === 'neo-service') ? setCustomerSiteLive(true) : siteLive; },
+            function () { return siteLive; });
+  }
+
+  // A QR code as an SVG string, for printed reports and receipts. Needs the
+  // qrcode-generator library (vendor/qrcode-generator/qrcode.js); without it
+  // the caller prints the link alone.
+  function qrSvg(text) {
+    var q = global.qrcode;
+    if (typeof q !== 'function' || !text) return '';
+    try {
+      var qr = q(0, 'M');
+      qr.addData(String(text));
+      qr.make();
+      // margin 16 = 4 modules of white around the code (the quiet zone scanners
+      // need), built in so nearby text on a receipt can never crowd it.
+      return qr.createSvgTag({ cellSize: 4, margin: 16, scalable: true, alt: 'QR code: ' + String(text) });
+    } catch (e) { return ''; }
+  }
 
   function footer(code) {
     var c = clip(code, 20);
@@ -1068,6 +1120,12 @@
     durationWords: durationWords,
     rupees: rupees,
     trackLink: trackLink,
+    CUSTOMER_SITE: CUSTOMER_SITE,
+    canTrackByLink: canTrackByLink,
+    customerSiteLive: customerSiteLive,
+    setCustomerSiteLive: setCustomerSiteLive,
+    checkCustomerSite: checkCustomerSite,
+    qrSvg: qrSvg,
     visitText: visitText,
     matchFaults: matchFaults,
     normPhone: normPhone,
