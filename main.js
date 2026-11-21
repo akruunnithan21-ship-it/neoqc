@@ -6,6 +6,12 @@ const { Worker } = require('worker_threads');
 const os = require('os');
 const { autoUpdater } = require('electron-updater');
 const log = require('electron-log');
+
+// 1.13: the app is called "Neo Service" now, but its data folder stays
+// %APPDATA%\neo-qc (the package name, as every release has used), so each PC
+// keeps its sign-in, settings and local data through the rename. Set before
+// anything reads userData; on an unchanged build this is a no-op.
+try { app.setPath('userData', path.join(app.getPath('appData'), 'neo-qc')); } catch (e) { /* keep the default */ }
 const cinebenchLib = require('./cinebench');
 
 // Configure auto updater logging
@@ -23,7 +29,7 @@ process.on('uncaughtException', (err) => {
 process.on('unhandledRejection', (reason) => {
   try { log.error('Unhandled promise rejection in main process:', reason); } catch (_) {}
 });
-log.info('NeoQC launching...');
+log.info('Neo Service launching...');
 
 function checkAdminElevated() {
   try {
@@ -137,7 +143,7 @@ function createWindow() {
     minHeight: 650,
     frame: false, // Frameless window!
     transparent: false,
-    title: "Neo OS",
+    title: "Neo Service",
     icon: path.join(__dirname, 'assets', 'icon.ico'),
     webPreferences: {
       nodeIntegration: true,
@@ -171,11 +177,11 @@ function createWindow() {
       log.error(`Renderer crashed ${recentCrashes.length} times in 20s — stopping the reload loop.`);
       try {
         dialog.showErrorBox(
-          'Neo OS — Repeated Renderer Crash',
-          `Neo OS keeps crashing while starting up.\n\n` +
+          'Neo Service — Repeated Renderer Crash',
+          `Neo Service keeps crashing while starting up.\n\n` +
           `Reason: ${details.reason} (exit code ${details.exitCode})\n\n` +
           `Please send the log file to the developer:\n${log.transports.file.getFile().path}\n\n` +
-          `Neo OS will now exit. Try reinstalling from the latest release.`
+          `Neo Service will now exit. Try reinstalling from the latest release.`
         );
       } catch (e) {}
       app.quit();
@@ -322,7 +328,7 @@ app.whenReady().then(() => {
   if (!checkAdminElevated()) {
     dialog.showErrorBox(
       'Administrator Privileges Required',
-      'Neo OS requires administrator privileges to access low-level CPU/GPU registers and temperature sensors. Please run the application as Administrator.'
+      'Neo Service requires administrator privileges to access low-level CPU/GPU registers and temperature sensors. Please run the application as Administrator.'
     );
     app.quit();
     process.exit(0);

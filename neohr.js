@@ -414,7 +414,7 @@
   function need(name) {
     var d = D();
     if (d && typeof d[name] === 'function') return d;
-    throw new Error('This needs the Neo OS 1.12 data layer. Restart Neo OS after the update finishes.');
+    throw new Error('This needs the Neo Service 1.12 data layer. Restart Neo Service after the update finishes.');
   }
 
   function loadTeamToday() {
@@ -480,7 +480,7 @@
   function loadApp(force) {
     return run('app', 'app', function () {
       var d = D();
-      if (!d || typeof d.latestNeoHrRelease !== 'function') throw new Error('This needs the Neo OS 1.11 data layer. Restart Neo OS after the update finishes.');
+      if (!d || typeof d.latestNeoHrRelease !== 'function') throw new Error('This needs the Neo Service 1.11 data layer. Restart Neo Service after the update finishes.');
       return d.latestNeoHrRelease({ force: !!force });
     });
   }
@@ -1222,7 +1222,7 @@
     if (!F() && st.tab !== 'logs' && st.tab !== 'app') {
       destroyMap();
       body.dataset.view = '';
-      body.innerHTML = banner('This needs the Neo OS 1.12 files. Restart Neo OS after the update finishes.', 'error');
+      body.innerHTML = banner('This needs the Neo Service 1.12 files. Restart Neo Service after the update finishes.', 'error');
       return;
     }
     if (st.tab === 'routes') { renderRoutes(body); return; }
@@ -2231,7 +2231,7 @@
     if (!host) return null;
     if (!L || typeof L.map !== 'function') {
       host.textContent = '';
-      host.appendChild(document.createTextNode('The map could not load. Restart Neo OS after the update finishes.'));
+      host.appendChild(document.createTextNode('The map could not load. Restart Neo Service after the update finishes.'));
       host.classList.add('hr-map-off');
       return null;
     }
@@ -2673,9 +2673,9 @@
     if (a && a.error) html.push(banner((rel ? 'Showing what this PC last saw — ' : '') + a.error, rel ? 'warn' : 'error'));
     var head = '<div class="hr-app-head"><span class="hr-app-ic" aria-hidden="true">📱</span><div>' +
       '<h3 class="hr-app-title">NeoHR for Android' + (rel ? ' <span class="hr-ver">' + esc(rel.version) + '</span>' : '') + '</h3>' +
-      '<p class="hr-app-sub">Part of Neo OS. Technicians and heads sign in with their Neo OS email and PIN — the same account as this app.</p>' +
+      '<p class="hr-app-sub">Part of Neo Service. Technicians and heads sign in with their Neo Service email and PIN — the same account as this app.</p>' +
       '</div></div>';
-    var what = '<p class="hr-app-p">On the phone, NeoHR is the one app a technician needs away from a Neo OS PC: attendance (punch in and out, breaks, ' +
+    var what = '<p class="hr-app-p">On the phone, NeoHR is the one app a technician needs away from a Neo Service PC: attendance (punch in and out, breaks, ' +
       'the time on each site, and Tell HR for a late start, leave or a missed punch), the route of the working day for travel allowance — recorded only ' +
       'between punch-in and punch-out, never on a break, and always with a notification — a simple dashboard, the work queue, their service jobs and ' +
       'builds, notes, photos, site visits and their daily work logs, which show up here.</p>';
@@ -2702,7 +2702,7 @@
       '<li>Send the download link to the phone (copy it here and WhatsApp it to them), or open the release page on the phone.</li>' +
       '<li>Download the NeoHR file on the phone and open it. If Android asks, allow <em>Install unknown apps</em> for the browser or Files app, then go back.</li>' +
       '<li>Tap <strong>Install</strong>. On a phone that already has NeoHR this updates it in place; the logs on it stay.</li>' +
-      '<li>Open NeoHR and sign in with the person’s Neo OS email and PIN. Allow notifications, so work offered to them reaches the phone.</li>' +
+      '<li>Open NeoHR and sign in with the person’s Neo Service email and PIN. Allow notifications, so work offered to them reaches the phone.</li>' +
       '<li>On the Attendance tab, allow location (<em>Allow all the time</em> keeps the route going when the phone is locked or restarts) and set NeoHR’s battery use to <em>Unrestricted</em> when it asks.</li>' +
       '<li>From then on NeoHR updates itself: it shows <em>Update available</em> on its Dashboard and in Settings → Check for updates.</li>' +
     '</ol>' +
@@ -2770,7 +2770,7 @@
   // ── dialogs ───────────────────────────────────────────────────────────────
   function dialog(opts) {
     var ui = UI();
-    if (!ui || typeof ui.dialog !== 'function') { toast('This needs the Neo OS 1.12 files. Restart Neo OS.', 'error'); return Promise.resolve(false); }
+    if (!ui || typeof ui.dialog !== 'function') { toast('This needs the Neo Service 1.12 files. Restart Neo Service.', 'error'); return Promise.resolve(false); }
     return ui.dialog(opts);
   }
   function stillMe(who) { return who === whoKey(); }
@@ -3172,7 +3172,7 @@
       var url = f && res ? f.jpegDataUrl(res.jpeg_b64) : null;
       if (!url) { toast('There is no photo for this punch.', 'info'); return; }
       var ui = UI();
-      if (!ui || typeof ui.lightbox !== 'function') { toast('The photo viewer could not open. Restart Neo OS.', 'error'); return; }
+      if (!ui || typeof ui.lightbox !== 'function') { toast('The photo viewer could not open. Restart Neo Service.', 'error'); return; }
       var bits = [sub, res.taken_at ? 'taken at ' + istHm(res.taken_at) : '', res.late ? 'sent late' : ''].filter(Boolean).join(' · ');
       ui.lightbox([{ url: url, title: title, sub: bits, type: 'image/jpeg' }], 0);
     }, function (err) {

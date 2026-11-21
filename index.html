@@ -11,7 +11,7 @@
        needed for it; pdfjs uses a local worker (worker-src blob:). To roll back a
        suspected breakage, delete this one <meta> tag. -->
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: blob: https:; font-src 'self' https://fonts.gstatic.com data:; connect-src 'self' https: wss: data: blob: file:; worker-src 'self' blob:; child-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'">
-  <title>Neo OS</title>
+  <title>Neo Service</title>
   <!-- Google Fonts: Space Grotesk, Hanken Grotesk, JetBrains Mono -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -39,7 +39,7 @@
   <div class="custom-titlebar">
     <div class="titlebar-drag-area">
       <svg class="titlebar-logo-svg" viewBox="0 0 100 100"><circle cx="50" cy="50" r="40" stroke="currentColor" stroke-width="10" fill="none" stroke-dasharray="78.776 5" stroke-dashoffset="60.332" /><path d="M 50,23 L 72,70 C 58,58 50,56 50,56 C 50,56 42,58 28,70 Z" fill="currentColor" /></svg>
-      <span class="titlebar-text">NEO OS</span>
+      <span class="titlebar-text">NEO SERVICE</span>
       <span id="update-status-pill" class="update-status-pill" style="display:none;"></span>
     </div>
     <button id="titlebar-user" class="titlebar-user hidden" title="Sign out">
@@ -85,7 +85,7 @@
       </div>
       <h1 class="logo-title">NEO TOKYO</h1>
       <p class="logo-tagline">ACCELERATING YOUR INFRA</p>
-      <p class="logo-subtitle">NEO OS</p>
+      <p class="logo-subtitle">NEO SERVICE</p>
       <p id="splash-status-text" class="splash-status-text">Starting up…</p>
     </div>
   </div>
@@ -116,7 +116,7 @@
             <p class="logo-tagline">ACCELERATING YOUR INFRA</p>
           </div>
         </div>
-        <p class="logo-subtitle">NEO OS</p>
+        <p class="logo-subtitle">NEO SERVICE</p>
       </div>
       <h2>Staff Sign-In</h2>
       <p class="selector-desc">Enter your Neo Tokyo credentials to continue.</p>
@@ -140,7 +140,7 @@
     <div class="glass-slab login-card">
       <div class="brand-header">
         <div class="hanko-stamp">ネオ東京</div>
-        <p class="logo-subtitle" style="margin-top:8px;">NEO OS</p>
+        <p class="logo-subtitle" style="margin-top:8px;">NEO SERVICE</p>
       </div>
       <h2>Welcome, <span id="tier-notice-name">staff</span></h2>
       <p class="selector-desc" id="tier-notice-msg">Your Neo Tokyo workspace is on the web portal. Please sign in at <strong>neoqctracker.netlify.app</strong> to manage your work.</p>
@@ -1643,7 +1643,7 @@
       <!-- Settings Header -->
       <div class="settings-header">
         <div class="settings-header-left">
-          <span class="settings-header-eyebrow">NEO OS</span>
+          <span class="settings-header-eyebrow">NEO SERVICE</span>
           <h2 class="settings-header-title">Application Settings</h2>
         </div>
         <div class="settings-header-right">
@@ -2617,19 +2617,23 @@
   <div id="changelog-modal" class="modal-overlay">
     <div class="glass-slab modal-card" style="max-width: 650px; width: 100%; padding: 30px; border-radius: 20px;">
       <div class="modal-header" style="border-bottom: 1px solid var(--glass-border); padding-bottom: 15px; margin-bottom: 20px;">
-        <h2 style="font-family: 'Syncopate', sans-serif; font-size: 1.3rem; color: var(--primary-pink); letter-spacing: 0.05em; margin: 0;">NEO OS UPDATED</h2>
-        <span data-app-version style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; font-weight: 700; background: rgba(var(--primary-pink-rgb), 0.1); color: var(--primary-pink); padding: 4px 8px; border-radius: 4px;">v1.12.7</span>
+        <h2 style="font-family: 'Syncopate', sans-serif; font-size: 1.3rem; color: var(--primary-pink); letter-spacing: 0.05em; margin: 0;">NEO SERVICE UPDATED</h2>
+        <span data-app-version style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; font-weight: 700; background: rgba(var(--primary-pink-rgb), 0.1); color: var(--primary-pink); padding: 4px 8px; border-radius: 4px;">v1.13.0</span>
       </div>
       <div class="modal-body" style="font-size: 0.92rem; line-height: 1.6; color: var(--text-dark); max-height: 420px; overflow-y: auto; padding-right: 5px;">
-        <p style="margin-top: 0;"><strong>Convert a service ticket to an RMA.</strong> Here's what's new in <strong data-app-version>v1.12.7</strong>:</p>
+        <p style="margin-top: 0;"><strong>Neo OS is now Neo Service</strong>, with a new service ticket from the counter to the handover. Here's what's new in <strong data-app-version>v1.13.0</strong>:</p>
         <ul style="padding-left: 20px; display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px;">
-          <li><strong>Convert to RMA…</strong> is now a button on every open service ticket. Pick the item (the main item is chosen for you), fill in the part, serial and fault, and the warranty claim is raised in RMA. The ticket stays open and can wait for the part to come back.</li>
-          <li><strong>See the RMA on the ticket.</strong> Each RMA case shows at the top of the ticket with its code and status. Click it to open the case in the RMA screen.</li>
-          <li>The RMA screen shows which service ticket each case came from.</li>
+          <li><strong>New ticket.</strong> The customer's name comes first, then the phone. <strong>Came with</strong> and <strong>Condition</strong> are tick lists (type anything else under Other…). One wide <strong>Category and problem</strong> list shows the usual time for each problem; <strong>Not in the list?</strong> adds a problem, or a new category, with your own estimate.</li>
+          <li><strong>Items.</strong> Tick <strong>Serial number</strong> to record it with a photo of the label. A graphics card, power supply, SSD, RAM or motherboard needs its serial or that photo. Every item left with us needs a condition photo. Finished items fold to one line.</li>
+          <li><strong>Assign a technician</strong> while you create the ticket, with Remarks for them. There is no queue.</li>
+          <li>The customer's WhatsApp message and tracking page say when to expect our update.</li>
+          <li><strong>On the ticket:</strong> a step bar shows where it is, and the <strong>Next step</strong> button does the usual next thing. Anything else is under Another move….</li>
+          <li><strong>Quotes</strong> are itemised (prices include GST) and need the diagnosis first. Record the customer's answer line by line — "do the SSD, skip the screen".</li>
+          <li><strong>Hand over:</strong> record the payment (cash, UPI, card or bank transfer — split if needed), who collected it, and print the A4 delivery receipt or save it as a PDF. A balance due is noted on the ticket and the receipt.</li>
         </ul>
       </div>
       <div class="modal-footer" style="border-top: 1px solid var(--glass-border); padding-top: 15px; display: flex; justify-content: flex-end; margin-top: 20px;">
-        <button id="btn-close-changelog" data-app-version-label class="primary-pink-btn" style="padding: 10px 24px; font-weight: 700; font-size: 0.95rem;">Launch Neo OS v1.12.7</button>
+        <button id="btn-close-changelog" data-app-version-label class="primary-pink-btn" style="padding: 10px 24px; font-weight: 700; font-size: 0.95rem;">Launch Neo Service v1.13.0</button>
       </div>
     </div>
   </div>
