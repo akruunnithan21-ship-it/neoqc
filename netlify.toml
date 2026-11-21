@@ -20,3 +20,32 @@
     X-Frame-Options = "DENY"
     Referrer-Policy = "strict-origin-when-cross-origin"
     Permissions-Policy = "geolocation=(), microphone=(), camera=()"
+
+# The customer tracker is the site root (dashboard/index.html); the staff
+# portal moved to /staff/ (Nov 2026). Old ?view= staff links are forwarded to
+# /staff/ by dashboard/tracker/tracker.js.
+
+# Tracking links in WhatsApp/SMS: /t/NT-XXXXXXXX opens the tracker with the
+# code filled in (the page reads it from the path).
+[[redirects]]
+  from = "/t/*"
+  to = "/index.html"
+  status = 200
+
+# shared/ppi-sync.js fetches assets/benchmarks/… by a relative path, which from
+# /staff/ means /staff/assets/…: serve the real files.
+[[redirects]]
+  from = "/staff/assets/*"
+  to = "/assets/:splat"
+  status = 200
+
+# The service worker is re-checked on every visit so a release replaces it.
+[[headers]]
+  for = "/sw.js"
+  [headers.values]
+    Cache-Control = "no-cache"
+
+[[headers]]
+  for = "/fonts/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"

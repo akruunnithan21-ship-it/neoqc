@@ -2326,7 +2326,16 @@ async function qbCreateTicket() {
       }
     };
 
-    const { error } = await db.from('tickets').insert(row);
+    // The customer tracker checks the last 4 digits of this number
+    // (sql/tracker-build-public.sql). Until that migration has run the column
+    // does not exist: save the ticket without it rather than lose the quote.
+    if (phone) row.customer_phone = phone;
+    let { error } = await db.from('tickets').insert(row);
+    if (error && row.customer_phone !== undefined &&
+        (error.code === 'PGRST204' || /customer_phone/i.test(error.message || ''))) {
+      delete row.customer_phone;
+      ({ error } = await db.from('tickets').insert(row));
+    }
     if (error) throw error;
 
     // Optimistic: the realtime INSERT will also arrive, and both paths dedupe by id.
@@ -2347,7 +2356,9 @@ async function qbCreateTicket() {
     const code = id.slice(-6).toUpperCase();
     qbResetDraft();
     qbCreateStatus('<strong>Ticket created.</strong> Customer receipt code <strong>' + escHtml(code) +
-      '</strong> — they can track it on this site. It is now in the Pipeline under <strong>Quote</strong>, ' +
+      '</strong> — they can track it on this site' +
+      (row.customer_phone ? ' with the last 4 digits of their phone' : ' (no phone saved, so they will only see a basic status)') +
+      '. It is now in the Pipeline under <strong>Quote</strong>, ' +
       'and moves to Procurement once the Builds desk assigns a technician in Neo OS.', 'ok');
     // Stays disabled: a second click would create a duplicate ticket.
     if (btn) btn.textContent = 'Ticket ' + code + ' created';
