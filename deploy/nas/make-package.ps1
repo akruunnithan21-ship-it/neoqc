@@ -15,9 +15,9 @@ $repo = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 if (Test-Path $Out) { Remove-Item -Recurse -Force $Out }
 New-Item -ItemType Directory -Force (Join-Path $Out 'site') | Out-Null
 
-Copy-Item (Join-Path $PSScriptRoot 'server.js') $Out
-Copy-Item (Join-Path $PSScriptRoot 'neo-tracker.service') $Out
-Copy-Item (Join-Path $PSScriptRoot 'README.md') $Out
+foreach ($f in 'server.js', 'update.sh', 'neo-tracker.service', 'neo-tracker-update.service', 'neo-tracker-update.timer', 'README.md') {
+  Copy-Item (Join-Path $PSScriptRoot $f) $Out
+}
 
 $tar = Join-Path $env:TEMP ('neo-tracker-' + [guid]::NewGuid().ToString('N') + '.tar')
 git -C $repo archive --format=tar -o $tar HEAD dashboard

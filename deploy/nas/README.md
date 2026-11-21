@@ -1,61 +1,90 @@
-# Customer tracker on the NAS (service.neotokyo.in)
+# The website on the NAS (service.neotokyo.in)
 
 The same pattern as the planner: the site runs on the NAS, and the Cloudflare
 tunnel the NAS already runs for the developers' neotokyo.in zone publishes it.
+The NAS keeps itself up to date from GitHub `main`, so merging is publishing.
 
 ```
 customer ─https─▶ Cloudflare (service.neotokyo.in) ─tunnel─▶ cloudflared on the NAS ─▶ 127.0.0.1:8097 (server.js) ─▶ ./site
+GitHub main (dashboard/) ─every 5 min─▶ update.sh ─▶ ./site
 ```
 
 | | |
 |---|---|
-| Folder on the NAS | `/home/neo_tokyo/neo-tracker/` (`server.js`, `neo-tracker.service`, `site/`) |
-| Service | `neo-tracker` (systemd, starts at boot, restarts on failure) |
+| Folder on the NAS | `/home/neo_tokyo/neo-tracker/` (`server.js`, `update.sh`, `site/`, `repo/`) |
+| Web server | systemd `neo-tracker` (starts at boot, restarts on failure) |
+| Updates | systemd `neo-tracker-update.timer` (every 5 minutes, from GitHub `main`) |
 | Port | `127.0.0.1:8097` (loopback only; 8090 is the planner, 8095 the configurator test) |
 | Public address | `https://service.neotokyo.in` (route added by the developers in Cloudflare) |
 
-## The route (for the developers' Cloudflare account)
+The repository is public, so the NAS needs no GitHub login to update.
 
-Zero Trust → Networks → Tunnels → the tunnel the NAS connector runs (the one
-with the planner and configurator-test routes) → Public hostnames → Add:
+## 1. Install on the NAS (once)
 
-- Subdomain `service`, domain `neotokyo.in`, path empty
-- Service type **HTTP** (not HTTPS), URL `localhost:8097`
-
-Cloudflare creates the DNS record itself. No token or password changes: the NAS
-connector already runs this tunnel.
-
-## Install (once)
-
-From the PC, with the package folder built by `make-package.ps1`:
+From the PC, build the folder and copy it (`deploy\nas\make-package.ps1` writes
+it to `A:\Projects\Service Website\nas-tracker`):
 
 ```
+powershell -ExecutionPolicy Bypass -File deploy\nas\make-package.ps1
 scp -r "A:\Projects\Service Website\nas-tracker" nas:~/neo-tracker
 ```
 
 On the NAS (`ssh nas`):
 
 ```
-sudo cp ~/neo-tracker/neo-tracker.service /etc/systemd/system/
+chmod +x ~/neo-tracker/update.sh
+sudo cp ~/neo-tracker/neo-tracker.service ~/neo-tracker/neo-tracker-update.service ~/neo-tracker/neo-tracker-update.timer /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now neo-tracker
-curl -sI http://127.0.0.1:8097/ | head -1        # HTTP/1.1 200 OK
+sudo systemctl enable --now neo-tracker-update.timer
+sudo systemctl start neo-tracker-update      # first update now: clones main into ~/neo-tracker/repo
+curl -s http://127.0.0.1:8097/ping.json      # {"site":"neo-service"}
+cat ~/neo-tracker/site/VERSION.txt           # tracker <commit> <time>
 ```
 
-Once the route is added, `https://service.neotokyo.in/ping.json` answers
-`{"site":"neo-service"}`. Neo Service checks it at start and every hour; the first
-good answer switches its tracking links and QR codes to service.neotokyo.in.
+## 2. The route (the developers' Cloudflare account, which holds neotokyo.in)
 
-## Update the site
+Zero Trust → Networks → Tunnels → the tunnel the NAS connector runs (the one
+whose public hostnames already include the planner and the configurator test)
+→ Public hostname → Add a public hostname:
 
-Copy the new files over `~/neo-tracker/site/`. No restart needed: the server
-reads from disk. Restart only after changing `server.js`:
-`sudo systemctl restart neo-tracker`.
+| Field | Value |
+|---|---|
+| Subdomain | `service` |
+| Domain | `neotokyo.in` |
+| Path | (empty) |
+| Service type | **HTTP** (not HTTPS) |
+| URL | `localhost:8097` |
+
+Save. Cloudflare creates the `service` DNS record (a proxied CNAME to the
+tunnel) itself. If a `service` record already exists in DNS, delete it first,
+or the hostname can't be added. Nothing else: no Access policy (customers use
+it), no token change (the NAS connector already runs this tunnel).
+
+Check from anywhere:
+
+```
+curl -s https://service.neotokyo.in/ping.json     # {"site":"neo-service"}
+```
+
+## 3. What happens by itself after that
+
+- Neo Service PCs see `ping.json` at their next start or within the hour, and
+  switch every tracking link, WhatsApp message and printed QR code to
+  `https://service.neotokyo.in/t/<code>`. Build links, WhatsApp and Customer
+  view on builds appear then.
+- The staff portal is at `https://service.neotokyo.in/staff/`.
+- Every merge to GitHub `main` reaches the NAS within about 5 minutes.
 
 ## Check or stop
 
 ```
-systemctl status neo-tracker
-journalctl -u neo-tracker -n 50
-sudo systemctl disable --now neo-tracker
+systemctl status neo-tracker neo-tracker-update.timer
+journalctl -u neo-tracker -u neo-tracker-update -n 50
+sudo systemctl start neo-tracker-update                    # update now
+sudo systemctl disable --now neo-tracker-update.timer      # stop updating
+sudo systemctl disable --now neo-tracker                   # stop the site
 ```
+
+To go back one version by hand: `mv ~/neo-tracker/site ~/neo-tracker/site.bad && mv ~/neo-tracker/site.old ~/neo-tracker/site`
+(and stop the timer until `main` is fixed).
