@@ -692,7 +692,7 @@
         esc('Accept by ' + hhmm(expMs) + ' (' + fmtLeft(expMs - now) + ' left)') + '</div>';
       var by = it.offer && it.offer.by_name;
       if (by || (it.offer && it.offer.reason)) {
-        clock += '<div class="q-reason">' + esc((it.offer.kind === 'auto' ? 'Neo OS' : (by || 'A lead')) + ': ' + (it.offer.reason || '')) + '</div>';
+        clock += '<div class="q-reason">' + esc((it.offer.kind === 'auto' ? 'Neo Service' : (by || 'A lead')) + ': ' + (it.offer.reason || '')) + '</div>';
       }
     } else if (ctx === 'open') {
       var c = claimText(it, now);
@@ -862,7 +862,7 @@
     }
     if (!profile()) { root.textContent = ''; setStat('—'); return; }
     if (!d || typeof d.workQueue !== 'function') {
-      html.push(banner('The work queue needs the Neo OS 1.11 data layer. Restart Neo OS after the update finishes.', 'error'));
+      html.push(banner('The work queue needs the Neo Service 1.11 data layer. Restart Neo Service after the update finishes.', 'error'));
       root.innerHTML = html.join('');
       setStat('—');
       return;
@@ -933,7 +933,7 @@
   // ── team ──────────────────────────────────────────────────────────────────
   function loadTeam() {
     var d = D();
-    if (!d || typeof d.workTeam !== 'function') { st.teamErr = new Error('The team view needs the latest Neo OS data layer.'); render(); return Promise.resolve(null); }
+    if (!d || typeof d.workTeam !== 'function') { st.teamErr = new Error('The team view needs the latest Neo Service data layer.'); render(); return Promise.resolve(null); }
     var who = whoKey();
     var seq = ++st.teamSeq;
     st.teamLoading = true;
@@ -979,7 +979,7 @@
   // (done, close), a string (shown inline, stays open) or false.
   function reasonAction(opts, run) {
     var ui = UI();
-    if (!ui || typeof ui.dialog !== 'function') { toast('Dialogs are not available — restart Neo OS.', 'error'); return Promise.resolve(false); }
+    if (!ui || typeof ui.dialog !== 'function') { toast('Dialogs are not available — restart Neo Service.', 'error'); return Promise.resolve(false); }
     var body = document.createElement('div');
     body.className = 'q-dlg';
     if (opts.text) {
@@ -1060,7 +1060,7 @@
 
   function needFn(d, name) {
     if (d && typeof d[name] === 'function') return true;
-    toast('This needs the Neo OS 1.11 data layer. Restart Neo OS after the update.', 'error');
+    toast('This needs the Neo Service 1.11 data layer. Restart Neo Service after the update.', 'error');
     return false;
   }
 
@@ -1101,7 +1101,7 @@
     var d = D(), ui = UI();
     if (!canAssignBuilds()) { toast('You need a Builds role to assign builds.', 'warning'); return false; }
     if (!needFn(d, 'buildTechList') || !needFn(d, 'buildAssign')) return false;
-    if (!ui || typeof ui.dialog !== 'function') { toast('Dialogs are not available — restart Neo OS.', 'error'); return false; }
+    if (!ui || typeof ui.dialog !== 'function') { toast('Dialogs are not available — restart Neo Service.', 'error'); return false; }
     if (st.inflight[key]) return false;
     var info = itemInfo('build', id);
     var t = localTicket(id);

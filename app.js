@@ -2152,7 +2152,7 @@ function stampAppVersion(version) {
   if (!v) { try { v = require('./package.json').version; } catch (e) {} }
   if (!v) return;
   document.querySelectorAll('[data-app-version]').forEach(el => { el.textContent = 'v' + v; });
-  document.querySelectorAll('[data-app-version-label]').forEach(el => { el.textContent = 'Launch Neo OS v' + v; });
+  document.querySelectorAll('[data-app-version-label]').forEach(el => { el.textContent = 'Launch Neo Service v' + v; });
 }
 
 // Save DB back to local storage. db:write is atomic and returns
@@ -2788,8 +2788,8 @@ function setupAuthListeners() {
     // so when something is open, this is the one place that says so.
     const open = sessionOverlayOpen();
     const msg = open
-      ? 'Sign out of Neo OS? The open ticket or form will be closed, and anything not saved in it will be lost.'
-      : 'Sign out of Neo OS?';
+      ? 'Sign out of Neo Service? The open ticket or form will be closed, and anything not saved in it will be lost.'
+      : 'Sign out of Neo Service?';
     if (await showConfirm(msg, { title: 'Sign out', okText: 'Sign out', danger: open })) neoLogout();
   });
   const tierLogout = document.getElementById('btn-tier-logout');
@@ -3188,7 +3188,7 @@ function renderDashboard() {
       if (assignBtn) assignBtn.addEventListener('click', (e) => {
         e.stopPropagation();
         const Q = window.NeoQcQueue;
-        if (!Q || typeof Q.buildAction !== 'function') { showToast('Assigning is not available on this PC — restart Neo OS.', 'error'); return; }
+        if (!Q || typeof Q.buildAction !== 'function') { showToast('Assigning is not available on this PC — restart Neo Service.', 'error'); return; }
         Promise.resolve(Q.buildAction('assign', t.id))
           .then(ok => ok ? refreshTicketFromCloud(t.id).catch(() => {}).then(() => renderDashboard()) : null)
           .catch(err => showToast('That did not work: ' + opsErrText(err), 'error', 8000));
@@ -4069,7 +4069,7 @@ async function assignPickedTech(id, email, uploaded, current) {
     return;
   }
   const D = window.NeoQcData;
-  if (!D || typeof D.buildAssign !== 'function') { showToast('The technician was not set — restart Neo OS and try again.', 'error'); return; }
+  if (!D || typeof D.buildAssign !== 'function') { showToast('The technician was not set — restart Neo Service and try again.', 'error'); return; }
   try {
     ownQueueActionAt[id] = Date.now();
     const res = await D.buildAssign(id, email, current ? 'Changed in the build ticket' : '', current || '');
@@ -4106,7 +4106,7 @@ async function onTechButton(act) {
   if (techActionBusy) return;
   const Q = window.NeoQcQueue;
   if (!Q || typeof Q.buildAction !== 'function') {
-    showToast('Assigning is not available on this PC — restart Neo OS.', 'error');
+    showToast('Assigning is not available on this PC — restart Neo Service.', 'error');
     return;
   }
   techActionBusy = true;
@@ -6356,7 +6356,7 @@ async function editOpsPerson(r, D) {
   const who = r.full_name || r.email;
   const seq = opsSettingsSeq;
   const UI = window.NeoQcUI;
-  if (!UI || typeof UI.dialog !== 'function') { showToast('Dialogs are not available — restart Neo OS.', 'error'); return; }
+  if (!UI || typeof UI.dialog !== 'function') { showToast('Dialogs are not available — restart Neo Service.', 'error'); return; }
   const block = opsChangeBlock(r);
   if (block) { showToast(block, 'warning'); return; }
   const self = opsIsSelf(r);
@@ -6393,7 +6393,7 @@ async function editOpsPerson(r, D) {
   body.appendChild(dl);
 
   const chkActive = opsCheck('Active — can sign in', r.active !== false, self, self ? selfNote : '');
-  const chkStaff = opsCheck('Staff — works in Neo OS (off for a new sign-up until set up)', !!r.is_staff, self, self ? selfNote : '');
+  const chkStaff = opsCheck('Staff — works in Neo Service (off for a new sign-up until set up)', !!r.is_staff, self, self ? selfNote : '');
   body.appendChild(chkActive.label);
   body.appendChild(chkStaff.label);
 
@@ -6584,8 +6584,8 @@ async function editOpsPreset(p, D) {
   const key = p ? p.key : null;              // bound before any await
   const seq = opsSettingsSeq;
   const UI = window.NeoQcUI;
-  if (!UI || typeof UI.dialog !== 'function') { showToast('Dialogs are not available — restart Neo OS.', 'error'); return; }
-  if (typeof D.presetUpsert !== 'function') { showToast('This needs the Neo OS 1.11 data layer.', 'error'); return; }
+  if (!UI || typeof UI.dialog !== 'function') { showToast('Dialogs are not available — restart Neo Service.', 'error'); return; }
+  if (typeof D.presetUpsert !== 'function') { showToast('This needs the Neo Service 1.11 data layer.', 'error'); return; }
   const cur = p || {};
   const body = opsNode('div', 'q-dlg');
   const grid = opsNode('div', 'ops-grid');

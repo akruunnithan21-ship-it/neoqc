@@ -1,6 +1,6 @@
 {
   "appId": "com.neotokyo.neoqc",
-  "productName": "NeoQC",
+  "productName": "Neo Service",
   "win": {
     "target": [
       "nsis",
@@ -13,10 +13,13 @@
     "oneClick": false,
     "allowToChangeInstallationDirectory": true,
     "deleteAppDataOnUninstall": true,
-    "artifactName": "NeoQC-Setup-${version}.${ext}"
+    "artifactName": "Neo-Service-Setup-${version}.${ext}",
+    "shortcutName": "Neo Service",
+    "uninstallDisplayName": "Neo Service ${version}",
+    "include": "build/installer.nsh"
   },
   "portable": {
-    "artifactName": "NeoQC.exe"
+    "artifactName": "Neo-Service.exe"
   },
   "publish": {
     "provider": "github",
@@ -40,7 +43,8 @@
     "!sql/**",
     "!tests/**",
     "!dev/**",
-    "!docs/**"
+    "!docs/**",
+    "!build/**"
   ],
   "asarUnpack": [
     "assets/diagnostics/**",
