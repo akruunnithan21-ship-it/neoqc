@@ -581,6 +581,18 @@
 
   function msg(lines) { return lines.filter(function (l) { return l != null && l !== ''; }).join('\n'); }
 
+  // ₹ the way the shop writes it: ₹4,500 · ₹1,25,000 · ₹4,500.50
+  function rupees(v) {
+    var n = Math.round((Number(v) || 0) * 100) / 100;
+    var whole = Math.floor(Math.abs(n)), paise = Math.round((Math.abs(n) - whole) * 100);
+    var s = String(whole), out;
+    if (s.length > 3) {
+      var last = s.slice(-3), rest = s.slice(0, -3);
+      out = rest.replace(/\B(?=(\d{2})+(?!\d))/g, ',') + ',' + last;
+    } else out = s;
+    return (n < 0 ? '-' : '') + '\u20b9' + out + (paise ? '.' + (paise < 10 ? '0' : '') + paise : '');
+  }
+
   // Minutes in words for a customer: "40 minutes", "1 hour 20 minutes",
   // "2 days" (a whole number of days only; otherwise hours). '' for none.
   function durationWords(m) {
@@ -623,6 +635,23 @@
         body = 'We have received your ' + deviceOf(j) + ' for service. Expect our update within about ' + est + '.';
       }
       return msg([hello(j.customer_name), 'Thank you for choosing ' + SHOP + '. ' + body, estLine, dataLine, footer(j.public_code)]);
+    },
+
+    // 1.13: an itemised quote (sql/service-v2.8.sql). Prices include GST.
+    quote_lines: function (job, quote) {
+      var j = job || {}, q = quote || {};
+      var lines = Array.isArray(q.lines) ? q.lines : [];
+      var rows = lines.slice(0, 30).map(function (l) {
+        var qty = Number(l && l.qty) || 1;
+        return '• ' + clip(l && l.text, 80) + (qty > 1 ? ' ×' + qty : '') + ' — ' + rupees(l && l.amount != null ? l.amount : (Number(l && l.price) || 0) * qty);
+      });
+      return msg([hello(j.customer_name),
+        'We have checked your ' + deviceOf(j) + '. Here is our quote (prices include GST):',
+        rows.join('\n'),
+        'Total: ' + rupees(q.total) + (q.version > 1 ? ' (revised quote)' : ''),
+        lines.length > 1 ? 'Reply YES to go ahead with everything, or tell us which items you want us to do.'
+                         : 'Reply YES to go ahead, or call us if you have any questions.',
+        footer(j.public_code)]);
     },
 
     quote: function (job, amountText) {
@@ -1024,6 +1053,7 @@
     ourWarrantyUntil: ourWarrantyUntil,
     WA_TEMPLATES: WA_TEMPLATES,
     durationWords: durationWords,
+    rupees: rupees,
     trackLink: trackLink,
     visitText: visitText,
     matchFaults: matchFaults,

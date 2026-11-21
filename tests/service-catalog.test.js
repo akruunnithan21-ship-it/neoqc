@@ -146,6 +146,32 @@ test('1.13: the created message gives the estimate in words, counted from when t
   assert.ok(!/please/i.test(m), 'no please');
 });
 
+test('1.13: rupees reads like sql _inr (Indian grouping, paise only when there are any)', function () {
+  assert.strictEqual(C.rupees(0), '\u20b90');
+  assert.strictEqual(C.rupees(800), '\u20b9800');
+  assert.strictEqual(C.rupees(4500), '\u20b94,500');
+  assert.strictEqual(C.rupees(4500.5), '\u20b94,500.50');
+  assert.strictEqual(C.rupees(125000), '\u20b91,25,000');
+  assert.strictEqual(C.rupees(1234567.05), '\u20b912,34,567.05');
+  assert.strictEqual(C.rupees('6200.5'), '\u20b96,200.50');
+});
+
+test('1.13: the itemised quote message lists every line and the total incl. GST', function () {
+  var job = { customer_name: 'Vishnu P', public_code: 'NT-7Q4R2ABC', device_label: 'ASUS TUF A15' };
+  var m = C.WA_TEMPLATES.quote_lines(job, { version: 1, total: 11300, lines: [
+    { text: 'Samsung 980 1TB SSD', qty: 1, price: 4500, amount: 4500 },
+    { text: 'RAM 8GB', qty: 2, price: 3000, amount: 6000 },
+    { text: 'Windows reinstall', qty: 1, price: 800, amount: 800 }] });
+  assert.ok(/prices include GST/.test(m), m);
+  assert.ok(/• Samsung 980 1TB SSD — \u20b94,500/.test(m), m);
+  assert.ok(/• RAM 8GB ×2 — \u20b96,000/.test(m), m);
+  assert.ok(/Total: \u20b911,300\n/.test(m) && !/revised/.test(m), m);
+  assert.ok(/tell us which items/.test(m), 'several lines: the customer can pick');
+  assert.ok(/NT-7Q4R2ABC/.test(m) && !/please/i.test(m));
+  var one = C.WA_TEMPLATES.quote_lines(job, { version: 2, total: 800, lines: [{ text: 'Labour', qty: 1, price: 800 }] });
+  assert.ok(/Total: \u20b9800 \(revised quote\)/.test(one) && /Reply YES to go ahead, or call us/.test(one), one);
+});
+
 test('estMinutes is the longest picked fault, 60 when none', function () {
   assert.strictEqual(C.estMinutes([]), 60);
   assert.strictEqual(C.estMinutes(['nonsense']), 60);

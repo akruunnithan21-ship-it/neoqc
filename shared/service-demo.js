@@ -154,6 +154,7 @@
 
     var jobs = [], items = [], units = [], intakes = [], events = [], rmaEvents = [], customers = [];
     var shipments = [], shipmentItems = [];
+    var quotes = [];
     var J = {}, U = {}, I = {}, CU = {};
 
     // ── vendors ─────────────────────────────────────────────────────────────
@@ -521,6 +522,17 @@
       body: 'Quote ₹8,400: MSI PRO B660M-A board ₹7,600 plus ₹800 labour. Sent on WhatsApp.'
     }));
     move('meera', 4.1 * D, 'diagnosing', 'quoted', 'vinayak', 'Quote sent: ₹8,400 for a replacement motherboard, fitted and tested.');
+    // 1.13 (sql/service-v2.8.sql): the same quote, itemised, waiting for her answer.
+    quotes.push({
+      id: 'demo_q_meera1', job_id: 'demo_s_meera', version: 1, status: 'sent',
+      lines: [
+        { n: 1, kind: 'part', text: 'MSI PRO B660M-A motherboard', qty: 1, price: 7600, amount: 7600 },
+        { n: 2, kind: 'labour', text: 'Fitting and testing', qty: 1, price: 800, amount: 800 }
+      ],
+      total: 8400, approved_total: null, gst_included: true, note: 'Board in stock at Prime ABGB, 2 days.',
+      sent_at: ago(4.1 * D), sent_by_email: STAFF.vinayak.email, sent_by_name: STAFF.vinayak.full_name,
+      decided_at: null, decided_by_email: null, decided_by_name: null, decided_via: null, decision_note: null
+    });
     sev('meera', 2 * D, 'note', extend(by('anagha'), { body: 'Called. She will confirm after talking to her husband.' }));
 
     // 4. Sandeep V — ready to collect for 2.4 days.
@@ -1152,7 +1164,8 @@
       techs: techs,
       customers: customers,
       shipments: shipments,
-      shipment_items: shipmentItems
+      shipment_items: shipmentItems,
+      quotes: quotes
     };
 
     // "Thu, 23 Oct, 2:30 pm" in local time, for event bodies.

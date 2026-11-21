@@ -521,3 +521,130 @@ body.dark-mode .sv2-chip.on { color: #ff6b9a; background: rgba(var(--primary-pin
 /* 1.12.7 — a ticket header RMA pill is a button that opens the case in RMA. */
 button.sv2-unit-pill { border: 0; font-family: inherit; cursor: pointer; }
 button.sv2-unit-pill:hover { text-decoration: underline; }
+
+/* ── 1.13: the step bar and the Next step row (job panel header) ─────────── */
+/* The ball row (style.css .sv-job-ball) wraps: these two take a whole line. */
+.sv2-steps, .sv2-next { flex: 0 0 100%; box-sizing: border-box; }
+.sv2-steps {
+  display: flex; align-items: flex-start; gap: 0;
+  margin: 0 0 12px; padding: 0; list-style: none; overflow-x: auto;
+}
+.sv2-step {
+  position: relative; flex: 1 1 0; min-width: 74px;
+  display: flex; flex-direction: column; align-items: center; gap: 5px; text-align: center;
+}
+/* the line to the next step, behind the dots */
+.sv2-step:not(:last-child)::after {
+  content: ""; position: absolute; top: 11px; left: calc(50% + 14px); right: calc(-50% + 14px);
+  height: 2px; border-radius: 2px; background: rgba(127, 127, 160, 0.28);
+}
+.sv2-step.is-done:not(:last-child)::after { background: var(--primary-pink); }
+.sv2-step-dot {
+  width: 24px; height: 24px; box-sizing: border-box; border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-family: "JetBrains Mono", monospace; font-size: 0.68rem; font-weight: 800;
+  border: 2px solid rgba(127, 127, 160, 0.45); color: var(--text-muted); background: var(--bg-color);
+}
+.sv2-step.is-done .sv2-step-dot { background: var(--primary-pink); border-color: var(--primary-pink); color: #ffffff; }
+.sv2-step.is-now .sv2-step-dot {
+  border-color: var(--primary-pink); color: var(--primary-pink);
+  box-shadow: 0 0 0 4px rgba(var(--primary-pink-rgb), 0.16);
+}
+.sv2-step-t { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.sv2-step-l { font-size: 0.72rem; font-weight: 700; color: var(--text-muted); white-space: nowrap; }
+.sv2-step.is-now .sv2-step-l { color: var(--text-dark); }
+.sv2-step.is-done .sv2-step-l { color: var(--text-dark); opacity: 0.8; }
+.sv2-step-s { font-size: 0.64rem; color: var(--primary-pink); font-weight: 600; line-height: 1.25; }
+body.dark-mode .sv2-step-s, body.dark-mode .sv2-step.is-now .sv2-step-dot { color: #ff7aa6; }
+
+.sv2-next {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+  margin-top: 12px; padding: 10px 12px; border-radius: 10px;
+  border: 1px dashed rgba(var(--primary-pink-rgb), 0.4); background: rgba(var(--primary-pink-rgb), 0.04);
+}
+.sv2-next-k {
+  font-size: 0.64rem; font-weight: 800; letter-spacing: 0.07em; text-transform: uppercase; color: var(--text-muted);
+}
+.sv2-next-main { padding: 8px 16px; font-size: 0.84rem; font-weight: 700; border-radius: 9px; }
+.sv2-next-or { font-size: 0.74rem; color: var(--text-muted); }
+.sv2-next-move { margin-left: auto; }
+.sv2-next-why { flex-basis: 100%; font-size: 0.72rem; color: var(--text-muted); }
+@keyframes sv2-flash { 0% { box-shadow: 0 0 0 0 rgba(var(--primary-pink-rgb), 0.55); } 100% { box-shadow: 0 0 0 14px rgba(var(--primary-pink-rgb), 0); } }
+#sv2-movebox.sv2-flash > .sv-movebox { animation: sv2-flash 0.9s ease-out 2; border-radius: 10px; }
+
+/* ── 1.13: quotes (sql/service-v2.8.sql) ─────────────────────────────────── */
+#sv2-quote-sec:not(:empty) { margin: 18px 0; }
+.sv2-quote { padding: 12px 14px; border-radius: 10px; border: 1px solid var(--glass-border); background: var(--glass-bg); }
+.sv2-q-status {
+  margin-left: 4px; padding: 2px 8px; border-radius: 999px; letter-spacing: 0.02em; text-transform: none;
+  font-size: 0.68rem; font-weight: 700; border: 1px solid rgba(127, 127, 160, 0.35); color: var(--text-dark);
+}
+.sv2-q-status.is-sent { border-color: rgba(245, 158, 11, 0.55); background: rgba(245, 158, 11, 0.1); color: #b45309; }
+.sv2-q-status.is-approved { border-color: rgba(16, 185, 129, 0.55); background: rgba(16, 185, 129, 0.1); color: #047857; }
+.sv2-q-status.is-partly_approved { border-color: rgba(59, 130, 246, 0.5); background: rgba(59, 130, 246, 0.1); color: #1d4ed8; }
+.sv2-q-status.is-declined { border-color: rgba(239, 68, 68, 0.5); background: rgba(239, 68, 68, 0.08); color: #b91c1c; }
+body.dark-mode .sv2-q-status.is-sent { color: #fbbf24; }
+body.dark-mode .sv2-q-status.is-approved { color: #34d399; }
+body.dark-mode .sv2-q-status.is-partly_approved { color: #93c5fd; }
+body.dark-mode .sv2-q-status.is-declined { color: #fca5a5; }
+.sv2-q-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; color: var(--text-dark); margin-bottom: 8px; }
+.sv2-q-table th {
+  text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--glass-border);
+  font-size: 0.64rem; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-muted);
+}
+.sv2-q-table td { padding: 7px 8px; border-bottom: 1px solid rgba(127, 127, 160, 0.14); vertical-align: top; }
+.sv2-q-table .num { text-align: right; white-space: nowrap; font-family: "JetBrains Mono", monospace; }
+.sv2-q-table tfoot td { font-weight: 800; border-bottom: 0; }
+.sv2-q-table tr.is-no td { opacity: 0.55; text-decoration: line-through; }
+.sv2-q-table .sv2-q-appr td { color: #047857; }
+body.dark-mode .sv2-q-table .sv2-q-appr td { color: #34d399; }
+.sv2-q-kind {
+  margin-left: 4px; padding: 1px 6px; border-radius: 999px; font-size: 0.64rem; font-weight: 700;
+  background: rgba(127, 127, 160, 0.14); color: var(--text-muted);
+}
+.sv2-q-yes, .sv2-q-no { display: inline-block; width: 16px; margin-right: 4px; font-weight: 800; }
+.sv2-q-yes { color: #059669; }
+.sv2-q-no { color: #dc2626; }
+.sv2-q-old summary { cursor: pointer; font-size: 0.76rem; color: var(--text-muted); margin-top: 8px; }
+.sv2-q-old ul { margin: 6px 0 0 18px; padding: 0; font-size: 0.76rem; color: var(--text-muted); line-height: 1.6; }
+
+/* the quote form: one grid row per line */
+.sv2-ql-head, .sv2-ql {
+  display: grid; grid-template-columns: 104px minmax(0, 1fr) 62px 118px 96px 30px; gap: 6px; align-items: center;
+}
+.sv2-ql-head {
+  margin: 12px 0 4px; font-size: 0.64rem; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-muted);
+}
+.sv2-ql { margin-bottom: 6px; }
+.sv2-ql input, .sv2-ql select {
+  width: 100%; box-sizing: border-box; padding: 8px 10px; border-radius: 8px;
+  border: 1px solid var(--glass-border); background: var(--glass-bg); color: var(--text-dark);
+  font-family: inherit; font-size: 0.86rem;
+}
+body.dark-mode .sv2-ql input, body.dark-mode .sv2-ql select { color-scheme: dark; background: rgba(255, 255, 255, 0.07); border-color: rgba(255, 255, 255, 0.16); }
+.sv2-ql input:focus, .sv2-ql select:focus { outline: none; border-color: var(--primary-pink); box-shadow: 0 0 0 3px rgba(var(--primary-pink-rgb), 0.14); }
+.sv2-ql select option { background: #ffffff; color: #0f172a; }
+body.dark-mode .sv2-ql select option { background: #182031; color: #f1f5fb; }
+.sv2-ql-amt { text-align: right; font-family: "JetBrains Mono", monospace; font-size: 0.8rem; color: var(--text-dark); }
+.sv2-ql-x {
+  width: 28px; height: 28px; border-radius: 7px; border: 1px solid transparent; background: transparent;
+  color: var(--text-muted); font-size: 1.05rem; line-height: 1; cursor: pointer;
+}
+.sv2-ql-x:hover, .sv2-ql-x:focus-visible { color: #dc2626; border-color: var(--glass-border); outline: none; }
+.sv2-ql-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 4px 0 12px; }
+.sv2-ql-total { font-size: 0.84rem; color: var(--text-muted); }
+.sv2-ql-total strong { margin-left: 6px; font-family: "JetBrains Mono", monospace; font-size: 1rem; color: var(--text-dark); }
+
+/* the answer form: one tick per line */
+.sv2-qa { display: flex; flex-direction: column; gap: 4px; margin: 8px 0; }
+.sv2-qa-row {
+  display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; gap: 10px; align-items: center;
+  padding: 8px 10px; border-radius: 8px; border: 1px solid var(--glass-border); cursor: pointer;
+  font-size: 0.86rem; color: var(--text-dark);
+}
+.sv2-qa-row input { width: 18px; height: 18px; accent-color: var(--primary-pink); cursor: pointer; }
+.sv2-qa-row:has(input:not(:checked)) .sv2-qa-t, .sv2-qa-row:has(input:not(:checked)) .sv2-qa-a { opacity: 0.5; text-decoration: line-through; }
+.sv2-qa-a { font-family: "JetBrains Mono", monospace; }
+.sv2-qa-sum { font-size: 0.84rem; color: var(--text-muted); margin: 6px 0 10px; }
+.sv2-qa-sum strong { font-family: "JetBrains Mono", monospace; color: var(--text-dark); }
+@media (prefers-reduced-motion: reduce) { #sv2-movebox.sv2-flash > .sv-movebox { animation: none; } }

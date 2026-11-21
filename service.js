@@ -63,7 +63,8 @@
     release: 'Release', assign: 'Assign', field: 'Field', rma: 'RMA',
     suggest: 'Suggest', priority: 'Priority', offer: 'Offer'
   };
-  var VIA = { claim: 'took it from the queue', manager: 'assigned by a lead', auto: 'offered by the app', legacy: 'assigned', self: 'took it at intake' };
+  // 1.13: no queue any more; the words say what happened, not where from.
+  var VIA = { claim: 'took it', manager: 'assigned', auto: 'offered by the app', legacy: 'assigned', self: 'took it at intake' };
   var NO_POOLS = { build: false, service: false, level: null };
   // The release dialog's one choice on a closed ticket: the part goes on by
   // itself and the ticket stays closed. Never a stage key; sent as no target.
@@ -1731,6 +1732,11 @@
         if (t) switchTab(t.getAttribute('data-tab'));
       });
     }
+    var ball = byId('sv-job-ball');
+    if (ball && !ball.dataset.sv2) {
+      ball.dataset.sv2 = '1';
+      ball.addEventListener('click', onBallClick);
+    }
     var acts = byId('sv-job-actions');
     if (acts && !acts.dataset.sv2) {
       acts.dataset.sv2 = '1';
@@ -1895,7 +1901,7 @@
     var now = Date.now();
     setText('sv-job-title', titleName(job));
     setText('sv-job-sub', subLine(job));
-    if (head) head.innerHTML = ballHtml(job, now);
+    if (head) head.innerHTML = stepperHtml(job) + ballHtml(job, now) + nextHtml(job);
     paintActions();
     paintTabs(job);
     staleCheck(job);
@@ -2036,7 +2042,7 @@
     hidePassword();                // a repaint never carries a shown password over
     disposeTray();
     formBase = null; visitBase = null; itemEditId = null; itemBase = null;
-    if (jobTab === 'details') body.innerHTML = detailsHtml(job);
+    if (jobTab === 'details') { body.innerHTML = detailsHtml(job); paintQuotes(job.id); loadQuotes(job.id); }
     else if (jobTab === 'items') { body.innerHTML = itemsTabHtml(job); loadItemPhotoCounts(job.id); }
     else if (jobTab === 'visit') { body.innerHTML = visitTabHtml(job); loadFieldActivity(job.id); }
     else if (jobTab === 'photos') { body.innerHTML = photosTabHtml(); mountTray(job); loadPhotos(job.id); }
@@ -2055,7 +2061,7 @@
         '<button type="button" class="sv-linkbtn" data-mact="reload-form">Reload the form</button>';
     } else if (formBase.hidden !== contactHidden(job)) {
       host.hidden = false;
-      host.innerHTML = (formBase.hidden ? 'This ticket has been taken from the queue. '
+      host.innerHTML = (formBase.hidden ? 'This ticket has been assigned. '
                                         : 'This ticket went back to be assigned. ') +
         '<button type="button" class="sv-linkbtn" data-mact="reload-form">Reload the form</button>';
     } else if (formBase.stage !== job.stage) {
@@ -2210,7 +2216,7 @@
     // Customer
     html += '<div class="sv2-sec"><div class="sv2-sec-title">Customer</div>';
     if (hidden) {
-      html += '<p class="sv-hint">The phone number and address show once the ticket is yours. Claim it from the bar above.</p>' +
+      html += '<p class="sv-hint">The phone number and address show once the ticket is assigned to you.</p>' +
         '<div class="sv-fields">' + roField('Customer', firstName(job.customer_name)) +
         (t === 'on_site' ? roField('Area', [job.site_area, job.site_pincode].filter(Boolean).join(' · ')) : '') + '</div>';
     } else {
@@ -2290,6 +2296,7 @@
     html += '<div class="sv-actions">' +
       '<button type="button" id="sv-e-save" class="primary-pink-btn">Save changes</button>' +
       '<span id="sv-e-status" class="sv-status" role="status"></span></div>';
+    html += '<div id="sv2-quote-sec"></div>';
     html += '<div id="sv2-movebox">' + moveBoxHtml(job) + '</div>';
 
     // Snapshot exactly what the form is being painted from. saveDetails diffs
@@ -2401,6 +2408,399 @@
   }
 
   // ── move box ───────────────────────────────────────────────────────────────
+  // ── 1.13: the step bar and the Next step button ───────────────────────────
+  // The bar shows where the ticket is in its type's steps (service-status.js
+  // STEPS_BY_TYPE). The button does the usual next thing; anything else stays
+  // in "Move this ticket on". A move goes through the move box itself (same
+  // checks, same extras), so the button can never do what the box would not.
+  var nextActs = [];
+  function stepperHtml(job) {
+    var M = svc();
+    if (!M || typeof M.stepsFor !== 'function') return '';
+    var s = M.stepsFor(job);
+    if (s.current < 0) return '';
+    var closed = job.stage === 'closed';
+    return '<ol class="sv2-steps" aria-label="Where this ticket is">' + s.steps.map(function (st, i) {
+      var state = (closed || i < s.current) ? 'done' : i === s.current ? 'now' : 'todo';
+      var label = st.label;
+      if (i === s.current && job.stage === 'logged' && s.type === 'in_store') label = 'Not here yet';
+      var sub = (state === 'now' && st.stages.length > 1 && !(s.type === 'in_store' && job.stage === 'logged')) ? stageLabel(job.stage) : '';
+      return '<li class="sv2-step is-' + state + '"' + (state === 'now' ? ' aria-current="step"' : '') + '>' +
+        '<span class="sv2-step-dot" aria-hidden="true">' + (state === 'done' ? '✓' : String(i + 1)) + '</span>' +
+        '<span class="sv2-step-t"><span class="sv2-step-l">' + esc(label) + '</span>' +
+        (sub ? '<span class="sv2-step-s">' + esc(sub) + '</span>' : '') + '</span></li>';
+    }).join('') + '</ol>';
+  }
+  function latestQuote(jobId) {
+    var d = D();
+    var list = (d && typeof d.cachedQuotes === 'function') ? d.cachedQuotes(jobId) : [];
+    return list.length ? list[0] : null;
+  }
+  function canFieldTap(job) { return isMine(job) || isLead(); }
+  // { label, kind: move | quote | answer | rma | open-rma | field | visit | movebox, to, ask, field, unit, disabled, why }
+  function nextActions(job) {
+    var t = typeOf(job), st = job.stage;
+    var A = [];
+    var mv = function (label, to, ask) { A.push({ label: label, kind: 'move', to: to, ask: !!ask }); };
+    if (!isDeskPlus() || st === 'closed') return A;
+    var q = latestQuote(job.id);
+    if (t === 'in_store') {
+      if (st === 'logged') mv('Mark received', 'received');
+      else if (st === 'received') mv('Start diagnosis', 'diagnosing');
+      else if (st === 'diagnosing') {
+        A.push({ label: 'Send quote', kind: 'quote' });
+        mv('No charge — start repair', 'in_service');
+        mv('Needs a part', 'parts_to_order');
+        A.push({ label: 'Warranty claim (RMA)…', kind: 'rma' });
+      } else if (st === 'quoted') {
+        if (q && q.status === 'sent') A.push({ label: 'Record the customer’s answer', kind: 'answer' });
+        else { mv('Approved — start repair', 'in_service'); mv('Declined — mark ready', 'ready', true); }
+        A.push({ label: q ? 'Revise the quote' : 'Send an itemised quote', kind: 'quote' });
+      } else if (st === 'approved') { mv('Start repair', 'in_service'); mv('Order a part', 'parts_to_order'); }
+      else if (st === 'parts_to_order') mv('Part ordered', 'parts_on_order', true);
+      else if (st === 'parts_on_order') mv('Part arrived — start repair', 'in_service');
+      else if (st === 'back_from_vendor') mv('Start repair', 'in_service');
+      else if (st === 'rma_raised' || st === 'at_vendor') {
+        var u = holdingUnits(job.id)[0] || unitsOfJob(job.id)[0];
+        if (u && canOpenRma()) A.push({ label: 'Open the RMA', kind: 'open-rma', unit: u.id });
+      }
+      else if (st === 'in_service') { mv('Start testing', 'verifying'); mv('Needs a part', 'parts_to_order'); A.push({ label: 'Extra work — send a quote', kind: 'quote' }); }
+      else if (st === 'verifying') mv('Mark ready', 'ready', true);
+      else if (st === 'ready') mv('Hand over', 'closed', true);
+    } else if (t === 'on_site') {
+      var field = canFieldTap(job);
+      var fieldWhy = field ? '' : 'Only the technician on this ticket, or a lead.';
+      if (st === 'logged' || st === 'revisit_needed' || st === 'approved' || st === 'parts_on_order' || st === 'back_from_vendor' || st === 'parts_to_order') {
+        A.push({ label: st === 'revisit_needed' ? 'Book the revisit' : st === 'parts_on_order' ? 'Part arrived — book the visit' : 'Book the visit', kind: 'visit' });
+        if (st === 'parts_to_order') mv('Part ordered', 'parts_on_order', true);
+      } else if (st === 'scheduled') A.push({ label: 'Left the shop', kind: 'field', field: 'left_base', disabled: !field, why: fieldWhy });
+      else if (st === 'en_route') A.push({ label: 'Checked in on site', kind: 'field', field: 'arrived', disabled: !field, why: fieldWhy });
+      else if (st === 'on_site') {
+        A.push({ label: 'Check out…', kind: 'visit' });
+        A.push({ label: 'Send quote', kind: 'quote' });
+      } else if (st === 'quoted') {
+        if (q && q.status === 'sent') A.push({ label: 'Record the customer’s answer', kind: 'answer' });
+        A.push({ label: q ? 'Revise the quote' : 'Send an itemised quote', kind: 'quote' });
+      } else if (st === 'work_done') mv('Close', 'closed', true);
+    } else {
+      if (st === 'logged' || st === 'quoted') A.push({ label: 'Book the session', kind: 'visit' });
+      else if (st === 'session_booked') mv('Start the session', 'in_session');
+      else if (st === 'in_session') mv('Resolved', 'resolved');
+      else if (st === 'resolved') mv('Close', 'closed', true);
+    }
+    return A;
+  }
+  function nextHtml(job) {
+    nextActs = nextActions(job);
+    if (!nextActs.length) return '';
+    var first = nextActs[0];
+    var html = '<div class="sv2-next">' +
+      '<span class="sv2-next-k">Next step</span>' +
+      '<button type="button" class="primary-pink-btn sv2-next-main" data-next="0"' + (first.disabled ? ' disabled title="' + esc(first.why || '') + '"' : '') + '>' + esc(first.label) + ' →</button>';
+    var rest = nextActs.slice(1);
+    if (rest.length) {
+      html += '<span class="sv2-next-or">or</span>' + rest.map(function (a, i) {
+        return '<button type="button" class="secondary-btn sv2-small sv2-next-alt" data-next="' + (i + 1) + '"' +
+          (a.disabled ? ' disabled title="' + esc(a.why || '') + '"' : '') + '>' + esc(a.label) + '</button>';
+      }).join('');
+    }
+    html += '<button type="button" class="sv-linkbtn sv2-next-move" data-next="movebox">Another move…</button>';
+    if (first.disabled && first.why) html += '<span class="sv2-next-why">' + esc(first.why) + '</span>';
+    return html + '</div>';
+  }
+  function onBallClick(e) {
+    var b = e.target.closest('[data-next]');
+    if (!b || b.disabled) return;
+    var key = b.getAttribute('data-next');
+    if (key === 'movebox') { showMoveBox(); return; }
+    var a = nextActs[Number(key)];
+    if (!a) return;
+    var jobId = openJobId;
+    if (a.kind === 'move') goMove(a.to, a.ask);
+    else if (a.kind === 'quote') quoteDialog(jobId);
+    else if (a.kind === 'answer') answerDialog(jobId);
+    else if (a.kind === 'rma') convertToRma(jobId);
+    else if (a.kind === 'open-rma') openRmaUnit(a.unit);
+    else if (a.kind === 'field') fieldTap(a.field);
+    else if (a.kind === 'visit') switchTab('visit');
+  }
+  async function showMoveBox() {
+    if (jobTab !== 'details') { await switchTab('details'); if (jobTab !== 'details') return; }
+    var box = byId('sv2-movebox');
+    if (!box) return;
+    try { box.scrollIntoView({ block: 'center', behavior: 'smooth' }); } catch (e) { box.scrollIntoView(); }
+    box.classList.remove('sv2-flash'); void box.offsetWidth; box.classList.add('sv2-flash');
+    var sel = byId('sv-m-stage');
+    if (sel) sel.focus();
+  }
+  // Picks `to` in the move box. A move that needs more (an outcome, a
+  // supplier) waits there for it; anything else goes straight away.
+  async function goMove(to, ask) {
+    var jobId = openJobId;
+    if (jobTab !== 'details') { await switchTab('details'); if (jobTab !== 'details' || openJobId !== jobId) return; }
+    var sel = byId('sv-m-stage');
+    if (!sel || moveBusy) return;
+    var open = Array.prototype.some.call(sel.options, function (o) { return o.value === to; });
+    if (!open) { toast(stageLabel(to) + ' isn’t open from here. Use “Another move…”.', 'warning'); showMoveBox(); return; }
+    sel.value = to;
+    sel.dispatchEvent(new Event('change', { bubbles: true }));
+    if (ask) {
+      await showMoveBox();
+      var ex = byId('sv-m-extra');
+      var first = ex && ex.querySelector('select, input, textarea');
+      if (first) first.focus();
+      setStatus('sv-m-status', 'Fill this in, then press Move.', '');
+      return;
+    }
+    doMove();
+  }
+
+  // ── 1.13: quotes (sql/service-v2.8.sql) ───────────────────────────────────
+  // Itemised, prices include GST. The latest quote shows above the move box;
+  // "Send quote" asks for the diagnosis first; the customer's answer is
+  // recorded line by line with how it came.
+  var quotesLoading = {};
+  async function loadQuotes(jobId) {
+    var d = D();
+    if (!d || typeof d.quotes !== 'function' || quotesLoading[jobId]) return;
+    quotesLoading[jobId] = true;
+    try { await d.quotes(jobId); }
+    catch (e) { var h0 = byId('sv2-quote-sec'); if (h0 && openJobId === jobId) h0.innerHTML = '<p class="sv-hint">Quotes could not be loaded: ' + esc(errMsg(e)) + '</p>'; return; }
+    finally { delete quotesLoading[jobId]; }
+    if (openJobId !== jobId) return;
+    paintQuotes(jobId);
+    paintJobHeader();                // the Next step depends on the latest quote
+  }
+  function money(v) { var C = CAT(); return (C && typeof C.rupees === 'function') ? C.rupees(v) : '₹' + (Number(v) || 0).toFixed(2); }
+  function quoteVocab(name, key) { var M = svc(); var m = (M && M[name]) || {}; return m[key] || key || ''; }
+  function paintQuotes(jobId) {
+    var host = byId('sv2-quote-sec');
+    var job = jobById(jobId);
+    if (!host || !job || openJobId !== jobId) return;
+    var d = D();
+    var list = (d && typeof d.cachedQuotes === 'function') ? d.cachedQuotes(jobId) : [];
+    if (!list.length) { host.innerHTML = ''; return; }
+    var q = list[0];
+    var decided = q.status === 'approved' || q.status === 'partly_approved' || q.status === 'declined';
+    var rows = (q.lines || []).map(function (l) {
+      var mark = decided ? (l.approved ? '<span class="sv2-q-yes" title="Approved">✓</span>' : '<span class="sv2-q-no" title="Not approved">✕</span>') : '';
+      return '<tr class="' + (decided && !l.approved ? 'is-no' : '') + '"><td>' + mark + esc(l.text) +
+        (l.kind && l.kind !== 'part' ? ' <span class="sv2-q-kind">' + esc(quoteVocab('QUOTE_LINE_KINDS', l.kind)) + '</span>' : '') + '</td>' +
+        '<td class="num">' + esc(String(l.qty || 1)) + '</td><td class="num">' + esc(money(l.amount != null ? l.amount : (l.price || 0) * (l.qty || 1))) + '</td></tr>';
+    }).join('');
+    var waiting = q.status === 'sent' && job.stage === 'quoted';
+    var html = '<div class="sv2-sec sv2-quote"><div class="sv2-sec-title">Quote' + (q.version > 1 ? ' · version ' + esc(String(q.version)) : '') +
+        ' <span class="sv2-q-status is-' + esc(q.status) + '">' + esc(quoteVocab('QUOTE_STATUSES', q.status)) + '</span></div>' +
+      '<table class="sv2-q-table"><thead><tr><th>Item</th><th class="num">Qty</th><th class="num">Amount</th></tr></thead><tbody>' + rows + '</tbody>' +
+      '<tfoot><tr><td colspan="2">Total incl. GST</td><td class="num">' + esc(money(q.total)) + '</td></tr>' +
+      (q.status === 'partly_approved' ? '<tr class="sv2-q-appr"><td colspan="2">Approved</td><td class="num">' + esc(money(q.approved_total)) + '</td></tr>' : '') +
+      '</tfoot></table>' +
+      '<p class="sv-hint">Sent ' + esc(fmtDateTime(q.sent_at)) + (q.sent_by_name ? ' by ' + esc(q.sent_by_name) : '') + (q.note ? ' · ' + esc(q.note) : '') + '</p>' +
+      (decided ? '<p class="sv-hint">Answer recorded ' + esc(fmtDateTime(q.decided_at)) + ' · ' + esc(quoteVocab('QUOTE_VIA', q.decided_via)) +
+        (q.decided_by_name ? ' · by ' + esc(q.decided_by_name) : '') + (q.decision_note ? ' · “' + esc(q.decision_note) + '”' : '') + '</p>' : '') +
+      '<div class="sv-actions">' +
+        (waiting ? '<button type="button" class="primary-pink-btn sv2-small" data-qact="answer">Record the customer’s answer</button>' : '') +
+        (!contactHidden(job) ? '<button type="button" class="secondary-btn sv2-small" data-qact="wa">Send on WhatsApp</button>' : '') +
+        (job.stage !== 'closed' && job.stage !== 'ready' && isDeskPlus() ? '<button type="button" class="secondary-btn sv2-small" data-qact="revise">' + (q.status === 'sent' ? 'Revise' : 'New quote') + '</button>' : '') +
+      '</div>';
+    if (list.length > 1) {
+      html += '<details class="sv2-q-old"><summary>Earlier quotes (' + (list.length - 1) + ')</summary><ul>' + list.slice(1).map(function (o) {
+        return '<li>Version ' + esc(String(o.version)) + ' · ' + esc(money(o.total)) + ' · ' + esc(quoteVocab('QUOTE_STATUSES', o.status)) + ' · ' + esc(fmtDateTime(o.sent_at)) + '</li>';
+      }).join('') + '</ul></details>';
+    }
+    host.innerHTML = html + '</div>';
+  }
+  function onQuoteClick(e) {
+    var b = e.target.closest('[data-qact]');
+    if (!b) return false;
+    var jobId = openJobId;
+    var a = b.getAttribute('data-qact');
+    if (a === 'answer') answerDialog(jobId);
+    else if (a === 'revise') quoteDialog(jobId);
+    else if (a === 'wa') sendQuoteWa(jobId, latestQuote(jobId));
+    return true;
+  }
+  function sendQuoteWa(jobId, q) {
+    var job = jobById(jobId);
+    var C = CAT(), u = U();
+    if (!job || !q || contactHidden(job)) return;
+    if (!C || !C.WA_TEMPLATES || typeof C.WA_TEMPLATES.quote_lines !== 'function') { toast('The message templates did not load.', 'error'); return; }
+    if (!u || typeof u.waOpen !== 'function') { toast('WhatsApp cannot be opened from here.', 'error'); return; }
+    var ok;
+    try { ok = u.waOpen(job.customer_phone, C.WA_TEMPLATES.quote_lines(job, q)); } catch (x) { toast('Could not open WhatsApp: ' + errMsg(x), 'error'); return; }
+    if (ok === false) toast('WhatsApp cannot open that phone number. Check it on the Details tab.', 'warning');
+  }
+
+  function quoteLineHtml(l) {
+    l = l || {};
+    var kinds = ['part', 'labour', 'other'];
+    return '<div class="sv2-ql" data-ql>' +
+      '<select class="settings-select sv2-ql-kind" aria-label="Kind">' + kinds.map(function (k) {
+        return '<option value="' + k + '"' + ((l.kind || 'part') === k ? ' selected' : '') + '>' + esc(quoteVocab('QUOTE_LINE_KINDS', k)) + '</option>';
+      }).join('') + '</select>' +
+      '<input type="text" class="sv2-ql-text" maxlength="200" placeholder="e.g. Samsung 980 1TB SSD" aria-label="Item" value="' + esc(l.text || '') + '">' +
+      '<input type="number" class="sv2-ql-qty" min="1" max="99" step="1" inputmode="numeric" aria-label="Quantity" value="' + esc(String(l.qty || 1)) + '">' +
+      '<input type="number" class="sv2-ql-price" min="0" step="1" inputmode="decimal" placeholder="₹ incl. GST" aria-label="Price each, incl. GST" value="' + (l.price != null ? esc(String(l.price)) : '') + '">' +
+      '<span class="sv2-ql-amt" aria-live="polite"></span>' +
+      '<button type="button" class="sv2-ql-x" data-qlx aria-label="Remove this line" title="Remove this line">×</button>' +
+    '</div>';
+  }
+  function readQuoteLines(scope) {
+    var out = [], problems = [];
+    Array.prototype.forEach.call(scope.querySelectorAll('[data-ql]'), function (row, i) {
+      var text = String((row.querySelector('.sv2-ql-text') || {}).value || '').trim();
+      var qtyRaw = String((row.querySelector('.sv2-ql-qty') || {}).value || '').trim();
+      var priceRaw = String((row.querySelector('.sv2-ql-price') || {}).value || '').trim();
+      if (!text && !priceRaw) return;                                   // an empty row is ignored
+      var qty = /^\d+$/.test(qtyRaw) ? parseInt(qtyRaw, 10) : NaN;
+      var price = priceRaw === '' ? NaN : Number(priceRaw);
+      if (!text) problems.push('Line ' + (i + 1) + ' needs a description.');
+      if (isNaN(qty) || qty < 1 || qty > 99) problems.push('Line ' + (i + 1) + ': the quantity is a whole number from 1 to 99.');
+      if (isNaN(price) || price < 0 || price > 10000000) problems.push('Line ' + (i + 1) + ': give a price (incl. GST) from ₹0 up.');
+      out.push({ kind: (row.querySelector('.sv2-ql-kind') || {}).value || 'part', text: text, qty: qty, price: Math.round(price * 100) / 100 });
+    });
+    return { lines: out, problems: problems };
+  }
+  function paintQuoteTotal(scope) {
+    var total = 0;
+    Array.prototype.forEach.call(scope.querySelectorAll('[data-ql]'), function (row) {
+      var qty = parseInt((row.querySelector('.sv2-ql-qty') || {}).value, 10) || 0;
+      var price = Number((row.querySelector('.sv2-ql-price') || {}).value) || 0;
+      var amt = qty * price;
+      total += amt;
+      var a = row.querySelector('.sv2-ql-amt');
+      if (a) a.textContent = amt ? money(amt) : '';
+    });
+    var t = scope.querySelector('#svd-q-total');
+    if (t) t.textContent = money(total);
+  }
+  async function quoteDialog(jobIdArg) {
+    var jobId = jobIdArg;                          // bound once
+    var d = D();
+    var job = jobById(jobId);
+    if (!d || !job) return;
+    if (typeof d.sendQuote !== 'function') { toast('Quotes need the 1.13 data layer. Restart the app.', 'error'); return; }
+    if (typeOf(job) === 'remote') { sendTemplateFor(jobId, 'quote_amount'); return; }
+    var from = job.stage;                          // service_quote_send checks it
+    var prev = latestQuote(jobId);
+    var seed = prev ? (prev.lines || []) : [{ kind: 'part' }, { kind: 'labour', text: 'Labour' }];
+    var html = '<p class="sv-hint">Prices include GST. The customer sees the lines and the total on WhatsApp and on their tracking page.</p>' +
+      field('Diagnosis — what is actually wrong', 'svd-q-diag', job.diagnosis || '', { textarea: true, wide: true, rows: 3,
+        placeholder: 'e.g. SSD fails SMART and drops out under load; screen cracked in the corner' }) +
+      '<div class="sv2-ql-head"><span>Kind</span><span>Item</span><span>Qty</span><span>Price each</span><span>Amount</span><span></span></div>' +
+      '<div id="svd-q-lines">' + seed.map(quoteLineHtml).join('') + '</div>' +
+      '<div class="sv2-ql-foot"><button type="button" class="secondary-btn sv2-small" data-qladd>+ Add line</button>' +
+        '<span class="sv2-ql-total">Total incl. GST <strong id="svd-q-total">₹0</strong></span></div>' +
+      field('Note for the shop (optional)', 'svd-q-note', '', { wide: true, maxlength: 1000, placeholder: 'e.g. Part in stock at Prime ABGB, 2 days' }) +
+      (!job.promised_at && from !== 'quoted' ? field('Promise a date now (optional)', 'svd-q-prom', '', { type: 'date', wide: true }) : '') +
+      (!contactHidden(job) ? '<label class="sv-check"><input type="checkbox" id="svd-q-wa" checked> Open WhatsApp with the quote after saving</label>' : '');
+    var node = dlgNode('quote', html);
+    var lines = node.querySelector('#svd-q-lines');
+    node.addEventListener('input', function () { paintQuoteTotal(node); });
+    node.addEventListener('click', function (e) {
+      if (e.target.closest('[data-qladd]')) {
+        if (lines.querySelectorAll('[data-ql]').length >= 30) { toast('A quote can have up to 30 lines.', 'warning'); return; }
+        lines.insertAdjacentHTML('beforeend', quoteLineHtml({ kind: 'part' }));
+        var last = lines.lastElementChild && lines.lastElementChild.querySelector('.sv2-ql-text');
+        if (last) last.focus();
+        paintQuoteTotal(node);
+        return;
+      }
+      var x = e.target.closest('[data-qlx]');
+      if (x) {
+        var row = x.closest('[data-ql]');
+        if (lines.querySelectorAll('[data-ql]').length > 1) row.parentNode.removeChild(row);
+        else Array.prototype.forEach.call(row.querySelectorAll('input'), function (i) { i.value = i.classList.contains('sv2-ql-qty') ? '1' : ''; });
+        paintQuoteTotal(node);
+      }
+    });
+    paintQuoteTotal(node);
+    var sent = null;
+    await openDialog({
+      title: (prev && prev.status === 'sent' ? 'Revise the quote for ' : 'Quote for ') + (job.public_code || 'this ticket'),
+      sub: titleName(job), body: node, wide: true, okText: 'Send quote', busyText: 'Sending…',
+      onOk: async function (root) {
+        var s = scopeOf(root, node, 'quote');
+        var diag = nval(s, '#svd-q-diag');
+        if (!diag) return 'Write the diagnosis first — every quote says what is actually wrong.';
+        if (diag.length > 4000) return 'Keep the diagnosis under 4000 characters.';
+        var got = readQuoteLines(s);
+        if (got.problems.length) return got.problems[0];
+        if (!got.lines.length) return 'Add at least one line with a price.';
+        var promRaw = nval(s, '#svd-q-prom'), prom = null;
+        if (promRaw) {
+          prom = dayToIso(promRaw);
+          if (!prom) return 'That promised date is not valid.';
+          if (ms(prom) < midnight(0)) return 'The promised date is in the past.';
+        }
+        var live = jobById(jobId);
+        if (live && live.stage !== from) return 'Someone moved this ticket to ' + stageLabel(live.stage) + ' while this was open. Close this and check it first.';
+        try { sent = await d.sendQuote(jobId, from, got.lines, diag, nval(s, '#svd-q-note'), prom); }
+        catch (e) { demoToast(e); return errMsg(e); }
+        if (sent && sent.quote && nchecked(s, '#svd-q-wa')) sendQuoteWa(jobId, sent.quote);
+        return true;
+      }
+    });
+    if (!sent) return;
+    toast('Quote ' + money(sent.quote && sent.quote.total) + ' saved on ' + (job.public_code || 'the ticket') + '.', 'success');
+    if (openJobId === jobId) { paintJobHeader(); if (jobTab === 'details') { paintQuotes(jobId); paintMoveBox(jobId); var dg = byId('sv-e-diagnosis'); if (dg && formBase && formBase.values && dg.value === formBase.values.diagnosis) { dg.value = (sent.job && sent.job.diagnosis) || dg.value; formBase.values.diagnosis = dg.value; } } }
+    scheduleRender();
+  }
+  async function answerDialog(jobIdArg) {
+    var jobId = jobIdArg;                          // bound once
+    var d = D();
+    var job = jobById(jobId);
+    var q = latestQuote(jobId);
+    if (!d || !job) return;
+    if (!q || q.status !== 'sent') { toast('There is no quote waiting for an answer on this ticket.', 'warning'); return; }
+    if (typeof d.decideQuote !== 'function') { toast('Quotes need the 1.13 data layer. Restart the app.', 'error'); return; }
+    var declineTo = typeOf(job) === 'on_site' ? 'Closed' : 'Ready for collection';
+    var html = '<p>Tick what the customer said yes to. Untick anything they don’t want.</p>' +
+      '<div class="sv2-qa">' + (q.lines || []).map(function (l) {
+        return '<label class="sv2-qa-row"><input type="checkbox" data-qa="' + esc(String(l.n)) + '" checked>' +
+          '<span class="sv2-qa-t">' + esc(l.text) + ((l.qty || 1) > 1 ? ' ×' + esc(String(l.qty)) : '') + '</span>' +
+          '<span class="sv2-qa-a">' + esc(money(l.amount)) + '</span></label>';
+      }).join('') + '</div>' +
+      '<p class="sv2-qa-sum">Approved <strong id="svd-qa-sum"></strong> of ' + esc(money(q.total)) + ' incl. GST</p>' +
+      '<div id="svd-qa-warn" class="ops-banner ops-banner-warn sv2-banner" hidden>Nothing ticked: the quote is declined and the ticket goes to ' + esc(declineTo) + ' with the outcome “Quote declined”.</div>' +
+      '<div class="sv-field sv-span2 sv2-mt"><span>How did they answer?</span>' +
+        chipsHtml('qvia', ['counter', 'phone', 'whatsapp', 'other'].map(function (k) { return { value: k, label: quoteVocab('QUOTE_VIA', k) }; }), [], { label: 'How did they answer?' }) + '</div>' +
+      field('Note (optional, staff only)', 'svd-qa-note', '', { wide: true, maxlength: 1000, placeholder: 'e.g. Wants the screen done next month' });
+    var node = dlgNode('qanswer', html);
+    var sync = function () {
+      var sum = 0, n = 0;
+      Array.prototype.forEach.call(node.querySelectorAll('[data-qa]'), function (cb) {
+        if (!cb.checked) return;
+        n++;
+        var l = (q.lines || []).filter(function (x) { return String(x.n) === cb.getAttribute('data-qa'); })[0];
+        sum += l ? Number(l.amount) || 0 : 0;
+      });
+      var s = node.querySelector('#svd-qa-sum'); if (s) s.textContent = money(sum);
+      var w = node.querySelector('#svd-qa-warn'); if (w) w.hidden = n > 0;
+    };
+    node.addEventListener('change', sync);
+    sync();
+    var res = null;
+    await openDialog({
+      title: 'The customer’s answer', sub: (job.public_code || '') + ' · ' + titleName(job), body: node, okText: 'Save the answer', busyText: 'Saving…',
+      onOk: async function (root) {
+        var s = scopeOf(root, node, 'qanswer');
+        var via = readGroup(s, 'qvia');
+        if (!via) return 'Say how the customer answered.';
+        var ok = Array.prototype.filter.call(s.querySelectorAll('[data-qa]'), function (cb) { return cb.checked; })
+          .map(function (cb) { return Number(cb.getAttribute('data-qa')); });
+        try { res = await d.decideQuote(jobId, q.id, ok, via, nval(s, '#svd-qa-note')); }
+        catch (e) { demoToast(e); return errMsg(e); }
+        return true;
+      }
+    });
+    if (!res) return;
+    var st = res.quote && res.quote.status;
+    toast(st === 'declined' ? 'Quote declined — the ticket is at ' + declineTo + '.' : st === 'partly_approved' ? 'Partly approved: ' + money(res.quote.approved_total) + '.' : 'Quote approved.', 'success');
+    if (openJobId === jobId) { paintJobHeader(); if (jobTab === 'details') { paintQuotes(jobId); paintMoveBox(jobId); } }
+    scheduleRender();
+  }
+
   function moveBoxHtml(job) {
     var t = typeOf(job);
     var moves = nextStagesFor(job) || [];
@@ -4785,11 +5185,21 @@
     var C = CAT(), u = U();
     if (!job) return;
     if (contactHidden(job)) return;
+    // 1.13: 'quote_amount' is the old one-amount quote (remote tickets).
+    var amountOnly = key === 'quote_amount';
+    if (amountOnly) key = 'quote';
     var T = C && C.WA_TEMPLATES;
     // visit_moved is built here from visit_booked until the catalogue has one.
     var tpl = (key === 'visit_moved' && T && typeof T.visit_moved !== 'function') ? 'visit_booked' : key;
     if (!T || typeof T[tpl] !== 'function') { toast('The message templates did not load.', 'error'); return; }
     if (!u || typeof u.waOpen !== 'function') { toast('WhatsApp cannot be opened from here.', 'error'); return; }
+    // 1.13: in-store and on-site quotes are itemised and saved; the menu
+    // sends the one waiting, or opens the quote form. Remote keeps the amount.
+    if (key === 'quote' && !amountOnly && typeOf(job) !== 'remote') {
+      var lq = latestQuote(jobId);
+      if (lq && lq.status === 'sent') sendQuoteWa(jobId, lq); else quoteDialog(jobId);
+      return;
+    }
     var amount = null;
     if (key === 'quote') {
       var node = dlgNode('quote', field('Quoted amount', 'svd-amount', '', { wide: true, placeholder: 'e.g. ₹8,400 including parts' }));
@@ -4873,6 +5283,7 @@
   // on every repaint and per-element bindings would be lost each time.
   function onBodyClick(e) {
     if (handleChipClick(e)) { var b0 = byId('sv-job-body'); if (b0) syncDeps(b0); return; }
+    if (onQuoteClick(e)) return;
     var t = e.target;
     if (t.closest('#sv-e-save')) { saveDetails(); return; }
     if (t.closest('#sv-m-go')) { doMove(); return; }

@@ -288,6 +288,60 @@
 
   // Written only by the RMA sync on a v2 ticket, so never offered by hand.
   var MIRROR_STAGES = ['rma_raised', 'at_vendor', 'back_from_vendor'];
+
+  // ── 1.13: the step bar on the ticket panel. Each step lists the stages it
+  //    covers; a detour (a part on order, a warranty claim) belongs to the
+  //    step it interrupts. Every legal stage of a type is in exactly one step.
+  var STEPS_BY_TYPE = {
+    in_store: [
+      { key: 'received',   label: 'Received',   stages: ['logged', 'received'] },
+      { key: 'diagnosing', label: 'Diagnosing', stages: ['diagnosing'] },
+      { key: 'quote',      label: 'Quote',      stages: ['quoted'] },
+      { key: 'repair',     label: 'Repair',     stages: ['approved', 'parts_to_order', 'parts_on_order', 'rma_raised',
+                                                       'at_vendor', 'back_from_vendor', 'in_service'] },
+      { key: 'testing',    label: 'Testing',    stages: ['verifying'] },
+      { key: 'ready',      label: 'Ready',      stages: ['ready'] },
+      { key: 'collected',  label: 'Collected',  stages: ['closed'] }
+    ],
+    on_site: [
+      { key: 'logged',     label: 'Logged',     stages: ['logged'] },
+      { key: 'scheduled',  label: 'Scheduled',  stages: ['scheduled', 'revisit_needed', 'quoted', 'approved', 'parts_to_order',
+                                                       'parts_on_order', 'rma_raised', 'at_vendor', 'back_from_vendor'] },
+      { key: 'en_route',   label: 'On the way', stages: ['en_route'] },
+      { key: 'on_site',    label: 'On site',    stages: ['on_site'] },
+      { key: 'work_done',  label: 'Work done',  stages: ['work_done'] },
+      { key: 'closed',     label: 'Closed',     stages: ['closed'] }
+    ],
+    remote: [
+      { key: 'logged',         label: 'Logged',         stages: ['logged', 'quoted'] },
+      { key: 'session_booked', label: 'Session booked', stages: ['session_booked'] },
+      { key: 'in_session',     label: 'In session',     stages: ['in_session'] },
+      { key: 'resolved',       label: 'Resolved',       stages: ['resolved'] },
+      { key: 'closed',         label: 'Closed',         stages: ['closed'] }
+    ]
+  };
+  // { steps, current }: the type's steps and the index of the one the ticket
+  // is on (-1 for a stage no step covers, which the tests rule out).
+  function stepsFor(job) {
+    var t = (job && job.service_type && STEPS_BY_TYPE[job.service_type]) ? job.service_type : 'in_store';
+    var steps = STEPS_BY_TYPE[t];
+    var st = job && job.stage;
+    var cur = -1;
+    for (var i = 0; i < steps.length; i++) { if (steps[i].stages.indexOf(st) !== -1) { cur = i; break; } }
+    return { type: t, steps: steps, current: cur };
+  }
+
+  // ── 1.13: quotes (sql/service-v2.8.sql). Prices include GST.
+  var QUOTE_STATUSES = {
+    sent:            'Waiting for the customer',
+    approved:        'Approved',
+    partly_approved: 'Partly approved',
+    declined:        'Declined',
+    withdrawn:       'Replaced by a newer quote'
+  };
+  var QUOTE_VIA = { counter: 'At the counter', phone: 'On the phone', whatsapp: 'On WhatsApp', other: 'Other' };
+  var QUOTE_LINE_KINDS = { part: 'Part', labour: 'Labour', other: 'Other' };
+  var QUOTE_MAX_LINES = 30;
   var MIRROR = { rma_raised: true, at_vendor: true, back_from_vendor: true };
 
   // Stages whose clock is the booked visit / session time, not idle days.
@@ -1226,6 +1280,12 @@
     MEDIA_ROLES: MEDIA_ROLES,
     PRIVATE_MEDIA_ROLES: PRIVATE_MEDIA_ROLES,
     STAGES_BY_TYPE: STAGES_BY_TYPE,
+    STEPS_BY_TYPE: STEPS_BY_TYPE,
+    stepsFor: stepsFor,
+    QUOTE_STATUSES: QUOTE_STATUSES,
+    QUOTE_VIA: QUOTE_VIA,
+    QUOTE_LINE_KINDS: QUOTE_LINE_KINDS,
+    QUOTE_MAX_LINES: QUOTE_MAX_LINES,
     MIRROR_STAGES: MIRROR_STAGES,
     BUDGET_BY_TYPE: BUDGET_BY_TYPE,
     budgetDays: budgetDays,

@@ -80,7 +80,7 @@ var JOBS = byId(d.jobs), UNITS = byId(d.units), INTAKES = byId(d.intakes), ITEMS
 
 test('build returns every table, media is empty, and it is deterministic', function () {
   ['jobs', 'items', 'units', 'intakes', 'vendors', 'events', 'staff', 'media', 'rma_events', 'techs', 'customers',
-   'shipments', 'shipment_items'].forEach(function (k) {
+   'shipments', 'shipment_items', 'quotes'].forEach(function (k) {
     assert.ok(Array.isArray(d[k]), k);
   });
   assert.deepStrictEqual(d.media, []);
