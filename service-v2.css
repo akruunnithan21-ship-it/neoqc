@@ -648,3 +648,60 @@ body.dark-mode .sv2-ql select option { background: #182031; color: #f1f5fb; }
 .sv2-qa-sum { font-size: 0.84rem; color: var(--text-muted); margin: 6px 0 10px; }
 .sv2-qa-sum strong { font-family: "JetBrains Mono", monospace; color: var(--text-dark); }
 @media (prefers-reduced-motion: reduce) { #sv2-movebox.sv2-flash > .sv-movebox { animation: none; } }
+
+/* ── 1.13: handover dialog (sql/service-v2.9.sql) ─────────────────────────── */
+.sv2-pay {
+  display: grid; grid-template-columns: 130px 170px minmax(0, 1fr) 30px; gap: 6px; align-items: center; margin-bottom: 6px;
+}
+.sv2-pay input, .sv2-pay select {
+  width: 100%; box-sizing: border-box; padding: 8px 10px; border-radius: 8px;
+  border: 1px solid var(--glass-border); background: var(--glass-bg); color: var(--text-dark);
+  font-family: inherit; font-size: 0.86rem;
+}
+body.dark-mode .sv2-pay input, body.dark-mode .sv2-pay select { color-scheme: dark; background: rgba(255, 255, 255, 0.07); border-color: rgba(255, 255, 255, 0.16); }
+.sv2-pay input:focus, .sv2-pay select:focus { outline: none; border-color: var(--primary-pink); box-shadow: 0 0 0 3px rgba(var(--primary-pink-rgb), 0.14); }
+.sv2-pay select option { background: #ffffff; color: #0f172a; }
+body.dark-mode .sv2-pay select option { background: #182031; color: #f1f5fb; }
+.sv2-h-free { align-self: end; }
+.sv2-bal { margin: 10px 0 4px; padding: 9px 12px; border-radius: 9px; font-size: 0.84rem; border: 1px solid var(--glass-border); color: var(--text-dark); }
+.sv2-bal.is-ok { border-color: rgba(16, 185, 129, 0.5); background: rgba(16, 185, 129, 0.08); }
+.sv2-bal.is-due { border-color: rgba(245, 158, 11, 0.55); background: rgba(245, 158, 11, 0.1); }
+.sv2-bal.is-over { border-color: rgba(239, 68, 68, 0.55); background: rgba(239, 68, 68, 0.08); }
+.sv2-h-print { margin-top: 6px; }
+#sv2-handover-sec:not(:empty) { margin: 18px 0; }
+
+/* ── 1.13: the delivery receipt — print and PDF only ───────────────────────
+   Same visibility rules as the RMA labels (rma.css): while body has
+   .sv-printing, only #sv-receipt-sheet prints. Always black on white. */
+.sv-receipt-sheet { display: none; }
+@media print {
+  body.sv-printing > *:not(#sv-receipt-sheet) { display: none !important; }
+  body.sv-printing #sv-receipt-sheet { display: block !important; position: static; }
+  body.sv-printing #sv-receipt-sheet,
+  body.sv-printing #sv-receipt-sheet * { visibility: visible !important; color: #000 !important; background: transparent !important; }
+  body.sv-printing .svr { font-family: "Hanken Grotesk", "Space Grotesk", sans-serif; font-size: 10pt; line-height: 1.4; }
+  body.sv-printing .svr-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 8mm; padding-bottom: 4mm; border-bottom: 1.5px solid #000; }
+  body.sv-printing .svr-shop { font-size: 15pt; font-weight: 800; letter-spacing: 0.02em; }
+  body.sv-printing .svr-shop-l { font-size: 8.5pt; }
+  body.sv-printing .svr-title { text-align: right; }
+  body.sv-printing .svr-t { font-size: 8pt; font-weight: 800; letter-spacing: 0.18em; text-transform: uppercase; }
+  body.sv-printing .svr-code { font-family: "JetBrains Mono", monospace; font-size: 16pt; font-weight: 700; }
+  body.sv-printing .svr-dates { font-size: 8.5pt; }
+  body.sv-printing table { width: 100%; border-collapse: collapse; margin-top: 4mm; }
+  body.sv-printing .svr-facts th { width: 32mm; text-align: left; vertical-align: top; padding: 1.4mm 3mm 1.4mm 0; font-size: 8.5pt; font-weight: 800; text-transform: uppercase; letter-spacing: 0.06em; }
+  body.sv-printing .svr-facts td { padding: 1.4mm 0; vertical-align: top; overflow-wrap: anywhere; white-space: pre-line; }
+  body.sv-printing .svr-lines th { text-align: left; padding: 1.6mm 2mm; border-bottom: 1px solid #000; font-size: 8pt; font-weight: 800; text-transform: uppercase; letter-spacing: 0.06em; }
+  body.sv-printing .svr-lines td { padding: 1.6mm 2mm; border-bottom: 0.5px solid #888; }
+  body.sv-printing .num { text-align: right; white-space: nowrap; font-family: "JetBrains Mono", monospace; }
+  body.sv-printing .svr-money { width: 60%; margin-left: auto; }
+  body.sv-printing .svr-money th { text-align: left; font-weight: 600; padding: 1.2mm 2mm; }
+  body.sv-printing .svr-money td { padding: 1.2mm 2mm; }
+  body.sv-printing .svr-money tr:first-child th, body.sv-printing .svr-money tr:first-child td { font-weight: 800; border-bottom: 1px solid #000; }
+  body.sv-printing .svr-due th, body.sv-printing .svr-due td { font-weight: 800; border-top: 1.5px solid #000; }
+  body.sv-printing .svr-warranty { margin-top: 6mm; font-size: 9pt; }
+  body.sv-printing .svr-track { font-size: 8.5pt; margin-top: 2mm; overflow-wrap: anywhere; }
+  body.sv-printing .svr-sign { display: flex; justify-content: space-between; gap: 20mm; margin-top: 18mm; font-size: 8.5pt; }
+  body.sv-printing .svr-sign > div { flex: 1; }
+  body.sv-printing .svr-line { border-bottom: 1px solid #000; height: 10mm; margin-bottom: 1.5mm; }
+  body.sv-printing .svr, body.sv-printing .svr * { break-inside: avoid; }
+}

@@ -406,7 +406,10 @@ var CHECK_MAP = {
   'rma_cases.return_method': S.RETURN_METHODS, 'rma_cases.stage': S.RMA_ORDER, 'rma_cases.disposition': S.RMA_DISPOSITIONS,
   'rma_cases.data_handling': S.DATA_HANDLING,
   'rma_shipments.mode': S.SHIPMENT_MODES,
-  'service_media.role': S.MEDIA_ROLES
+  'service_media.role': S.MEDIA_ROLES,
+  // 1.13 (service-v2.8.sql, service-v2.9.sql)
+  'service_quotes.status': S.QUOTE_STATUSES, 'service_quotes.decided_via': S.QUOTE_VIA,
+  'service_payments.method': S.PAYMENT_METHODS
 };
 
 // v2.1: the shop never backs up data. Three answers are offered, the two

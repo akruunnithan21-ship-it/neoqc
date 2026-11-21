@@ -465,6 +465,16 @@
   // Six months from the day the customer took the build home; from the day
   // it was completed when the hand-over was never recorded.
   var OUR_WARRANTY_MONTHS = 6;
+  // 1.13 delivery receipt (owner, 2026-11-21): the repair warranty, word for
+  // word, and the shop's details printed under its name — each line exactly
+  // as the owner typed it.
+  var REPAIR_WARRANTY_DAYS = 30;
+  var REPAIR_WARRANTY_TEXT = REPAIR_WARRANTY_DAYS + ' days on the work we did and the parts we fitted, for the same fault. ' +
+    'Physical, liquid or electrical damage after collection is not covered.';
+  var SHOP_DETAILS = {
+    name: 'Neo Tokyo Kochi',
+    lines: ['2nd Floor, Koroth Arcade,', 'Opp. V-Guard Industries, Vennala,', 'Kochi- 682028', 'GST- 32AASFN1853C1ZF']
+  };
 
   function _time(v) {
     if (v == null || v === '') return NaN;
@@ -1050,6 +1060,9 @@
     HANDLING_FEE_BY_KIND: HANDLING_FEE_BY_KIND,
     handlingFee: handlingFee,
     OUR_WARRANTY_MONTHS: OUR_WARRANTY_MONTHS,
+    REPAIR_WARRANTY_DAYS: REPAIR_WARRANTY_DAYS,
+    REPAIR_WARRANTY_TEXT: REPAIR_WARRANTY_TEXT,
+    SHOP_DETAILS: SHOP_DETAILS,
     ourWarrantyUntil: ourWarrantyUntil,
     WA_TEMPLATES: WA_TEMPLATES,
     durationWords: durationWords,

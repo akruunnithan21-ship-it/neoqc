@@ -48,7 +48,8 @@ var JOB_COLS = OFFER_COLS.concat(['id', 'public_code', 'created_at', 'updated_at
   'site_address', 'site_area', 'site_pincode', 'site_landmark', 'site_maps_url', 'site_lat', 'site_lng', 'site_contact',
   'remote_tool', 'remote_session_ref', 'remote_consent_at', 'converted_from', 'accessories', 'condition_note', 'powers_on',
   'data_consent', 'est_minutes', 'client_request_id', 'has_device_password',
-  'category_other']);   // sql/service-v2.6.sql (1.13)
+  'category_other',     // sql/service-v2.6.sql (1.13)
+  'bill_total', 'collected_by_name', 'collected_by_phone']);   // sql/service-v2.9.sql (1.13)
 var ITEM_COLS =['id', 'job_id', 'sort', 'is_primary', 'kind', 'label', 'serial', 'serial_norm', 'purchase_source', 'build_ticket_id',
   'invoice_no', 'purchase_date', 'condition_remarks', 'accessories', 'powers_on', 'returned_at', 'created_at', 'created_by'];
 var INTAKE_COLS = ['id', 'source', 'service_job_id', 'sender_kind', 'sender_name', 'sender_phone', 'sender_customer_id',

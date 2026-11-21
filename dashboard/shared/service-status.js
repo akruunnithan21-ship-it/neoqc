@@ -342,6 +342,9 @@
   var QUOTE_VIA = { counter: 'At the counter', phone: 'On the phone', whatsapp: 'On WhatsApp', other: 'Other' };
   var QUOTE_LINE_KINDS = { part: 'Part', labour: 'Labour', other: 'Other' };
   var QUOTE_MAX_LINES = 30;
+  // ── 1.13: handover payments (sql/service-v2.9.sql).
+  var PAYMENT_METHODS = { cash: 'Cash', upi: 'UPI', card: 'Card', bank_transfer: 'Bank transfer' };
+  var PAYMENTS_MAX = 6;
   var MIRROR = { rma_raised: true, at_vendor: true, back_from_vendor: true };
 
   // Stages whose clock is the booked visit / session time, not idle days.
@@ -1286,6 +1289,8 @@
     QUOTE_VIA: QUOTE_VIA,
     QUOTE_LINE_KINDS: QUOTE_LINE_KINDS,
     QUOTE_MAX_LINES: QUOTE_MAX_LINES,
+    PAYMENT_METHODS: PAYMENT_METHODS,
+    PAYMENTS_MAX: PAYMENTS_MAX,
     MIRROR_STAGES: MIRROR_STAGES,
     BUDGET_BY_TYPE: BUDGET_BY_TYPE,
     budgetDays: budgetDays,

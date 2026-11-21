@@ -2042,7 +2042,11 @@
     hidePassword();                // a repaint never carries a shown password over
     disposeTray();
     formBase = null; visitBase = null; itemEditId = null; itemBase = null;
-    if (jobTab === 'details') { body.innerHTML = detailsHtml(job); paintQuotes(job.id); loadQuotes(job.id); }
+    if (jobTab === 'details') {
+      body.innerHTML = detailsHtml(job);
+      paintQuotes(job.id); loadQuotes(job.id);
+      paintHandover(job.id); if (job.stage === 'closed' && job.bill_total != null) loadPayments(job.id);
+    }
     else if (jobTab === 'items') { body.innerHTML = itemsTabHtml(job); loadItemPhotoCounts(job.id); }
     else if (jobTab === 'visit') { body.innerHTML = visitTabHtml(job); loadFieldActivity(job.id); }
     else if (jobTab === 'photos') { body.innerHTML = photosTabHtml(); mountTray(job); loadPhotos(job.id); }
@@ -2296,6 +2300,7 @@
     html += '<div class="sv-actions">' +
       '<button type="button" id="sv-e-save" class="primary-pink-btn">Save changes</button>' +
       '<span id="sv-e-status" class="sv-status" role="status"></span></div>';
+    html += '<div id="sv2-handover-sec"></div>';
     html += '<div id="sv2-quote-sec"></div>';
     html += '<div id="sv2-movebox">' + moveBoxHtml(job) + '</div>';
 
@@ -2466,7 +2471,7 @@
       }
       else if (st === 'in_service') { mv('Start testing', 'verifying'); mv('Needs a part', 'parts_to_order'); A.push({ label: 'Extra work — send a quote', kind: 'quote' }); }
       else if (st === 'verifying') mv('Mark ready', 'ready', true);
-      else if (st === 'ready') mv('Hand over', 'closed', true);
+      else if (st === 'ready') A.push({ label: 'Hand over', kind: 'handover' });
     } else if (t === 'on_site') {
       var field = canFieldTap(job);
       var fieldWhy = field ? '' : 'Only the technician on this ticket, or a lead.';
@@ -2481,12 +2486,12 @@
       } else if (st === 'quoted') {
         if (q && q.status === 'sent') A.push({ label: 'Record the customer’s answer', kind: 'answer' });
         A.push({ label: q ? 'Revise the quote' : 'Send an itemised quote', kind: 'quote' });
-      } else if (st === 'work_done') mv('Close', 'closed', true);
+      } else if (st === 'work_done') A.push({ label: 'Hand over and close', kind: 'handover' });
     } else {
       if (st === 'logged' || st === 'quoted') A.push({ label: 'Book the session', kind: 'visit' });
       else if (st === 'session_booked') mv('Start the session', 'in_session');
       else if (st === 'in_session') mv('Resolved', 'resolved');
-      else if (st === 'resolved') mv('Close', 'closed', true);
+      else if (st === 'resolved') A.push({ label: 'Close and bill', kind: 'handover' });
     }
     return A;
   }
@@ -2523,6 +2528,7 @@
     else if (a.kind === 'open-rma') openRmaUnit(a.unit);
     else if (a.kind === 'field') fieldTap(a.field);
     else if (a.kind === 'visit') switchTab('visit');
+    else if (a.kind === 'handover') handoverDialog(jobId);
   }
   async function showMoveBox() {
     if (jobTab !== 'details') { await switchTab('details'); if (jobTab !== 'details') return; }
@@ -2799,6 +2805,320 @@
     toast(st === 'declined' ? 'Quote declined — the ticket is at ' + declineTo + '.' : st === 'partly_approved' ? 'Partly approved: ' + money(res.quote.approved_total) + '.' : 'Quote approved.', 'success');
     if (openJobId === jobId) { paintJobHeader(); if (jobTab === 'details') { paintQuotes(jobId); paintMoveBox(jobId); } }
     scheduleRender();
+  }
+
+  // ── 1.13: handover — payment, who collected it, the delivery receipt ──────
+  // sql/service-v2.9.sql. From Ready (in-store), Work done (on-site) or
+  // Resolved (remote). The bill defaults to the approved quote; paying less is
+  // allowed and the balance due is noted and printed. The receipt is A4,
+  // printed through the native dialog or saved as a PDF.
+  var PAY_KEYS = ['cash', 'upi', 'card', 'bank_transfer'];
+  function payLabel(k) { var M = svc(); return (M && M.PAYMENT_METHODS && M.PAYMENT_METHODS[k]) || k; }
+  function decidedQuote(jobId) {
+    var d = D();
+    var list = (d && typeof d.cachedQuotes === 'function') ? d.cachedQuotes(jobId) : [];
+    for (var i = 0; i < list.length; i++) {
+      if (list[i].status === 'approved' || list[i].status === 'partly_approved') return list[i];
+    }
+    return null;
+  }
+  function payRowHtml(p) {
+    p = p || {};
+    return '<div class="sv2-pay" data-pay>' +
+      '<input type="number" class="sv2-pay-amt" min="1" step="1" inputmode="decimal" placeholder="₹ amount" aria-label="Amount" value="' + (p.amount != null ? esc(String(p.amount)) : '') + '">' +
+      '<select class="settings-select sv2-pay-method" aria-label="How was it paid?"><option value="">How was it paid?</option>' +
+        PAY_KEYS.map(function (k) { return '<option value="' + k + '"' + (p.method === k ? ' selected' : '') + '>' + esc(payLabel(k)) + '</option>'; }).join('') +
+      '</select>' +
+      '<input type="text" class="sv2-pay-ref" maxlength="80" placeholder="Reference — UPI / card (optional)" aria-label="Reference">' +
+      '<button type="button" class="sv2-ql-x" data-payx aria-label="Remove this payment" title="Remove this payment">×</button>' +
+    '</div>';
+  }
+  function readPays(scope) {
+    var out = [], problems = [];
+    Array.prototype.forEach.call(scope.querySelectorAll('[data-pay]'), function (row, i) {
+      var raw = String((row.querySelector('.sv2-pay-amt') || {}).value || '').trim();
+      var method = (row.querySelector('.sv2-pay-method') || {}).value || '';
+      var ref = String((row.querySelector('.sv2-pay-ref') || {}).value || '').trim();
+      if (!raw && !method && !ref) return;                              // an empty row is ignored
+      var amt = raw === '' ? NaN : Number(raw);
+      if (isNaN(amt) || amt <= 0 || amt > 10000000) problems.push('Payment ' + (i + 1) + ' needs an amount above ₹0.');
+      if (!method) problems.push('Say how payment ' + (i + 1) + ' was made.');
+      out.push({ amount: Math.round(amt * 100) / 100, method: method, reference: ref });
+    });
+    return { pays: out, problems: problems };
+  }
+  function paintBalance(scope) {
+    var free = !!(scope.querySelector('#svd-h-free') || {}).checked;
+    var billEl = scope.querySelector('#svd-h-bill');
+    var bill = free ? 0 : (Number(billEl && billEl.value) || 0);
+    var paid = 0;
+    Array.prototype.forEach.call(scope.querySelectorAll('[data-pay] .sv2-pay-amt'), function (i) { paid += Number(i.value) || 0; });
+    var box = scope.querySelector('#svd-h-bal');
+    var pays = scope.querySelector('#svd-h-paywrap');
+    if (pays) pays.hidden = free;
+    if (billEl) billEl.disabled = free;
+    if (!box) return;
+    box.className = 'sv2-bal';
+    if (free) { box.textContent = 'No charge — nothing to pay.'; return; }
+    if (billEl && String(billEl.value || '').trim() === '') { box.textContent = 'Type the bill total (incl. GST), or tick “No charge”.'; return; }
+    if (paid > bill) { box.classList.add('is-over'); box.textContent = 'Paid ' + money(paid) + ' — that is more than the bill (' + money(bill) + ').'; return; }
+    if (paid < bill) { box.classList.add('is-due'); box.textContent = 'Paid ' + money(paid) + ' of ' + money(bill) + ' — balance due ' + money(bill - paid) + '. It is noted on the ticket and printed on the receipt.'; return; }
+    box.classList.add('is-ok'); box.textContent = 'Paid in full: ' + money(paid) + '.';
+  }
+  async function handoverDialog(jobIdArg) {
+    var jobId = jobIdArg;                          // bound once
+    var d = D();
+    var job = jobById(jobId);
+    if (!d || !job) return;
+    if (typeof d.handover !== 'function') { toast('Handover needs the 1.13 data layer. Restart the app.', 'error'); return; }
+    var from = job.stage;
+    try { if (typeof d.quotes === 'function') await d.quotes(jobId); } catch (e) { /* the bill can still be typed */ }
+    if (openJobId !== jobId) return;
+    job = jobById(jobId) || job;
+    var q = decidedQuote(jobId);
+    var billDefault = q ? Number(q.approved_total != null ? q.approved_total : q.total) : '';
+    var keep = recordedOutcome(job);
+    var oopts = outcomeOptions(job);
+    if (keep && !oopts.some(function (o) { return o.value === keep; })) oopts.unshift({ value: keep, label: svc().OUTCOMES[keep] });
+    var custName = contactHidden(job) ? firstName(job.customer_name) : (job.customer_name || 'the customer');
+    var html =
+      selectField('Outcome', 'svd-h-outcome', [{ value: '', label: '— What happened? —' }].concat(oopts), keep,
+                  keep ? { wide: true, hint: 'Recorded when it went to Ready. Change it only if that was wrong.' } : { wide: true }) +
+      field('Work done — printed on the receipt', 'svd-h-work', job.work_done || '', { textarea: true, wide: true, rows: 3,
+        placeholder: 'e.g. Replaced the SSD, reinstalled Windows 11, tested for 2 hours' }) +
+      '<div class="sv-grid sv2-mt">' +
+        field('Bill total incl. GST', 'svd-h-bill', billDefault === '' ? '' : String(billDefault), { type: 'number', min: 0, step: '1',
+          hint: q ? 'From the ' + (q.status === 'partly_approved' ? 'approved lines of the' : 'approved') + ' quote. Change it if the final bill is different.' : 'No approved quote on this ticket — type the bill.' }) +
+        '<label class="sv-check sv2-h-free"><input type="checkbox" id="svd-h-free"> No charge (warranty, goodwill, quote declined)</label>' +
+      '</div>' +
+      '<div id="svd-h-paywrap" class="sv2-mt"><div class="sv2-sec-title">Payments received now</div>' +
+        '<div id="svd-h-pays">' + payRowHtml({ amount: billDefault === '' ? null : billDefault }) + '</div>' +
+        '<button type="button" class="secondary-btn sv2-small" data-payadd>+ Split the payment</button>' +
+      '</div>' +
+      '<div id="svd-h-bal" class="sv2-bal" role="status" aria-live="polite"></div>' +
+      '<div class="sv-field sv-span2 sv2-mt"><span>Who is collecting it?</span>' +
+        chipsHtml('hcoll', [{ value: 'self', label: custName + ' (the customer)' }, { value: 'other', label: 'Someone else' }], 'self', { label: 'Who is collecting it?' }) + '</div>' +
+      '<div class="sv-grid" data-show-when="hcoll:other">' +
+        field('Their name', 'svd-h-who', '', { maxlength: 120, placeholder: 'e.g. Rahul (brother)' }) +
+        field('Their phone (optional)', 'svd-h-whoph', '', { inputmode: 'tel', maxlength: 30 }) +
+      '</div>' +
+      field('Note (optional, staff only)', 'svd-h-note', '', { wide: true, maxlength: 1000, placeholder: 'e.g. Will pay the balance on Monday' }) +
+      '<div class="sv2-h-print">' +
+        '<label class="sv-check"><input type="checkbox" id="svd-h-print" checked> Print the delivery receipt</label>' +
+        '<label class="sv-check"><input type="checkbox" id="svd-h-pdf"> Save the receipt as a PDF (for a customer who wants it digitally)</label>' +
+      '</div>';
+    var node = dlgNode('handover', html);
+    var pays = node.querySelector('#svd-h-pays');
+    node.addEventListener('input', function () { paintBalance(node); });
+    node.addEventListener('change', function () { paintBalance(node); });
+    node.addEventListener('click', function (e) {
+      if (e.target.closest('[data-payadd]')) {
+        var n = pays.querySelectorAll('[data-pay]').length;
+        var M = svc();
+        if (n >= ((M && M.PAYMENTS_MAX) || 6)) { toast('A handover takes up to ' + ((M && M.PAYMENTS_MAX) || 6) + ' payments.', 'warning'); return; }
+        pays.insertAdjacentHTML('beforeend', payRowHtml({}));
+        var a = pays.lastElementChild && pays.lastElementChild.querySelector('.sv2-pay-amt');
+        if (a) a.focus();
+        paintBalance(node);
+        return;
+      }
+      var x = e.target.closest('[data-payx]');
+      if (x) {
+        var row = x.closest('[data-pay]');
+        if (pays.querySelectorAll('[data-pay]').length > 1) row.parentNode.removeChild(row);
+        else Array.prototype.forEach.call(row.querySelectorAll('input, select'), function (i) { i.value = ''; });
+        paintBalance(node);
+      }
+    });
+    paintBalance(node);
+    var res = null, wantPrint = false, wantPdf = false;
+    await openDialog({
+      title: 'Hand over ' + (job.public_code || 'this ticket'), sub: titleName(job), body: node, wide: true,
+      okText: 'Hand over', busyText: 'Handing over…',
+      onOk: async function (root) {
+        var s = scopeOf(root, node, 'handover');
+        var outcome = nval(s, '#svd-h-outcome');
+        if (!outcome && !keep) return 'Say what happened — the customer sees this, and “Closed” on its own tells them nothing.';
+        var free = nchecked(s, '#svd-h-free');
+        var billRaw = nval(s, '#svd-h-bill');
+        var bill = free ? 0 : (billRaw === '' ? NaN : Number(billRaw));
+        if (isNaN(bill) || bill < 0 || bill > 10000000) return 'Give the bill total incl. GST — or tick “No charge”.';
+        var got = free ? { pays: [], problems: [] } : readPays(s);
+        if (got.problems.length) return got.problems[0];
+        var paid = got.pays.reduce(function (t, p) { return t + p.amount; }, 0);
+        if (paid > bill + 0.001) return 'The payments add up to more than the bill.';
+        var other = readGroup(s, 'hcoll') === 'other';
+        var who = other ? nval(s, '#svd-h-who') : '';
+        if (other && !who) return 'Write the name of the person collecting it.';
+        var live = jobById(jobId);
+        if (live && live.stage !== from) return 'Someone moved this ticket to ' + stageLabel(live.stage) + ' while this was open. Close this and check it first.';
+        wantPrint = nchecked(s, '#svd-h-print');
+        wantPdf = nchecked(s, '#svd-h-pdf');
+        try {
+          res = await d.handover(jobId, from, {
+            outcome: outcome || null, billTotal: bill, payments: got.pays,
+            collectedBy: who || null, collectedPhone: other ? nval(s, '#svd-h-whoph') : null,
+            workDone: nval(s, '#svd-h-work'), note: nval(s, '#svd-h-note')
+          });
+        } catch (e) { demoToast(e); return errMsg(e); }
+        return true;
+      }
+    });
+    if (!res) return;
+    var bal = Number(res.balance) || 0;
+    toast((job.public_code || 'The ticket') + ' handed over' + (bal > 0 ? ' — balance due ' + money(bal) + '.' : '.'), bal > 0 ? 'warning' : 'success');
+    scheduleRender();
+    if (openJobId === jobId) paintJob();
+    if (wantPdf) await printReceipt(jobId, 'pdf');
+    if (wantPrint) await printReceipt(jobId, 'print');
+  }
+
+  // The handover facts on a closed ticket, with the receipt buttons.
+  var paysLoading = {};
+  async function loadPayments(jobId) {
+    var d = D();
+    if (!d || typeof d.payments !== 'function' || paysLoading[jobId]) return;
+    paysLoading[jobId] = true;
+    try { await d.payments(jobId); } catch (e) { /* the section says what it can */ }
+    finally { delete paysLoading[jobId]; }
+    if (openJobId === jobId) paintHandover(jobId);
+  }
+  function paintHandover(jobId) {
+    var host = byId('sv2-handover-sec');
+    var job = jobById(jobId);
+    if (!host || !job || openJobId !== jobId) return;
+    if (job.stage !== 'closed' || job.bill_total == null) { host.innerHTML = ''; return; }
+    var d = D();
+    var pays = (d && typeof d.cachedPayments === 'function') ? d.cachedPayments(jobId) : [];
+    var paid = pays.reduce(function (t, p) { return t + (Number(p.amount) || 0); }, 0);
+    var bal = (Number(job.bill_total) || 0) - paid;
+    host.innerHTML = '<div class="sv2-sec sv2-quote"><div class="sv2-sec-title">Handover' +
+        (bal > 0.004 ? ' <span class="sv2-q-status is-declined">Balance due ' + esc(money(bal)) + '</span>' : ' <span class="sv2-q-status is-approved">Paid</span>') + '</div>' +
+      '<p class="sv-hint">Bill ' + esc(money(job.bill_total)) + ' incl. GST · paid ' + esc(money(paid)) +
+        (pays.length ? ' (' + esc(pays.map(function (p) { return money(p.amount) + ' ' + payLabel(p.method) + (p.reference ? ' ' + p.reference : ''); }).join(', ')) + ')' : '') +
+        (job.collected_by_name ? ' · collected by ' + esc(job.collected_by_name) : '') + '</p>' +
+      '<div class="sv-actions"><button type="button" class="secondary-btn sv2-small" data-hact="print">Print the receipt</button>' +
+        '<button type="button" class="secondary-btn sv2-small" data-hact="pdf">Save the receipt as PDF</button></div></div>';
+  }
+  function onHandoverClick(e) {
+    var b = e.target.closest('[data-hact]');
+    if (!b) return false;
+    printReceipt(openJobId, b.getAttribute('data-hact') === 'pdf' ? 'pdf' : 'print');
+    return true;
+  }
+
+  // ── the delivery receipt (A4) ──────────────────────────────────────────────
+  var svPrintArmed = false, svPrintArmedAt = 0;
+  function svPrinter() {
+    try {
+      if (typeof require !== 'function') return null;
+      var e = require('electron');
+      return (e && e.ipcRenderer && typeof e.ipcRenderer.invoke === 'function') ? e.ipcRenderer : null;
+    } catch (x) { return null; }
+  }
+  function receiptSheet() {
+    var s = byId('sv-receipt-sheet');
+    if (!s) {
+      s = document.createElement('div');
+      s.id = 'sv-receipt-sheet';
+      s.className = 'sv-receipt-sheet';
+      s.setAttribute('aria-hidden', 'true');
+      document.body.appendChild(s);
+      window.addEventListener('afterprint', endSvPrint);
+      var settle = function () { if (svPrintArmed && Date.now() - svPrintArmedAt > 1500) endSvPrint(); };
+      document.addEventListener('pointerdown', settle, true);
+      document.addEventListener('keydown', settle, true);
+    }
+    return s;
+  }
+  function endSvPrint() { svPrintArmed = false; document.body.classList.remove('sv-printing'); }
+  function shopDetails() {
+    var C = CAT();
+    var base = (C && C.SHOP_DETAILS) || {};
+    var name = base.name || 'Neo Tokyo Kochi';
+    try { if (typeof appState !== 'undefined' && appState && appState.settings && appState.settings.shopName) name = String(appState.settings.shopName); } catch (e) { /* default */ }
+    return { name: name, lines: Array.isArray(base.lines) ? base.lines.map(String).filter(Boolean) : [] };
+  }
+  // A receipt carries the year: "21 Nov 2026".
+  function receiptDate(v) {
+    var t = ms(v);
+    if (t == null) return '';
+    try { return new Date(t).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }); }
+    catch (e) { return fmtDate(v); }
+  }
+  function receiptHtml(job, items, quote, pays) {
+    var C = CAT(), M = svc();
+    var shop = shopDetails();
+    var paid = pays.reduce(function (t, p) { return t + (Number(p.amount) || 0); }, 0);
+    var bill = Number(job.bill_total) || 0;
+    var bal = bill - paid;
+    var row = function (k, v) { return v ? '<tr><th>' + esc(k) + '</th><td>' + esc(v) + '</td></tr>' : ''; };
+    var itemRows = (items || []).map(function (it) {
+      return esc([kindLabel(it.kind), it.label, it.serial ? 'S/N ' + it.serial : ''].filter(Boolean).join(' · '));
+    });
+    var lines = quote ? (quote.lines || []).filter(function (l) { return l.approved !== false; }) : [];
+    var outcome = job.outcome && M && M.OUTCOMES ? M.OUTCOMES[job.outcome] : '';
+    var staff = (pays[0] && pays[0].received_by_name) || myName();
+    return '<div class="svr">' +
+      '<div class="svr-head"><div><div class="svr-shop">' + esc(shop.name) + '</div>' +
+        shop.lines.map(function (x) { return '<div class="svr-shop-l">' + esc(x) + '</div>'; }).join('') +
+      '</div><div class="svr-title"><div class="svr-t">Delivery receipt</div><div class="svr-code">' + esc(job.public_code || '') + '</div>' +
+        '<div class="svr-dates">Received ' + esc(receiptDate(job.received_at || job.created_at)) + ' · Handed over ' + esc(receiptDate(job.closed_at || new Date().toISOString())) + '</div></div></div>' +
+      '<table class="svr-facts">' +
+        row('Customer', [job.customer_name, job.customer_phone].filter(Boolean).join(' · ')) +
+        row('Collected by', job.collected_by_name ? [job.collected_by_name, job.collected_by_phone].filter(Boolean).join(' · ') : '') +
+        (itemRows.length ? '<tr><th>Item' + (itemRows.length > 1 ? 's' : '') + '</th><td>' + itemRows.join('<br>') + '</td></tr>' : row('Item', job.device_label)) +
+        row('Reported fault', job.reported_fault) +
+        row('Work done', job.work_done) +
+        row('Outcome', outcome) +
+      '</table>' +
+      (lines.length ? '<table class="svr-lines"><thead><tr><th>Work and parts</th><th class="num">Qty</th><th class="num">Amount</th></tr></thead><tbody>' +
+        lines.map(function (l) { return '<tr><td>' + esc(l.text) + '</td><td class="num">' + esc(String(l.qty || 1)) + '</td><td class="num">' + esc(money(l.amount)) + '</td></tr>'; }).join('') +
+        '</tbody></table>' : '') +
+      '<table class="svr-money">' +
+        '<tr><th>Bill total (incl. GST)</th><td class="num">' + esc(money(bill)) + '</td></tr>' +
+        (pays.length ? pays.map(function (p) {
+          return '<tr><th>Paid · ' + esc(payLabel(p.method)) + (p.reference ? ' · ' + esc(p.reference) : '') + ' · ' + esc(receiptDate(p.received_at)) + '</th><td class="num">' + esc(money(p.amount)) + '</td></tr>';
+        }).join('') : '<tr><th>Paid</th><td class="num">' + esc(money(0)) + '</td></tr>') +
+        (bal > 0.004 ? '<tr class="svr-due"><th>Balance due</th><td class="num">' + esc(money(bal)) + '</td></tr>' : '') +
+      '</table>' +
+      (C && C.REPAIR_WARRANTY_TEXT ? '<p class="svr-warranty"><strong>Repair warranty:</strong> ' + esc(C.REPAIR_WARRANTY_TEXT) + '</p>' : '') +
+      '<p class="svr-track">Your ticket: ' + esc(job.public_code || '') + ' · ' + esc(trackLink(job.public_code || '')) + '</p>' +
+      '<div class="svr-sign"><div><div class="svr-line"></div>Customer signature</div><div><div class="svr-line"></div>For ' + esc(shop.name) + ' · ' + esc(staff) + '</div></div>' +
+    '</div>';
+  }
+  async function printReceipt(jobIdArg, mode) {
+    var jobId = jobIdArg;
+    var job = jobById(jobId);
+    var d = D();
+    if (!job || !d) return;
+    var ipc = svPrinter();
+    if (!ipc) { toast('Printing is not available on this machine.', 'warning'); return; }
+    var pays = [], quotes = [];
+    try { pays = typeof d.payments === 'function' ? await d.payments(jobId) : []; }
+    catch (e) { toast('Could not load the payments for the receipt: ' + errMsg(e), 'error'); return; }
+    try { quotes = typeof d.quotes === 'function' ? await d.quotes(jobId) : []; } catch (e) { quotes = []; }
+    job = jobById(jobId) || job;
+    var q = null;
+    for (var i = 0; i < quotes.length; i++) { if (quotes[i].status === 'approved' || quotes[i].status === 'partly_approved') { q = quotes[i]; break; } }
+    receiptSheet().innerHTML = receiptHtml(job, itemsOf(jobId), q, pays);
+    document.body.classList.add('sv-printing');
+    svPrintArmed = true;
+    svPrintArmedAt = Date.now();
+    try {
+      if (mode === 'pdf') {
+        var r = await ipc.invoke('sys:print-pdf', { filename: 'Receipt ' + (job.public_code || 'service') + '.pdf', title: 'Save the delivery receipt as PDF' });
+        endSvPrint();
+        if (r && r.success) toast('Receipt saved: ' + (r.filePath || 'PDF') + '. Send it to the customer on WhatsApp.', 'success');
+        else if (r && r.error && r.error !== 'Cancelled') toast('Could not save the PDF: ' + r.error, 'error');
+      } else {
+        var p = await ipc.invoke('sys:print');
+        if (p && p.success === false) { endSvPrint(); toast('Could not open the print dialog.', 'error'); }
+      }
+    } catch (e) {
+      endSvPrint();
+      toast('Could not print: ' + errMsg(e), 'error');
+    }
   }
 
   function moveBoxHtml(job) {
@@ -5284,6 +5604,7 @@
   function onBodyClick(e) {
     if (handleChipClick(e)) { var b0 = byId('sv-job-body'); if (b0) syncDeps(b0); return; }
     if (onQuoteClick(e)) return;
+    if (onHandoverClick(e)) return;
     var t = e.target;
     if (t.closest('#sv-e-save')) { saveDetails(); return; }
     if (t.closest('#sv-m-go')) { doMove(); return; }

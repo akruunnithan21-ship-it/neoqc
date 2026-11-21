@@ -554,6 +554,7 @@
     mediaById = {};
     demoData = null;
     quotesByJob = {};
+    paymentsByJob = {};
     writeStamp = {};
     pinnedJobs = {}; pinnedUnits = {};
     lastSnapshot = { jobs: 0, units: 0 };
@@ -1118,6 +1119,7 @@
     techList = Array.isArray(d.techs) ? d.techs : demoTechs(staffList, jobList, now);
     demoData = { events: asArray(d.events), rma_events: asArray(d.rma_events), media: asArray(d.media), customers: asArray(d.customers) };
     quotesByJob = {};
+    paymentsByJob = {};
     asArray(d.quotes).forEach(function (q) { if (q && q.job_id) (quotesByJob[q.job_id] = quotesByJob[q.job_id] || []).push(q); });
     mediaById = {};
     loaded = true;
@@ -1733,6 +1735,41 @@
     if (res && res.quote) keepQuote(res.quote);
     await applyJobResult(jobId, res);
     emit('quotes');
+    return res;
+  }
+
+  // ── handover (1.13, sql/service-v2.9.sql) ─────────────────────────────────
+  var paymentsByJob = {};
+  async function payments(jobId) {
+    requireId(jobId, 'ticket');
+    if (demoFlag) return (paymentsByJob[jobId] || []).slice();
+    var c = readable();
+    var r = await timed(c.from('service_payments').select('*').eq('job_id', jobId)
+      .order('received_at', { ascending: true }).limit(50), READ_MS);
+    if (r && r.error) throw asError(r.error);
+    paymentsByJob[jobId] = (r && r.data) || [];
+    return paymentsByJob[jobId].slice();
+  }
+  function cachedPayments(jobId) { return (paymentsByJob[jobId] || []).slice(); }
+  // o: { outcome, billTotal, payments: [{ amount, method, reference }],
+  //      collectedBy, collectedPhone, workDone, note }. Closes the ticket.
+  async function handover(jobId, from, o) {
+    writable();
+    requireId(jobId, 'ticket');
+    o = o || {};
+    var bill = Number(o.billTotal);
+    if (!isFinite(bill) || bill < 0) throw new Error('NEO_GATE: Give the bill total incl. GST — ₹0 if there is no charge.');
+    var res = await rpc('service_handover', {
+      p_job_id: jobId, p_from: clean(from), p_outcome: clean(o.outcome), p_bill_total: Math.round(bill * 100) / 100,
+      p_payments: (o.payments || []).map(function (p) {
+        return { amount: Math.round(Number(p.amount) * 100) / 100, method: clean(p.method), reference: clean(p.reference) };
+      }),
+      p_collected_by: clean(o.collectedBy), p_collected_phone: clean(o.collectedPhone),
+      p_work_done: clean(o.workDone), p_note: clean(o.note)
+    });
+    if (res && Array.isArray(res.payments)) paymentsByJob[jobId] = res.payments;
+    await applyJobResult(jobId, res);
+    emit('jobs');
     return res;
   }
 
@@ -3273,6 +3310,9 @@
     cachedQuotes: cachedQuotes,
     sendQuote: sendQuote,
     decideQuote: decideQuote,
+    payments: payments,
+    cachedPayments: cachedPayments,
+    handover: handover,
     setDevicePassword: setDevicePassword,
     getDevicePassword: getDevicePassword,
     fieldActivity: fieldActivity,

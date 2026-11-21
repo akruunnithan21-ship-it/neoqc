@@ -215,6 +215,8 @@
         has_device_password: false,
         // sql/service-v2.6.sql (1.13): the typed name of an 'Other' category.
         category_other: null,
+        // sql/service-v2.9.sql (1.13): the handover's bill and who collected it.
+        bill_total: null, collected_by_name: null, collected_by_phone: null,
         // sql/work-queue.sql (v2.2): the live offer (30 minutes to accept), who
         // declined or ignored one in this queue cycle, and the last auto-offer try.
         offered_to_email: null, offered_to_name: null, offer_kind: null, offer_by_email: null, offer_by_name: null,
