@@ -130,11 +130,27 @@ test('suggestType: most common, ties go to hands-on types', function () {
   assert.strictEqual(C.suggestType(['nonsense']), 'in_store');
 });
 
+test('1.13: the created message gives the estimate in words, counted from when the device is with us', function () {
+  var base = { customer_name: 'Vishnu P', service_type: 'in_store', public_code: 'NT-7Q4R2ABC' };
+  var m = C.WA_TEMPLATES.created(Object.assign({ stage: 'received', est_minutes: 80 }, base));
+  assert.ok(/Expect our update within about 1 hour 20 minutes\./.test(m), m);
+  assert.ok(!/We will update you after/.test(m), 'one update sentence, not two');
+  m = C.WA_TEMPLATES.created(Object.assign({ stage: 'logged', est_minutes: 2880 }, base));
+  assert.ok(/Once it is with us, expect our update within about 2 days\./.test(m), m);
+  m = C.WA_TEMPLATES.created(Object.assign({ stage: 'received', est_minutes: 45 }, base, { service_type: 'remote' }));
+  assert.ok(/Estimated time for the work: about 45 minutes\./.test(m), m);
+  m = C.WA_TEMPLATES.created(Object.assign({ stage: 'received', est_minutes: 60 }, base));
+  assert.ok(/about 1 hour\./.test(m), m);
+  m = C.WA_TEMPLATES.created(Object.assign({ stage: 'received' }, base));
+  assert.ok(/We will update you after we have checked it\./.test(m) && !/Expect our update/.test(m), 'no estimate, no line');
+  assert.ok(!/please/i.test(m), 'no please');
+});
+
 test('estMinutes is the longest picked fault, 60 when none', function () {
   assert.strictEqual(C.estMinutes([]), 60);
   assert.strictEqual(C.estMinutes(['nonsense']), 60);
-  assert.strictEqual(C.estMinutes(['windows_activation']), 20);
-  assert.strictEqual(C.estMinutes(['windows_activation', 'data_recovery', 'bsod']), 180);
+  assert.strictEqual(C.estMinutes(['windows_activation']), 30);   // 20 before 1.13's +30%
+  assert.strictEqual(C.estMinutes(['windows_activation', 'data_recovery', 'bsod']), 235);   // 180 before
 });
 
 test('mergeChecklists keeps order and drops duplicates', function () {

@@ -90,7 +90,7 @@
     CATEGORIES: {
       repair: 'Repair', warranty_claim: 'Warranty claim', upgrade: 'Upgrade', installation: 'Installation',
       data_recovery: 'Data recovery', os_software: 'OS / software', networking: 'Networking',
-      maintenance: 'Maintenance', diagnosis_only: 'Diagnosis only'
+      maintenance: 'Maintenance', diagnosis_only: 'Diagnosis only', other: 'Other'
     },
     PRIORITIES: {
       low: { label: 'Low', rank: 0 }, normal: { label: 'Normal', rank: 1 },
@@ -627,6 +627,12 @@
   function typeLabel(t) { return lbl(vocab('TYPES'), t, 'In-store'); }
   function channelLabel(c) { return lbl(vocab('CHANNELS'), c, ''); }
   function categoryLabel(c) { return c ? lbl(vocab('CATEGORIES'), c, c) : ''; }
+  // 1.13: an "Other" ticket goes by the name the desk typed for it.
+  function jobCategoryText(job) {
+    if (!job) return '';
+    if (job.category === 'other' && job.category_other) return String(job.category_other);
+    return categoryLabel(job.category);
+  }
   function kindLabel(k) { return lbl(vocab('ITEM_KINDS'), k, k || 'Item'); }
   function sourceLabel(s) { return lbl(vocab('PURCHASE_SOURCES'), s, 'Not sure'); }
   function rmaLabel(stage) {
@@ -1417,7 +1423,7 @@
   function primaryLabel(job) {
     var items = itemsOf(job.id);
     var p = items[0];
-    var label = (p && (p.label || kindLabel(p.kind))) || job.device_label || categoryLabel(job.category) ||
+    var label = (p && (p.label || kindLabel(p.kind))) || job.device_label || jobCategoryText(job) ||
                 lbl(svc() && svc().JOB_KINDS, job.job_kind, 'Service');
     return { label: label, extra: items.length > 1 ? items.length - 1 : 0 };
   }
@@ -1865,7 +1871,7 @@
     var M = svc();
     var parts = [typeLabel(typeOf(job))];
     if (job.channel) parts.push(channelLabel(job.channel));
-    parts.push(categoryLabel(job.category) || lbl(M && M.JOB_KINDS, job.job_kind, ''));
+    parts.push(jobCategoryText(job) || lbl(M && M.JOB_KINDS, job.job_kind, ''));
     parts.push(job.public_code || '');
     if (isDemo()) parts.push('DEMO');
     return parts.filter(Boolean).join(' · ');
@@ -2220,6 +2226,9 @@
     // The job
     html += '<div class="sv2-sec"><div class="sv2-sec-title">The job</div><div class="sv-grid">' +
       selectField('Category', 'sv-e-category', mapOptions(vocab('CATEGORIES'), null, '— Not set —'), job.category || '') +
+      '<div id="sv-e-catname-wrap"' + (job.category === 'other' ? '' : ' hidden') + '>' +
+        field('Category name', 'sv-e-catname', job.category_other, { maxlength: 60, placeholder: 'e.g. Laptop body repair' }) +
+      '</div>' +
       priorityRow(job) +
       suggestRow(job) +
       selectField('Customer data', 'sv-e-consent', consentOptions(job.data_consent), job.data_consent || '',
@@ -2235,7 +2244,7 @@
     '</div>' +
     checkField('sv-e-hasdata', 'Customer data on it — we don’t back it up, so handle the drives with care', job.has_customer_data) +
     '</div>';
-    fields.push(F('category', 'sv-e-category', 'select'), F('data_consent', 'sv-e-consent', 'select'),
+    fields.push(F('category', 'sv-e-category', 'select'), F('category_other', 'sv-e-catname', 'text'), F('data_consent', 'sv-e-consent', 'select'),
                 F('promised_at', 'sv-e-promised', 'day'), F('needed_by', 'sv-e-needed', 'day'),
                 F('reported_fault', 'sv-e-fault', 'text'), F('diagnosis', 'sv-e-diagnosis', 'text'),
                 F('work_done', 'sv-e-work', 'text'), F('has_customer_data', 'sv-e-hasdata', 'check'));
@@ -2292,6 +2301,9 @@
 
   function validateDetails(job, patch) {
     var eff = function (k) { return (k in patch) ? patch[k] : job[k]; };
+    if (eff('category') === 'other' && !String(eff('category_other') || '').trim()) {
+      return 'Type the name of the category, or pick one from the list.';
+    }
     if ('customer_name' in patch && !patch.customer_name) return 'A ticket needs a customer name.';
     if ('customer_phone' in patch && !validPhone(patch.customer_phone)) {
       return 'That phone number does not look right — use the 10-digit mobile, or the full number with its country code.';
@@ -2324,7 +2336,11 @@
     if ('needed_by' in patch) out.push(patch.needed_by ? 'Needed by ' + fmtDate(patch.needed_by) : 'Needed-by date cleared');
     if ('diagnosis' in patch) out.push('Diagnosis recorded');
     if ('work_done' in patch) out.push('Work done updated');
-    if ('category' in patch) out.push('Category: ' + (categoryLabel(patch.category) || 'not set'));
+    if ('category' in patch || 'category_other' in patch) {
+      var catTxt = (patch.category || null) === 'other' || (!('category' in patch) && 'category_other' in patch)
+        ? (patch.category_other || 'Other') : (categoryLabel(patch.category) || 'not set');
+      out.push('Category: ' + catTxt);
+    }
     if ('data_consent' in patch) out.push(patch.data_consent ? 'Data: ' + lbl(vocab('DATA_CONSENTS'), patch.data_consent, patch.data_consent) : 'Data answer cleared');
     if ('has_customer_data' in patch) out.push(patch.has_customer_data ? 'Marked as having customer data on it' : 'Marked as no customer data on it');
     if ('site_address' in patch || 'site_area' in patch || 'site_pincode' in patch) out.push('Site address changed');
@@ -4916,6 +4932,12 @@
   function onBodyChange(e) {
     var t = e.target;
     if (t.id === 'sv-i-serial') { serialHint(t, 'sv-i'); return; }
+    if (t.id === 'sv-e-category') {
+      var cw = byId('sv-e-catname-wrap');
+      if (cw) cw.hidden = t.value !== 'other';
+      if (t.value === 'other') { var cn = byId('sv-e-catname'); if (cn && !cn.value) cn.focus(); }
+      return;
+    }
     if (t.id === 'sv-e-consent') {
       // Today's answers decide the "data on it" box (anything but "No
       // important data" means there is); an old answer leaves it alone. The

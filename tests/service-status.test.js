@@ -302,9 +302,9 @@ test('vocabulary keys and labels match the spec', function () {
   });
   assert.deepStrictEqual(S.CHANNELS, { walk_in: 'Walk-in', phone: 'Phone', whatsapp: 'WhatsApp', website: 'Website', courier: 'Courier', staff: 'Staff' });
   assert.deepStrictEqual(Object.keys(S.CATEGORIES), ['repair', 'warranty_claim', 'upgrade', 'installation', 'data_recovery',
-    'os_software', 'networking', 'maintenance', 'diagnosis_only']);
+    'os_software', 'networking', 'maintenance', 'diagnosis_only', 'other']);   // 'other': 1.13, server v2.6
   assert.deepStrictEqual(Object.keys(S.CATEGORIES).map(function (k) { return S.CATEGORIES[k]; }),
-    ['Repair', 'Warranty claim', 'Upgrade', 'Installation', 'Data recovery', 'OS / software', 'Networking', 'Maintenance', 'Diagnosis only']);
+    ['Repair', 'Warranty claim', 'Upgrade', 'Installation', 'Data recovery', 'OS / software', 'Networking', 'Maintenance', 'Diagnosis only', 'Other']);
   assert.deepStrictEqual(S.PRIORITIES, { low: { label: 'Low', rank: 0 }, normal: { label: 'Normal', rank: 1 },
     high: { label: 'High', rank: 2 }, urgent: { label: 'Urgent', rank: 3 } });
   assert.deepStrictEqual(Object.keys(S.ITEM_KINDS), ['pc', 'laptop', 'gpu', 'psu', 'ram', 'ssd', 'hdd', 'motherboard', 'cpu',

@@ -190,6 +190,17 @@
     setText(el('svc-since'), 'for ' + humanDuration(M.daysInStage(rec, Date.now())));
   }
 
+  // "Expect our first update within about 1 hour 20 minutes." — only before
+  // and during diagnosis, and only when the ticket has an estimate.
+  function estimateLine(job) {
+    var CAT = window.NeoQcCatalog;
+    var words = CAT && typeof CAT.durationWords === 'function' ? CAT.durationWords(job && job.est_minutes) : '';
+    if (!words) return '';
+    if (job.stage === 'logged') return 'Once it is with us, expect our first update within about ' + words + '.';
+    if (job.stage === 'received' || job.stage === 'diagnosing') return 'Expect our first update within about ' + words + '.';
+    return '';
+  }
+
   function setPromise(text, mode) {
     var pr = el('svc-promise');
     if (!pr) return;
@@ -434,7 +445,9 @@
       // above carries the time that matters.
       setPromise('', 'muted');
     } else {
-      setPromise("We'll give you a date once we've finished diagnosing it.", 'muted');
+      // 1.13: the estimate the counter gave (server v2.7 sends est_minutes),
+      // while we have not looked at it yet or are still looking.
+      setPromise([estimateLine(job), "We'll give you a date once we've finished diagnosing it."].filter(Boolean).join(' '), 'muted');
     }
 
     setHandler(job.handled_by, job.stage === 'closed');

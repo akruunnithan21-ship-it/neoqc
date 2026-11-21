@@ -190,7 +190,10 @@
     os_software:     'OS / software',
     networking:      'Networking',
     maintenance:     'Maintenance',
-    diagnosis_only:  'Diagnosis only'
+    diagnosis_only:  'Diagnosis only',
+    // 1.13: a category the list doesn't have; its name is the ticket's
+    // category_other (sql/service-other-category.sql).
+    other:           'Other'
   };
 
   var PRIORITIES = {

@@ -3413,7 +3413,8 @@ async function qbCreateTicket() {
       value: null, allowNone: true, onChange: nsChanged
     });
     ns.chips.faults = chipGroup($('ns-faults'), [], { multi: true, onChange: nsFaultsChanged });
-    fillSelect($('ns-category'), vocabList('CATEGORIES', FB_CATEGORIES), null);
+    // 'other' (Neo OS 1.13) needs a typed name, which only the desktop intake asks for.
+    fillSelect($('ns-category'), vocabList('CATEGORIES', FB_CATEGORIES).filter(function (o) { return o.value !== 'other'; }), null);
     $('ns-category').value = 'repair';
     ns.chips.tool = chipGroup($('ns-tool'), vocabList('REMOTE_TOOLS', FB_REMOTE_TOOLS), {
       value: null, allowNone: true, onChange: nsChanged

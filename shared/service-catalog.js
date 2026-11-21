@@ -45,12 +45,13 @@
 
   // ── The fault catalogue ────────────────────────────────────────────────────
   // priority: what this fault alone deserves. est_minutes: typical bench /
-  // visit time, used for planning only. kinds: the item kinds it applies to
+  // visit time, used for planning and shown at the counter as the estimate.
+  // 1.13 (owner, 2026-11-21): every time raised 30%, rounded UP to 5 minutes. kinds: the item kinds it applies to
   // ([] = any). keywords: phrases matched whole-word, case-insensitive, by the
   // chat parser and the free-text suggester — keep them specific; a keyword
   // that fires on ordinary chat ("ok", "work") is worse than none.
   var FAULTS = [
-    { key: 'no_power', label: 'No power', category: 'repair', priority: 'high', est_minutes: 60, suggest_type: 'in_store',
+    { key: 'no_power', label: 'No power', category: 'repair', priority: 'high', est_minutes: 80, suggest_type: 'in_store',
       kinds: ['pc', 'laptop', 'psu', 'motherboard'],
       checklist: ['Check the wall socket, power cable and the PSU switch', 'Test the PSU with a tester or a known-good unit',
                   'Short the power pins to rule out the front-panel switch', 'Strip to minimum: board, CPU, one RAM stick',
@@ -59,7 +60,7 @@
                  'does not turn on', 'not powering on', 'completely dead', 'pc dead', 'laptop dead', 'system dead',
                  'pc not starting', 'computer not starting', 'system not starting', 'no light'] },
 
-    { key: 'no_display', label: 'No display', category: 'repair', priority: 'high', est_minutes: 60, suggest_type: 'in_store',
+    { key: 'no_display', label: 'No display', category: 'repair', priority: 'high', est_minutes: 80, suggest_type: 'in_store',
       kinds: ['pc', 'laptop', 'gpu', 'monitor', 'motherboard'],
       checklist: ['Confirm the cable is in the graphics card, not the motherboard', 'Try another cable and another monitor',
                   'Reseat the graphics card and RAM', 'Check beep codes or the board debug LEDs',
@@ -67,47 +68,47 @@
       keywords: ['no display', 'no signal', 'black screen', 'blank screen', 'nothing on screen', 'nothing on the screen',
                  'display not coming', 'screen not coming', 'no picture', 'display not working'] },
 
-    { key: 'random_restart', label: 'Restarts or shuts down by itself', category: 'repair', priority: 'normal', est_minutes: 120, suggest_type: 'in_store',
+    { key: 'random_restart', label: 'Restarts or shuts down by itself', category: 'repair', priority: 'normal', est_minutes: 160, suggest_type: 'in_store',
       kinds: ['pc', 'laptop', 'psu', 'motherboard', 'cpu', 'ram'],
       checklist: ['Read Event Viewer for Kernel-Power 41 and WHEA errors', 'Log CPU and GPU temperatures under load',
                   'Stress test the CPU, then the GPU, for 30 minutes', 'Swap in a known-good PSU', 'Run a memory test'],
       keywords: ['restart', 'restarts', 'restarting', 'reboots', 'rebooting', 'shuts down', 'shutting down', 'shuts off',
                  'turns off', 'switches off', 'switching off', 'auto shutdown', 'automatically shut'] },
 
-    { key: 'bsod', label: 'Blue screen (BSOD)', category: 'repair', priority: 'normal', est_minutes: 90, suggest_type: 'in_store',
+    { key: 'bsod', label: 'Blue screen (BSOD)', category: 'repair', priority: 'normal', est_minutes: 120, suggest_type: 'in_store',
       kinds: ['pc', 'laptop'],
       checklist: ['Note the stop code and any driver named on the blue screen', 'Read the minidump (WhoCrashed or WinDbg)',
                   'Update or roll back the named driver', 'Run a memory test and an SSD health check',
                   'Remove any overclock and turn XMP / EXPO off to retest'],
       keywords: ['blue screen', 'bsod', 'stop code', 'blue screen error', 'your pc ran into a problem'] },
 
-    { key: 'overheating', label: 'Overheating', category: 'repair', priority: 'normal', est_minutes: 60, suggest_type: 'in_store',
+    { key: 'overheating', label: 'Overheating', category: 'repair', priority: 'normal', est_minutes: 80, suggest_type: 'in_store',
       kinds: ['pc', 'laptop', 'gpu', 'cpu', 'cooler'],
       checklist: ['Log idle and load temperatures', 'Clean dust from heatsinks, fans and filters',
                   'Check the cooler mount and the fan headers', 'Replace the thermal paste', 'Check the case airflow direction'],
       keywords: ['overheating', 'overheat', 'overheats', 'heating', 'heating up', 'too hot', 'very hot', 'temperature', 'thermal throttling'] },
 
-    { key: 'noisy_fans', label: 'Noisy fans / grinding noise', category: 'maintenance', priority: 'low', est_minutes: 45, suggest_type: 'in_store',
+    { key: 'noisy_fans', label: 'Noisy fans / grinding noise', category: 'maintenance', priority: 'low', est_minutes: 60, suggest_type: 'in_store',
       kinds: ['pc', 'laptop', 'gpu', 'psu', 'cooler'],
       checklist: ['Find which fan is noisy (stop each one briefly)', 'Clean the fan and check for a cable touching the blades',
                   'Check the fan curve in BIOS or the vendor software', 'Replace the fan if the bearing grinds'],
       keywords: ['noise', 'noisy', 'loud', 'fan noise', 'grinding', 'rattling', 'buzzing', 'whining', 'coil whine', 'fan sound'] },
 
-    { key: 'slow', label: 'Slow or hangs', category: 'repair', priority: 'low', est_minutes: 60, suggest_type: 'in_store',
+    { key: 'slow', label: 'Slow or hangs', category: 'repair', priority: 'low', est_minutes: 80, suggest_type: 'in_store',
       kinds: ['pc', 'laptop'],
       checklist: ['Check startup apps and background usage in Task Manager', 'Check drive health (SMART) and free space',
                   'Scan for malware', 'Check temperatures for throttling', 'Suggest an SSD or RAM upgrade on an old system'],
       keywords: ['slow', 'very slow', 'lag', 'lagging', 'laggy', 'hang', 'hangs', 'hanging', 'freezes', 'freezing',
                  'not responding', 'sluggish'] },
 
-    { key: 'boot_loop', label: 'Boot loop', category: 'repair', priority: 'high', est_minutes: 90, suggest_type: 'in_store',
+    { key: 'boot_loop', label: 'Boot loop', category: 'repair', priority: 'high', est_minutes: 120, suggest_type: 'in_store',
       kinds: ['pc', 'laptop', 'motherboard', 'ram', 'cpu'],
       checklist: ['Clear CMOS and load BIOS defaults', 'Turn XMP / EXPO off and retest', 'Test RAM one stick at a time',
                   'Check the CPU power cable and the 24-pin', 'Update the BIOS if the CPU is newer than the board'],
       keywords: ['boot loop', 'bootloop', 'keeps restarting', 'restart loop', 'restarting again and again',
                  'stuck on logo', 'stuck at logo', 'stuck on the logo'] },
 
-    { key: 'wont_boot_os', label: "Won't boot into Windows", category: 'os_software', priority: 'high', est_minutes: 60, suggest_type: 'in_store',
+    { key: 'wont_boot_os', label: "Won't boot into Windows", category: 'os_software', priority: 'high', est_minutes: 80, suggest_type: 'in_store',
       kinds: ['pc', 'laptop', 'ssd', 'hdd'],
       checklist: ['Check the boot drive is detected in BIOS', 'Check the boot order and mode (UEFI / legacy)',
                   'Try Startup Repair from recovery media', 'Check the drive health before any repair',
@@ -116,14 +117,14 @@
                  'boot device not found', 'automatic repair', 'windows not loading', 'windows not starting',
                  'stuck on windows logo'] },
 
-    { key: 'windows_activation', label: 'Windows activation', category: 'os_software', priority: 'low', est_minutes: 20, suggest_type: 'remote',
+    { key: 'windows_activation', label: 'Windows activation', category: 'os_software', priority: 'low', est_minutes: 30, suggest_type: 'remote',
       kinds: ['pc', 'laptop'],
       checklist: ['Check the installed edition against the licence bought', "Check the digital licence is linked to the customer's Microsoft account",
                   'Enter or re-enter the product key', 'Run the activation troubleshooter after a hardware change'],
       keywords: ['activation', 'activate windows', 'not activated', 'windows not activated', 'product key',
                  'license key', 'licence key', 'activate'] },
 
-    { key: 'os_reinstall', label: 'Fresh Windows install', category: 'os_software', priority: 'normal', est_minutes: 90, suggest_type: 'remote',
+    { key: 'os_reinstall', label: 'Fresh Windows install', category: 'os_software', priority: 'normal', est_minutes: 120, suggest_type: 'remote',
       kinds: ['pc', 'laptop', 'ssd'],
       checklist: ['Check the customer backed up their data — we don’t back it up', 'Note the licences and software the customer needs',
                   'Install Windows and the latest updates', 'Install chipset, graphics and network drivers',
@@ -131,7 +132,7 @@
       keywords: ['format', 'formatting', 'reinstall', 're-install', 'fresh install', 'install windows',
                  'windows installation', 'os installation', 'reset pc', 'factory reset', 'reinstall windows', 'clean install'] },
 
-    { key: 'virus_malware', label: 'Virus, malware or pop-ups', category: 'os_software', priority: 'normal', est_minutes: 60, suggest_type: 'remote',
+    { key: 'virus_malware', label: 'Virus, malware or pop-ups', category: 'os_software', priority: 'normal', est_minutes: 80, suggest_type: 'remote',
       kinds: ['pc', 'laptop'],
       checklist: ['Disconnect shared drives before scanning', 'Full scan with Defender plus a second-opinion scanner',
                   'Remove unwanted extensions and startup entries', 'Reset the browsers and advise a password change',
@@ -139,35 +140,35 @@
       keywords: ['virus', 'viruses', 'malware', 'popup', 'popups', 'pop-up', 'pop-ups', 'pop up', 'pop ups', 'adware',
                  'hacked', 'ransomware', 'trojan', 'unwanted ads'] },
 
-    { key: 'driver_crash', label: 'Driver problems', category: 'os_software', priority: 'normal', est_minutes: 45, suggest_type: 'remote',
+    { key: 'driver_crash', label: 'Driver problems', category: 'os_software', priority: 'normal', est_minutes: 60, suggest_type: 'remote',
       kinds: ['pc', 'laptop', 'gpu', 'peripheral'],
       checklist: ['Note the device and the error in Device Manager', 'Remove the old driver cleanly (DDU for graphics)',
                   "Install the vendor's current driver", 'Check Windows Update has not replaced it'],
       keywords: ['driver', 'drivers', 'driver error', 'driver crash', 'driver issue', 'device manager',
                  'display driver', 'driver not working'] },
 
-    { key: 'game_crash', label: 'Games crash or stutter', category: 'repair', priority: 'normal', est_minutes: 90, suggest_type: 'in_store',
+    { key: 'game_crash', label: 'Games crash or stutter', category: 'repair', priority: 'normal', est_minutes: 120, suggest_type: 'in_store',
       kinds: ['pc', 'laptop', 'gpu'],
       checklist: ['Note which games crash and when (loading, menu, after some minutes)', 'Log GPU and CPU temperatures and clocks while gaming',
                   'Clean-install the graphics driver', 'Run a GPU stress test', 'Check PSU wattage and the card power cables'],
       keywords: ['game crash', 'games crash', 'game crashing', 'games crashing', 'crashing in games', 'crash in game',
                  'stutter', 'stuttering', 'fps drop', 'fps drops', 'low fps', 'game closes'] },
 
-    { key: 'no_internet', label: 'No internet / LAN not working', category: 'networking', priority: 'normal', est_minutes: 30, suggest_type: 'in_store',
+    { key: 'no_internet', label: 'No internet / LAN not working', category: 'networking', priority: 'normal', est_minutes: 40, suggest_type: 'in_store',
       kinds: ['pc', 'laptop', 'motherboard'],
       checklist: ['Check the cable and the router lights', 'Check the adapter in Device Manager',
                   'Reinstall the network driver', 'Reset the network stack (Network reset)'],
       keywords: ['no internet', 'internet not working', 'lan not working', 'ethernet', 'network not working',
                  'no network', 'lan port', 'internet issue'] },
 
-    { key: 'wifi_issue', label: 'Wi-Fi or Bluetooth not working', category: 'networking', priority: 'normal', est_minutes: 45, suggest_type: 'in_store',
+    { key: 'wifi_issue', label: 'Wi-Fi or Bluetooth not working', category: 'networking', priority: 'normal', est_minutes: 60, suggest_type: 'in_store',
       kinds: ['pc', 'laptop', 'motherboard', 'peripheral'],
       checklist: ['Check the antenna is fitted (desktops)', 'Check the adapter is enabled and the driver loaded',
                   'Test against a known-good network', 'Update the Wi-Fi / Bluetooth driver',
                   'Check airplane mode and the BIOS wireless setting'],
       keywords: ['wifi', 'wi-fi', 'wireless', 'bluetooth', 'wifi not working', 'wifi disconnecting', 'no wifi', 'weak signal'] },
 
-    { key: 'network_setup', label: 'Network or router setup', category: 'networking', priority: 'normal', est_minutes: 90, suggest_type: 'on_site',
+    { key: 'network_setup', label: 'Network or router setup', category: 'networking', priority: 'normal', est_minutes: 120, suggest_type: 'on_site',
       kinds: [],
       checklist: ['Note the ISP, the router model and the rooms to cover', 'Set up the router: name, password, WPA2 / WPA3',
                   'Set up mesh or access points if needed', 'Test the speed in each room and note it',
@@ -175,13 +176,13 @@
       keywords: ['router', 'router setup', 'network setup', 'mesh', 'access point', 'lan cabling', 'office network',
                  'wifi setup', 'wi-fi setup', 'new connection'] },
 
-    { key: 'printer_setup', label: 'Printer setup', category: 'installation', priority: 'low', est_minutes: 45, suggest_type: 'on_site',
+    { key: 'printer_setup', label: 'Printer setup', category: 'installation', priority: 'low', est_minutes: 60, suggest_type: 'on_site',
       kinds: ['peripheral'],
       checklist: ['Note the printer model and how it connects (USB / Wi-Fi)', "Install the vendor's driver and software",
                   'Add the printer on each PC that needs it', 'Print a test page from each PC'],
       keywords: ['printer', 'printers', 'printing', 'printer setup', 'printer not working', 'print out', 'scanner setup'] },
 
-    { key: 'data_recovery', label: 'Data recovery', category: 'data_recovery', priority: 'high', est_minutes: 180, suggest_type: 'in_store',
+    { key: 'data_recovery', label: 'Data recovery', category: 'data_recovery', priority: 'high', est_minutes: 235, suggest_type: 'in_store',
       kinds: ['pc', 'laptop', 'ssd', 'hdd'],
       checklist: ['Stop using the drive: do not install or repair anything on it', 'Check the drive is detected and read its SMART health',
                   'Image the drive first if it is failing', 'Recover to a separate drive and check the files open',
@@ -189,7 +190,7 @@
       keywords: ['data recovery', 'recover data', 'recover files', 'recover my files', 'lost data', 'lost my data',
                  'deleted files', 'files missing', 'recover photos', 'corrupted drive', 'data lost'] },
 
-    { key: 'liquid_spill', label: 'Liquid spill', category: 'repair', priority: 'urgent', est_minutes: 120, suggest_type: 'in_store',
+    { key: 'liquid_spill', label: 'Liquid spill', category: 'repair', priority: 'urgent', est_minutes: 160, suggest_type: 'in_store',
       kinds: ['pc', 'laptop', 'peripheral', 'monitor'],
       checklist: ['Do not power it on; disconnect the battery first', 'Open it up and photograph the affected area',
                   'Clean with isopropyl alcohol and dry it fully', 'Check the board and connectors for corrosion',
@@ -197,27 +198,27 @@
       keywords: ['spill', 'spilled', 'spilt', 'liquid spill', 'liquid damage', 'liquid fell', 'water fell', 'water spill',
                  'water damage', 'water inside', 'coffee', 'tea fell', 'wet', 'juice'] },
 
-    { key: 'physical_damage', label: 'Physical damage', category: 'repair', priority: 'normal', est_minutes: 60, suggest_type: 'in_store',
+    { key: 'physical_damage', label: 'Physical damage', category: 'repair', priority: 'normal', est_minutes: 80, suggest_type: 'in_store',
       kinds: [],
       checklist: ['Photograph the damage before anything else', 'List what is broken (panel, port, hinge, case)',
                   'Check it still powers on and works', 'Quote parts and labour'],
       keywords: ['broken', 'broke', 'cracked', 'crack', 'damaged', 'fell down', 'dropped', 'bent', 'physical damage'] },
 
-    { key: 'upgrade_request', label: 'Upgrade', category: 'upgrade', priority: 'low', est_minutes: 60, suggest_type: 'in_store',
+    { key: 'upgrade_request', label: 'Upgrade', category: 'upgrade', priority: 'low', est_minutes: 80, suggest_type: 'in_store',
       kinds: ['pc', 'laptop', 'gpu', 'ram', 'ssd', 'cpu', 'psu', 'cooler', 'motherboard'],
       checklist: ['Note what the customer wants better (games, editing, storage)', 'Check compatibility: socket, board, PSU wattage, case size',
                   'Quote the parts and the labour', 'Back up first if the boot drive changes', 'Benchmark before and after'],
       keywords: ['upgrade', 'upgrading', 'add ram', 'more ram', 'increase ram', 'add ssd', 'add storage',
                  'new graphics card', 'better performance'] },
 
-    { key: 'cleaning_maintenance', label: 'Cleaning / servicing', category: 'maintenance', priority: 'low', est_minutes: 45, suggest_type: 'in_store',
+    { key: 'cleaning_maintenance', label: 'Cleaning / servicing', category: 'maintenance', priority: 'low', est_minutes: 60, suggest_type: 'in_store',
       kinds: ['pc', 'laptop', 'gpu', 'cooler'],
       checklist: ['Photograph it before cleaning', 'Blow out dust from fans, filters and heatsinks',
                   'Replace the thermal paste if temperatures are high', 'Check every fan spins and the cables are tidy',
                   'Log temperatures before and after'],
       keywords: ['cleaning', 'clean my pc', 'clean the pc', 'dust', 'dusty', 'servicing', 'general service', 'maintenance', 'thermal paste'] },
 
-    { key: 'new_installation', label: 'New PC installation at site', category: 'installation', priority: 'normal', est_minutes: 90, suggest_type: 'on_site',
+    { key: 'new_installation', label: 'New PC installation at site', category: 'installation', priority: 'normal', est_minutes: 120, suggest_type: 'on_site',
       kinds: ['pc', 'monitor', 'peripheral'],
       checklist: ['Unbox and check for transit damage', 'Set up the PC, monitor and peripherals',
                   "Connect to the customer's network and sign in", "Install the customer's software and update Windows",
@@ -225,14 +226,14 @@
       keywords: ['installation at home', 'install at home', 'home installation', 'setup at home', 'set up at home',
                  'new pc setup', 'delivery and setup', 'on site installation', 'onsite installation', 'office installation'] },
 
-    { key: 'ram_fault', label: 'RAM fault', category: 'repair', priority: 'normal', est_minutes: 60, suggest_type: 'in_store',
+    { key: 'ram_fault', label: 'RAM fault', category: 'repair', priority: 'normal', est_minutes: 80, suggest_type: 'in_store',
       kinds: ['pc', 'laptop', 'ram', 'motherboard'],
       checklist: ['Run MemTest86 for at least one full pass', 'Test each stick alone in a known-good slot',
                   'Retest at stock speed with XMP / EXPO off', 'Note the serial if the stick goes for RMA'],
       keywords: ['memory error', 'ram problem', 'ram issue', 'ram error', 'ram not detected', 'faulty ram', 'ram faulty',
                  'memtest', 'memory management'] },
 
-    { key: 'ssd_fault', label: 'SSD or hard drive fault', category: 'repair', priority: 'high', est_minutes: 60, suggest_type: 'in_store',
+    { key: 'ssd_fault', label: 'SSD or hard drive fault', category: 'repair', priority: 'high', est_minutes: 80, suggest_type: 'in_store',
       kinds: ['pc', 'laptop', 'ssd', 'hdd'],
       checklist: ['Check the drive is detected in BIOS', 'Read SMART health and wear (CrystalDiskInfo)',
                   'Check the firmware and the cable or M.2 slot', 'Check the data answer before any test that writes to it',
@@ -241,7 +242,7 @@
                  'hard disk not detected', 'hdd not detected', 'hdd problem', 'drive not detected', 'disk not detected',
                  'disk error', 'disk 100%', 'clicking sound', 'storage not showing', 'bad sectors'] },
 
-    { key: 'gpu_artifacts', label: 'Graphics card artifacts', category: 'repair', priority: 'high', est_minutes: 90, suggest_type: 'in_store',
+    { key: 'gpu_artifacts', label: 'Graphics card artifacts', category: 'repair', priority: 'high', est_minutes: 120, suggest_type: 'in_store',
       kinds: ['pc', 'laptop', 'gpu'],
       checklist: ['Photograph or film the artifacts', 'Clean-install the driver and retest',
                   'Run a GPU stress test and watch the temperatures', 'Test the card in a known-good PC',
@@ -250,27 +251,27 @@
                  'lines on the screen', 'colour lines', 'color lines', 'checkerboard', 'gpu problem', 'gpu issue',
                  'graphics card problem', 'graphics card issue', 'graphics problem'] },
 
-    { key: 'psu_fault', label: 'Power supply fault', category: 'repair', priority: 'high', est_minutes: 45, suggest_type: 'in_store',
+    { key: 'psu_fault', label: 'Power supply fault', category: 'repair', priority: 'high', est_minutes: 60, suggest_type: 'in_store',
       kinds: ['pc', 'psu'],
       checklist: ['Test with a PSU tester and under load', 'Check for a burnt smell, noise or swollen capacitors',
                   "Check every cable is the PSU's own (modular cables are not interchangeable)", 'Note the serial if it goes for RMA'],
       keywords: ['smps', 'burning smell', 'burnt smell', 'smoke', 'sparks', 'spark', 'psu problem', 'psu issue', 'psu dead',
                  'psu fault', 'psu not working', 'power supply problem', 'power supply issue', 'power supply dead'] },
 
-    { key: 'usb_ports', label: 'USB ports not working', category: 'repair', priority: 'low', est_minutes: 45, suggest_type: 'in_store',
+    { key: 'usb_ports', label: 'USB ports not working', category: 'repair', priority: 'low', est_minutes: 60, suggest_type: 'in_store',
       kinds: ['pc', 'laptop', 'motherboard', 'peripheral'],
       checklist: ['Test each port with a known-good device', 'Check the front-panel USB headers are connected',
                   'Check USB drivers and power management settings', 'Look for bent pins or a loose port'],
       keywords: ['usb', 'usb port', 'usb ports', 'usb not working', 'port not working', 'pendrive', 'pen drive', 'type-c', 'type c'] },
 
-    { key: 'audio_issue', label: 'No sound / audio problem', category: 'repair', priority: 'low', est_minutes: 30, suggest_type: 'in_store',
+    { key: 'audio_issue', label: 'No sound / audio problem', category: 'repair', priority: 'low', est_minutes: 40, suggest_type: 'in_store',
       kinds: ['pc', 'laptop', 'motherboard', 'peripheral'],
       checklist: ['Check the output device selected in Windows', 'Test the front and rear audio jacks',
                   'Reinstall the audio driver', 'Check the front-panel audio header'],
       keywords: ['no sound', 'sound not working', 'audio', 'speaker not working', 'speakers not working', 'headphone',
                  'headphones', 'headset', 'mic not working', 'microphone'] },
 
-    { key: 'monitor_issue', label: 'Monitor problem', category: 'repair', priority: 'normal', est_minutes: 45, suggest_type: 'in_store',
+    { key: 'monitor_issue', label: 'Monitor problem', category: 'repair', priority: 'normal', est_minutes: 60, suggest_type: 'in_store',
       kinds: ['monitor', 'pc'],
       checklist: ['Test with another cable and another source', 'Check the refresh rate and resolution settings',
                   'Look for dead pixels, lines or backlight bleed and photograph them', "Check the monitor's own menu and power LED",
@@ -278,21 +279,21 @@
       keywords: ['monitor not working', 'monitor problem', 'monitor issue', 'dead pixel', 'dead pixels', 'backlight',
                  'monitor flickering', 'lines on monitor', 'flickering'] },
 
-    { key: 'laptop_battery', label: 'Laptop battery or charging', category: 'repair', priority: 'normal', est_minutes: 45, suggest_type: 'in_store',
+    { key: 'laptop_battery', label: 'Laptop battery or charging', category: 'repair', priority: 'normal', est_minutes: 60, suggest_type: 'in_store',
       kinds: ['laptop'],
       checklist: ['Check battery health (powercfg /batteryreport)', 'Test with a known-good charger',
                   'Check the charging port and DC jack', 'Look for a swollen battery and do not charge it if swollen'],
       keywords: ['battery', 'not charging', 'charging issue', 'battery drain', 'battery draining', 'swollen battery',
                  'plugged in not charging', 'charger not working'] },
 
-    { key: 'laptop_keyboard', label: 'Laptop keyboard or touchpad', category: 'repair', priority: 'normal', est_minutes: 60, suggest_type: 'in_store',
+    { key: 'laptop_keyboard', label: 'Laptop keyboard or touchpad', category: 'repair', priority: 'normal', est_minutes: 80, suggest_type: 'in_store',
       kinds: ['laptop'],
       checklist: ['Test every key with a keyboard tester', 'Check for liquid residue under the keys',
                   'Test with an external keyboard to rule out software', 'Quote a replacement keyboard if keys are dead'],
       keywords: ['keyboard not working', 'keyboard problem', 'keyboard issue', 'keys not working', 'key not working',
                  'touchpad', 'trackpad', 'touch pad'] },
 
-    { key: 'laptop_screen', label: 'Laptop screen broken or flickering', category: 'repair', priority: 'high', est_minutes: 60, suggest_type: 'in_store',
+    { key: 'laptop_screen', label: 'Laptop screen broken or flickering', category: 'repair', priority: 'high', est_minutes: 80, suggest_type: 'in_store',
       kinds: ['laptop'],
       checklist: ['Photograph the screen damage', 'Test with an external monitor to rule out the board',
                   'Check the display cable and the hinge', 'Quote the exact panel (model, resolution, refresh, connector)'],
@@ -301,37 +302,37 @@
 
     // Beyond the required list: common counter requests that otherwise fall
     // into "other" and lose their priority and checklist.
-    { key: 'warranty_part', label: 'Part failed — warranty claim', category: 'warranty_claim', priority: 'normal', est_minutes: 30, suggest_type: 'in_store',
+    { key: 'warranty_part', label: 'Part failed — warranty claim', category: 'warranty_claim', priority: 'normal', est_minutes: 40, suggest_type: 'in_store',
       kinds: ['gpu', 'psu', 'ram', 'ssd', 'hdd', 'motherboard', 'cpu', 'cooler', 'monitor', 'peripheral'],
       checklist: ['Confirm the fault on our test bench', 'Photograph the serial label and the part',
                   'Check where and when it was bought (invoice)', "Check the vendor's warranty terms"],
       keywords: ['warranty', 'under warranty', 'warranty claim', 'rma'] },
 
-    { key: 'general_checkup', label: 'Check-up / not sure what is wrong', category: 'diagnosis_only', priority: 'low', est_minutes: 45, suggest_type: 'in_store',
+    { key: 'general_checkup', label: 'Check-up / not sure what is wrong', category: 'diagnosis_only', priority: 'low', est_minutes: 60, suggest_type: 'in_store',
       kinds: [],
       checklist: ["Write down the customer's exact symptoms and when they happen", 'Run a full hardware health check (drives, RAM, temperatures)',
                   'Check Event Viewer for errors', 'Report findings before doing any paid work'],
       keywords: ['check up', 'checkup', 'diagnosis', 'not sure what', 'some problem', 'full check'] },
 
-    { key: 'data_transfer', label: 'Data backup or transfer', category: 'data_recovery', priority: 'normal', est_minutes: 60, suggest_type: 'in_store',
+    { key: 'data_transfer', label: 'Data backup or transfer', category: 'data_recovery', priority: 'normal', est_minutes: 80, suggest_type: 'in_store',
       kinds: ['pc', 'laptop', 'ssd', 'hdd'],
       checklist: ['Agree exactly what to copy (folders, mail, browser data)', 'Check the destination drive has room',
                   'Copy and verify file counts', 'Show the customer the copied data before wiping anything'],
       keywords: ['backup', 'back up', 'data transfer', 'transfer data', 'copy data', 'move data', 'clone', 'cloning'] },
 
-    { key: 'software_install', label: 'Install software', category: 'os_software', priority: 'low', est_minutes: 30, suggest_type: 'remote',
+    { key: 'software_install', label: 'Install software', category: 'os_software', priority: 'low', est_minutes: 40, suggest_type: 'remote',
       kinds: ['pc', 'laptop'],
       checklist: ['Confirm the customer owns a licence for the software', 'Download from the official vendor site only',
                   'Install and activate', 'Check it opens and works for the customer'],
       keywords: ['install software', 'software installation', 'install office', 'ms office', 'microsoft office', 'install app', 'tally'] },
 
-    { key: 'bios_update', label: 'BIOS update or settings', category: 'maintenance', priority: 'low', est_minutes: 30, suggest_type: 'in_store',
+    { key: 'bios_update', label: 'BIOS update or settings', category: 'maintenance', priority: 'low', est_minutes: 40, suggest_type: 'in_store',
       kinds: ['pc', 'laptop', 'motherboard'],
       checklist: ['Note the current BIOS version and the CPU', 'Check the update is for this exact board revision',
                   'Update on a stable power supply (UPS)', 'Re-apply XMP / EXPO and boot settings afterwards'],
       keywords: ['bios', 'bios update', 'uefi', 'xmp', 'expo', 'bios settings'] },
 
-    { key: 'cooler_aio', label: 'Liquid cooler (AIO) problem', category: 'repair', priority: 'high', est_minutes: 60, suggest_type: 'in_store',
+    { key: 'cooler_aio', label: 'Liquid cooler (AIO) problem', category: 'repair', priority: 'high', est_minutes: 80, suggest_type: 'in_store',
       kinds: ['pc', 'cooler'],
       checklist: ['Check for any leak before powering on', 'Check the pump runs (pump speed in BIOS)',
                   'Check the radiator fans and the tubing', 'Log CPU temperature at idle and under load',
@@ -580,6 +581,17 @@
 
   function msg(lines) { return lines.filter(function (l) { return l != null && l !== ''; }).join('\n'); }
 
+  // Minutes in words for a customer: "40 minutes", "1 hour 20 minutes",
+  // "2 days" (a whole number of days only; otherwise hours). '' for none.
+  function durationWords(m) {
+    m = Math.round(Number(m) || 0);
+    if (m <= 0) return '';
+    if (m >= 1440 && m % 1440 === 0) { var d = m / 1440; return d + (d === 1 ? ' day' : ' days'); }
+    if (m < 60) return m + (m === 1 ? ' minute' : ' minutes');
+    var h = Math.floor(m / 60), r = m % 60;
+    return h + (h === 1 ? ' hour' : ' hours') + (r ? ' ' + r + (r === 1 ? ' minute' : ' minutes') : '');
+  }
+
   var WA_TEMPLATES = {
     created: function (job) {
       var j = job || {};
@@ -600,7 +612,17 @@
       // never backs up what is on it (sql/service-v2.1.sql). Said in writing,
       // before the work starts.
       var dataLine = (t === 'on_site' || t === 'remote') ? '' : NO_BACKUP_LINE;
-      return msg([hello(j.customer_name), 'Thank you for choosing ' + SHOP + '. ' + body, dataLine, footer(j.public_code)]);
+      // 1.13 (owner): the estimate the counter saw, so the customer knows
+      // when to expect our update. Counted from when the device is with us.
+      var est = durationWords(j.est_minutes);
+      var estLine = !est ? ''
+        : (t === 'on_site' || t === 'remote') ? 'Estimated time for the work: about ' + est + '.'
+        : j.stage === 'logged' ? 'Once it is with us, expect our update within about ' + est + '.'
+        : '';
+      if (est && t !== 'on_site' && t !== 'remote' && j.stage !== 'logged') {
+        body = 'We have received your ' + deviceOf(j) + ' for service. Expect our update within about ' + est + '.';
+      }
+      return msg([hello(j.customer_name), 'Thank you for choosing ' + SHOP + '. ' + body, estLine, dataLine, footer(j.public_code)]);
     },
 
     quote: function (job, amountText) {
@@ -1001,6 +1023,7 @@
     OUR_WARRANTY_MONTHS: OUR_WARRANTY_MONTHS,
     ourWarrantyUntil: ourWarrantyUntil,
     WA_TEMPLATES: WA_TEMPLATES,
+    durationWords: durationWords,
     trackLink: trackLink,
     visitText: visitText,
     matchFaults: matchFaults,
