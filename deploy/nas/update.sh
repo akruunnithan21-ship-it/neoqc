@@ -10,7 +10,7 @@
 # - Does nothing when main hasn't moved.
 set -euo pipefail
 
-DIR="${NEO_TRACKER_DIR:-/home/neo_tokyo/neo-tracker}"
+DIR="${NEO_TRACKER_DIR:-$HOME/neo-tracker}"
 REPO="$DIR/repo"
 URL="https://github.com/akruunnithan21-ship-it/neoqc.git"
 

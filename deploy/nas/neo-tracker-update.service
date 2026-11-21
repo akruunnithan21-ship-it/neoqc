@@ -1,12 +1,7 @@
 [Unit]
-Description=Neo Tokyo customer tracker: take the website from GitHub main
-After=network-online.target
-Wants=network-online.target
+Description=Neo Tokyo customer website: take the site from GitHub main
 
 [Service]
 Type=oneshot
-User=neo_tokyo
-Group=neo_tokyo
-ExecStart=/home/neo_tokyo/neo-tracker/update.sh
+ExecStart=%h/neo-tracker/update.sh
 NoNewPrivileges=true
-PrivateTmp=true

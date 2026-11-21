@@ -12,12 +12,15 @@ GitHub main (dashboard/) ─every 5 min─▶ update.sh ─▶ ./site
 | | |
 |---|---|
 | Folder on the NAS | `/home/neo_tokyo/neo-tracker/` (`server.js`, `update.sh`, `site/`, `repo/`) |
-| Web server | systemd `neo-tracker` (starts at boot, restarts on failure) |
-| Updates | systemd `neo-tracker-update.timer` (every 5 minutes, from GitHub `main`) |
+| Web server | user service `neo-tracker` (starts at boot, restarts on failure) |
+| Updates | user timer `neo-tracker-update.timer` (every 5 minutes, from GitHub `main`) |
 | Port | `127.0.0.1:8097` (loopback only; 8090 is the planner, 8095 the configurator test) |
 | Public address | `https://service.neotokyo.in` (route added by the developers in Cloudflare) |
 
-The repository is public, so the NAS needs no GitHub login to update.
+The repository is public, so the NAS needs no GitHub login to update. Both run
+as **user services** of `neo_tokyo`, like the configurator test copy and the NAS
+phone app: lingering is on for that user, so they start at boot, and nothing
+needs `sudo`.
 
 ## 1. Install on the NAS (once)
 
@@ -33,13 +36,13 @@ On the NAS (`ssh nas`):
 
 ```
 chmod +x ~/neo-tracker/update.sh
-sudo cp ~/neo-tracker/neo-tracker.service ~/neo-tracker/neo-tracker-update.service ~/neo-tracker/neo-tracker-update.timer /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now neo-tracker
-sudo systemctl enable --now neo-tracker-update.timer
-sudo systemctl start neo-tracker-update      # first update now: clones main into ~/neo-tracker/repo
-curl -s http://127.0.0.1:8097/ping.json      # {"site":"neo-service"}
-cat ~/neo-tracker/site/VERSION.txt           # tracker <commit> <time>
+mkdir -p ~/.config/systemd/user
+cp ~/neo-tracker/neo-tracker.service ~/neo-tracker/neo-tracker-update.service ~/neo-tracker/neo-tracker-update.timer ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now neo-tracker.service neo-tracker-update.timer
+systemctl --user start neo-tracker-update.service   # first update now: clones main into ~/neo-tracker/repo
+curl -s http://127.0.0.1:8097/ping.json              # {"site":"neo-service"}
+cat ~/neo-tracker/site/VERSION.txt                   # tracker <commit> <time>
 ```
 
 ## 2. The route (the developers' Cloudflare account, which holds neotokyo.in)
@@ -79,11 +82,11 @@ curl -s https://service.neotokyo.in/ping.json     # {"site":"neo-service"}
 ## Check or stop
 
 ```
-systemctl status neo-tracker neo-tracker-update.timer
-journalctl -u neo-tracker -u neo-tracker-update -n 50
-sudo systemctl start neo-tracker-update                    # update now
-sudo systemctl disable --now neo-tracker-update.timer      # stop updating
-sudo systemctl disable --now neo-tracker                   # stop the site
+systemctl --user status neo-tracker neo-tracker-update.timer
+journalctl --user -u neo-tracker -u neo-tracker-update -n 50
+systemctl --user start neo-tracker-update                  # update now
+systemctl --user disable --now neo-tracker-update.timer    # stop updating
+systemctl --user disable --now neo-tracker                 # stop the site
 ```
 
 To go back one version by hand: `mv ~/neo-tracker/site ~/neo-tracker/site.bad && mv ~/neo-tracker/site.old ~/neo-tracker/site`
