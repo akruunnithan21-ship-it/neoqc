@@ -870,7 +870,12 @@
       if (navigator.clipboard && navigator.clipboard.writeText) { await navigator.clipboard.writeText(text); return true; }
     } catch (e) {}
     var el = electron();
-    try { if (el && el.clipboard) { el.clipboard.writeText(text); return true; } } catch (e) {}
+    // 1.14 (Electron 44+): no clipboard module in the page; ask the main process.
+    try {
+      if (el && el.ipcRenderer && typeof el.ipcRenderer.invoke === 'function') {
+        if (await el.ipcRenderer.invoke('sys:clipboard-write', String(text)) === true) return true;
+      }
+    } catch (e) {}
     try {
       var ta = document.createElement('textarea');
       ta.value = text; ta.setAttribute('readonly', ''); ta.style.position = 'fixed'; ta.style.opacity = '0';

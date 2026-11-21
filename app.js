@@ -2575,7 +2575,23 @@ function showTierNotice() {
   if (el) el.classList.add('active');
   const nameEl = document.getElementById('tier-notice-name');
   if (nameEl && currentProfile) nameEl.textContent = (currentProfile.full_name || 'staff').split(' ')[0];
+  // 1.14 — a phone-only technician (modules.js phoneOnly) is sent to the
+  // phone app, not to the web portal.
+  let phone = false;
+  try { phone = !!(currentProfile && window.NeoQcModules && window.NeoQcModules.phoneOnly(currentProfile)); } catch (e) { phone = false; }
+  const webMsg = document.getElementById('tier-notice-msg');
+  const phoneMsg = document.getElementById('tier-notice-phone');
+  if (webMsg) webMsg.classList.toggle('hidden', phone);
+  if (phoneMsg) phoneMsg.classList.toggle('hidden', !phone);
 }
+// 1.14 — an access answer that arrives after the first screen (a slow
+// my_modules at sign-in) and says phone-only takes the person off it.
+window.addEventListener('neo-modules-changed', () => {
+  try {
+    const M = window.NeoQcModules;
+    if (currentProfile && M && M.phoneOnly(currentProfile)) showTierNotice();
+  } catch (e) {}
+});
 
 // The titlebar chip: avatar + name + tier + one-click sign-out. Shown on every
 // screen once signed in; hidden on the login screen itself.

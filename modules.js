@@ -17,6 +17,8 @@
       whether they are in the build pool / the service pool and their build
       level. pools() reads them. Tier 3+ is a lead everywhere but is NOT in a
       pool unless the People screen put them in one.
+    - phone_only (1.14, server v2.10): a technician below tier 3 who works
+      only from the phone app. Nothing opens for them here (phoneOnly()).
 
   NOTHING HERE IS A SECURITY BOUNDARY. The server's RLS (svc_reader /
   rma_reader) decides what rows anyone can read; this keeps the UI honest so
@@ -108,6 +110,8 @@
     out.build_pool = data.build_pool === true;
     out.service_pool = data.service_pool === true;
     out.build_level = LEVELS.indexOf(data.build_level) !== -1 ? data.build_level : null;
+    // 1.14 (server v2.10): a technician who works only from the phone app.
+    out.phone_only = data.phone_only === true;
     return out;
   }
 
@@ -247,6 +251,19 @@
     };
   }
 
+  // 1.14 — owner decision 2026-11-21: only senior technicians and the office
+  // sign in to Neo Service; the other technicians work from the phone app.
+  // They keep their service role and pool (so jobs are still assigned to them
+  // and the phone app works), but this app opens nothing for them: they land
+  // on the notice with Sign out. Tier 3+ are never phone-only here, so a
+  // wrong flag can never lock a lead out of the desktop app.
+  function phoneOnly(prof) {
+    var p = prof === undefined ? profile() : prof;
+    if (!p || p.active === false || tierOf(p) >= 3) return false;
+    var a = accessFor(p);
+    return !!(a && a.phone_only === true);
+  }
+
   // ── registry lookups ───────────────────────────────────────────────────────
   function list() { return REGISTRY.slice(); }
 
@@ -280,6 +297,7 @@
     if (!e || e.hidden || e.spacer) return false;
     var p = prof === undefined ? profile() : prof;
     if (!p || p.active === false) return false;
+    if (phoneOnly(p)) return false;
     var t = tierOf(p);
     var n = e.needs || null;
     if (!n) return false;
@@ -316,6 +334,7 @@
   function firstHome(prof) {
     var p = prof === undefined ? profile() : prof;
     if (!p || p.active === false) return null;
+    if (phoneOnly(p)) return null;
     var t = tierOf(p);
     if (t >= 3) return 'overview';
     var pl = pools(p);
@@ -346,6 +365,7 @@
     roleFor: roleFor,
     hasRole: hasRole,
     pools: pools,
+    phoneOnly: phoneOnly,
     roleRank: roleRank,
     refreshAccess: refreshAccess,
     firstHome: firstHome,

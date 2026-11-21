@@ -3243,10 +3243,18 @@
   function copyText(text, token) {
     if (!text) return;
     var done = function () { lateToast(token, 'Code ' + text + ' copied.', 'success'); };
+    // 1.14 (Electron 44+): the page has no clipboard module any more; the
+    // fallback asks the main process to write it (sys:clipboard-write).
     var viaElectron = function () {
       try {
         var el = (typeof require === 'function') ? require('electron') : null;
-        if (el && el.clipboard && typeof el.clipboard.writeText === 'function') { el.clipboard.writeText(text); done(); return true; }
+        if (el && el.ipcRenderer && typeof el.ipcRenderer.invoke === 'function') {
+          el.ipcRenderer.invoke('sys:clipboard-write', String(text)).then(function (ok) {
+            if (ok === true) done();
+            else lateToast(token, 'Could not copy. The code is ' + text + '.', 'warning');
+          }, function () { lateToast(token, 'Could not copy. The code is ' + text + '.', 'warning'); });
+          return true;
+        }
       } catch (e) { /* not Electron */ }
       return false;
     };

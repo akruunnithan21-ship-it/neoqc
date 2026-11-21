@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, clipboard } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { exec, spawn, execSync } = require('child_process');
@@ -12,6 +12,12 @@ const log = require('electron-log');
 // keeps its sign-in, settings and local data through the rename. Set before
 // anything reads userData; on an unchanged build this is a no-op.
 try { app.setPath('userData', path.join(app.getPath('appData'), 'neo-qc')); } catch (e) { /* keep the default */ }
+// Development only (never in the installed app): NEOQC_USER_DATA=<folder>
+// runs `npm start` with its own data folder, so a test copy never shares
+// sign-in or local data with an installed Neo Service open on the same PC.
+if (!app.isPackaged && process.env.NEOQC_USER_DATA) {
+  try { app.setPath('userData', path.resolve(process.env.NEOQC_USER_DATA)); } catch (e) { /* keep neo-qc */ }
+}
 const cinebenchLib = require('./cinebench');
 
 // Configure auto updater logging
@@ -145,14 +151,22 @@ function createWindow() {
     transparent: false,
     title: "Neo Service",
     icon: path.join(__dirname, 'assets', 'icon.ico'),
+    // 1.14 (Electron 44+): the window opens where it was left: same size,
+    // place and maximised state. Electron saves it per window `name` and
+    // falls back to the size above when that screen is gone.
+    name: 'neo-service-main',
+    windowStatePersistence: true,
     webPreferences: {
       nodeIntegration: true,
       contextIsolation: false // Simpler for local utility apps
     }
   });
 
-  mainWindow.webContents.on('console-message', (event, level, message, line, sourceId) => {
-    console.log(`RENDERER LOG [Level ${level}]: ${message} (from ${path.basename(sourceId)}:${line})`);
+  // 1.14: the details-object form (the positional arguments are deprecated
+  // and go in Electron 47). level is 'info' | 'warning' | 'error' | 'debug'.
+  mainWindow.webContents.on('console-message', (details) => {
+    const d = details || {};
+    console.log(`RENDERER LOG [${d.level}]: ${d.message} (from ${path.basename(String(d.sourceId || ''))}:${d.lineNumber})`);
   });
 
   // White-screen recovery. This is a frameless window (frame:false), so the
@@ -325,7 +339,10 @@ ipcMain.handle('sys:pawnio-status', async () => {
 app.whenReady().then(() => {
   // Fire-and-forget: never delay the window on a driver install.
   ensurePawnIOInstalled().catch(e => log.warn('[PawnIO] ensure failed:', e && e.message));
-  if (!checkAdminElevated()) {
+  // Development only: NEOQC_NO_ADMIN=1 opens an unpackaged test copy without
+  // elevation (screens and sign-in work; hardware tests will not).
+  const devNoAdmin = !app.isPackaged && process.env.NEOQC_NO_ADMIN === '1';
+  if (!devNoAdmin && !checkAdminElevated()) {
     dialog.showErrorBox(
       'Administrator Privileges Required',
       'Neo Service requires administrator privileges to access low-level CPU/GPU registers and temperature sensors. Please run the application as Administrator.'
@@ -580,14 +597,52 @@ ipcMain.handle('catalog:write-cache', (event, data) => {
   }
 });
 
+// 1.14 (Electron 43+): an Open or Save dialog with no folder given opens in
+// Downloads, and Windows no longer brings back the last folder used. The app
+// remembers the last folder for each kind of file itself, in
+// userData\dialog-folders.json, so staff land where they were last time.
+function dialogFoldersFile() { return path.join(app.getPath('userData'), 'dialog-folders.json'); }
+function readDialogFolders() {
+  try {
+    const all = JSON.parse(fs.readFileSync(dialogFoldersFile(), 'utf-8'));
+    return (all && typeof all === 'object' && !Array.isArray(all)) ? all : {};
+  } catch (e) { return {}; }
+}
+function dialogFolder(kind) {
+  const d = readDialogFolders()[kind];
+  try { if (typeof d === 'string' && d && fs.statSync(d).isDirectory()) return d; } catch (e) { /* gone: use the default */ }
+  return '';
+}
+function rememberDialogFolder(kind, filePath) {
+  try {
+    const dir = path.dirname(String(filePath || ''));
+    if (!dir || dir === '.' || !path.isAbsolute(dir)) return;
+    const all = readDialogFolders();
+    all[kind] = dir;
+    fs.writeFileSync(dialogFoldersFile(), JSON.stringify(all), 'utf-8');
+  } catch (e) { log.warn('Could not remember the dialog folder:', e && e.message); }
+}
+
 // IPC Handler: Select File Dialog
 ipcMain.handle('dialog:open-file', async (event, filters) => {
-  const result = await dialog.showOpenDialog(mainWindow, {
+  const opts = {
     properties: ['openFile'],
     filters: filters || [{ name: 'All Files', extensions: ['*'] }]
-  });
+  };
+  const dir = dialogFolder('open');
+  if (dir) opts.defaultPath = dir;   // first time: Electron's default, Downloads
+  const result = await dialog.showOpenDialog(mainWindow, opts);
   if (result.canceled) return null;
+  rememberDialogFolder('open', result.filePaths[0]);
   return result.filePaths[0];
+});
+
+// 1.14 (Electron 44+): the page can no longer use Electron's clipboard module,
+// so the copy buttons fall back to this when navigator.clipboard refuses.
+ipcMain.handle('sys:clipboard-write', async (event, text) => {
+  if (typeof text !== 'string' || text.length > 100000) return false;
+  await clipboard.writeText(text);
+  return true;
 });
 
 // IPC Handler: Read Text File (used for Cinebench logs or CrystalDiskMark outputs)
@@ -893,15 +948,18 @@ ipcMain.handle('sys:print-pdf', async (event, arg) => {
   const filename = typeof opts.filename === 'string' ? opts.filename : '';
   const title = typeof opts.title === 'string' && opts.title ? opts.title.slice(0, 120) : 'Save Quality Control Report as PDF';
   try {
+    // The last folder a PDF went to (Documents the first time) + the name.
+    const name = path.basename(filename || 'QC-Report.pdf');
     const result = await dialog.showSaveDialog(mainWindow, {
       title: title,
-      defaultPath: filename || 'QC-Report.pdf',
+      defaultPath: path.join(dialogFolder('pdf') || app.getPath('documents'), name),
       filters: [{ name: 'PDF Files', extensions: ['pdf'] }]
     });
 
     if (result.canceled || !result.filePath) {
       return { success: false, error: 'Cancelled' };
     }
+    rememberDialogFolder('pdf', result.filePath);
 
     const pdfData = await mainWindow.webContents.printToPDF({
       margins: {

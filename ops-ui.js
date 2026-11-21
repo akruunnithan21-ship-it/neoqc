@@ -343,21 +343,25 @@
 
   function copyText(text) {
     var s = String(text == null ? '' : text);
-    var viaElectron = function () {
+    // 1.14 (Electron 44+): the page has no clipboard module any more; the
+    // fallback asks the main process to write it (sys:clipboard-write).
+    var viaMain = function () {
       try {
         if (typeof require === 'function') {
-          var cb = require('electron').clipboard;
-          if (cb && typeof cb.writeText === 'function') { cb.writeText(s); return true; }
+          var ipc = require('electron').ipcRenderer;
+          if (ipc && typeof ipc.invoke === 'function') {
+            return ipc.invoke('sys:clipboard-write', s).then(function (ok) { return ok === true; }, function () { return false; });
+          }
         }
       } catch (e) { /* not Electron */ }
-      return false;
+      return Promise.resolve(false);
     };
     try {
       if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
-        return navigator.clipboard.writeText(s).then(function () { return true; }, function () { return viaElectron(); });
+        return navigator.clipboard.writeText(s).then(function () { return true; }, viaMain);
       }
     } catch (e) { /* fall through */ }
-    return Promise.resolve(viaElectron());
+    return viaMain();
   }
 
   // ── scanner guard ──────────────────────────────────────────────────────────
