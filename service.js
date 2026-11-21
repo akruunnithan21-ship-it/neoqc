@@ -870,7 +870,12 @@
       if (navigator.clipboard && navigator.clipboard.writeText) { await navigator.clipboard.writeText(text); return true; }
     } catch (e) {}
     var el = electron();
-    try { if (el && el.clipboard) { el.clipboard.writeText(text); return true; } } catch (e) {}
+    // 1.14 (Electron 44+): no clipboard module in the page; ask the main process.
+    try {
+      if (el && el.ipcRenderer && typeof el.ipcRenderer.invoke === 'function') {
+        if (await el.ipcRenderer.invoke('sys:clipboard-write', String(text)) === true) return true;
+      }
+    } catch (e) {}
     try {
       var ta = document.createElement('textarea');
       ta.value = text; ta.setAttribute('readonly', ''); ta.style.position = 'fixed'; ta.style.opacity = '0';
@@ -1279,12 +1284,18 @@
     // once-a-minute repaint; on a 1100 px office screen the board scrolls.
     var oldBoard = root.querySelector('.sv-board');
     var sx = oldBoard ? oldBoard.scrollLeft : 0;
+    var rowScroll = {};
+    Array.prototype.forEach.call(root.querySelectorAll('.sv2-sb-scroll'), function (s) { rowScroll[s.getAttribute('data-sb-row')] = s.scrollLeft; });
     var focusJob = document.activeElement && root.contains(document.activeElement) && document.activeElement.getAttribute
       ? document.activeElement.getAttribute('data-job') : null;
     tviewCache = null;
     root.innerHTML = html;
     var nb = root.querySelector('.sv-board');
     if (nb && sx) nb.scrollLeft = sx;
+    Array.prototype.forEach.call(root.querySelectorAll('.sv2-sb-scroll'), function (s) {
+      var x = rowScroll[s.getAttribute('data-sb-row')];
+      if (x) s.scrollLeft = x;
+    });
     if (focusJob) {
       var again = Array.prototype.find.call(root.querySelectorAll('[data-job][role="button"]'), function (x) { return x.getAttribute('data-job') === focusJob; });
       if (again) again.focus();
@@ -1357,68 +1368,141 @@
     return rows;
   }
 
-  // ── board ──────────────────────────────────────────────────────────────────
+  // ── board (1.14): columns by step ──────────────────────────────────────────
+  // The owner's layout (2026-11-21): the same steps as the ticket's step bar,
+  // so the board and the ticket speak one language (service-status.js
+  // BOARD_ROWS). In-store tickets are the first row; on-site and remote jobs
+  // have a row of their own steps underneath. Whose turn it is — us, the
+  // customer, a supplier — is the coloured tag on each card. Tickets closed
+  // today are a strip of chips under the rows, so they never take a column.
+  var TURN_WORDS = { shop: 'On us', customer: 'Customer’s turn', third_party: 'Supplier', nobody: 'Done' };
+  function estText(m) {
+    m = Math.round(Number(m) || 0);
+    if (m <= 0) return '';
+    if (m >= 1440 && m % 1440 === 0) { var dd = m / 1440; return dd + (dd === 1 ? ' day' : ' days'); }
+    return fmtMinutes(m);
+  }
+  function initials(name) {
+    var p = String(name || '').trim().split(/\s+/).filter(Boolean);
+    if (!p.length) return '?';
+    return (p[0].charAt(0) + (p.length > 1 ? p[p.length - 1].charAt(0) : '')).toUpperCase();
+  }
   function boardHtml(rows, now) {
     var M = svc();
+    if (!M || !Array.isArray(M.BOARD_ROWS) || typeof M.boardCellOf !== 'function') {
+      return '<div class="sv-empty">The board layout did not load. Restart the app.</div>';
+    }
     var mid = midnight(0);
-    var buckets = {};
-    M.COLUMNS.forEach(function (c) { buckets[c.key] = []; });
+    var cells = {}, closed = [];
+    M.BOARD_ROWS.forEach(function (r) { r.cols.forEach(function (c) { cells[r.key + ':' + c.key] = []; }); });
     rows.forEach(function (j) {
-      var lane = laneOf(j, now);
-      if (!buckets[lane]) lane = 'shop';
-      if (lane === 'closed') {
-        // "Closed today" empties overnight — the only feedback loop that makes
-        // people actually close tickets rather than leave them on the board.
-        var ct = ms(j.closed_at);
-        if (!(ct >= mid)) return;
+      var cell = M.boardCellOf(j);
+      if (cell && cell.row === 'closed') {
+        // "Closed today" empties overnight — the feedback that gets tickets closed.
+        if (ms(j.closed_at) >= mid) closed.push(j);
+        return;
       }
-      buckets[lane].push(j);
+      var key = cell ? cell.row + ':' + cell.col : null;
+      if (!key || !cells[key]) {
+        // A stage its row does not know (the tests rule this out): the row's
+        // first column, so a ticket is never lost from the board.
+        var r0 = M.BOARD_ROWS.filter(function (r) { return r.types.indexOf(typeOf(j)) !== -1; })[0] || M.BOARD_ROWS[0];
+        key = r0.key + ':' + r0.cols[0].key;
+      }
+      cells[key].push(j);
     });
-
     var since = function (j) { return ms(j.stage_since) || ms(j.created_at) || 0; };
+    // Late first, then the more urgent, then the longest waiting.
     var urgentFirst = function (a, b) {
       return (lateOf(b, now) - lateOf(a, now)) || (priRank(b.priority) - priRank(a.priority)) || (since(a) - since(b));
     };
-    // The thing rotting longest is the thing to act on.
-    buckets.intake.sort(urgentFirst);
-    buckets.customer.sort(urgentFirst);
-    buckets.third.sort(urgentFirst);
-    // On us: grouped by technician, the queue first because nobody owns it.
-    buckets.shop.sort(function (a, b) {
-      var an = lower(a.assignee || (a.assignee_email ? staffName(a.assignee_email) : '')), bn = lower(b.assignee || (b.assignee_email ? staffName(b.assignee_email) : ''));
-      if (an !== bn) { if (!an) return -1; if (!bn) return 1; return an < bn ? -1 : 1; }
-      return urgentFirst(a, b);
+    var showRow = {
+      shop: typeFilter === 'all' || typeFilter === 'in_store',
+      field: typeFilter === 'all' || typeFilter === 'on_site' || typeFilter === 'remote'
+    };
+    var html = '<div class="sv2-sb">';
+    M.BOARD_ROWS.forEach(function (r) {
+      if (showRow[r.key] === false) return;
+      var total = 0;
+      r.cols.forEach(function (c) { total += cells[r.key + ':' + c.key].length; });
+      html += '<section class="sv2-sb-row sv2-sb-' + esc(r.key) + '" aria-label="' + esc(r.label) + '">' +
+        '<div class="sv2-sb-row-h"><span class="sv2-sb-row-t">' + esc(r.label) + '</span>' +
+        '<span class="sv2-sb-row-n">' + total + (total === 1 ? ' ticket' : ' tickets') + '</span></div>';
+      if (r.key === 'field' && !total) {
+        html += '<div class="sv2-sb-none">No on-site or remote jobs open right now.</div></section>';
+        return;
+      }
+      html += '<div class="sv2-sb-scroll" data-sb-row="' + esc(r.key) + '"><div class="sv2-sb-cols" style="--sb-n:' + r.cols.length + '">' +
+        r.cols.map(function (c, ci) {
+          var list = cells[r.key + ':' + c.key].sort(urgentFirst);
+          var late = list.filter(function (j) { return lateOf(j, now) === 2; }).length;
+          return '<div class="sv2-sb-col" data-col="' + esc(c.key) + '">' +
+            '<div class="sv2-sb-col-h"><span class="sv2-sb-dot" aria-hidden="true">' + (ci + 1) + '</span>' +
+              '<span class="sv2-sb-col-t">' + esc(c.label) + '</span>' +
+              '<span class="sv2-sb-count' + (late ? ' has-late' : '') + '"' + (late ? ' title="' + late + ' late"' : '') + '>' + list.length + '</span></div>' +
+            '<div class="sv2-sb-hint">' + esc(c.hint) + '</div>' +
+            '<div class="sv2-sb-cards">' + (list.length ? list.map(function (j) { return cardHtml(j, now, c); }).join('')
+                                                        : '<div class="sv2-sb-empty">Nothing here</div>') + '</div>' +
+          '</div>';
+        }).join('') + '</div></div></section>';
     });
-    buckets.closed.sort(function (a, b) { return (ms(b.closed_at) || 0) - (ms(a.closed_at) || 0); });
-
-    return '<div class="sv-board sv2-board">' + M.COLUMNS.map(function (c) {
-      var list = buckets[c.key] || [];
-      var breached = list.filter(function (j) { return lateOf(j, now) === 2; }).length;
-      var cards;
-      if (!list.length) cards = '<div class="sv-empty">Nothing here</div>';
-      else if (c.key === 'shop') {
-        var lastKey = null;
-        cards = list.map(function (j) {
-          var name = j.assignee || (j.assignee_email ? staffName(j.assignee_email) : '');
-          var key = lower(name);
-          var head = '';
-          if (key !== lastKey) {
-            lastKey = key;
-            var n = list.filter(function (x) { return lower(x.assignee || (x.assignee_email ? staffName(x.assignee_email) : '')) === key; }).length;
-            head = '<div class="sv2-group">' + esc(name || 'No technician yet') + ' <span class="sv2-group-n">' + n + '</span></div>';
-          }
-          return head + cardHtml(j, now);
-        }).join('');
-      } else cards = list.map(function (j) { return cardHtml(j, now); }).join('');
-      return '<section class="sv-col sv-col-' + c.key + '" aria-label="' + esc(c.label) + '">' +
-        '<div class="sv-col-head">' +
-          '<span class="sv-col-name">' + esc(c.label) + '</span>' +
-          '<span class="sv-col-count' + (breached ? ' has-breach' : '') + '" title="' + (breached ? breached + ' late' : '') + '">' + list.length + '</span>' +
-        '</div>' +
-        '<div class="sv-col-hint">' + esc(c.hint) + '</div>' +
-        '<div class="sv-cards">' + cards + '</div>' +
+    closed.sort(function (a, b) { return (ms(b.closed_at) || 0) - (ms(a.closed_at) || 0); });
+    html += '<section class="sv2-sb-closed" aria-label="Closed today"><span class="sv2-sb-row-t">Closed today</span>' +
+      (closed.length ? closed.map(function (j) {
+        return '<button type="button" class="sv2-sb-chip" data-job="' + esc(j.id) + '" title="' + esc(M.waitingSentence(j) || 'Closed') + '">' +
+          esc(j.customer_name || '—') + ' <span class="sv2-sb-chip-c">' + esc(j.public_code || '') + '</span></button>';
+      }).join('') : '<span class="sv2-sb-muted">Nothing closed yet today. This empties overnight.</span>') +
       '</section>';
-    }).join('') + '</div>';
+    return html + '</div>';
+  }
+
+  // A card: the customer's name first and large, the item, whose turn it is,
+  // the technician, the estimate and the promise; the ticket code small.
+  function cardHtml(job, now, col) {
+    var tv = tview(job, now);
+    var risk = lateOf(job, now);
+    var pl = primaryLabel(job);
+    var ball = ballCls(tv.ball);
+    var turn = TURN_WORDS[ball] || 'On us';
+    if (ball === 'third_party') {
+      turn = tv.unit ? 'At ' + (vendorName(tv.unit) || 'the vendor') : (job.waiting_party ? 'At ' + job.waiting_party : 'Supplier');
+    }
+    var sub = tv.unit ? tv.unit.public_code + ' · ' + rmaLabel(tv.unit.stage)
+                      : ((col && col.stages.length > 1) ? stageLabel(job.stage) : '');
+    var techName = job.assignee || (job.assignee_email ? staffName(job.assignee_email) : '');
+    var tech = techName
+      ? '<span class="sv2-sb-av" aria-hidden="true">' + esc(initials(techName)) + '</span><span class="sv2-sb-tn">' + esc(techName) + '</span>'
+      : '<span class="sv2-sb-notech">No technician yet</span>';
+    var t = typeOf(job), when = [];
+    if (t !== 'in_store' && ms(job.visit_start) != null) {
+      when.push('<span>' + esc((t === 'remote' ? 'Session ' : 'Visit ') + whenShort(job.visit_start)) + '</span>');
+    }
+    if (Number(job.est_minutes) > 0) when.push('<span>Est. ' + esc(estText(job.est_minutes)) + '</span>');
+    if (job.promised_at) {
+      var missed = ms(job.promised_at) < now;
+      when.push('<span class="' + (missed ? 'is-late' : '') + '">Promised ' + esc(fmtDate(job.promised_at)) + '</span>');
+    } else if (t === 'in_store') {
+      when.push('<span class="sv2-sb-muted">No promise yet</span>');
+    }
+    // Open RMA parts: a short tag (the turn line already names a part the
+    // ticket is waiting for).
+    var openUnits = unitsOfJob(job.id).filter(function (u) { return u.stage !== 'closed'; });
+    var rmaTag = openUnits.length ? '<span class="sv2-sb-rma" title="' + esc(openUnits.map(function (u) { return u.public_code + ' · ' + rmaLabel(u.stage); }).join(', ')) + '">RMA ' + openUnits.length + '</span>' : '';
+    var tags = (job.priority === 'urgent' || job.priority === 'high' ? priBadge(job.priority) : '') + rmaTag + lateTag(risk);
+    var itemText = pl.label + (pl.extra ? ' +' + pl.extra : '');
+    return '<div class="sv2-sb-card p-' + priKey(job.priority) + (risk === 2 ? ' is-late' : risk === 1 ? ' is-soon' : '') + '"' +
+        ' data-job="' + esc(job.id) + '" role="button" tabindex="0"' +
+        ' aria-label="' + esc((job.customer_name || 'Ticket') + ', ' + stageLabel(job.stage) + ', ' + turn + (risk === 2 ? ', late' : '')) + '">' +
+      '<div class="sv2-sb-top"><span class="sv2-sb-name">' + esc(job.customer_name || '—') + '</span>' +
+        '<span class="sv2-sb-time" title="Time in this step">' + esc(fmtDays(daysIn(job, now))) + '</span></div>' +
+      '<div class="sv2-sb-item" title="' + esc(itemText) + '">' + iconPair(job) + '<span class="sv2-sb-it">' + esc(itemText) + '</span></div>' +
+      '<div class="sv2-sb-state"><span class="sv2-sb-turn t-' + ball + '"><span class="sv2-sb-turn-dot" aria-hidden="true"></span>' + esc(turn) + '</span>' +
+        (sub ? '<span class="sv2-sb-sub">' + esc(sub) + '</span>' : '') + '</div>' +
+      '<div class="sv2-sb-meta">' + tech + '</div>' +
+      (when.length ? '<div class="sv2-sb-meta sv2-sb-when">' + when.join('<span class="sv2-sb-sep" aria-hidden="true">·</span>') + '</div>' : '') +
+      '<div class="sv2-sb-foot"><span class="sv2-sb-code">' + esc(job.public_code || '') + '</span>' +
+        (tags ? '<span class="sv2-sb-tags">' + tags + '</span>' : '') + '</div>' +
+    '</div>';
   }
 
   function primaryLabel(job) {
@@ -1443,19 +1527,6 @@
     var holds = open.some(function (u) { return u.holds_ticket; });
     return '<span class="sv2-rma-badge' + (holds ? ' holds' : '') + '" title="' + (holds ? 'The ticket waits for this part' : 'The part follows separately') + '">' + esc(text) + '</span>';
   }
-  function promiseOrVisit(job, now) {
-    var t = typeOf(job);
-    var vs = ms(job.visit_start);
-    if (vs != null && (job.stage === 'scheduled' || job.stage === 'en_route' || job.stage === 'session_booked' || job.stage === 'logged' || job.stage === 'revisit_needed')) {
-      return '<span class="sv2-when">' + esc((t === 'remote' ? 'Session ' : 'Visit ') + whenShort(job.visit_start)) + '</span>';
-    }
-    // A promised date is only given AFTER diagnosis, so a blank one is normal
-    // early on and must not read as missing data.
-    if (job.promised_at) return '<span class="sv-promise">Promised ' + esc(fmtDate(job.promised_at)) + '</span>';
-    if (job.stage === 'closed') return '<span class="sv-promise">Closed ' + esc(fmtTime(job.closed_at)) + '</span>';
-    var early = ['logged', 'received', 'diagnosing', 'scheduled', 'en_route', 'on_site', 'session_booked', 'in_session'];
-    return '<span class="sv-nopromise">' + (early.indexOf(job.stage) !== -1 ? 'No promise yet' : 'No date given') + '</span>';
-  }
   // Colour is never the only signal: a late thing also says "late".
   function lateTag(risk, words) {
     var u = U();
@@ -1466,50 +1537,6 @@
     if (risk === 2) return '<span class="sv2-late">' + esc(words.late || 'late') + '</span>';
     if (risk === 1) return '<span class="sv2-soon">' + esc(words.soon || 'due soon') + '</span>';
     return '';
-  }
-
-  function cardHtml(job, now) {
-    var M = svc();
-    var tv = tview(job, now);
-    var risk = lateOf(job, now);
-    var riskCls = risk === 2 ? ' risk-breached' : risk === 1 ? ' risk-soon' : '';
-    var pl = primaryLabel(job);
-    var lines = '';
-    lines += '<div class="sv-card-line"><span class="sv-k">Stage</span> ' + esc(stageLabel(job.stage)) + '</div>';
-    if (job.stage === 'closed') {
-      lines += '<div class="sv-card-line">' + esc(M.waitingSentence(job)) + '</div>';
-    } else if (tv.unit) {
-      // Waiting on a part: say which part and where it is, not just the stage.
-      lines += '<div class="sv-card-line"><span class="sv-k">Part</span> ' + esc(tv.unit.public_code + ' · ' + rmaLabel(tv.unit.stage)) + '</div>';
-    } else if (job.waiting_party && ballOf(job.stage) === 'third_party') {
-      lines += '<div class="sv-card-line"><span class="sv-k">Waiting on</span> ' + esc(job.waiting_party) + '</div>';
-    }
-    var tech;
-    if (job.assignee || job.assignee_email) {
-      tech = '<span class="sv-k">Tech</span> ' + esc(job.assignee || staffName(job.assignee_email));
-    } else if (job.stage !== 'closed') {
-      var chip = offerChipHtml(job);
-      tech = '<span class="sv2-inq">No technician yet</span>' +
-        (chip ? ' ' + chip
-              : job.suggested_tech_email ? ' <span class="sv2-star" title="Requested technician">★ ' + esc(staffName(job.suggested_tech_email)) + '</span>' : '');
-    } else tech = '<span class="sv-k">Tech</span> —';
-    lines += '<div class="sv-card-line">' + tech + '</div>';
-
-    return '' +
-      '<div class="sv-card sv2-card sv2-p-' + priKey(job.priority) + riskCls + '" data-job="' + esc(job.id) + '" role="button" tabindex="0"' +
-        ' aria-label="' + esc((job.customer_name || 'Ticket') + ', ' + stageLabel(job.stage) + (risk === 2 ? ', late' : '')) + '">' +
-        '<div class="sv-card-top">' +
-          '<span class="sv2-card-who">' + iconPair(job) + '<span class="sv-cust">' + esc(job.customer_name || '—') + '</span></span>' +
-          '<span class="sv-idle" title="Time in the current stage">' + esc(fmtDays(daysIn(job, now))) + '</span>' +
-        '</div>' +
-        '<div class="sv-card-dev">' + esc(pl.label) + (pl.extra ? ' <span class="sv2-more">+' + pl.extra + ' item' + (pl.extra > 1 ? 's' : '') + '</span>' : '') + '</div>' +
-        lines +
-        '<div class="sv2-card-tags">' + (job.priority === 'urgent' || job.priority === 'high' ? priBadge(job.priority) : '') + rmaBadge(job) + lateTag(risk) + '</div>' +
-        '<div class="sv-card-foot">' +
-          '<span class="sv-code">' + esc(job.public_code || '') + '</span>' +
-          promiseOrVisit(job, now) +
-        '</div>' +
-      '</div>';
   }
 
   // ── queue ──────────────────────────────────────────────────────────────────

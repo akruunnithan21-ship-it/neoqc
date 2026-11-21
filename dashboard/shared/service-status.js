@@ -331,6 +331,47 @@
     return { type: t, steps: steps, current: cur };
   }
 
+  // ── 1.14: the Service board, by step (owner, 2026-11-21) ─────────────────
+  //    The same steps as the ticket's step bar, so the board and the ticket
+  //    speak one language. In-store tickets are the first row; on-site and
+  //    remote jobs share a second row of their own steps. Closed tickets are
+  //    not a column: the board shows the ones closed today in a strip below.
+  //    Whose turn it is stays on each card (ballOf), not in the column.
+  var BOARD_ROWS = [
+    { key: 'shop', label: 'In the shop', types: ['in_store'], cols: [
+      { key: 'received',   label: 'Received',   hint: 'Checked in, not started',             stages: ['logged', 'received'] },
+      { key: 'diagnosing', label: 'Diagnosing', hint: 'Finding the fault',                   stages: ['diagnosing'] },
+      { key: 'quote',      label: 'Quote',      hint: 'Waiting for the customer\u2019s yes', stages: ['quoted'] },
+      { key: 'repair',     label: 'Repair',     hint: 'Approved, parts, warranty, bench',    stages: ['approved', 'parts_to_order', 'parts_on_order',
+                                                                                                'rma_raised', 'at_vendor', 'back_from_vendor', 'in_service'] },
+      { key: 'testing',    label: 'Testing',    hint: 'Checking before handover',            stages: ['verifying'] },
+      { key: 'ready',      label: 'Ready',      hint: 'Call the customer to collect',        stages: ['ready'] }
+    ] },
+    { key: 'field', label: 'On-site and remote', types: ['on_site', 'remote'], cols: [
+      { key: 'to_book',    label: 'To book',    hint: 'Needs a visit or session time',       stages: ['logged', 'revisit_needed', 'quoted', 'approved', 'parts_to_order',
+                                                                                                'parts_on_order', 'rma_raised', 'at_vendor', 'back_from_vendor'] },
+      { key: 'booked',     label: 'Booked',     hint: 'Time fixed',                          stages: ['scheduled', 'session_booked'] },
+      { key: 'on_the_way', label: 'On the way', hint: 'Technician travelling',               stages: ['en_route'] },
+      { key: 'working',    label: 'Working',    hint: 'On site or in session',               stages: ['on_site', 'in_session'] },
+      { key: 'done',       label: 'Done',       hint: 'Confirm with the customer and close', stages: ['work_done', 'resolved'] }
+    ] }
+  ];
+  // { row, col } for an open ticket; { row: 'closed' } for a closed one; null
+  // for a stage its type's row does not cover (the tests rule that out).
+  function boardCellOf(job) {
+    if (!job) return null;
+    if (job.stage === 'closed') return { row: 'closed', col: null };
+    var t = job.service_type || 'in_store';
+    for (var i = 0; i < BOARD_ROWS.length; i++) {
+      var r = BOARD_ROWS[i];
+      if (r.types.indexOf(t) === -1) continue;
+      for (var j = 0; j < r.cols.length; j++) {
+        if (r.cols[j].stages.indexOf(job.stage) !== -1) return { row: r.key, col: r.cols[j].key };
+      }
+    }
+    return null;
+  }
+
   // ── 1.13: quotes (sql/service-v2.8.sql). Prices include GST.
   var QUOTE_STATUSES = {
     sent:            'Waiting for the customer',
@@ -1284,6 +1325,8 @@
     PRIVATE_MEDIA_ROLES: PRIVATE_MEDIA_ROLES,
     STAGES_BY_TYPE: STAGES_BY_TYPE,
     STEPS_BY_TYPE: STEPS_BY_TYPE,
+    BOARD_ROWS: BOARD_ROWS,
+    boardCellOf: boardCellOf,
     stepsFor: stepsFor,
     QUOTE_STATUSES: QUOTE_STATUSES,
     QUOTE_VIA: QUOTE_VIA,
