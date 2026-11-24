@@ -333,7 +333,8 @@
   var VENDOR_KINDS = [
     { value: 'brand', label: 'Brand' },
     { value: 'distributor', label: 'Distributor' },
-    { value: 'service_centre', label: 'Service centre' }
+    { value: 'service_centre', label: 'Service centre' },
+    { value: 'portal', label: 'Brand portal' }
   ];
   function vendorKindLabel(k) {
     var o = VENDOR_KINDS.filter(function (x) { return x.value === k; })[0];
@@ -363,7 +364,7 @@
     if (m && typeof m.rmaGateProblems === 'function') {
       // A8: the with_tech stage.
       s.withTech = !(m.RMA_TRANSITIONS && m.RMA_TRANSITIONS.with_tech);
-      var base = { stage: 'received', serial: 'X1234', vendor_id: 1, fee_status: 'paid' };
+      var base = { stage: 'received', serial: 'X1234', vendor_id: 1, fee_status: 'paid', check_result: 'fault_confirmed', verified_at: 'x' };   // 1.15: steps 2–3 done
       try {
         // A12: a vendor document (warranty-check screenshot) counts as the invoice.
         s.vendorDoc = m.rmaGateProblems(Object.assign({}, base, { kind: 'gpu', purchase_source: 'elsewhere' }),
@@ -464,7 +465,11 @@
   }
   function augment(u) {
     var v = vendorOf(u);
-    return Object.assign({}, u, { waiting_party: customerFacingVendor(u, v) || u.waiting_party || null });
+    // 1.15: a brand that needs no invoice (Intel, WD…) is exempt from the
+    // invoice gate, as on the server (rma_brands.invoice_needed).
+    var b = brandOf(u && u.brand);
+    return Object.assign({}, u, { waiting_party: customerFacingVendor(u, v) || u.waiting_party || null,
+                                  invoice_exempt: !!(b && b.invoice_needed === false) });
   }
   // The unit as a WhatsApp template should see it: greeted by name of whoever
   // actually receives the message (the owner only when it goes to the owner).
@@ -882,7 +887,7 @@
         '<div class="rma-seg" role="group" aria-label="View">' +
           '<button type="button" class="rma-seg-btn" data-view="board" aria-pressed="false">Board</button>' +
           '<button type="button" class="rma-seg-btn" data-view="ship" aria-pressed="false">Ship to vendor <span class="rma-seg-n" id="rma-ship-n"></span></button>' +
-          '<button type="button" class="rma-seg-btn" data-view="vendors" aria-pressed="false">Vendors</button>' +
+          '<button type="button" class="rma-seg-btn" data-view="vendors" aria-pressed="false">Centres &amp; brands</button>' +
         '</div>' +
         '<div class="rma-srcs" role="group" aria-label="Where the parts came from">' +
           SOURCE_FILTERS.map(function (s) {
@@ -1264,43 +1269,211 @@
   // last two days and carry no "came back on" timestamp, so this averages
   // intake-to-closed for recently closed parts that went to that vendor. The
   // column's tooltip says so; "—" when there are none.
+  // 1.15: "Centres & brands" — the service centres and brand portals (how each
+  // one works), the brands (warranty months, invoice needed) and where each
+  // brand goes, by part type and model (owner, 25 Nov 2026: the list is not
+  // fixed; staff add brands, models and centres as they meet them).
   function vendorsHtml(units) {
     var q = searchQ;
-    var list = allVendors().slice().sort(function (a, b) { return String(a.name || '').localeCompare(String(b.name || '')); })
-      .filter(function (v) { return !q || (String(v.name || '') + ' ' + String(v.public_name || '')).toLowerCase().indexOf(q) !== -1; });
+    var M = model() || {};
+    var hit = function (txt) { return !q || String(txt || '').toLowerCase().indexOf(q) !== -1; };
     var stats = {};
     units.forEach(function (u) {
       if (u.vendor_id == null) return;
       var k = String(u.vendor_id);
-      var s = stats[k] || (stats[k] = { open: 0, atVendor: 0, sum: 0, n: 0 });
-      if (u.stage !== 'closed') s.open++;
-      if (u.stage === 'with_vendor') s.atVendor++;
-      if (u.stage === 'closed' && u.vendor_result) {
-        var a = ms(u.created_at), b = ms(u.closed_at);
-        if (a != null && b != null && b >= a) { s.sum += (b - a) / DAY; s.n++; }
-      }
+      var s2 = stats[k] || (stats[k] = { open: 0, atVendor: 0 });
+      if (u.stage !== 'closed') s2.open++;
+      if (u.stage === 'with_vendor') s2.atVendor++;
     });
+    var w = canDesk();
+    var lbl = function (map, k) { return (k && M[map] && M[map][k]) || ''; };
+    var byName = function (a, b) { return String(a.name || '').localeCompare(String(b.name || '')); };
+    var vs = allVendors();
+    var centres = vs.filter(function (v) { return v.kind === 'service_centre' || v.kind === 'portal'; }).sort(byName)
+      .filter(function (v) { return hit(v.name + ' ' + v.public_name + ' ' + (v.notes || '')); });
+    var others = vs.filter(function (v) { return v.kind !== 'service_centre' && v.kind !== 'portal'; }).sort(byName)
+      .filter(function (v) { return hit(v.name + ' ' + v.public_name); });
+    var routes = routesList();
+    var allBrands = brandsList();
+    var routesOf = function (b) { return routes.filter(function (r) { return String(r.brand_id) === String(b.id); }); };
+    var brands = allBrands.slice().sort(byName).filter(function (b) {
+      return hit(b.name) || routesOf(b).some(function (r) { var v = vendorById(r.vendor_id); return hit(v && v.name) || hit(r.model_hint); });
+    });
+    var routeChip = function (r) {
+      var v = vendorById(r.vendor_id);
+      var bits = [r.kind ? kindLabel(r.kind) : '', r.model_hint ? '“' + r.model_hint + '”' : ''].filter(Boolean).join(', ');
+      return '<span class="rma-route" title="' + esc(r.notes || '') + '">' +
+        (w ? '<button type="button" class="rma-route-main" data-act="edit-route" data-id="' + esc(String(r.id)) + '">' : '<span class="rma-route-main">') +
+          esc(v ? vendorName(v) : 'Unknown centre') + (bits ? ' <span class="rma-muted">(' + esc(bits) + ')</span>' : '') +
+        (w ? '</button><button type="button" class="rma-route-x" data-act="del-route" data-id="' + esc(String(r.id)) + '" aria-label="Remove this route" title="Remove">×</button>' : '</span>') +
+      '</span>';
+    };
+    var centreRows = centres.map(function (v) {
+      var s3 = stats[String(v.id)] || { open: 0, atVendor: 0 };
+      return '<tr' + (v.active === false ? ' class="is-inactive"' : '') + '>' +
+        '<td><strong>' + esc(v.name || '') + '</strong>' + (v.active === false ? ' <span class="rma-muted">(inactive)</span>' : '') +
+          (v.notes ? '<div class="rma-muted rma-cell-note">' + esc(v.notes) + '</div>' : '') + '</td>' +
+        '<td>' + esc(vendorKindLabel(v.kind)) + '</td>' +
+        '<td>' + esc(lbl('VENDOR_SUBMIT_HOW', v.submit_how) || '—') + '</td>' +
+        '<td>' + esc(lbl('VENDOR_INVOICE_RULES', v.invoice_rule) || '—') + '</td>' +
+        '<td>' + esc(lbl('VENDOR_RETURN_HOW', v.return_how) || '—') + '</td>' +
+        '<td class="num">' + esc(String(v.typical_tat_days || 14)) + '</td>' +
+        '<td class="num">' + s3.open + (s3.atVendor ? ' <span class="rma-muted">(' + s3.atVendor + ' there)</span>' : '') + '</td>' +
+        '<td>' + (w ? '<button type="button" class="secondary-btn rma-small" data-act="edit-centre" data-id="' + esc(String(v.id)) + '">Edit</button>' : '') + '</td>' +
+      '</tr>';
+    }).join('');
+    var brandRows = brands.map(function (b) {
+      var rs = routesOf(b).sort(function (x, y) { return (y.kind ? 1 : 0) - (x.kind ? 1 : 0); });
+      return '<tr' + (b.active === false ? ' class="is-inactive"' : '') + '>' +
+        '<td><strong>' + esc(b.name) + '</strong>' + (b.notes ? '<div class="rma-muted rma-cell-note">' + esc(b.notes) + '</div>' : '') + '</td>' +
+        '<td>' + (b.warranty_months != null ? esc(String(b.warranty_months)) + ' months' : '<span class="rma-muted">Not set</span>') + '</td>' +
+        '<td>' + (b.invoice_needed === false ? 'Not needed' : 'Needed') + '</td>' +
+        '<td class="rma-routes-cell">' + (rs.length ? rs.map(routeChip).join('') : '<span class="rma-muted">No centre yet</span>') +
+          (w ? '<button type="button" class="rma-linkbtn" data-act="add-route" data-brand="' + esc(String(b.id)) + '">+ Centre</button>' : '') + '</td>' +
+        '<td>' + (w ? '<button type="button" class="secondary-btn rma-small" data-act="edit-brand" data-id="' + esc(String(b.id)) + '">Edit</button>' : '') + '</td>' +
+      '</tr>';
+    }).join('');
+    var noDir = !allBrands.length && !routes.length;
     return '<div class="rma-vendors">' +
-      '<div class="rma-vendors-head"><h3>Vendors</h3>' +
-        (canDesk() ? '<button type="button" class="primary-pink-btn" data-act="add-vendor">+ Add vendor</button>' : '') +
-      '</div>' +
-      (list.length ? '<div class="rma-table-wrap"><table class="rma-table">' +
-        '<thead><tr><th scope="col">Name</th><th scope="col">Name customers see</th><th scope="col">Kind</th>' +
-          '<th scope="col" class="num">Usual days</th><th scope="col" class="num">Open parts</th>' +
-          '<th scope="col" class="num" title="Average days from intake until closed, for parts closed in the last two days">Avg days back</th></tr></thead>' +
-        '<tbody>' + list.map(function (v) {
-          var s = stats[String(v.id)] || { open: 0, atVendor: 0, sum: 0, n: 0 };
-          return '<tr' + (v.active === false ? ' class="is-inactive"' : '') + '>' +
-            '<td>' + esc(v.name || '') + (v.active === false ? ' <span class="rma-muted">(inactive)</span>' : '') + '</td>' +
-            '<td>' + esc(v.public_name || v.name || '') + '</td>' +
-            '<td>' + esc(vendorKindLabel(v.kind)) + '</td>' +
-            '<td class="num">' + esc(String(v.typical_tat_days || 14)) + '</td>' +
-            '<td class="num">' + s.open + (s.atVendor ? ' <span class="rma-muted">(' + s.atVendor + ' with them)</span>' : '') + '</td>' +
-            '<td class="num">' + (s.n ? esc((s.sum / s.n).toFixed(1)) : '—') + '</td>' +
-          '</tr>';
-        }).join('') + '</tbody></table></div>'
-        : '<div class="rma-empty-big">' + (q ? 'No vendor matches that search.' : 'No vendors yet.') + '</div>') +
+      '<div class="rma-vendors-head"><h3>Service centres and brand portals</h3>' +
+        (w ? '<button type="button" class="primary-pink-btn" data-act="add-centre">+ Add centre</button>' : '') + '</div>' +
+      (centreRows ? '<div class="rma-table-wrap"><table class="rma-table rma-dir">' +
+        '<thead><tr><th scope="col">Name</th><th scope="col">Kind</th><th scope="col">How to submit</th><th scope="col">Invoice</th>' +
+          '<th scope="col">Comes back</th><th scope="col" class="num">Usual days</th><th scope="col" class="num">Open parts</th><th></th></tr></thead>' +
+        '<tbody>' + centreRows + '</tbody></table></div>'
+        : '<div class="rma-empty-big">' + (q ? 'No centre matches that search.' : 'No service centres yet.') + '</div>') +
+      '<div class="rma-vendors-head rma-vendors-head2"><h3>Brands, and where each one goes</h3>' +
+        (w ? '<button type="button" class="primary-pink-btn" data-act="add-brand">+ Add brand</button>' : '') + '</div>' +
+      '<p class="sv-hint">A brand can go to different centres by part type or model: ADATA RAM to Acro, some ADATA SSDs to Gigabyte. The most specific match is suggested first when a part is verified.</p>' +
+      (noDir ? '<div class="rma-empty-big">The brand list arrives with the server update (v2.11).</div>'
+        : brandRows ? '<div class="rma-table-wrap"><table class="rma-table rma-dir">' +
+          '<thead><tr><th scope="col">Brand</th><th scope="col">Warranty</th><th scope="col">Invoice</th><th scope="col">Goes to</th><th></th></tr></thead>' +
+          '<tbody>' + brandRows + '</tbody></table></div>'
+        : '<div class="rma-empty-big">No brand matches that search.</div>') +
+      (others.length ? '<details class="rma-other-vendors"><summary>Other vendors (' + others.length + '): brands and distributors from before 1.15</summary>' +
+        '<div class="rma-table-wrap"><table class="rma-table"><thead><tr><th scope="col">Name</th><th scope="col">Name customers see</th><th scope="col">Kind</th>' +
+        '<th scope="col" class="num">Open parts</th><th></th></tr></thead><tbody>' + others.map(function (v) {
+          var s4 = stats[String(v.id)] || { open: 0 };
+          return '<tr' + (v.active === false ? ' class="is-inactive"' : '') + '><td>' + esc(v.name || '') + '</td><td>' + esc(v.public_name || '') + '</td>' +
+            '<td>' + esc(vendorKindLabel(v.kind)) + '</td><td class="num">' + s4.open + '</td>' +
+            '<td>' + (w ? '<button type="button" class="secondary-btn rma-small" data-act="edit-centre" data-id="' + esc(String(v.id)) + '">Edit</button>' : '') + '</td></tr>';
+        }).join('') + '</tbody></table></div></details>' : '') +
     '</div>';
+  }
+
+  function optionList(map, selected, blank) {
+    return '<option value="">' + esc(blank || '—') + '</option>' + Object.keys(map || {}).map(function (k) {
+      return '<option value="' + esc(k) + '"' + (k === selected ? ' selected' : '') + '>' + esc(map[k]) + '</option>';
+    }).join('');
+  }
+  function selField(label, key, inner, wide) {
+    return '<label class="sv-field' + (wide ? ' sv-span2' : '') + '"><span>' + esc(label) + '</span><select data-f="' + key + '" class="settings-select">' + inner + '</select></label>';
+  }
+  // Add or edit a service centre, portal or other vendor.
+  async function dlgCentre(id) {
+    if (!canDesk()) return;
+    var g = sessionGen;
+    var M = model() || {};
+    var v = id != null ? vendorById(id) : null;
+    var kinds = {};
+    VENDOR_KINDS.forEach(function (k) { kinds[k.value] = k.label; });
+    var body = dlgBody('<div class="sv-grid">' +
+      dfield('Name', 'name', v ? v.name : '', { placeholder: 'e.g. Kaizen' }) +
+      dfield('Name customers see', 'pub', v ? v.public_name : '', { placeholder: 'Defaults to the name' }) +
+      selField('Kind', 'kind', optionList(kinds, v ? v.kind : 'service_centre', 'Choose…')) +
+      dfield('Usual turnaround (days)', 'tat', v ? String(v.typical_tat_days || 14) : '14', { type: 'number', attrs: ' min="1" max="365" step="1" inputmode="numeric"' }) +
+      selField('How to submit', 'submit', optionList(M.VENDOR_SUBMIT_HOW, v ? v.submit_how : '', 'Not set')) +
+      selField('Invoice', 'invoice', optionList(M.VENDOR_INVOICE_RULES, v ? v.invoice_rule : '', 'Not set')) +
+      selField('How it comes back', 'ret', optionList(M.VENDOR_RETURN_HOW, v ? v.return_how : '', 'Not set')) +
+      dfield('Contact', 'contact', v ? v.contact || '' : '', { placeholder: 'Phone or person' }) +
+      dfield('Address', 'address', v ? v.address || '' : '', { textarea: true, wide: true }) +
+      dfield('Portal link (for an online claim)', 'portal', v ? v.portal_url || '' : '', { wide: true, placeholder: 'https://…' }) +
+      dfield('How it works (notes)', 'notes', v ? v.notes || '' : '', { textarea: true, wide: true, rows: 3 }) +
+      '</div>' +
+      (v ? '<label class="sv-check"><input type="checkbox" data-f="inactive"' + (v.active === false ? ' checked' : '') + '> No longer used (hidden from the pickers)</label>' : ''));
+    var ok = await openDialog({ title: v ? 'Edit ' + (v.name || 'centre') : 'Add a service centre', body: body, okText: 'Save', wide: true, onOk: async function () {
+      var name = fval(body, 'name');
+      if (!name) return 'Give it a name.';
+      var dup = allVendors().filter(function (x) { return String(x.name || '').toLowerCase() === name.toLowerCase() && (!v || String(x.id) !== String(v.id)); })[0];
+      if (dup) return 'There is already one called ' + dup.name + '.';
+      var tat = Number(fval(body, 'tat') || 14);
+      if (!isFinite(tat) || tat < 1 || tat > 365 || Math.round(tat) !== tat) return 'Turnaround should be a whole number of days, 1 to 365.';
+      try {
+        await data().saveVendor({ id: v ? v.id : undefined, name: name, public_name: fval(body, 'pub') || name, kind: fval(body, 'kind') || 'service_centre',
+          typical_tat_days: tat, submit_how: fval(body, 'submit'), invoice_rule: fval(body, 'invoice'), return_how: fval(body, 'ret'),
+          contact: fval(body, 'contact'), address: fval(body, 'address'), portal_url: fval(body, 'portal'), notes: fval(body, 'notes'),
+          active: !((body.querySelector('[data-f="inactive"]') || {}).checked) });
+      } catch (e) { return failText(e); }
+      return true;
+    } });
+    if (ok && !isStale(g)) { toast('Saved.', 'success', 2000); if (screenActive()) renderView(); }
+  }
+  // Add or edit a brand: its usual warranty and whether claims need the invoice.
+  async function dlgBrand(id) {
+    if (!canDesk()) return;
+    var g = sessionGen;
+    var b = id != null ? brandsList().filter(function (x) { return String(x.id) === String(id); })[0] : null;
+    var body = dlgBody('<div class="sv-grid">' +
+      dfield('Brand', 'name', b ? b.name : '', { placeholder: 'e.g. Lexar' }) +
+      dfield('Warranty (months, usual)', 'months', b && b.warranty_months != null ? String(b.warranty_months) : '', { type: 'number', attrs: ' min="0" max="240" step="1" inputmode="numeric"' }) +
+      dfield('Notes', 'notes', b ? b.notes || '' : '', { textarea: true, wide: true, placeholder: 'e.g. 5 years on SSDs, 3 on RAM' }) +
+      '</div>' +
+      '<label class="sv-check"><input type="checkbox" data-f="noinv"' + (b && b.invoice_needed === false ? ' checked' : '') + '> Claims need no invoice (like Intel and WD)</label>');
+    var ok = await openDialog({ title: b ? 'Edit ' + b.name : 'Add a brand', body: body, okText: 'Save', onOk: async function () {
+      var name = fval(body, 'name');
+      if (!name) return 'Type the brand name.';
+      var dup = brandsList().filter(function (x) { return String(x.name).toLowerCase() === name.toLowerCase() && (!b || String(x.id) !== String(b.id)); })[0];
+      if (dup) return dup.name + ' is already in the list.';
+      try {
+        await data().saveBrand({ id: b ? b.id : undefined, name: name, warranty_months: fval(body, 'months'), notes: fval(body, 'notes'),
+          invoice_needed: !((body.querySelector('[data-f="noinv"]') || {}).checked) });
+      } catch (e) { return failText(e); }
+      return true;
+    } });
+    if (ok && !isStale(g)) { toast('Saved.', 'success', 2000); if (screenActive()) renderView(); }
+  }
+  // Save a brand with its warranty support centre, for a part type or model.
+  async function dlgRoute(routeId, brandId) {
+    if (!canDesk()) return;
+    var g = sessionGen;
+    var M = model() || {};
+    var r = routeId != null ? routesList().filter(function (x) { return String(x.id) === String(routeId); })[0] : null;
+    var bid = r ? String(r.brand_id) : (brandId != null ? String(brandId) : '');
+    var bOpts = brandsList().slice().sort(function (a, b) { return String(a.name).localeCompare(String(b.name)); })
+      .map(function (b) { return '<option value="' + esc(String(b.id)) + '"' + (String(b.id) === bid ? ' selected' : '') + '>' + esc(b.name) + '</option>'; }).join('');
+    var kinds = {};
+    Object.keys(M.ITEM_KINDS || {}).forEach(function (k) { kinds[k] = M.ITEM_KINDS[k]; });
+    var body = dlgBody('<div class="sv-grid">' +
+      selField('Brand', 'brand', '<option value="">Choose…</option>' + bOpts) +
+      selField('Part type', 'kind', optionList(kinds, r ? r.kind || '' : '', 'Any part')) +
+      dfield('Model contains (optional)', 'model', r ? r.model_hint || '' : '', { placeholder: 'e.g. SX8200 (empty: every model)' }) +
+      '<label class="sv-field"><span>Service centre</span><select data-f="vendor" class="settings-select">' + centreOptions(r ? String(r.vendor_id) : '', []) + '</select></label>' +
+      selField('How it comes back (if not the centre’s usual)', 'ret', optionList(M.VENDOR_RETURN_HOW, r ? r.return_how : '', 'The centre’s usual'), true) +
+      dfield('Notes', 'notes', r ? r.notes || '' : '', { textarea: true, wide: true }) +
+      '</div>');
+    var ok = await openDialog({ title: r ? 'Edit where it goes' : 'Save a brand with its centre', body: body, okText: 'Save', onOk: async function () {
+      if (!fval(body, 'brand')) return 'Choose the brand.';
+      if (!fval(body, 'vendor')) return 'Choose the service centre.';
+      try {
+        await data().saveRoute({ id: r ? r.id : undefined, brand_id: fval(body, 'brand'), kind: fval(body, 'kind'), model_hint: fval(body, 'model'),
+          vendor_id: fval(body, 'vendor'), return_how: fval(body, 'ret'), notes: fval(body, 'notes') });
+      } catch (e) { return failText(e); }
+      return true;
+    } });
+    if (ok && !isStale(g)) { toast('Saved.', 'success', 2000); if (screenActive()) renderView(); }
+  }
+  async function delRoute(routeId) {
+    var r = routesList().filter(function (x) { return String(x.id) === String(routeId); })[0];
+    if (!r || !canDesk()) return;
+    var v = vendorById(r.vendor_id);
+    var b = brandsList().filter(function (x) { return String(x.id) === String(r.brand_id); })[0];
+    var go = await confirmBox('Stop suggesting ' + (v ? vendorName(v) : 'this centre') + ' for ' + (b ? b.name : 'this brand') +
+      (r.kind ? ' ' + kindLabel(r.kind).toLowerCase() : '') + '? Parts already sent are not affected.',
+      { title: 'Remove route', okText: 'Remove', danger: true });
+    if (!go) return;
+    try { await data().deleteRoute(r.id); toast('Removed.', 'success', 2000); }
+    catch (e) { toast('Could not remove it: ' + failText(e), 'error'); }
+    if (screenActive()) renderView();
   }
 
   // ── screen wiring ──
@@ -1337,6 +1510,14 @@
         if (act) {
           var a = act.getAttribute('data-act');
           if (a === 'add-vendor') { dlgAddVendor().then(function () { if (screenActive()) renderView(); }); return; }
+          // 1.15: Centres & brands
+          if (a === 'add-centre') { dlgCentre(null); return; }
+          if (a === 'edit-centre') { dlgCentre(act.getAttribute('data-id')); return; }
+          if (a === 'add-brand') { dlgBrand(null); return; }
+          if (a === 'edit-brand') { dlgBrand(act.getAttribute('data-id')); return; }
+          if (a === 'add-route') { dlgRoute(null, act.getAttribute('data-brand')); return; }
+          if (a === 'edit-route') { dlgRoute(act.getAttribute('data-id'), null); return; }
+          if (a === 'del-route') { delRoute(act.getAttribute('data-id')); return; }
           if (a === 'recheck') { Object.keys(rolesCache).forEach(forgetRoles); renderView(); return; }
           if (a === 'recheck-one') { forgetRoles(act.getAttribute('data-unit')); renderView(); return; }
           if (a === 'retry-load') { ensureLoaded(); return; }
@@ -1505,6 +1686,8 @@
     if (!root || !u) return;
     root.innerHTML = '<div class="rma-u">' +
       '<div id="rma-u-head" class="rma-u-head"></div>' +
+      // 1.15: the eight RMA steps and the Next step buttons (paintSteps).
+      '<div id="rma-u-steps" class="rma-u-steps"></div>' +
       '<div id="rma-u-gates"></div>' +
       '<div id="rma-u-actions" class="rma-u-actions"></div>' +
       '<div id="rma-u-tabs" class="sv-tabs" role="tablist"></div>' +
@@ -1577,8 +1760,9 @@
         host.innerHTML = err ? '<div class="rma-gates is-note">Could not check the photos: ' + esc(err) + '</div>' : '';
         return;
       }
-      probs = gateCheck(augment(u), 'ready_to_ship', rolesFor(u.id));
-      title = s === 'ready_to_ship' ? 'Before it can be dispatched' : 'Before it can ship to the vendor';
+      // 1.15: steps 2 and 3 are on the step bar, so they are not listed here.
+      probs = gateCheck(Object.assign(augment(u), { skipSteps: true }), 'ready_to_ship', rolesFor(u.id));
+      title = s === 'ready_to_ship' ? 'Before it can be submitted' : 'Before it can go to the service centre';
       if (rolesPartial(u.id)) {
         // Said, not enforced: the ticket's photos may well have it (rolesFor).
         var seen = rolesSeen(u.id), lack = [];
@@ -1616,6 +1800,7 @@
     var host = el('rma-u-actions');
     var u = unitById(openUnitId);
     if (!host || !u) return;
+    paintSteps();
     var m = model();
     var acts = [];
     try { acts = (typeof m.rmaActions === 'function' ? m.rmaActions(u) : []) || []; } catch (e) { acts = []; }
@@ -1633,9 +1818,591 @@
     // 1.14.1 — the customer's own page for this part (app.js openCustomerView).
     if (u.public_code && trackingPhone(u) && window.NeoServiceCustomerView) b.push(['customer-view', 'Customer view', 'secondary-btn']);
     if (canPrint()) b.push(['print-label', 'Print label', 'secondary-btn']);
+    // 1.15: what the Next step line already offers is not repeated here.
+    b = b.filter(function (x) { return !stepActs.some(function (a) { return a.act === x[0]; }); });
     host.innerHTML = b.map(function (x) {
       return '<button type="button" class="' + x[2] + ' rma-act" data-act="' + x[0] + '">' + esc(x[1]) + '</button>';
     }).join('');
+  }
+
+  // ══ 1.15: the eight RMA steps (owner's brief, 24–25 Nov 2026) ════════════
+  // The bar reads where the part is (NeoQcService.rmaStepsFor); the Next step
+  // line offers what moves it on. Each step is recorded by rma_step (v2.11),
+  // which checks the gate and writes the customer's line; failing a gate
+  // stops the claim with a reason the customer is told.
+  function brandsList() { var d = data(); try { return (d && typeof d.brands === 'function') ? d.brands() || [] : []; } catch (e) { return []; } }
+  function routesList() { var d = data(); try { return (d && typeof d.routes === 'function') ? d.routes() || [] : []; } catch (e) { return []; } }
+  function brandOf(name) {
+    var m = model();
+    try { return (m && typeof m.rmaBrandOf === 'function') ? m.rmaBrandOf(name, brandsList()) : null; } catch (e) { return null; }
+  }
+  function centresFor(part) {
+    var m = model();
+    if (!m || typeof m.rmaRoutesFor !== 'function') return [];
+    try { return m.rmaRoutesFor(part, routesList(), brandsList(), allVendors()) || []; } catch (e) { return []; }
+  }
+  function stepsOf(u) {
+    var m = model();
+    try { return (m && typeof m.rmaStepsFor === 'function') ? m.rmaStepsFor(augment(u)) : null; } catch (e) { return null; }
+  }
+  function stepMsg(step, u, extra) {
+    var m = model();
+    if (!m || typeof m.rmaStepMessage !== 'function' || !u) return '';
+    try { return m.rmaStepMessage(step, u, Object.assign({ party: customerFacingVendor(u, vendorOf(u)) }, extra || {})); } catch (e) { return ''; }
+  }
+  function dayStr(iso) { return iso ? fmtDate(iso) : ''; }
+  // The line under a finished step: its date, or the fact it settled.
+  function stepNote(u, i) {
+    switch (i) {
+      case 0: return dayStr(u.created_at);
+      case 1: return dayStr(u.checked_at);
+      case 2: return u.warranty_until ? 'Valid till ' + fmtDate(u.warranty_until) : dayStr(u.verified_at);
+      case 3: {
+        var v = vendorOf(u);
+        return [dayStr(u.submitted_at), v ? vendorName(v) : ''].filter(Boolean).join(' · ');
+      }
+      case 4: return u.vendor_rma_no ? 'No. ' + u.vendor_rma_no : dayStr(u.vendor_accepted_at);
+      case 5: return dayStr(u.vendor_ready_at);
+      case 6: return u.vendor_result ? resultLabel(u.vendor_result) : '';
+      case 7: return dayStr(u.closed_at);
+    }
+    return '';
+  }
+  function stepsHtml(u) {
+    var s = stepsOf(u);
+    if (!s) return '';
+    var late = safeRisk(u, Date.now(), vendorOf(u)) === 2;
+    return '<ol class="sv2-steps rma-steps" aria-label="Where this RMA is">' + s.steps.map(function (st, i) {
+      var state = s.states[i];
+      var dot = state === 'done' ? '✓' : state === 'failed' ? '✕' : state === 'skipped' ? '–' : String(i + 1);
+      var sub = state === 'failed' ? s.why : state === 'now' ? s.sub : state === 'done' ? stepNote(u, i) : '';
+      return '<li class="sv2-step is-' + state + (state === 'now' && late ? ' is-late' : '') + '"' +
+        (state === 'now' ? ' aria-current="step"' : '') + ' title="' + esc(st.full) + '">' +
+        '<span class="sv2-step-dot" aria-hidden="true">' + dot + '</span>' +
+        '<span class="sv2-step-t"><span class="sv2-step-l">' + esc(st.label) + '</span>' +
+        (sub ? '<span class="sv2-step-s">' + esc(sub) + (state === 'now' && late ? ' · late' : '') + '</span>' : '') +
+        '</span></li>';
+    }).join('') + '</ol>';
+  }
+  // { act, label } — the first is the main button. Only what the desk can do.
+  var stepActs = [];
+  function stepActions(u) {
+    var A = [];
+    if (!u || !canDesk()) return A;
+    var st = u.stage;
+    var push = function (act, label) { if (!A.some(function (a) { return a.act === act; })) A.push({ act: act, label: label }); };
+    if (st === 'closed') { push('add-delivery-docs', 'Add delivery challan / receipts'); return A; }
+    var hold = isHolding(u);
+    if (st === 'logged' || st === 'with_tech') push('receive', 'Mark received');
+    if ((st === 'with_tech' || st === 'received' || st === 'testing') && !u.check_result) push('step-check', 'Record the check');
+    if (u.check_result === 'no_fault' && (st === 'received' || st === 'testing')) {
+      push(hold ? 'release' : 'return-part', hold ? 'Release back to the ticket' : 'Return the part');
+      push('step-check', 'Check again');
+    }
+    if (u.check_result === 'fault_confirmed' && (st === 'with_tech' || st === 'received' || st === 'testing' || st === 'awaiting_docs')) {
+      push('step-verify', st === 'awaiting_docs' ? 'Invoice is here — verify' : 'Verify bill and part');
+      if (st !== 'awaiting_docs') push('step-check', 'Check again');
+    }
+    if (st === 'customer_decision' && !u.vendor_result) {
+      push('paid-repair', 'Open paid repair');
+      push(hold ? 'release' : 'return-part', hold ? 'Release back to the ticket' : 'Return the part');
+      if (u.check_result === 'fault_confirmed') push('step-verify', 'Verify again');
+    }
+    if (st === 'ready_to_ship') push('dispatch', 'Submit to the centre');
+    if (st === 'with_vendor') {
+      if (u.vendor_ready_at) {
+        push('vendor-result', u.vendor_ready_via === 'courier' ? 'Received — back with us' : 'Collected — back with us');
+      } else if (u.vendor_accepted_at) {
+        push('step-ready', 'Ready at the centre');
+        push('step-progress', 'Update the status');
+        push('vendor-result', 'Rejected or other result');
+      } else {
+        push('step-accepted', 'RMA Accepted');
+        push('step-ready', 'Ready at the centre');
+        push('step-submitted', 'Submission details');
+        push('vendor-result', 'Rejected or other result');
+      }
+    }
+    if (st === 'back_from_vendor') push('to-customer', 'Ready for the customer');
+    if (st === 'customer_decision' && u.vendor_result) push('to-customer', 'Ready for the customer');
+    if (st === 'ready_to_return') {
+      if (u.return_confirmed === false) push('to-customer', 'Choose how it goes back');
+      else if (u.return_method === 'courier') push('goto-move:returning', 'Dispatched by courier');
+      else push('goto-move:closed', u.return_method === 'with_device' ? 'Fitted back — close' : 'Handed over — close');
+    }
+    if (st === 'returning') push('goto-move:closed', 'Delivered — close');
+    return A;
+  }
+  function paintSteps() {
+    var host = el('rma-u-steps');
+    var u = unitById(openUnitId);
+    if (!host || !u) { stepActs = []; return; }
+    stepActs = stepActions(u);
+    var first = stepActs[0];
+    host.innerHTML = stepsHtml(u) + (first
+      ? '<div class="sv2-next rma-next"><span class="sv2-next-k">Next step</span>' +
+          '<button type="button" class="primary-pink-btn sv2-next-main" data-step-act="0">' + esc(first.label) + ' →</button>' +
+          (stepActs.length > 1 ? '<span class="sv2-next-or">or</span>' + stepActs.slice(1).map(function (a, i) {
+            return '<button type="button" class="secondary-btn sv2-small sv2-next-alt" data-step-act="' + (i + 1) + '">' + esc(a.label) + '</button>';
+          }).join('') : '') +
+          '<span id="rma-step-status" class="sv-status rma-step-status"></span>' +
+        '</div>'
+      : '');
+  }
+  function runStepAct(a) {
+    var act = a.act;
+    if (act.indexOf('goto-move:') === 0) { gotoMove(act.slice(10)); return; }
+    switch (act) {
+      case 'receive': dlgReceive(); break;
+      case 'dispatch': dlgDispatchOne(); break;
+      case 'vendor-result': dlgVendorResult(); break;
+      case 'paid-repair': dlgPaidRepair(); break;
+      case 'release': dlgRelease(); break;
+      case 'step-check': dlgStepCheck(); break;
+      case 'step-verify': dlgStepVerify(); break;
+      case 'step-submitted': dlgStepSubmitted(); break;
+      case 'step-accepted': dlgStepAccepted('accepted'); break;
+      case 'step-progress': dlgStepAccepted('progress'); break;
+      case 'step-ready': dlgStepReady(); break;
+      case 'return-part': dlgToCustomer(); break;
+      case 'to-customer': dlgToCustomer(); break;
+      case 'add-delivery-docs': switchTab('photos'); break;
+      default: break;
+    }
+  }
+  // The Move box on the Details tab, with the stage already picked.
+  async function gotoMove(to) {
+    if (unitTab !== 'details') await switchTab('details');
+    if (unitTab !== 'details') return;
+    var sel = el('rma-m-stage');
+    if (sel && Array.prototype.some.call(sel.options, function (o) { return o.value === to; })) {
+      sel.value = to;
+      sel.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+    var box = el('rma-u-movebox');
+    if (box && typeof box.scrollIntoView === 'function') box.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+  // After a step: "Recorded." with a button that opens WhatsApp with the same
+  // sentence the customer's tracking page now shows.
+  function offerTell(unitId, text, said) {
+    if (openUnitId !== unitId) return;
+    var u = unitById(unitId);
+    if (!u) return;
+    if (text && trackingPhone(u)) {
+      setStatusId('rma-step-status', said || 'Recorded.', 'ok', { label: 'Tell the customer on WhatsApp', fn: function () { dlgMessage(unitId, null, text); } });
+    } else {
+      setStatusId('rma-step-status', said || 'Recorded.', 'ok');
+    }
+  }
+  function partLine(u) {
+    return '<p><strong>' + esc(u.public_code || '') + '</strong> · ' + esc(kindLabel(u.kind) + ' · ' + brandModel(u)) +
+      (u.serial ? ' · <span class="sv-code">' + esc(u.serial) + '</span>' : '') + '</p>';
+  }
+  function showIf(body, attr, value) {
+    Array.prototype.forEach.call(body.querySelectorAll('[' + attr + ']'), function (x) {
+      show(x, !!value && x.getAttribute(attr).split(' ').indexOf(value) !== -1);
+    });
+  }
+  function todayIso() {
+    var d = new Date();
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  }
+  function plusDaysIso(n) {
+    var d = new Date(); d.setDate(d.getDate() + n);
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  }
+  function makeTray(host, roles, defaultRole, label) {
+    var T = trays();
+    if (!host || !T || typeof T.create !== 'function') return null;
+    try { return T.create(host, { roles: roles, defaultRole: defaultRole, allowPdf: true, minPhotos: 0, label: label }); }
+    catch (e) { return null; }
+  }
+  // Upload whatever is in a dialog's tray; '' when all went (or none).
+  async function uploadTray(tray, unitId) {
+    if (!tray || !photoCount(tray)) return '';
+    var r;
+    try { r = await trays().uploadAll(tray, { caseId: unitId }, function () {}); }
+    catch (e) { return 'The files did not upload (' + failText(e) + ').'; }
+    forgetRoles(unitId);
+    if (r && r.failed && r.failed.length) return r.failed.length + ' file' + (r.failed.length === 1 ? '' : 's') + ' did not upload.';
+    return '';
+  }
+
+  // Step 2 — Component checked: is the customer's complaint real?
+  async function dlgStepCheck() {
+    var unitId = openUnitId, g = sessionGen, u = unitById(unitId);
+    if (!u) return;
+    var result = null;
+    var body = dlgBody(partLine(u) +
+      '<p class="sv-hint">The complaint: ' + esc(u.fault || '—') + '</p>' +
+      '<div class="sv-field"><span>What did the check find?</span>' +
+        chipsHtml('result', [{ value: 'fault_confirmed', label: 'Fault confirmed' }, { value: 'no_fault', label: 'No fault found' }], null, { label: 'Check result' }) + '</div>' +
+      dfield('What you tested and what you saw', 'note', '', { textarea: true, wide: true, rows: 3,
+        placeholder: 'e.g. No display on two test boards; artefacts in FurMark after 2 minutes' }) +
+      '<p class="sv-hint rma-warn" data-if="no_fault">The claim stops here. The customer is told the part works and the problem is elsewhere' +
+        (u.service_job_id ? ', and the ticket goes back to diagnosis when you release the part.' : '.') + '</p>' +
+      '<p class="sv-hint" data-if="fault_confirmed">Next: verify the bill and the part (warranty date, no physical damage).</p>');
+    body.addEventListener('ops-chip-change', function () { showIf(body, 'data-if', readChip(body, 'result')); });
+    showIf(body, 'data-if', null);
+    var ok = await openDialog({ title: 'Component checked', body: body, okText: 'Record', wide: true, onOk: async function () {
+      var r = readChip(body, 'result');
+      if (!r) return 'Pick what the check found.';
+      var note = fval(body, 'note');
+      if (!note) return 'Write what you tested and what you saw.';
+      var live = unitById(unitId);
+      if (!live || ['with_tech', 'received', 'testing'].indexOf(live.stage) === -1) return 'This part has moved on — close this and look again.';
+      try { await data().rmaStep(unitId, 'check', { result: r, note: note }); } catch (e) { return failText(e); }
+      result = r;
+      return true;
+    } });
+    if (!ok || isStale(g)) return;
+    toast((u.public_code || 'Part') + ': ' + (result === 'no_fault' ? 'no fault found.' : 'fault confirmed.'), result === 'no_fault' ? 'warning' : 'success');
+    repaintAfterWrite(unitId);
+    offerTell(unitId, stepMsg('check', unitById(unitId), { result: result }));
+  }
+
+  // Step 3 — Bill and component cross-verified.
+  var CONDITION_TICKS = [
+    ['burn', 'No burn marks or liquid damage'],
+    ['pins', 'No bent pins, cracks or broken parts'],
+    ['sticker', 'Warranty sticker intact'],
+    ['serial', 'Serial label intact and readable']
+  ];
+  async function dlgStepVerify() {
+    var unitId = openUnitId, g = sessionGen, u = unitById(unitId);
+    if (!u) return;
+    if (rolesStale(unitId)) await loadRoles(unitId);
+    if (isStale(g) || openUnitId !== unitId) return;
+    u = unitById(unitId) || u;
+    var b = brandOf(u.brand);
+    var months = b && b.warranty_months != null ? String(b.warranty_months) : '';
+    var pdate = u.purchase_date ? String(u.purchase_date).slice(0, 10) : '';
+    var until = u.warranty_until ? String(u.warranty_until).slice(0, 10) : '';
+    var M = model();
+    var calcUntil = function (d, mo) { try { return M.rmaWarrantyUntil(d, mo) || ''; } catch (e) { return ''; } };
+    if (!until && pdate && months) until = calcUntil(pdate, months);
+    var sugg = centresFor(u);
+    var suggIds = sugg.map(function (x) { return String(x.vendor.id); });
+    // A part logged against a brand (before 1.15 every vendor was one) gets
+    // the suggested centre instead; a centre already chosen stays.
+    var curV = u.vendor_id != null ? vendorById(u.vendor_id) : null;
+    var chosen = curV && curV.kind !== 'brand' ? String(curV.id)
+      : sugg[0] ? String(sugg[0].vendor.id) : (u.vendor_id != null ? String(u.vendor_id) : '');
+    var outcomes = [{ value: 'ok', label: 'Eligible — prepare the claim' }].concat(Object.keys(M.RMA_VERIFY_PROBLEMS || {}).map(function (k) {
+      return { value: k, label: M.RMA_VERIFY_PROBLEMS[k] };
+    }));
+    var invoiceLine = !u.brand ? ''
+      : b ? (b.invoice_needed === false ? esc(b.name) + ' needs no invoice.' : esc(b.name) + ' needs the purchase invoice.')
+      : esc(u.brand) + ' is not in the brand list yet.';
+    var body = dlgBody(partLine(u) +
+      '<div class="sv-grid">' +
+        dfield('Invoice date', 'pdate', pdate, { type: 'date' }) +
+        dfield('Invoice no.', 'inv', u.invoice_no || '') +
+        dfield('Warranty (months)', 'months', months, { type: 'number', attrs: ' min="0" max="240" step="1" inputmode="numeric"', placeholder: b ? 'Not set for ' + b.name : 'e.g. 36' }) +
+        dfield('Warranty valid till', 'until', until, { type: 'date' }) +
+      '</div>' +
+      (u.brand ? '<label class="sv-check rma-remember"><input type="checkbox" data-f="remember-months"> Remember the warranty months for ' + esc(b ? b.name : u.brand) + '</label>' : '') +
+      '<div class="sv-field"><span>Physical check</span><div class="rma-ticks">' + CONDITION_TICKS.map(function (t) {
+        return '<label class="sv-check"><input type="checkbox" data-tick="' + t[0] + '"> ' + esc(t[1]) + '</label>';
+      }).join('') + '</div></div>' +
+      (invoiceLine ? '<p class="sv-hint">' + invoiceLine + '</p>' : '') +
+      '<label class="sv-field"><span>Service centre</span><select data-f="vendor" class="settings-select">' + centreOptions(chosen, suggIds) + '</select></label>' +
+      '<div class="rma-centre-notes" data-centre-notes></div>' +
+      (u.brand ? '<label class="sv-check rma-remember" data-save-route><input type="checkbox" data-f="save-route"> Save this centre for ' + esc(b ? b.name : u.brand) + ' ' + esc(kindLabel(u.kind).toLowerCase()) + ' next time</label>' : '') +
+      '<div class="sv-field"><span>Outcome</span>' + chipsHtml('outcome', outcomes, 'ok', { label: 'Outcome' }) + '</div>' +
+      '<div class="rma-gates" data-needs hidden></div>' +
+      '<p class="sv-hint rma-warn" data-if="out_of_warranty physical_damage tampered">The claim stops. The customer is told why and offered a paid repair or a replacement.</p>' +
+      '<p class="sv-hint" data-if="invoice_missing">It waits for the customer to send the invoice. They are asked for it on their tracking page.</p>' +
+      dfield('Note (internal, optional)', 'note', '', { textarea: true, wide: true }));
+    var sync = function () {
+      var out = readChip(body, 'outcome') || 'ok';
+      showIf(body, 'data-if', out);
+      var vid = fval(body, 'vendor');
+      var notes = body.querySelector('[data-centre-notes]');
+      var hit = sugg.filter(function (x) { return String(x.vendor.id) === vid; })[0];
+      var v = vendorById(vid);
+      if (notes) {
+        var lines = [];
+        if (hit && hit.route.notes) lines.push(hit.route.notes);
+        if (v && v.notes) lines.push(v.notes);
+        notes.innerHTML = lines.length ? '<p class="sv-hint">' + lines.map(esc).join('<br>') + '</p>' : '';
+      }
+      var sr = body.querySelector('[data-save-route]');
+      if (sr) show(sr, !!vid && suggIds.indexOf(vid) === -1);
+      var needs = body.querySelector('[data-needs]');
+      if (needs) {
+        var probs = out === 'ok' ? gateCheck(Object.assign(augment(u), { vendor_id: vid || null, skipSteps: true }), 'ready_to_ship', rolesFor(unitId)) : [];
+        needs.hidden = !probs.length;
+        needs.innerHTML = probs.length ? '<div class="rma-gates-title">Also needed before it can go to the centre</div><ul>' +
+          probs.map(function (p) { return '<li>' + esc(p) + '</li>'; }).join('') + '</ul>' : '';
+      }
+    };
+    var onDates = function (e) {
+      var k = e.target && e.target.getAttribute('data-f');
+      if (k !== 'pdate' && k !== 'months') return;
+      var c = calcUntil(fval(body, 'pdate'), fval(body, 'months'));
+      var ue = fel(body, 'until');
+      if (c && ue) ue.value = c;
+    };
+    body.addEventListener('ops-chip-change', sync);
+    body.addEventListener('change', function (e) { onDates(e); sync(); });
+    body.addEventListener('input', onDates);
+    sync();
+    var outcome = null;
+    var ok = await openDialog({ title: 'Bill and component cross-verified', body: body, okText: 'Record', wide: true, onOk: async function () {
+      var out = readChip(body, 'outcome') || 'ok';
+      var vid = fval(body, 'vendor');
+      var payload = {
+        purchase_date: fval(body, 'pdate') || null, invoice_no: fval(body, 'inv') || null,
+        warranty_until: fval(body, 'until') || null, vendor_id: vid ? Number(vid) : null, note: fval(body, 'note') || null
+      };
+      if (out === 'ok') {
+        var unticked = CONDITION_TICKS.filter(function (t) { var x = body.querySelector('[data-tick="' + t[0] + '"]'); return !(x && x.checked); });
+        if (unticked.length) return 'Tick the physical check — or pick the problem you found as the outcome.';
+        if (payload.warranty_until && payload.warranty_until < todayIso()) return 'The warranty ended on ' + fmtDate(payload.warranty_until) + '. Pick “Out of warranty” as the outcome.';
+        if (!vid) return 'Choose the service centre.';
+        payload.condition_ok = true;
+      } else {
+        payload.problem = out;
+      }
+      var live = unitById(unitId);
+      if (!live) return 'This part is no longer here — close this and look again.';
+      // The directory first: remembering is a convenience, never a blocker.
+      var mo = fval(body, 'months');
+      var rememberM = (body.querySelector('[data-f="remember-months"]') || {}).checked;
+      var saveR = (body.querySelector('[data-f="save-route"]') || {}).checked && vid && suggIds.indexOf(vid) === -1;
+      if ((rememberM && mo) || saveR) {
+        try {
+          var br = brandOf(u.brand);
+          if (!br || (rememberM && mo && String(br.warranty_months) !== mo)) {
+            br = await data().saveBrand({ id: br ? br.id : undefined, name: br ? br.name : u.brand,
+              warranty_months: rememberM && mo ? Number(mo) : (br ? br.warranty_months : null),
+              invoice_needed: br ? br.invoice_needed !== false : true, notes: br ? br.notes : null });
+          }
+          if (saveR && br) await data().saveRoute({ brand_id: br.id, kind: u.kind, vendor_id: vid });
+        } catch (e) { toast('The brand list did not save: ' + failText(e), 'warning'); }
+        if (isStale(g)) return false;
+      }
+      try { await data().rmaStep(unitId, 'verify', payload); } catch (e) { return failText(e); }
+      outcome = out;
+      return true;
+    } });
+    if (!ok || isStale(g)) return;
+    var live2 = unitById(unitId) || u;
+    toast((u.public_code || 'Part') + ': ' + (outcome === 'ok' ? 'verified — ready to submit.' : (M.RMA_VERIFY_PROBLEMS[outcome] || 'recorded') + '.'),
+          outcome === 'ok' ? 'success' : 'warning');
+    repaintAfterWrite(unitId);
+    offerTell(unitId, stepMsg('verify', live2, { problem: outcome === 'ok' ? null : outcome, until: live2.warranty_until ? fmtDate(live2.warranty_until) : '' }));
+  }
+  // Suggested centres first (from the routes), then every other centre and
+  // portal, then the rest of the vendor list.
+  function centreOptions(selected, firstIds) {
+    var all = allVendors().filter(function (v) { return v.active !== false || String(v.id) === String(selected); });
+    var byId = {};
+    all.forEach(function (v) { byId[String(v.id)] = v; });
+    var opt = function (v) {
+      var id = String(v.id);
+      return '<option value="' + esc(id) + '"' + (id === String(selected) ? ' selected' : '') + '>' + esc(vendorName(v)) +
+        (v.kind === 'portal' ? ' (online)' : '') + '</option>';
+    };
+    var used = {};
+    var grp = function (label, list) {
+      list = list.filter(function (v) { return v && !used[String(v.id)]; });
+      list.forEach(function (v) { used[String(v.id)] = true; });
+      return list.length ? '<optgroup label="' + esc(label) + '">' + list.map(opt).join('') + '</optgroup>' : '';
+    };
+    var byName = function (a, b2) { return String(vendorName(a)).localeCompare(String(vendorName(b2))); };
+    return '<option value="">Choose…</option>' +
+      grp('Suggested for this part', (firstIds || []).map(function (id) { return byId[id]; })) +
+      grp('Service centres', all.filter(function (v) { return v.kind === 'service_centre'; }).sort(byName)) +
+      grp('Brand portals', all.filter(function (v) { return v.kind === 'portal'; }).sort(byName)) +
+      grp('Brands and distributors', all.slice().sort(byName));
+  }
+
+  // Step 4 — the submission details: who, when, the centre's RMA / job no.,
+  // its receipt or job sheet, and photos of the part as handed over.
+  async function dlgStepSubmitted() {
+    var unitId = openUnitId, g = sessionGen, u = unitById(unitId);
+    if (!u) return;
+    var tray = null, saved = false;
+    var sub = u.submitted_at ? String(u.submitted_at).slice(0, 10) : todayIso();
+    var body = dlgBody(partLine(u) +
+      '<div class="sv-grid">' +
+        dfield('Submitted by', 'by', u.submitted_by || myName()) +
+        dfield('Submitted on', 'at', sub, { type: 'date' }) +
+        dfield('RMA / job no. from the centre', 'rma', u.vendor_rma_no || '', { wide: true, placeholder: 'As on their receipt or job sheet' }) +
+        dfield('Note (internal, optional)', 'note', '', { textarea: true, wide: true }) +
+      '</div>' +
+      '<div class="rma-dlg-tray"></div>');
+    var ok = await openDialog({
+      title: 'Submitted at the centre', body: body, okText: 'Save', wide: true,
+      onOpen: function () { tray = makeTray(body.querySelector('.rma-dlg-tray'), ['job_sheet', 'submission'], 'job_sheet', 'The receipt or job sheet (PDF or photo), and photos of the part as submitted'); },
+      onOk: async function () {
+        if (!saved) {
+          var at = fval(body, 'at');
+          if (at && at > todayIso()) return 'The submitted date is in the future.';
+          try {
+            await data().rmaStep(unitId, 'submitted', { by: fval(body, 'by') || null, at: at || null, rma_no: fval(body, 'rma') || null, note: fval(body, 'note') || null });
+          } catch (e) { return failText(e); }
+          saved = true;
+          if (isStale(g)) return false;
+        }
+        var up = await uploadTray(tray, unitId);
+        return up ? 'Saved. ' + up + ' Press Save to retry, or Cancel to skip.' : true;
+      }
+    });
+    if (tray) { try { tray.destroy(); } catch (e) { /* gone */ } }
+    if (saved && !isStale(g)) { toast('Submission details saved.', ok ? 'success' : 'info'); repaintAfterWrite(unitId); }
+  }
+
+  // Step 5 — RMA Accepted (mode 'accepted'), and later status updates
+  // ('progress'): in repair, waiting for stock, model change, credit note.
+  async function dlgStepAccepted(mode) {
+    var unitId = openUnitId, g = sessionGen, u = unitById(unitId);
+    if (!u) return;
+    var M = model();
+    var v = vendorOf(u);
+    var tat = v && Number(v.typical_tat_days) > 0 ? Number(v.typical_tat_days) : 14;
+    var exp = u.expected_back_at ? isoToDay(u.expected_back_at) : plusDaysIso(tat);
+    var progs = Object.keys(M.RMA_VENDOR_PROGRESS || {}).map(function (k) { return { value: k, label: M.RMA_VENDOR_PROGRESS[k] }; });
+    var tray = null, saved = false, prog = null, expOut = '';
+    var body = dlgBody(partLine(u) +
+      (mode === 'accepted' ? '<p class="sv-hint">' + esc(v ? vendorName(v) : 'The centre') + ' accepted the claim. Record their RMA or job number from the acknowledgement.</p>' : '') +
+      '<div class="sv-grid">' +
+        (mode === 'accepted' ? dfield('RMA / job no.', 'rma', u.vendor_rma_no || '', { placeholder: 'Required' }) + dfield('Accepted on', 'at', todayIso(), { type: 'date' }) : '') +
+      '</div>' +
+      '<div class="sv-field"><span>Where does it stand?</span>' + chipsHtml('prog', progs, u.vendor_progress || 'in_repair', { label: 'Status at the centre' }) + '</div>' +
+      '<div class="sv-grid">' + dfield('Expected back by', 'exp', exp, { type: 'date' }) + '</div>' +
+      '<p class="sv-hint" data-if="awaiting_stock">Stock waits are usually 7–14 days and often longer. The customer sees the expected date; you get a reminder to chase when it passes.</p>' +
+      '<p class="sv-hint" data-if="model_change">Write the model they offered in the note. The customer is called to agree it.</p>' +
+      '<p class="sv-hint" data-if="credit_note">Write the credit amount in the note. The customer is called about the options.</p>' +
+      dfield('Note (internal, optional)', 'note', '', { textarea: true, wide: true }) +
+      (mode === 'accepted' ? '<div class="rma-dlg-tray"></div>' : ''));
+    body.addEventListener('ops-chip-change', function () { showIf(body, 'data-if', readChip(body, 'prog')); });
+    showIf(body, 'data-if', u.vendor_progress || 'in_repair');
+    var ok = await openDialog({
+      title: mode === 'accepted' ? 'RMA Accepted' : 'Update from the centre', body: body, okText: 'Record', wide: true,
+      onOpen: function () { if (mode === 'accepted') tray = makeTray(body.querySelector('.rma-dlg-tray'), ['job_sheet'], 'job_sheet', 'The acknowledgement (PDF or photo)'); },
+      onOk: async function () {
+        if (!saved) {
+          var p = readChip(body, 'prog');
+          if (!p) return 'Pick where the claim stands.';
+          var e1 = fval(body, 'exp');
+          if (e1 && e1 < todayIso()) return 'The expected date is in the past.';
+          var pay = { progress: p, expected: e1 || null, note: fval(body, 'note') || null };
+          if (mode === 'accepted') {
+            pay.rma_no = fval(body, 'rma') || null;
+            if (!pay.rma_no && !u.vendor_rma_no) return 'Type the centre’s RMA or job number.';
+            pay.at = fval(body, 'at') || null;
+          }
+          var live = unitById(unitId);
+          if (!live || live.stage !== 'with_vendor') return 'This part is no longer at the centre — close this and look again.';
+          try { await data().rmaStep(unitId, mode, pay); } catch (e) { return failText(e); }
+          saved = true; prog = p; expOut = e1 ? fmtDate(e1) : '';
+          if (isStale(g)) return false;
+        }
+        var up = await uploadTray(tray, unitId);
+        return up ? 'Recorded. ' + up + ' Press Record to retry, or Cancel to skip.' : true;
+      }
+    });
+    if (tray) { try { tray.destroy(); } catch (e) { /* gone */ } }
+    if (!saved || isStale(g)) return;
+    toast((u.public_code || 'Part') + ': ' + (mode === 'accepted' ? 'RMA accepted.' : 'status updated.'), 'success');
+    repaintAfterWrite(unitId);
+    offerTell(unitId, stepMsg(mode, unitById(unitId), { progress: prog, expected: expOut }));
+  }
+
+  // Step 6 — ready at the centre: we collect (2-day clock) or they courier it.
+  async function dlgStepReady() {
+    var unitId = openUnitId, g = sessionGen, u = unitById(unitId);
+    if (!u) return;
+    var M = model();
+    var v = vendorOf(u);
+    var hit = centresFor(u).filter(function (x) { return v && String(x.vendor.id) === String(v.id); })[0];
+    var how = (hit && hit.route.return_how) || (v && v.return_how) || '';
+    var via0 = how === 'courier_to_us' ? 'courier' : 'collect';
+    var vias = Object.keys(M.RMA_READY_VIA || {}).map(function (k) { return { value: k, label: M.RMA_READY_VIA[k] }; });
+    var via = null;
+    var days = M.RMA_COLLECT_DAYS || 2;
+    var body = dlgBody(partLine(u) +
+      '<p class="sv-hint">' + esc(v ? vendorName(v) : 'The centre') + ' says it is ready (replaced, repaired, or a new model).</p>' +
+      '<div class="sv-field"><span>How does it come back to us?</span>' + chipsHtml('via', vias, via0, { label: 'How it comes back' }) + '</div>' +
+      '<div class="sv-grid">' + dfield('Ready since', 'at', todayIso(), { type: 'date' }) +
+        dfield('Expected at our office', 'exp', plusDaysIso(3), { type: 'date', wrapAttrs: ' data-if="courier"' }) + '</div>' +
+      '<p class="sv-hint rma-warn" data-if="collect">We have ' + days + ' days to collect it. After that it shows as late for everyone, not only the coordinator.</p>' +
+      dfield('Note (internal, optional)', 'note', '', { textarea: true, wide: true }));
+    body.addEventListener('ops-chip-change', function () { showIf(body, 'data-if', readChip(body, 'via')); });
+    showIf(body, 'data-if', via0);
+    var ok = await openDialog({ title: 'Ready at the centre', body: body, okText: 'Record', onOk: async function () {
+      var x = readChip(body, 'via');
+      if (!x) return 'Say how it comes back.';
+      var at = fval(body, 'at');
+      if (at && at > todayIso()) return 'The date is in the future.';
+      var live = unitById(unitId);
+      if (!live || live.stage !== 'with_vendor') return 'This part is no longer at the centre — close this and look again.';
+      try {
+        await data().rmaStep(unitId, 'ready', { via: x, at: at || null, expected: x === 'courier' ? (fval(body, 'exp') || null) : null, note: fval(body, 'note') || null });
+      } catch (e) { return failText(e); }
+      via = x;
+      return true;
+    } });
+    if (!ok || isStale(g)) return;
+    toast((u.public_code || 'Part') + ': ready at the centre.', 'success');
+    repaintAfterWrite(unitId);
+    offerTell(unitId, stepMsg('ready', unitById(unitId), { via: via }));
+  }
+
+  // Steps 7–8 — back to the customer. "How does it go back?" is asked here,
+  // never at creation (owner, 24 Nov 2026). A claim that stopped (no fault,
+  // out of warranty…) says why it goes back without one.
+  async function dlgToCustomer() {
+    var unitId = openUnitId, g = sessionGen, u = unitById(unitId);
+    if (!u) return;
+    var from = u.stage;
+    var job = jobOf(u);
+    var rets = [{ value: 'collect', label: RETURN_LABELS.collect }, { value: 'courier', label: RETURN_LABELS.courier }];
+    if (u.service_job_id) rets.push({ value: 'with_device', label: RETURN_LABELS.with_device });
+    var ret0 = u.return_confirmed === false ? null : (u.return_method || 'collect');
+    var needDisp = !u.vendor_result && !u.advance_replacement;
+    var disp0 = u.check_result === 'no_fault' ? 'no_fault_found' : u.verify_problem && u.verify_problem !== 'invoice_missing' ? 'out_of_warranty' : '';
+    var moving = from !== 'ready_to_return';
+    var body = dlgBody(partLine(u) +
+      '<div class="sv-field"><span>How does it go back to the customer?</span>' + chipsHtml('ret', rets, ret0, { label: 'How it goes back' }) + '</div>' +
+      '<label class="sv-field" data-if="courier"><span>Return address</span><textarea data-f="addr" rows="2">' + esc(u.return_address || '') + '</textarea></label>' +
+      (u.service_job_id ? '<p class="sv-hint" data-if="with_device">It is fitted back in their device on ' + esc(job && job.public_code ? job.public_code : 'the ticket') + '.</p>' : '') +
+      (moving && needDisp ? '<label class="sv-field"><span>Why is it going back without a claim? (the customer sees this)</span><select data-f="disp" class="settings-select">' +
+        '<option value="">Choose…</option>' + ['no_fault_found', 'out_of_warranty', 'withdrawn'].map(function (k) {
+          return '<option value="' + k + '"' + (k === disp0 ? ' selected' : '') + '>' + esc(dispLabel(k)) + '</option>';
+        }).join('') + '</select></label>' : '') +
+      (moving ? dfield('Note for the customer (optional)', 'note', '', { textarea: true, wide: true }) : ''));
+    body.addEventListener('ops-chip-change', function () { showIf(body, 'data-if', readChip(body, 'ret')); });
+    showIf(body, 'data-if', ret0);
+    var ok = await openDialog({ title: moving ? 'Ready for the customer' : 'How does it go back?', body: body, okText: moving ? 'Ready' : 'Save', onOk: async function () {
+      var r = readChip(body, 'ret');
+      if (!r) return 'Choose how it goes back.';
+      var addr = fval(body, 'addr');
+      if (r === 'courier' && !addr) return 'A courier return needs the address.';
+      var disp = moving && needDisp ? fval(body, 'disp') : '';
+      if (moving && needDisp && !disp) return 'Say why it is going back — no fault found, out of warranty, or withdrawn.';
+      var live = unitById(unitId);
+      if (!live || live.stage !== from) return 'This part has moved on — close this and look again.';
+      try {
+        var patch = { return_method: r, return_confirmed: true };
+        if (r === 'courier') patch.return_address = addr;
+        await data().updateRma(unitId, patch);
+        if (moving) {
+          var note = fval(body, 'note');
+          await data().moveRma(unitId, from, 'ready_to_return', note || null, true, disp ? { disposition: disp } : {});
+        }
+      } catch (e) { return failText(e); }
+      return true;
+    } });
+    if (!ok || isStale(g)) return;
+    toast((u.public_code || 'Part') + (moving ? ' is ready for the customer.' : ': return method saved.'), 'success');
+    repaintAfterWrite(unitId);
+    if (openUnitId === unitId && trackingPhone(unitById(unitId) || u)) {
+      setStatusId('rma-step-status', 'Done. Tell the customer?', 'ok', { label: 'Message on WhatsApp', fn: function () { dlgMessage(unitId, 'rma_ready'); } });
+    }
   }
 
   function paintTabs() {
@@ -1718,6 +2485,8 @@
     var v = row ? row[col] : null;
     if (col === 'expected_back_at') return isoToDay(v);
     if (col === 'purchase_date') return v ? String(v).slice(0, 10) : '';
+    // 1.15: a return method left open at creation reads as not decided yet.
+    if (col === 'return_method' && row && row.return_confirmed === false) return '';
     return v == null ? '' : String(v);
   }
   function fid(col) { return 'rma-u-f-' + col; }
@@ -1874,8 +2643,9 @@
       '</div>' +
       '<h4 class="rma-sec-title">Return</h4>' +
       '<div class="sv-grid">' +
-        uselect('How does it go back?', fid('return_method'), B.return_method || 'collect', retOpts) +
-        '<div></div>' +
+        uselect('How does it go back?', fid('return_method'), B.return_method,
+                (B.return_method ? [] : [{ value: '', label: '— Not decided yet —' }]).concat(retOpts)) +
+        (B.return_method ? '<div></div>' : '<p class="sv-hint">Decide when the part is back or ready for the customer.</p>') +
         ufield('Return address (for courier)', fid('return_address'), B.return_address, { textarea: true, wide: true }) +
       '</div>' +
       '</fieldset>' +
@@ -1945,6 +2715,8 @@
     if ('purchase_date' in patch && patch.purchase_date && !/^\d{4}-\d{2}-\d{2}$/.test(patch.purchase_date)) return set('That purchase date does not look right.', 'err');
     if ('expected_back_at' in patch && patch.expected_back_at && !/^\d{4}-\d{2}-\d{2}$/.test(patch.expected_back_at)) return set('That expected-back date does not look right.', 'err');
     ['diagnosed_by', 'purchase_source', 'return_method'].forEach(function (k) { if (k in patch && !patch[k]) delete patch[k]; });
+    // 1.15: choosing the return method decides it (v2.11 return_confirmed).
+    if ('return_method' in patch) patch.return_confirmed = true;
     if ('sender_name' in ipatch && !ipatch.sender_name) return set('Keep the sender’s name.', 'err');
     if ('sender_phone' in ipatch && ipatch.sender_phone && !validPhone(ipatch.sender_phone)) return set('The sender phone should be a mobile number — 10 digits, or with the country code.', 'err');
 
@@ -1960,6 +2732,7 @@
     }
     if (isStale(g)) return;                       // signed out meanwhile: nothing more for them
     var changed = Object.keys(unitSaved || !failed ? patch : {}).concat(failed ? [] : Object.keys(ipatch))
+      .filter(function (k) { return k !== 'return_confirmed'; })
       .map(function (k) { return FIELD_NAMES[k] || k; });
     if (changed.length) {
       // A short internal history line, so "who changed the serial" has an answer.
@@ -2273,9 +3046,12 @@
   }
 
   // ── Photos ──
-  var UNIT_ROLES = ['condition', 'serial_label', 'invoice', 'damage', 'packing', 'unboxing', 'vendor_doc', 'return_condition'];
+  var UNIT_ROLES = ['condition', 'serial_label', 'invoice', 'damage', 'packing', 'unboxing', 'vendor_doc', 'return_condition',
+                    'submission', 'job_sheet', 'delivery_doc'];   // 1.15
   function defaultRoleFor(u) {
-    if (u.stage === 'with_vendor') return 'vendor_doc';
+    if (u.stage === 'with_vendor') return 'job_sheet';
+    if (u.stage === 'ready_to_ship') return 'submission';
+    if (u.stage === 'closed') return 'delivery_doc';
     if (u.stage === 'back_from_vendor' || u.stage === 'ready_to_return' || u.stage === 'returning') return 'return_condition';
     return 'condition';
   }
@@ -2590,6 +3366,8 @@
         if (hint) hint.innerHTML = '<div class="rma-build-hint is-linked">Linked to build #' + esc(lb.getAttribute('data-build-code') || '') + ' — press Save changes to keep it.</div>';
         return;
       }
+      var sa = t.closest('[data-step-act]');
+      if (sa && !sa.disabled) { var sx = stepActs[Number(sa.getAttribute('data-step-act'))]; if (sx) runStepAct(sx); return; }
       var a = t.closest('[data-act]');
       if (!a) return;
       var act = a.getAttribute('data-act');
@@ -2868,6 +3646,13 @@
         dfield('Return AWB (optional)', 'awb', '', { wrapAttrs: ' data-results="replaced repaired credit_note rejected shipped_to_customer"' }) +
         dfield('Note (optional)', 'note', '', { textarea: true, wide: true }) +
       '</div>' +
+      // 1.15: decided here if it was left open at creation (never earlier).
+      (u.return_confirmed === false
+        ? '<div class="sv-field" data-results="replaced repaired credit_note rejected"><span>How does it go back to the customer?</span>' +
+            chipsHtml('ret', [{ value: 'collect', label: RETURN_LABELS.collect }, { value: 'courier', label: RETURN_LABELS.courier }]
+              .concat(u.service_job_id ? [{ value: 'with_device', label: RETURN_LABELS.with_device }] : []), null, { label: 'How it goes back' }) + '</div>' +
+          '<label class="sv-field" data-results="replaced repaired credit_note rejected" data-ret-addr><span>Return address (for courier)</span><textarea data-f="addr" rows="2">' + esc(u.return_address || '') + '</textarea></label>'
+        : '') +
       '<p class="sv-hint" data-results="lost">A lost part goes to “Waiting on customer decision” so we can agree a settlement with them.</p>' +
       '<p class="sv-hint" data-results="shipped_to_customer">It goes to “Returning” — close it once the customer confirms it arrived.</p>');
     var sync = function () {
@@ -2893,6 +3678,16 @@
       var live = unitById(unitId);
       if (!live || live.stage !== 'with_vendor') return 'This part is no longer with the vendor — someone already recorded it. Close this and look again.';
       var withSerial = r === 'replaced' || r === 'shipped_to_customer';
+      // 1.15: back with us means the return method must be known now.
+      if (live.return_confirmed === false && r !== 'lost' && r !== 'shipped_to_customer') {
+        var ret = readChip(body, 'ret');
+        if (!ret) return 'Choose how it goes back to the customer.';
+        var addr = fval(body, 'addr');
+        if (ret === 'courier' && !addr) return 'A courier return needs the address.';
+        var rp = { return_method: ret, return_confirmed: true };
+        if (ret === 'courier') rp.return_address = addr;
+        try { await data().updateRma(unitId, rp); } catch (e) { return failText(e); }
+      }
       try {
         await data().vendorResult(unitId, r, reason || null, withSerial ? (rs || null) : null,
           r === 'lost' ? null : (fval(body, 'courier') || null), r === 'lost' ? null : (fval(body, 'awb') || null),
@@ -3154,7 +3949,8 @@
     else if (!followup) toast('The repair ticket was created, but this machine has not received it yet — find it on the service board.', 'warning', 8000);
   }
 
-  async function dlgMessage(unitId, preset) {
+  // custom (1.15): the sentence a step just wrote, offered as "This update".
+  async function dlgMessage(unitId, preset, custom) {
     var u = unitById(unitId);
     if (!u) return;
     var phone = trackingPhone(u);
@@ -3162,8 +3958,14 @@
     var v = vendorOf(u);
     var vlabel = customerFacingVendor(u, v);
     var names = [['rma_received', 'Received'], ['rma_sent', 'Sent to the manufacturer'], ['rma_back', 'Back from the manufacturer'], ['rma_ready', 'Ready']];
-    var textFor = function (k) { return waText(k, msgUnit(u), vlabel); };
-    var start = preset || 'rma_received';
+    var it0 = intakeOf(u) || {};
+    var hello = (u.owner_phone ? u.owner_name : it0.sender_name) || '';
+    var customText = custom ? 'Hi' + (hello ? ' ' + String(hello).split(' ')[0] : '') + ', an update on your warranty claim ' +
+      (u.public_code || '') + ' (' + brandModel(u) + '):\n\n' + custom + '\n\nTrack it here: ' + trackLinkFor(u.public_code || '') +
+      '\n\n— Neo Tokyo' : '';
+    if (custom) names.unshift(['custom', 'This update']);
+    var textFor = function (k) { return k === 'custom' ? customText : waText(k, msgUnit(u), vlabel); };
+    var start = custom ? 'custom' : (preset || 'rma_received');
     var body = dlgBody(
       '<p>To ' + esc(showPhone(phone)) + (u.owner_phone ? ' (end customer)' : ' (sender)') + '</p>' +
       '<div class="sv-field"><span>Which update?</span>' + chipsHtml('tpl', names.map(function (n) { return { value: n[0], label: n[1] }; }), start, { label: 'Which update' }) + '</div>' +
@@ -3381,11 +4183,12 @@
                    '<span class="rma-src-card-t">' + esc(s[1]) + '</span><span class="rma-src-card-s">' + esc(s[2]) + '</span></button>';
           }).join('') + '</div>' +
         '</section>' +
-        '<section class="rma-in-sec" id="rma-in-sender"><h3 class="rma-in-h">Who sent it?</h3>' +
-          chipsHtml('sender', SENDER_OPTS, f.senderKind, { label: 'Who sent it' }) +
+        '<section class="rma-in-sec" id="rma-in-sender"><h3 class="rma-in-h">Who brought or sent it to Neo Tokyo?</h3>' +
+          chipsHtml('sender', SENDER_OPTS, f.senderKind, { label: 'Who brought or sent it to Neo Tokyo' }) +
+          // 1.15 (owner): name first, phone second, as on the service ticket.
           '<div class="sv-grid rma-mt">' +
-            '<label class="sv-field"><span>Phone</span><input type="text" id="rma-in-phone" inputmode="tel" autocomplete="off" spellcheck="false" maxlength="20" placeholder="10-digit mobile, or with the country code"></label>' +
             '<label class="sv-field"><span>Name</span><input type="text" id="rma-in-name" autocomplete="off" spellcheck="false" placeholder="Person or shop name"></label>' +
+            '<label class="sv-field"><span>Phone</span><input type="text" id="rma-in-phone" inputmode="tel" autocomplete="off" spellcheck="false" maxlength="20" placeholder="10-digit mobile, or with the country code"></label>' +
           '</div>' +
           '<div id="rma-in-lookup" class="rma-in-lookup" aria-live="polite"></div>' +
         '</section>' +
@@ -3397,14 +4200,17 @@
           '</div>' +
           '<div id="rma-in-box" class="rma-in-box"><div class="rma-in-boxtray"></div></div>' +
         '</section>' +
-        '<section class="rma-in-sec" id="rma-in-return"><h3 class="rma-in-h">How does it go back?</h3>' +
-          chipsHtml('ret', [{ value: 'collect', label: 'Collect in store' }, { value: 'courier', label: 'Courier back' }], f.ret, { label: 'How it goes back' }) +
+        '<section class="rma-in-sec" id="rma-in-return"><h3 class="rma-in-h">How does it go back? <span class="rma-muted">(optional now)</span></h3>' +
+          chipsHtml('ret', [{ value: 'later', label: 'Decide later' }, { value: 'collect', label: 'Collect in store' }, { value: 'courier', label: 'Courier back' }], f.ret, { label: 'How it goes back' }) +
+          '<p class="sv-hint">Often not known yet. It is asked when the part is back or ready for the customer.</p>' +
           '<label class="sv-field rma-mt" id="rma-in-addr-wrap"><span>Return address</span><textarea id="rma-in-addr" rows="2" placeholder="Name, address, pincode, phone"></textarea></label>' +
         '</section>' +
         '<section class="rma-in-sec"><div class="rma-in-hrow"><h3 class="rma-in-h">Parts</h3>' +
           '<button type="button" class="secondary-btn rma-small" id="rma-in-add">+ Add part</button></div>' +
           '<div id="rma-in-units"></div>' +
         '</section>' +
+        '<datalist id="rma-brand-list">' + brandsList().slice().sort(function (a, b) { return String(a.name).localeCompare(String(b.name)); })
+          .map(function (b) { return '<option value="' + esc(b.name) + '"></option>'; }).join('') + '</datalist>' +
         '<section class="rma-in-sec"><label class="sv-field"><span>Notes for the shop (optional)</span>' +
           '<textarea id="rma-in-notes" rows="2" placeholder="Anything the next person should know"></textarea></label></section>' +
       '</div>' +
@@ -3422,14 +4228,18 @@
         '<button type="button" class="rma-linkbtn" data-act="remove-unit">Remove</button></div>' +
       '<div class="sv-grid">' +
         '<label class="sv-field"><span>What is it?</span><select data-f="kind" class="settings-select"><option value="">Choose…</option>' + kinds + '</select></label>' +
-        dfield('Brand', 'brand', '', { placeholder: 'e.g. ASUS' }) +
+        dfield('Brand', 'brand', '', { placeholder: 'e.g. ASUS', attrs: ' list="rma-brand-list"' }) +
         dfield('Model', 'model', '', { placeholder: 'e.g. TUF RTX 4070 Ti' }) +
         dfield('Serial (as printed on the label)', 'serial', '', { placeholder: 'Optional now — needed before it ships' }) +
         '<div class="sv-span2 rma-hint-slot" data-slot="build"></div>' +
         '<input type="hidden" data-f="build_ticket_id" value="">' +
         dfield('Fault', 'fault', '', { textarea: true, wide: true, placeholder: 'What is wrong with it, in the sender’s words' }) +
         '<div class="sv-field sv-span2"><span>Who found the fault?</span>' + chipsHtml('diag', DIAG_OPTIONS, 'customer', { label: 'Who found the fault' }) + '</div>' +
-        '<div class="sv-field sv-span2 rma-in-data hidden"><span>Data on the drive</span>' + chipsHtml('data', DATA_HANDLING, null, { label: 'Data on the drive', allowNone: true }) +
+        '<div class="sv-field sv-span2 rma-in-data hidden">' +
+          // 1.15 (owner): said at creation, for every storage drive.
+          '<div class="rma-in-datawarn"><strong>Tell the customer:</strong> the data on this drive will be lost during the warranty claim, and Neo Tokyo is not responsible for it. They should copy anything they need first.</div>' +
+          '<label class="sv-check"><input type="checkbox" data-f="data_told"> The customer has been told</label>' +
+          '<span>Data on the drive</span>' + chipsHtml('data', DATA_HANDLING, null, { label: 'Data on the drive', allowNone: true }) +
           '<p class="sv-hint">Needed before a drive can ship. Leave it for now if you have not asked yet.</p></div>' +
         '<div class="sv-span2 rma-in-owner"><div class="sv-grid">' +
           dfield('End customer name (optional)', 'owner_name', '', { placeholder: 'If the sender is not the owner' }) +
@@ -3467,7 +4277,7 @@
       source: (src === 'courier' || src === 'stock') ? src : 'walk_in',
       senderKind: 'customer',
       inHand: true,
-      ret: 'collect',
+      ret: 'later',                               // 1.15: decided when it comes back
       units: [],
       boxTray: null,
       busy: false, done: false, retired: false,
@@ -3783,6 +4593,10 @@
       }
       var pd = fval(c, 'purchase_date');
       if (pd && !/^\d{4}-\d{2}-\d{2}$/.test(pd)) return { msg: n + 'the purchase date does not look right.', focus: fel(c, 'purchase_date') };
+      // 1.15: a drive is only taken once the customer knows the data goes with it.
+      if (isDrive(fval(c, 'kind')) && !stock && !((c.querySelector('[data-f="data_told"]') || {}).checked)) {
+        return { msg: n + 'tell the customer the data on the drive will be lost, then tick that they were told.', focus: c.querySelector('[data-f="data_told"]') };
+      }
     }
     return null;
   }
@@ -3802,7 +4616,8 @@
       sender_phone: (!stock && validPhone(rawPhone)) ? normPhone(rawPhone) : null,
       inbound_courier: courier ? (String((el('rma-in-courier-name') || {}).value || '').trim() || null) : null,
       inbound_awb: courier ? (String((el('rma-in-awb') || {}).value || '').trim() || null) : null,
-      return_method: stock ? 'collect' : f.ret,
+      // 1.15 (v2.11): no return method = decided later (return_confirmed false).
+      return_method: stock ? 'collect' : (f.ret === 'later' ? null : f.ret),
       return_address: (!stock && f.ret === 'courier') ? String((el('rma-in-addr') || {}).value || '').trim() : null,
       notes: String((el('rma-in-notes') || {}).value || '').trim() || null,
       in_hand: courier ? !!f.inHand : true,
@@ -3828,7 +4643,9 @@
           purchase_date: fval(c, 'purchase_date') || null,
           build_ticket_id: fval(c, 'build_ticket_id') || null,
           handling_fee: (fee === null || isNaN(fee)) ? null : fee,
-          condition_remarks: fval(c, 'condition_remarks') || null
+          condition_remarks: [fval(c, 'condition_remarks'),
+            (isDrive(kind) && !stock && (c.querySelector('[data-f="data_told"]') || {}).checked)
+              ? 'Customer told the data on the drive will be lost and Neo Tokyo is not responsible.' : ''].filter(Boolean).join(' ') || null
         };
         var dh = isDrive(kind) ? readChip(c, 'data') : null;
         if (dh) out.data_handling = dh;
@@ -4110,7 +4927,7 @@
       } else if (g === 'inhand') {
         f.inHand = readChip(root, 'inhand') !== 'expected';
       } else if (g === 'ret') {
-        f.ret = readChip(root, 'ret') || 'collect';
+        f.ret = readChip(root, 'ret') || 'later';
       } else if (g === 'diag') {
         var rec = recOfCard(f, e.target.closest && e.target.closest('.rma-in-unit'));
         if (rec) rec.diagTouched = true;

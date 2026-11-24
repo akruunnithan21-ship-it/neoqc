@@ -52,14 +52,18 @@
     after: 'After the work',
     vendor_doc: 'Vendor document',
     return_condition: 'Return condition',
-    other: 'Other'
+    other: 'Other',
+    // 1.15 (v2.11): RMA submission and completion
+    submission: 'At submission',
+    job_sheet: 'Receipt / job sheet',
+    delivery_doc: 'Delivery challan / receipt'
   };
   // Never shown to the customer. The database refuses customer_visible on these
   // too (service_media_private_roles); hiding the tick just stops a click that
   // could only ever fail.
-  var PRIVATE_ROLES = { invoice: true, serial_label: true, vendor_doc: true };
+  var PRIVATE_ROLES = { invoice: true, serial_label: true, vendor_doc: true, job_sheet: true, delivery_doc: true };
   // The only roles a PDF may carry (the data layer enforces the same rule).
-  var PDF_ROLES = { invoice: true, vendor_doc: true };
+  var PDF_ROLES = { invoice: true, vendor_doc: true, job_sheet: true, delivery_doc: true };
   var TYPE_BY_EXT = {
     jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp',
     heic: 'image/heic', heif: 'image/heif', pdf: 'application/pdf'

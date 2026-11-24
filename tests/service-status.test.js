@@ -358,7 +358,8 @@ test('vocabulary keys and labels match the spec', function () {
      'Monitor', 'Peripheral', 'Other']);
   assert.deepStrictEqual(S.PURCHASE_SOURCES, { neo_tokyo: 'Neo Tokyo', elsewhere: 'Bought elsewhere', unknown: 'Not sure' });
   assert.deepStrictEqual(S.MIRROR_STAGES, ['rma_raised', 'at_vendor', 'back_from_vendor']);
-  assert.deepStrictEqual(S.PRIVATE_MEDIA_ROLES, ['invoice', 'serial_label', 'vendor_doc']);
+  // 1.15 (v2.11): the centre's receipt / job sheet and the delivery challan are private too.
+  assert.deepStrictEqual(S.PRIVATE_MEDIA_ROLES, ['invoice', 'serial_label', 'vendor_doc', 'job_sheet', 'delivery_doc']);
   // v2.2 (sql/work-queue.sql) widens service_jobs.assigned_via with 'auto' (an accepted app offer).
   assert.deepStrictEqual(S.ASSIGNED_VIA, { claim: 'Claimed', manager: 'Assigned by a lead', auto: 'Offered by Neo OS',
     legacy: 'Assigned', self: 'Took it at intake' });
@@ -708,7 +709,7 @@ test('RMA vocab tables carry exactly the spec keys (plus A9, A10, A11)', functio
   assert.deepStrictEqual(S.DATA_HANDLING_KINDS, ['ssd', 'hdd']);
   assert.ok(S.needsDataHandling('ssd') && S.needsDataHandling('hdd') && !S.needsDataHandling('gpu') && !S.needsDataHandling(null));
   assert.deepStrictEqual(Object.keys(S.SHIPMENT_MODES), ['courier', 'hand_delivery', 'vendor_pickup', 'bus_parcel']);
-  assert.deepStrictEqual(Object.keys(S.VENDOR_KINDS), ['brand', 'distributor', 'service_centre']);
+  assert.deepStrictEqual(Object.keys(S.VENDOR_KINDS), ['brand', 'distributor', 'service_centre', 'portal']);   // portal: 1.15
   assert.deepStrictEqual(S.RMA_PRE_RETURN, ['with_tech', 'logged', 'received', 'testing', 'awaiting_docs', 'ready_to_ship', 'with_vendor'], 'A2');
   assert.deepStrictEqual(Object.keys(S.FEE_STATUSES), ['n_a', 'quoted', 'accepted', 'paid', 'waived']);
   assert.deepStrictEqual(Object.keys(S.RMA_SOURCES), ['from_ticket', 'walk_in', 'courier', 'field', 'stock', 'website']);
@@ -798,24 +799,27 @@ test('rmaWaitingSentence names whose turn it is', function () {
 });
 
 test('rmaGateProblems → ready_to_ship / with_vendor', function () {
+  // 1.15 (v2.11): steps 2 and 3 come first; the rest below have them done.
   var bare = { stage: 'testing', purchase_source: 'unknown', fee_status: 'n_a' };
   var p = S.rmaGateProblems(bare, 'ready_to_ship', []);
-  assert.strictEqual(p.length, 4, JSON.stringify(p));
+  assert.strictEqual(p.length, 6, JSON.stringify(p));
+  assert.ok(/check the part first/i.test(p[0]) && /verify the bill/i.test(p[1]), JSON.stringify(p));
+  assert.strictEqual(S.rmaGateProblems(Object.assign({ skipSteps: true }, bare), 'ready_to_ship', []).length, 4, 'skipSteps leaves the rest');
   assert.ok(p.some(function (s) { return /serial number/i.test(s); }));
   assert.ok(p.some(function (s) { return /serial label/i.test(s); }));
   assert.ok(p.some(function (s) { return /where it was bought/i.test(s); }));
-  assert.ok(p.some(function (s) { return /vendor/i.test(s); }));
+  assert.ok(p.some(function (s) { return /service centre/i.test(s); }));
 
-  var ok = { stage: 'testing', serial: 'ABC123', purchase_source: 'neo_tokyo', vendor_id: 7, fee_status: 'n_a' };
+  var ok = { check_result: 'fault_confirmed', verified_at: 'x', stage: 'testing', serial: 'ABC123', purchase_source: 'neo_tokyo', vendor_id: 7, fee_status: 'n_a' };
   assert.deepStrictEqual(S.rmaGateProblems(ok, 'ready_to_ship', ['serial_label']), []);
   assert.deepStrictEqual(S.rmaGateProblems(ok, 'ready_to_ship', [{ role: 'serial_label' }]), [], 'media rows accepted');
   assert.deepStrictEqual(S.rmaGateProblems(ok, 'ready_to_ship', { serial_label: 2 }), [], 'role counts accepted');
   assert.deepStrictEqual(S.rmaGateProblems(ok, 'ready_to_ship', null), [], 'media not loaded: photo checks skipped');
   assert.strictEqual(S.rmaGateProblems(ok, 'ready_to_ship', []).length, 1, 'known empty media: photo missing');
-  assert.strictEqual(S.rmaGateProblems({ stage: 'testing', serial: '   ', purchase_source: 'neo_tokyo', vendor_id: 7 },
+  assert.strictEqual(S.rmaGateProblems({ check_result: 'fault_confirmed', verified_at: 'x', stage: 'testing', serial: '   ', purchase_source: 'neo_tokyo', vendor_id: 7 },
                                        'ready_to_ship', ['serial_label']).length, 1, 'blank serial');
 
-  var els = { stage: 'awaiting_docs', serial: 'X', purchase_source: 'elsewhere', vendor_id: 7, fee_status: 'quoted' };
+  var els = { check_result: 'fault_confirmed', verified_at: 'x', stage: 'awaiting_docs', serial: 'X', purchase_source: 'elsewhere', vendor_id: 7, fee_status: 'quoted' };
   var pe = S.rmaGateProblems(els, 'ready_to_ship', ['serial_label']);
   assert.strictEqual(pe.length, 2, JSON.stringify(pe));
   assert.ok(pe.some(function (s) { return /invoice/i.test(s); }));
@@ -828,17 +832,17 @@ test('rmaGateProblems → ready_to_ship / with_vendor', function () {
   assert.ok(/quote the handling fee/i.test(S.rmaGateProblems(els, 'ready_to_ship', ['serial_label', 'invoice'])[0]));
 
   // Dispatch re-checks the same gates from ready_to_ship.
-  var rts = { stage: 'ready_to_ship', serial: 'X', purchase_source: 'neo_tokyo', vendor_id: 3 };
+  var rts = { check_result: 'fault_confirmed', verified_at: 'x', stage: 'ready_to_ship', serial: 'X', purchase_source: 'neo_tokyo', vendor_id: 3 };
   assert.deepStrictEqual(S.rmaGateProblems(rts, 'with_vendor', ['serial_label']), []);
   assert.strictEqual(S.rmaGateProblems(rts, 'with_vendor', []).length, 1);
   assert.deepStrictEqual(S.rmaGateProblems(rts, 'ready_to_ship', ['serial_label']), [], 're-check in place');
-  assert.strictEqual(S.rmaGateProblems({ stage: 'received', serial: 'X', purchase_source: 'neo_tokyo', vendor_id: 3 },
+  assert.strictEqual(S.rmaGateProblems({ check_result: 'fault_confirmed', verified_at: 'x', stage: 'received', serial: 'X', purchase_source: 'neo_tokyo', vendor_id: 3 },
                                        'with_vendor', ['serial_label']).length, 1, 'cannot dispatch from received');
 });
 
 test('A11: a drive ships only once its data handling is recorded', function () {
   ['ssd', 'hdd'].forEach(function (k) {
-    var drive = { stage: 'testing', kind: k, serial: 'X', purchase_source: 'neo_tokyo', vendor_id: 3 };
+    var drive = { check_result: 'fault_confirmed', verified_at: 'x', stage: 'testing', kind: k, serial: 'X', purchase_source: 'neo_tokyo', vendor_id: 3 };
     var p = S.rmaGateProblems(drive, 'ready_to_ship', ['serial_label']);
     assert.strictEqual(p.length, 1, k);
     assert.ok(/data on the drive/i.test(p[0]), p[0]);
@@ -850,13 +854,13 @@ test('A11: a drive ships only once its data handling is recorded', function () {
     // Dispatch re-checks it.
     assert.strictEqual(S.rmaGateProblems(Object.assign({}, drive, { stage: 'ready_to_ship' }), 'with_vendor', ['serial_label']).length, 1);
   });
-  assert.deepStrictEqual(S.rmaGateProblems({ stage: 'testing', kind: 'gpu', serial: 'X', purchase_source: 'neo_tokyo', vendor_id: 3 },
+  assert.deepStrictEqual(S.rmaGateProblems({ check_result: 'fault_confirmed', verified_at: 'x', stage: 'testing', kind: 'gpu', serial: 'X', purchase_source: 'neo_tokyo', vendor_id: 3 },
                                            'ready_to_ship', ['serial_label']), [], 'not a drive');
-  assert.deepStrictEqual(S.rmaGateProblems({ stage: 'testing', kind: 'ssd' }, 'awaiting_docs', []), [], 'only the shipping gate asks');
+  assert.deepStrictEqual(S.rmaGateProblems({ check_result: 'fault_confirmed', verified_at: 'x', stage: 'testing', kind: 'ssd' }, 'awaiting_docs', []), [], 'only the shipping gate asks');
 });
 
 test('A12: a warranty-check screenshot counts as the invoice for a part bought elsewhere', function () {
-  var els = { stage: 'awaiting_docs', kind: 'gpu', serial: 'X', purchase_source: 'elsewhere', vendor_id: 7, fee_status: 'accepted' };
+  var els = { check_result: 'fault_confirmed', verified_at: 'x', stage: 'awaiting_docs', kind: 'gpu', serial: 'X', purchase_source: 'elsewhere', vendor_id: 7, fee_status: 'accepted' };
   assert.deepStrictEqual(S.rmaGateProblems(els, 'ready_to_ship', ['serial_label', 'vendor_doc']), []);
   assert.deepStrictEqual(S.rmaGateProblems(els, 'ready_to_ship', ['serial_label', 'invoice']), []);
   var p = S.rmaGateProblems(els, 'ready_to_ship', ['serial_label']);
@@ -868,7 +872,7 @@ test('A12: a warranty-check screenshot counts as the invoice for a part bought e
 });
 
 test('A8 and A10 gates: with_tech moves, and the vendor shipping straight to the customer', function () {
-  var wt = { stage: 'with_tech', kind: 'psu', serial: 'X', purchase_source: 'neo_tokyo', vendor_id: 3 };
+  var wt = { check_result: 'fault_confirmed', verified_at: 'x', stage: 'with_tech', kind: 'psu', serial: 'X', purchase_source: 'neo_tokyo', vendor_id: 3 };
   assert.deepStrictEqual(S.rmaGateProblems(wt, 'received', []), [], 'bringing it in has no gate');
   assert.deepStrictEqual(S.rmaGateProblems(wt, 'ready_to_ship', ['serial_label']), [], 'hand delivery straight from the field');
   assert.strictEqual(S.rmaGateProblems(Object.assign({}, wt, { serial: '' }), 'ready_to_ship', ['serial_label']).length, 1,
@@ -1074,7 +1078,7 @@ test('ticketWithUnits (A23): ball, lane, risk and sentence from the most urgent 
 test("rma.js's amendment bridges switch themselves off against this model", function () {
   // The exact probes rma.js shims() runs (A8, A12, A11). Each bridge is ON
   // when its probe says the model lacks the amendment.
-  var base = { stage: 'received', serial: 'X1234', vendor_id: 1, fee_status: 'paid' };
+  var base = { stage: 'received', serial: 'X1234', vendor_id: 1, fee_status: 'paid', check_result: 'fault_confirmed', verified_at: 'x' };   // 1.15: steps 2–3 done
   var withTech = !(S.RMA_TRANSITIONS && S.RMA_TRANSITIONS.with_tech);
   var vendorDoc = S.rmaGateProblems(Object.assign({}, base, { kind: 'gpu', purchase_source: 'elsewhere' }),
                                     'ready_to_ship', ['serial_label', 'vendor_doc']).length > 0;

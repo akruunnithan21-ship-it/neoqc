@@ -61,11 +61,15 @@ var UNIT_COLS = ['id', 'public_code', 'intake_id', 'service_job_id', 'service_it
   'replacement_serial', 'handling_fee', 'fee_status', 'fee_ref', 'fee_note', 'return_method', 'return_address', 'return_courier',
   'return_awb', 'advance_replacement', 'advance_serial', 'advance_at', 'stage', 'stage_since', 'disposition', 'handler_email',
   'handler_name', 'followup_job_id', 'created_at', 'updated_at', 'created_by_email', 'closed_at', 'closed_by',
-  'data_handling' /* A11 */, 'replacement_serial_norm' /* A15, generated */, 'intake_seq' /* order in the create payload */];
+  'data_handling' /* A11 */, 'replacement_serial_norm' /* A15, generated */, 'intake_seq' /* order in the create payload */,
+  // 1.15 (sql/service-v2.11.sql): the RMA step facts
+  'check_result', 'checked_at', 'checked_by', 'warranty_until', 'verify_problem', 'verified_at', 'verified_by',
+  'submitted_at', 'submitted_by', 'vendor_accepted_at', 'vendor_progress', 'vendor_ready_at', 'vendor_ready_via', 'return_confirmed'];
 var SHIPMENT_COLS = ['id', 'direction', 'vendor_id', 'courier', 'awb', 'cost', 'notes', 'dispatched_at', 'delivered_at',
   'created_at', 'created_by_email', 'mode' /* A9 */, 'carried_by' /* A9 */];
 var SHIPMENT_ITEM_COLS = ['shipment_id', 'case_id'];
-var VENDOR_COLS = ['id', 'name', 'public_name', 'kind', 'contact', 'address', 'portal_url', 'typical_tat_days', 'active', 'created_at'];
+var VENDOR_COLS = ['id', 'name', 'public_name', 'kind', 'contact', 'address', 'portal_url', 'typical_tat_days', 'active', 'created_at',
+  'submit_how', 'invoice_rule', 'return_how', 'notes' /* 1.15, v2.11 */];
 var SEV_COLS = ['id', 'job_id', 'at', 'client_at', 'kind', 'actor_kind', 'actor_email', 'actor_name', 'from_stage', 'to_stage',
   'body', 'customer_visible', 'meta'];
 var REV_COLS = ['id', 'case_id', 'at', 'client_at', 'kind', 'actor_kind', 'actor_email', 'actor_name', 'from_stage', 'to_stage',
@@ -378,7 +382,12 @@ test("every unit's intake, ticket, item and vendor exist and agree", function ()
   assert.ok(d.vendors.length >= 36, 'the full vendor seed');
   assert.strictEqual(VENDORS.demo_v_intel.typical_tat_days, 21);
   assert.strictEqual(VENDORS.demo_v_asus.typical_tat_days, 14);
-  d.vendors.forEach(function (v) { assert.ok(v.public_name && v.kind === 'brand' && v.active === true, v.id); });
+  // 1.15 (v2.11): the brands, plus the service centres and portals the owner named.
+  d.vendors.forEach(function (v) { assert.ok(v.public_name && S.VENDOR_KINDS[v.kind] && v.active === true, v.id); });
+  assert.ok(d.vendors.some(function (v) { return v.kind === 'service_centre'; }) && d.vendors.some(function (v) { return v.kind === 'portal'; }));
+  var brandIds = {};
+  d.brands.forEach(function (b) { brandIds[b.id] = true; });
+  d.routes.forEach(function (r) { assert.ok(brandIds[r.brand_id] && VENDORS[r.vendor_id], r.id + ' brand and centre exist'); });
 });
 
 test('every part past testing really passed the shipping gates (photos aside)', function () {

@@ -399,3 +399,62 @@ body.dark-mode .rma-gates { color: #fcd34d; }
   body.rma-printing .rma-label-row { font-size: 8.5pt; overflow-wrap: anywhere; }
   body.rma-printing .rma-label-row span { display: inline-block; min-width: 13mm; font-weight: 700; }
 }
+
+/* ── 1.15: the eight RMA steps on the part panel (rma.js paintSteps) ──────────
+   Same bar as the service ticket (service-v2.css .sv2-steps), plus a failed
+   gate (red cross, with its reason), skipped steps after it (dashed), and a
+   late current step. */
+.rma-u-steps { margin: 4px 0 12px; }
+.rma-u-steps .sv2-next { margin-top: 4px; }
+.rma-steps .sv2-step { min-width: 82px; }
+.rma-steps .sv2-step-l { white-space: normal; line-height: 1.2; }
+.rma-steps .sv2-step-s { color: var(--text-muted); font-weight: 600; }
+.rma-steps .sv2-step.is-now .sv2-step-s { color: var(--primary-pink); }
+.rma-steps .sv2-step.is-failed .sv2-step-dot { background: #d92d20; border-color: #d92d20; color: #ffffff; }
+.rma-steps .sv2-step.is-failed .sv2-step-l { color: #d92d20; }
+.rma-steps .sv2-step.is-failed .sv2-step-s { color: #d92d20; }
+.rma-steps .sv2-step.is-skipped .sv2-step-dot { border-style: dashed; background: transparent; opacity: 0.6; }
+.rma-steps .sv2-step.is-skipped .sv2-step-l { opacity: 0.5; text-decoration: line-through; }
+.rma-steps .sv2-step.is-skipped:not(:last-child)::after,
+.rma-steps .sv2-step.is-failed:not(:last-child)::after {
+  background: repeating-linear-gradient(90deg, rgba(127, 127, 160, 0.4) 0 4px, transparent 4px 8px);
+}
+.rma-steps .sv2-step.is-now.is-late .sv2-step-dot { border-color: #d97706; color: #d97706; box-shadow: 0 0 0 4px rgba(217, 119, 6, 0.18); }
+.rma-steps .sv2-step.is-now.is-late .sv2-step-s { color: #d97706; }
+body.dark-mode .rma-steps .sv2-step.is-failed .sv2-step-l,
+body.dark-mode .rma-steps .sv2-step.is-failed .sv2-step-s { color: #ff8a80; }
+.rma-step-status { flex-basis: 100%; }
+.rma-step-status:empty { display: none; }
+.rma-ticks { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 14px; }
+@media (max-width: 640px) { .rma-ticks { grid-template-columns: 1fr; } }
+.rma-remember { font-size: 0.78rem; margin: -2px 0 8px; }
+.rma-centre-notes .sv-hint { margin: -4px 0 8px; }
+.rma-dlg [data-needs] { margin: 8px 0; }
+
+/* 1.15: Centres & brands (rma.js vendorsHtml) */
+.rma-vendors-head2 { margin-top: 26px; }
+.rma-dir td { vertical-align: top; }
+.rma-cell-note { font-size: 0.72rem; line-height: 1.35; margin-top: 2px; max-width: 420px; }
+.rma-routes-cell { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.rma-route {
+  display: inline-flex; align-items: stretch; border-radius: 999px; overflow: hidden;
+  border: 1px solid rgba(var(--primary-pink-rgb), 0.35); background: rgba(var(--primary-pink-rgb), 0.06);
+  font-size: 0.76rem;
+}
+.rma-route-main { border: 0; background: transparent; color: var(--text-dark); padding: 3px 10px; font: inherit; cursor: pointer; }
+span.rma-route-main { cursor: default; }
+.rma-route-x {
+  border: 0; border-left: 1px solid rgba(var(--primary-pink-rgb), 0.25); background: transparent;
+  color: var(--text-muted); padding: 0 8px; cursor: pointer; font-size: 0.9rem; line-height: 1;
+}
+.rma-route-x:hover { color: #d92d20; }
+.rma-other-vendors { margin-top: 22px; }
+.rma-other-vendors > summary { cursor: pointer; font-size: 0.82rem; font-weight: 700; color: var(--text-muted); }
+
+/* 1.15: the drive-data warning on the New RMA form */
+.rma-in-datawarn {
+  margin: 2px 0 6px; padding: 9px 12px; border-radius: 10px; font-size: 0.8rem; line-height: 1.45;
+  background: rgba(217, 119, 6, 0.10); border: 1px solid rgba(217, 119, 6, 0.35); color: var(--text-dark);
+}
+.rma-dir td:last-child { white-space: nowrap; width: 1%; }
+.rma-dir td:last-child .rma-small { white-space: nowrap; }

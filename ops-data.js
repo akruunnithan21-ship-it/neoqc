@@ -82,9 +82,10 @@
   // work_done) is the server's check, so the two lists can't drift apart.
   var RELEASE_TARGETS = ['ready', 'in_service', 'revisit_needed', 'work_done'];
   var MEDIA_ROLES = ['condition', 'serial_label', 'invoice', 'damage', 'packing', 'unboxing',
-                     'during', 'after', 'vendor_doc', 'return_condition', 'other'];
-  var PDF_ROLES = ['invoice', 'vendor_doc'];
-  var PRIVATE_ROLES = ['invoice', 'serial_label', 'vendor_doc'];
+                     'during', 'after', 'vendor_doc', 'return_condition', 'other',
+                     'submission', 'job_sheet', 'delivery_doc'];   // 1.15 (v2.11)
+  var PDF_ROLES = ['invoice', 'vendor_doc', 'job_sheet', 'delivery_doc'];
+  var PRIVATE_ROLES = ['invoice', 'serial_label', 'vendor_doc', 'job_sheet', 'delivery_doc'];
   var INTAKE_PHASE_ROLES = ['condition', 'serial_label', 'invoice', 'unboxing', 'damage', 'packing'];
   var MODULES = ['service', 'rma', 'qc', 'neohr'];
   var ROLES = ['desk', 'tech', 'lead'];
@@ -112,7 +113,10 @@
   var UNIT_EDITABLE = {
     brand: 1, model: 1, serial: 1, fault: 1, diagnosed_by: 1, our_finding: 1, owner_name: 1, owner_phone: 1,
     purchase_source: 1, invoice_no: 1, purchase_date: 1, build_ticket_id: 1, vendor_id: 1, vendor_rma_no: 1,
-    expected_back_at: 1, return_method: 1, return_address: 1, data_handling: 1
+    expected_back_at: 1, return_method: 1, return_address: 1, data_handling: 1,
+    // 1.15 (v2.11): choosing the return method confirms it; the warranty date
+    // can be corrected. Every other step fact goes through rma_step.
+    return_confirmed: 1, warranty_until: 1
   };
   var INTAKE_EDITABLE = {
     sender_name: 1, sender_phone: 1, inbound_courier: 1, inbound_awb: 1, return_method: 1, return_address: 1, notes: 1
@@ -131,6 +135,9 @@
   var unitById = {}, unitsList = null;
   var intakeById = {};
   var vendorById = {}, vendorList = null;
+  // 1.15 (v2.11): the centre directory — brands and routes (brand + part type
+  // + model → centre). Empty until the server has v2.11.
+  var brandList = [], routeList = [];
   var staffList = [], techList = [];
   var accessData = null;
   var mediaById = {};
@@ -550,6 +557,7 @@
     unitById = {}; unitsList = null;
     intakeById = {};
     vendorById = {}; vendorList = null;
+    brandList = []; routeList = [];
     staffList = []; techList = [];
     mediaById = {};
     demoData = null;
@@ -677,6 +685,15 @@
     vendorById = {};
     ((r && r.data) || []).forEach(mergeVendor);
     vendorList = null;
+    // 1.15: brands and routes ride with the vendors. Before v2.11 is on the
+    // server the tables do not exist: the directory is just empty then.
+    try {
+      var rb = await timed(c.from('rma_brands').select('*').order('name'), READ_MS);
+      var rr = await timed(c.from('rma_routes').select('*').order('id'), READ_MS);
+      if (gen !== generation || my !== seq.vendors) return;
+      brandList = (rb && !rb.error && rb.data) || [];
+      routeList = (rr && !rr.error && rr.data) || [];
+    } catch (e) { brandList = []; routeList = []; }
     emit('vendors');
   }
 
@@ -1112,6 +1129,7 @@
     unitById = indexBy(d.units); unitsList = null;
     intakeById = indexBy(d.intakes);
     vendorById = indexBy(d.vendors); vendorList = null;
+    brandList = asArray(d.brands); routeList = asArray(d.routes);
     staffList = asArray(d.staff).filter(function (s) { return s && (s.full_name || s.name); }).map(function (s) {
       return Object.assign({ full_name: s.name, active: true }, s);
     });
@@ -1250,6 +1268,8 @@
     return vendorList.slice();
   }
   function vendor(id) { return (id != null && id !== '' && cacheValid() && vendorById[String(id)]) || null; }
+  function brands() { return cacheValid() ? brandList.slice() : []; }
+  function routes() { return cacheValid() ? routeList.slice() : []; }
   function staff() { return cacheValid() ? staffList.slice() : []; }
   function techs() { return cacheValid() ? techList.slice() : []; }
   function me() { return profile(); }
@@ -1944,6 +1964,98 @@
       p_cost: toNum(o.cost), p_note: clean(o.note), p_carried_by: clean(o.carriedBy)
     });
     return afterRmaWrite(res, list);
+  }
+
+  // 1.15 (v2.11): record an RMA step — check, verify, submitted, accepted,
+  // progress or ready. The server checks the gate and writes the customer's
+  // line; a NEO_GATE message says what is missing.
+  var RMA_STEP_NAMES = ['check', 'verify', 'submitted', 'accepted', 'progress', 'ready'];
+  async function rmaStep(id, step, payload) {
+    writable();
+    requireId(id, 'RMA part');
+    if (RMA_STEP_NAMES.indexOf(step) === -1) throw new Error('NEO_GATE: That is not one of the RMA steps.');
+    var p = {};
+    Object.keys(payload || {}).forEach(function (k) {
+      var v = payload[k];
+      if (v === '' || v === undefined) return;
+      p[k] = typeof v === 'string' ? v.trim() : v;
+    });
+    var res = await rpc('rma_step', { p_case_id: id, p_step: step, p: p });
+    return afterRmaWrite(res, [id]);
+  }
+
+  // 1.15: the centre directory. Plain table writes under RLS (rma desk), like
+  // addVendor; the database checks the shapes.
+  function rowOrThrow(r, what) {
+    if (r && r.error) {
+      var e = asError(r.error);
+      if (String(e.code) === '23505') throw new Error('NEO_GATE: ' + what + ' is already in the list.');
+      throw e;
+    }
+    if (!r || !r.data) throw new Error('NEO_DENIED: That change was not saved — you may not have access to the RMA desk.');
+    return r.data;
+  }
+  async function saveBrand(row) {
+    var c = writable();
+    var name = need(row && row.name, 'Enter the brand name.');
+    var months = row.warranty_months == null || row.warranty_months === '' ? null : toInt(row.warranty_months);
+    if (months != null && (months < 0 || months > 240)) throw new Error('NEO_GATE: Warranty months should be between 0 and 240.');
+    var rec = { name: name, warranty_months: months, invoice_needed: row.invoice_needed !== false, notes: clean(row.notes) };
+    var q = row.id != null
+      ? c.from('rma_brands').update(rec).eq('id', row.id).select().single()
+      : c.from('rma_brands').insert(Object.assign({ created_by: (profile() && profile().full_name) || null }, rec)).select().single();
+    var data = rowOrThrow(await timed(q, WRITE_MS, WRITE_TIMEOUT_MSG), name);
+    brandList = brandList.filter(function (b) { return String(b.id) !== String(data.id); }).concat([data])
+      .sort(function (a, b) { return String(a.name).localeCompare(String(b.name)); });
+    emit('vendors');
+    return data;
+  }
+  async function saveRoute(row) {
+    var c = writable();
+    if (!row || row.brand_id == null || row.brand_id === '') throw new Error('NEO_GATE: Choose the brand.');
+    if (row.vendor_id == null || row.vendor_id === '') throw new Error('NEO_GATE: Choose the service centre.');
+    var rec = {
+      brand_id: toInt(row.brand_id), vendor_id: toInt(row.vendor_id), kind: clean(row.kind),
+      model_hint: clean(row.model_hint), invoice_rule: clean(row.invoice_rule), return_how: clean(row.return_how), notes: clean(row.notes)
+    };
+    var q = row.id != null
+      ? c.from('rma_routes').update(rec).eq('id', row.id).select().single()
+      : c.from('rma_routes').insert(Object.assign({ created_by: (profile() && profile().full_name) || null }, rec)).select().single();
+    var data = rowOrThrow(await timed(q, WRITE_MS, WRITE_TIMEOUT_MSG), 'That brand and centre');
+    routeList = routeList.filter(function (x) { return String(x.id) !== String(data.id); }).concat([data]);
+    emit('vendors');
+    return data;
+  }
+  async function deleteRoute(id) {
+    var c = writable();
+    requireId(id, 'route');
+    var r = await timed(c.from('rma_routes').delete().eq('id', id).select(), WRITE_MS, WRITE_TIMEOUT_MSG);
+    if (r && r.error) throw asError(r.error);
+    routeList = routeList.filter(function (x) { return String(x.id) !== String(id); });
+    emit('vendors');
+    return true;
+  }
+  var VENDOR_KIND_KEYS = ['brand', 'distributor', 'service_centre', 'portal'];
+  async function saveVendor(row) {
+    var c = writable();
+    var name = need(row && row.name, 'Enter the name of the service centre.');
+    var tat = row.typical_tat_days == null || row.typical_tat_days === '' ? 14 : toInt(row.typical_tat_days);
+    if (tat == null || tat < 1 || tat > 365) throw new Error('NEO_GATE: Typical turnaround must be between 1 and 365 days.');
+    var kind = clean(row.kind) || 'service_centre';
+    if (VENDOR_KIND_KEYS.indexOf(kind) === -1) throw new Error('NEO_GATE: Choose what kind of place this is.');
+    var rec = {
+      name: name, public_name: clean(row.public_name) || name, kind: kind, typical_tat_days: tat,
+      contact: clean(row.contact), address: clean(row.address), portal_url: clean(row.portal_url),
+      submit_how: clean(row.submit_how), invoice_rule: clean(row.invoice_rule), return_how: clean(row.return_how), notes: clean(row.notes)
+    };
+    if (row.active === false) rec.active = false;
+    var q = row.id != null
+      ? c.from('rma_vendors').update(rec).eq('id', row.id).select().single()
+      : c.from('rma_vendors').insert(rec).select().single();
+    var data = rowOrThrow(await timed(q, WRITE_MS, WRITE_TIMEOUT_MSG), name);
+    mergeVendor(data);
+    emit('vendors');
+    return vendorById[String(data.id)];
   }
 
   async function vendorResult(id, result, reason, replacementSerial, courier, awb, note) {
@@ -3331,6 +3443,14 @@
     updateRma: updateRma,
     updateIntake: updateIntake,
     addVendor: addVendor,
+    // 1.15 (v2.11): the RMA steps and the centre directory
+    rmaStep: rmaStep,
+    brands: brands,
+    routes: routes,
+    saveBrand: saveBrand,
+    saveRoute: saveRoute,
+    deleteRoute: deleteRoute,
+    saveVendor: saveVendor,
 
     // media
     uploadMedia: uploadMedia,

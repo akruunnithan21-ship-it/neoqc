@@ -2598,6 +2598,9 @@ window.addEventListener('neo-modules-changed', () => {
 // screen once signed in; hidden on the login screen itself.
 function renderUserChip() {
   const chip = document.getElementById('titlebar-user');
+  // v1.15 the Jidoka orb sits beside the chip and shows with it.
+  const jdk = document.getElementById('jidoka');
+  if (jdk) jdk.classList.toggle('hidden', !currentProfile);
   if (!chip) return;
   if (!currentProfile) { chip.classList.add('hidden'); return; }
   chip.classList.remove('hidden');

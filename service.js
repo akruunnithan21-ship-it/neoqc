@@ -4180,7 +4180,9 @@
         var payload = {
           client_request_id: crid, source: fromField ? 'field' : 'from_ticket', service_job_id: jobId,
           holds_ticket: holds === 'yes',
-          return_method: holds === 'yes' ? 'with_device' : 'collect',
+          // 1.15 (v2.11): a part that does not hold the ticket goes back however
+          // the customer decides later; it is asked when the part is back.
+          return_method: holds === 'yes' ? 'with_device' : null,
           // Only an in-store ticket's part is at the counter now. A field part
           // starts with_tech whatever this says; a remote customer's is
           // expected. SPEC-GAP: a part already at the vendor is not in our

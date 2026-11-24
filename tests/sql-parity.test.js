@@ -438,6 +438,15 @@ test('v2.1 data answers: three offered, two legacy, all five valid on both sides
       assert.deepStrictEqual(last[k], first[k].concat(['other']), "v2.6 changed _vocab_list('category') beyond adding 'other'");
       return;
     }
+    // service-v2.11.sql (1.15) adds three RMA document roles and the brand portal, and only those.
+    if (k === 'media_role' && last[k].indexOf('job_sheet') !== -1) {
+      assert.deepStrictEqual(last[k], first[k].concat(['submission', 'job_sheet', 'delivery_doc']), "v2.11 changed _vocab_list('media_role') beyond the three RMA roles");
+      return;
+    }
+    if (k === 'vendor_kind' && last[k].indexOf('portal') !== -1) {
+      assert.deepStrictEqual(last[k], first[k].concat(['portal']), "v2.11 changed _vocab_list('vendor_kind') beyond adding 'portal'");
+      return;
+    }
     assert.deepStrictEqual(last[k], first[k], "the follow-up changed _vocab_list('" + k + "') — copy v2's body, change one line");
   });
   sameSet(last.data_consent, Object.keys(S.DATA_CONSENTS), "_vocab_list('data_consent') after the follow-ups");
@@ -557,9 +566,10 @@ test('_rma_gate_problems carries the A11 drive-data and A12 vendor_doc rules', f
   assert.ok(/'vendor_doc'/.test(body), 'A12: a vendor_doc photo does not satisfy the "bought elsewhere" gate in SQL');
   assert.ok(/data_handling/.test(body) && /'ssd'/.test(body) && /'hdd'/.test(body), 'A11: no ssd/hdd data_handling gate in SQL');
   // The JS side, for the same two rules.
-  var drive = { stage: 'testing', kind: 'ssd', serial: 'X', purchase_source: 'neo_tokyo', vendor_id: 1 };
+  // 1.15 (v2.11): checked and verified, so only these two rules are in play.
+  var drive = { stage: 'testing', kind: 'ssd', serial: 'X', purchase_source: 'neo_tokyo', vendor_id: 1, check_result: 'fault_confirmed', verified_at: 'x' };
   assert.strictEqual(S.rmaGateProblems(drive, 'ready_to_ship', ['serial_label']).length, 1);
-  var els = { stage: 'testing', kind: 'gpu', serial: 'X', purchase_source: 'elsewhere', vendor_id: 1, fee_status: 'paid' };
+  var els = { stage: 'testing', kind: 'gpu', serial: 'X', purchase_source: 'elsewhere', vendor_id: 1, fee_status: 'paid', check_result: 'fault_confirmed', verified_at: 'x' };
   assert.deepStrictEqual(S.rmaGateProblems(els, 'ready_to_ship', ['serial_label', 'vendor_doc']), []);
 });
 

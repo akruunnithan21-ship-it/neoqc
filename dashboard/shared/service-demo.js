@@ -119,6 +119,40 @@
     'Intel', 'AMD', 'Lenovo', 'HP', 'Dell', 'Acer', 'LG', 'BenQ', 'Logitech', 'TP-Link'
   ];
   var VENDOR_TAT = { Intel: 21, AMD: 21 };
+  // 1.15 (v2.11): [name, public name, kind, submit_how, invoice_rule, return_how, notes]
+  var CENTRE_SEED = [
+    ['Acro', 'Acro', 'service_centre', 'in_person', 'with_part', 'we_collect', 'Submit at their place. They re-check the part before accepting. Mostly replacements.'],
+    ['F1 Info Services', 'F1 Info Services', 'service_centre', 'in_person', 'checked_returned', 'either', 'They check the invoice date and hand it back. Mostly repairs (motherboards, PSUs). MSI couriers it back to our office; ASUS must be collected.'],
+    ['Gigabyte service centre', 'Gigabyte', 'service_centre', 'in_person', 'checked_returned', 'we_collect', 'Authorised Gigabyte centre. Checks the invoice and hands it back. We collect.'],
+    ['Kaizen', 'Kaizen', 'service_centre', 'in_person', 'checked_returned', 'we_collect', 'Replaces RAM, SSD, HDD, PSU and sometimes coolers. Repairs GPUs and motherboards; if the fault comes back, a replacement of the same or another model (they call before using a different model).'],
+    ['Smart Core', 'Intel', 'service_centre', 'in_person', 'not_needed', 'we_collect', 'Intel processors. No bill needed.'],
+    ['Rashi Peripherals (RP Tech)', 'Rashi Peripherals', 'service_centre', 'in_person', null, null, 'NVIDIA, SanDisk and others.'],
+    ['AMD warranty portal', 'AMD', 'portal', 'portal', null, null, 'Register the claim online. AMD checks the warranty and gives a deadline to submit at an authorised centre.'],
+    ['SanDisk warranty portal', 'SanDisk', 'portal', 'portal', null, null, 'Register the claim online, then submit by the deadline they give.'],
+    ['WD warranty portal', 'Western Digital', 'portal', 'portal', 'not_needed', null, 'Register the claim online, then submit by the deadline they give. No invoice needed.'],
+    ['Samsung warranty portal', 'Samsung', 'portal', 'portal', null, null, 'Depends on the part type. Register online, then submit by the deadline they give.']
+  ];
+  var BRAND_SEED = ['Acer', 'ADATA', 'AMD', 'Ant Esports', 'Antec', 'ASUS', 'Colorful', 'Cooler Master', 'Corsair', 'Creative',
+    'Crucial', 'Deepcool', 'G.Skill', 'Galax', 'Gigabyte', 'Inno3D', 'Intel', 'Kingston', 'LG', 'Lexar', 'Mercury', 'MSI',
+    'Nextron', 'NVIDIA', 'Samsung', 'SanDisk', 'Sapphire', 'Seagate', 'Syrotech', 'Western Digital', 'XPG', 'Zotac'];
+  // Only a few are filled in, as staff would over time ("Remember the months").
+  var BRAND_MONTHS = { ASUS: 36, MSI: 36, Corsair: 60, Zotac: 36, Seagate: 24, Samsung: 60, 'Western Digital': 36 };
+  // [brand, part type or null, centre, return_how, notes]
+  var ROUTE_SEED = [
+    ['XPG', null, 'Acro', null, null], ['ADATA', null, 'Acro', null, 'Acro takes ADATA RAM and most ADATA parts.'],
+    ['ADATA', 'ssd', 'Gigabyte service centre', null, 'Some ADATA SSD models only. Check the model, and add it to this route once known.'],
+    ['G.Skill', null, 'Acro', null, null], ['Deepcool', null, 'Acro', null, null], ['Ant Esports', null, 'Acro', null, null],
+    ['MSI', null, 'F1 Info Services', 'courier_to_us', 'MSI couriers it back to our office.'], ['Acer', null, 'F1 Info Services', null, null],
+    ['ASUS', null, 'F1 Info Services', 'we_collect', 'ASUS must be collected.'], ['Gigabyte', null, 'Gigabyte service centre', null, null],
+    ['Mercury', null, 'Kaizen', null, null], ['Cooler Master', null, 'Kaizen', null, null], ['Corsair', null, 'Kaizen', null, null],
+    ['Colorful', null, 'Kaizen', null, null], ['Creative', null, 'Kaizen', null, null], ['Zotac', null, 'Kaizen', null, null],
+    ['Syrotech', null, 'Kaizen', null, null], ['Lexar', null, 'Kaizen', null, null], ['Crucial', null, 'Kaizen', null, null],
+    ['Sapphire', null, 'Kaizen', null, null], ['Nextron', null, 'Kaizen', null, null], ['Galax', null, 'Kaizen', null, null],
+    ['Inno3D', null, 'Kaizen', null, null], ['Intel', 'cpu', 'Smart Core', null, null],
+    ['NVIDIA', null, 'Rashi Peripherals (RP Tech)', null, null], ['SanDisk', null, 'Rashi Peripherals (RP Tech)', null, null],
+    ['AMD', null, 'AMD warranty portal', null, null], ['SanDisk', null, 'SanDisk warranty portal', null, 'Some SanDisk parts are claimed online.'],
+    ['Western Digital', null, 'WD warranty portal', null, null], ['Samsung', null, 'Samsung warranty portal', null, 'Depends on the part type.']
+  ];
   function vendorId(name) { return 'demo_v_' + name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, ''); }
 
   function build(nowMs) {
@@ -162,11 +196,33 @@
       return {
         id: vendorId(name), name: name, public_name: name, kind: 'brand',
         contact: null, address: null, portal_url: null,
-        typical_tat_days: VENDOR_TAT[name] || 14, active: true, created_at: ago(120 * D)
+        typical_tat_days: VENDOR_TAT[name] || 14, active: true, created_at: ago(120 * D),
+        submit_how: null, invoice_rule: null, return_how: null, notes: null
       };
+    });
+    // 1.15 (v2.11): the service centres and brand portals the owner named
+    // (the same seed as sql/service-v2.11.sql).
+    CENTRE_SEED.forEach(function (c) {
+      vendors.push({
+        id: vendorId(c[0]), name: c[0], public_name: c[1], kind: c[2],
+        contact: null, address: null, portal_url: null, typical_tat_days: 14, active: true, created_at: ago(60 * D),
+        submit_how: c[3], invoice_rule: c[4], return_how: c[5], notes: c[6]
+      });
     });
     var V = {};
     vendors.forEach(function (v) { V[v.name] = v; });
+    // rma_brands and rma_routes (brand + part type -> centre).
+    var brands = BRAND_SEED.map(function (name, i) {
+      return { id: 'demo_br_' + (i + 1), name: name, warranty_months: BRAND_MONTHS[name] == null ? null : BRAND_MONTHS[name],
+               invoice_needed: name !== 'Intel' && name !== 'Western Digital', notes: null, active: true,
+               created_at: ago(60 * D), created_by: 'v2.11 seed' };
+    });
+    var BR = {};
+    brands.forEach(function (b) { BR[b.name] = b; });
+    var routes = ROUTE_SEED.filter(function (r) { return BR[r[0]] && V[r[2]]; }).map(function (r, i) {
+      return { id: 'demo_rt_' + (i + 1), brand_id: BR[r[0]].id, kind: r[1], model_hint: null, vendor_id: V[r[2]].id,
+               invoice_rule: null, return_how: r[3], notes: r[4], created_at: ago(60 * D), created_by: 'v2.11 seed' };
+    });
 
     // ── customers ───────────────────────────────────────────────────────────
     function customer(key, o) {
@@ -339,7 +395,12 @@
         stage: 'received', stage_since: null, disposition: null, data_handling: null,
         handler_email: null, handler_name: null, followup_job_id: null,
         created_at: ik.created_at, updated_at: null, created_by_email: ik.created_by_email,
-        closed_at: null, closed_by: null
+        closed_at: null, closed_by: null,
+        // 1.15 (v2.11): the step facts rma_step records.
+        check_result: null, checked_at: null, checked_by: null, warranty_until: null, verify_problem: null,
+        verified_at: null, verified_by: null, submitted_at: null, submitted_by: null,
+        vendor_accepted_at: null, vendor_progress: null, vendor_ready_at: null, vendor_ready_via: null,
+        return_confirmed: true
       }, o);
       // Generated columns in the database (A15 adds the replacement's).
       row.serial_norm = serialNorm(row.serial);
@@ -786,7 +847,9 @@
       fault: 'Shuts down under gaming load. Tested with another PSU and the PC is fine.', diagnosed_by: 'third_party',
       owner_name: CU.biju.name, owner_phone: CU.biju.phone_norm,
       purchase_source: 'neo_tokyo', invoice_no: 'NT/TR/25-26/0331', purchase_date: dateAgo(210),
-      vendor_id: V.Corsair.id, stage: 'testing', stage_since: ago(2 * H)
+      vendor_id: V.Corsair.id, stage: 'testing', stage_since: ago(2 * H),
+      check_result: 'fault_confirmed', checked_at: ago(1 * H), checked_by: STAFF.amal.full_name,
+      our_finding: 'Shuts off at 480 W on our load tester. Fault confirmed.'
     });
     handler(t, 'amal');
     t = unit('kingston', 'sreekumar', {
@@ -814,7 +877,9 @@
       fault: 'No display. The DRAM light stays on.', diagnosed_by: 'customer',
       our_finding: 'No POST with a known-good CPU and RAM. DRAM LED stays on. Board fault confirmed.',
       purchase_source: 'neo_tokyo', invoice_no: 'NT/INV/25-26/0918', purchase_date: dateAgo(240),
-      vendor_id: V.ASUS.id, stage: 'ready_to_ship', stage_since: ago(1 * D)
+      vendor_id: V['F1 Info Services'].id, stage: 'ready_to_ship', stage_since: ago(1 * D),
+      check_result: 'fault_confirmed', checked_at: ago(1.4 * D), checked_by: STAFF.amal.full_name,
+      verified_at: ago(1 * D), verified_by: STAFF.anagha.full_name, warranty_until: dateAgo(-855), return_confirmed: false
     });
     handler(t, 'amal');
 
@@ -835,7 +900,9 @@
       fault: 'Artifacts within 2 minutes of FurMark; same in a second PC.', diagnosed_by: 'us',
       our_finding: 'Artifacts reproduced on two PCs at stock clocks. Memory fault on the card.',
       purchase_source: 'neo_tokyo', invoice_no: 'NT/INV/24-25/1187', purchase_date: dateAgo(430),
-      vendor_id: V.Zotac.id, stage: 'ready_to_ship', stage_since: ago(2 * H)
+      vendor_id: V.Kaizen.id, stage: 'ready_to_ship', stage_since: ago(2 * H),
+      check_result: 'fault_confirmed', checked_at: ago(4 * H), checked_by: STAFF.amal.full_name,
+      verified_at: ago(2 * H), verified_by: STAFF.anagha.full_name, warranty_until: dateAgo(-665)
     });
     handler(t, 'amal');
 
@@ -850,7 +917,9 @@
       fault: 'Clicking noise; the PC freezes when copying files.', diagnosed_by: 'customer',
       our_finding: 'SMART shows 1,240 reallocated sectors. Clicking confirmed.',
       purchase_source: 'elsewhere', handling_fee: 300, fee_status: 'quoted',
-      vendor_id: V.Seagate.id, stage: 'awaiting_docs', stage_since: ago(1.2 * D)
+      vendor_id: V.Seagate.id, stage: 'awaiting_docs', stage_since: ago(1.2 * D),
+      check_result: 'fault_confirmed', checked_at: ago(1.8 * D), checked_by: STAFF.adhil.full_name,
+      verify_problem: 'invoice_missing', verified_at: ago(1.2 * D), verified_by: STAFF.anagha.full_name
     });
     handler(t, 'adhil');
 
@@ -865,8 +934,12 @@
       fault: 'Pump makes a grinding noise; CPU reaches 95 °C.', diagnosed_by: 'customer',
       our_finding: 'Pump speed reads 0 rpm in BIOS. Grinding confirmed.',
       purchase_source: 'neo_tokyo', invoice_no: 'NT/INV/25-26/0144', purchase_date: dateAgo(330),
-      vendor_id: V.Corsair.id, vendor_rma_no: 'CS-RMA-882134', expected_back_at: ahead(12 * D),
-      stage: 'with_vendor', stage_since: ago(2 * D)
+      vendor_id: V.Kaizen.id, vendor_rma_no: 'KZ/JS/24117', expected_back_at: ahead(12 * D),
+      stage: 'with_vendor', stage_since: ago(2 * D),
+      check_result: 'fault_confirmed', checked_at: ago(4.8 * D), checked_by: STAFF.adhil.full_name,
+      verified_at: ago(3 * D), verified_by: STAFF.anagha.full_name, warranty_until: dateAgo(-1495),
+      submitted_at: ago(2 * D), submitted_by: STAFF.anagha.full_name,
+      vendor_accepted_at: ago(1 * D), vendor_progress: 'awaiting_stock'
     });
     handler(t, 'adhil');
 
@@ -882,7 +955,10 @@
       public_code: 'RM-DEMOC6NP', kind: 'ssd', brand: 'Samsung', model: '980 1TB (MZ-V8V1T0)', serial: 'S649NJ0R123456A',
       fault: 'Drops off the bus under sustained writes during burn-in.', diagnosed_by: 'us',
       our_finding: 'Fails a 30-minute sustained write test every time.',
-      purchase_source: 'neo_tokyo', vendor_id: V.Samsung.id, expected_back_at: ahead(9 * D),
+      purchase_source: 'neo_tokyo', vendor_id: V['Samsung warranty portal'].id, expected_back_at: ahead(9 * D),
+      check_result: 'fault_confirmed', checked_at: ago(6 * D), checked_by: STAFF.amal.full_name,
+      verified_at: ago(5.5 * D), verified_by: STAFF.amal.full_name,
+      submitted_at: ago(5 * D), submitted_by: STAFF.amal.full_name,
       data_handling: 'wiped_by_us',
       stage: 'with_vendor', stage_since: ago(5 * D)
     });
@@ -902,7 +978,11 @@
       fault: 'Clicks and shuts off as soon as it is powered on.', diagnosed_by: 'customer',
       our_finding: 'Fails on the PSU tester. 12 V rail collapses under load.',
       purchase_source: 'neo_tokyo', invoice_no: 'NT/INV/25-26/0067', purchase_date: dateAgo(400),
-      vendor_id: V.MSI.id, vendor_rma_no: 'MSI-RMA-41190', expected_back_at: ago(5 * D),
+      vendor_id: V['F1 Info Services'].id, vendor_rma_no: 'MSI-RMA-41190', expected_back_at: ago(5 * D),
+      check_result: 'fault_confirmed', checked_at: ago(19 * D), checked_by: STAFF.vinayak.full_name,
+      verified_at: ago(19 * D), verified_by: STAFF.anagha.full_name, warranty_until: dateAgo(-695),
+      submitted_at: ago(18 * D), submitted_by: STAFF.vinayak.full_name,
+      vendor_accepted_at: ago(17 * D), vendor_progress: 'in_repair', vendor_ready_at: ago(7 * D), vendor_ready_via: 'courier',
       vendor_result: 'replaced', replacement_serial: '6022B0654321',
       stage: 'closed', stage_since: ago(closedAgo), disposition: 'replaced',
       closed_at: ago(closedAgo), closed_by: STAFF.anagha.email
@@ -923,7 +1003,11 @@
       fault: 'No output on a known-good bench after the PSU failure.', diagnosed_by: 'us',
       our_finding: 'No output on two known-good boards. Fans spin, no POST code from the card.',
       purchase_source: 'neo_tokyo', invoice_no: 'NT/INV/24-25/2210', purchase_date: dateAgo(270),
-      vendor_id: V.ASUS.id, vendor_rma_no: 'A4471', expected_back_at: ago(2 * D),
+      vendor_id: V['F1 Info Services'].id, vendor_rma_no: 'A4471', expected_back_at: ago(2 * D),
+      check_result: 'fault_confirmed', checked_at: ago(17 * D), checked_by: STAFF.athul.full_name,
+      verified_at: ago(16.5 * D), verified_by: STAFF.anagha.full_name, warranty_until: dateAgo(-825),
+      submitted_at: ago(16 * D), submitted_by: STAFF.athul.full_name,
+      vendor_accepted_at: ago(15 * D), vendor_progress: 'awaiting_stock', vendor_ready_at: ago(4 * D), vendor_ready_via: 'collect',
       return_method: 'with_device', stage: 'with_vendor', stage_since: ago(16 * D)
     });
     handler(t, 'athul');
@@ -935,6 +1019,8 @@
       purchase_source: 'elsewhere', invoice_no: 'AMZ-407-1234567', purchase_date: dateAgo(300),
       handling_fee: 300, fee_status: 'accepted', fee_note: 'Customer agreed on WhatsApp.',
       vendor_id: V.Antec.id, expected_back_at: ago(0.5 * D),
+      check_result: 'fault_confirmed', checked_at: ago(17 * D), checked_by: STAFF.athul.full_name,
+      verified_at: ago(16.5 * D), verified_by: STAFF.anagha.full_name, submitted_at: ago(16 * D), submitted_by: STAFF.athul.full_name,
       vendor_result: 'rejected', vendor_reason: 'Burnt component on the PCB; physical damage is not covered.',
       return_method: 'collect', return_address: null,
       stage: 'customer_decision', stage_since: ago(1 * D)
@@ -966,7 +1052,8 @@
       fault: 'Screen flickers and goes black every few minutes.', diagnosed_by: 'customer',
       our_finding: "No fault in a 48-hour soak test on our bench. The flicker followed the customer's HDMI cable.",
       purchase_source: 'neo_tokyo', invoice_no: 'NT/INV/25-26/0510', purchase_date: dateAgo(120),
-      vendor_id: V.LG.id, stage: 'ready_to_return', stage_since: ago(1.2 * D)
+      vendor_id: V.LG.id, stage: 'ready_to_return', stage_since: ago(1.2 * D),
+      check_result: 'no_fault', checked_at: ago(1.3 * D), checked_by: STAFF.vinayak.full_name, disposition: 'no_fault_found'
     });
     handler(t, 'vinayak');
 
@@ -1085,11 +1172,11 @@
       dispatched_at: ago(1 * D), created_by_email: STAFF.ancy.email
     });
     ship(['msi650'], {
-      vendor_id: V.MSI.id, courier: 'DTDC', awb: 'D45118876501', cost: 120,
+      vendor_id: V['F1 Info Services'].id, courier: 'DTDC', awb: 'D45118876501', cost: 120,
       dispatched_at: ago(19 * D), created_by_email: STAFF.vinayak.email
     });
     ship(['rtx4070ti'], {
-      vendor_id: V.ASUS.id, courier: 'Blue Dart', awb: '71234511223', cost: 220,
+      vendor_id: V['F1 Info Services'].id, mode: 'hand_delivery', carried_by: STAFF.athul.full_name, courier: null, awb: null, cost: null,
       dispatched_at: ago(16 * D), created_by_email: STAFF.athul.email
     });
     ship(['antec650'], {
@@ -1097,12 +1184,12 @@
       dispatched_at: ago(13.5 * D), created_by_email: STAFF.athul.email
     });
     ship(['ssd980'], {
-      vendor_id: V.Samsung.id, mode: 'hand_delivery', carried_by: STAFF.vinayak.full_name,
-      notes: 'Dropped at the Samsung service centre, Palarivattom, on the way to a visit.',
+      vendor_id: V['Samsung warranty portal'].id, mode: 'hand_delivery', carried_by: STAFF.vinayak.full_name,
+      notes: 'Registered on the Samsung portal, then dropped at the Samsung service centre, Palarivattom, on the way to a visit.',
       dispatched_at: ago(5 * D), created_by_email: STAFF.amal.email
     });
     ship(['h100i'], {
-      vendor_id: V.Corsair.id, courier: 'Blue Dart', awb: '71234598765', cost: 180,
+      vendor_id: V.Kaizen.id, mode: 'hand_delivery', carried_by: STAFF.adhil.full_name, courier: null, awb: null, cost: null,
       dispatched_at: ago(2 * D), created_by_email: STAFF.adhil.email
     });
 
@@ -1159,6 +1246,8 @@
       units: units,
       intakes: intakes,
       vendors: vendors,
+      brands: brands,
+      routes: routes,
       events: events.concat(rmaEvents).sort(function (a, b) { return a.at < b.at ? -1 : a.at > b.at ? 1 : 0; }),
       staff: staff,
       media: [],

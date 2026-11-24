@@ -273,9 +273,14 @@
     after:            'After the work',
     vendor_doc:       'Vendor document',
     return_condition: 'Condition at return',
-    other:            'Other'
+    other:            'Other',
+    // 1.15 (v2.11): the part as submitted at the centre, the centre's receipt /
+    // job sheet / acknowledgement, and the delivery challan or receipts at the end.
+    submission:       'At submission',
+    job_sheet:        'Receipt / job sheet',
+    delivery_doc:     'Delivery challan / receipt'
   };
-  var PRIVATE_MEDIA_ROLES = ['invoice', 'serial_label', 'vendor_doc'];
+  var PRIVATE_MEDIA_ROLES = ['invoice', 'serial_label', 'vendor_doc', 'job_sheet', 'delivery_doc'];
 
   // ── Legal stages per service type (v2 tickets). Mirrors SQL svc_stage_legal.
   var STAGES_BY_TYPE = {
@@ -804,6 +809,47 @@
     lost_compensated:      'Settled for a lost part'
   };
 
+  // ── 1.15: the RMA steps (owner's brief, 24–25 Nov 2026) ───────────────────
+  // Eight steps on top of a part, each a check gate. The stage machine above
+  // is unchanged: a step is read from the stage plus the facts rma_step()
+  // records (sql/service-v2.11.sql). `label` fits the step bar; `full` is the
+  // owner's own name for the step.
+  var RMA_STEPS = [
+    { key: 'created',   label: 'Ticket created',    full: 'Ticket created' },
+    { key: 'checked',   label: 'Component checked', full: 'Component checked' },
+    { key: 'verified',  label: 'Bill verified',     full: 'Bill and component cross-verified' },
+    { key: 'submitted', label: 'Submitted',         full: 'Submitted at vendor / RMA initiated' },
+    { key: 'accepted',  label: 'RMA Accepted',      full: 'RMA Accepted' },
+    { key: 'ready',     label: 'Ready at centre',   full: 'Ready for collection / replacement received' },
+    { key: 'collected', label: 'Collected',         full: 'Component collected / ready for collection' },
+    { key: 'completed', label: 'Completed',         full: 'RMA completed / Dispatched' }
+  ];
+  var RMA_CHECK_RESULTS = { fault_confirmed: 'Fault confirmed', no_fault: 'No fault found' };
+  var RMA_VERIFY_PROBLEMS = {
+    out_of_warranty: 'Out of warranty',
+    physical_damage: 'Physical damage',
+    tampered:        'Sticker or serial tampered',
+    invoice_missing: 'Invoice missing'
+  };
+  var RMA_VENDOR_PROGRESS = {
+    in_repair:      'In repair',
+    awaiting_stock: 'Waiting for stock',
+    model_change:   'Model change offered',
+    credit_note:    'Credit note'
+  };
+  var RMA_READY_VIA = { collect: 'We collect it', courier: 'They courier it to us' };
+  // We have this long to collect a part the centre says is ready; after that
+  // the delay is ours (owner, 24 Nov 2026). The server sets expected_back_at.
+  var RMA_COLLECT_DAYS = 2;
+  // How each service centre or portal works (rma_vendors, v2.11).
+  var VENDOR_SUBMIT_HOW = { in_person: 'Drop off in person', courier: 'Send by courier', portal: 'Register online first' };
+  var VENDOR_INVOICE_RULES = {
+    with_part:        'Invoice goes with the part',
+    checked_returned: 'They check the invoice and hand it back',
+    not_needed:       'No invoice needed'
+  };
+  var VENDOR_RETURN_HOW = { we_collect: 'We collect it', courier_to_us: 'They courier it to us', either: 'Depends on the brand' };
+
   var RMA_VENDOR_RESULTS = {
     replaced:            'Replaced',
     repaired:            'Repaired',
@@ -835,7 +881,8 @@
   var VENDOR_KINDS = {
     brand:          'Brand',
     distributor:    'Distributor',
-    service_centre: 'Service centre'
+    service_centre: 'Service centre',
+    portal:         'Brand portal'
   };
 
   var FEE_STATUSES = {
@@ -1063,6 +1110,177 @@
 
   function needsDataHandling(kind) { return DATA_HANDLING_KINDS.indexOf(kind) !== -1; }
   var DATA_GATE_MSG = 'Say what happened to the data on the drive — wiped, customer agreed, or unreadable.';
+  var RETURN_GATE_MSG = 'Choose how the part goes back to the customer.';
+
+  // ── 1.15: where a part is in the eight RMA steps ────────────────────────
+  // { steps, current, failed, states[], sub, why }:
+  //   current  the step being worked on now (0-based)
+  //   failed   the step whose gate stopped the claim, or -1
+  //   states   per step: done | now | todo | failed | skipped
+  //   sub      one line under the current step (what it is waiting for)
+  //   why      the reason a gate failed, in plain words
+  // A part from before 1.15 has no step facts: the stage it reached stands in
+  // for them, so it never reads as "not checked" while it is at the centre.
+  var RMA_GOOD_RESULTS = { replaced: true, repaired: true, credit_note: true, shipped_to_customer: true };
+  function _shortDate(iso) {
+    var t = _ms(iso);
+    if (t == null) return '';
+    var d = new Date(t);
+    return d.getDate() + ' ' + ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][d.getMonth()];
+  }
+  function rmaStepsFor(unit) {
+    var u = _unit(unit) || {};
+    var st = u.stage;
+    var n = RMA_STEPS.length;
+    var cur = 0, failed = -1, sub = '', why = '';
+    if (u.check_result === 'no_fault') { failed = 1; why = 'No fault found'; }
+    else if (u.verify_problem) { failed = 2; why = own(RMA_VERIFY_PROBLEMS, u.verify_problem) || 'Not eligible'; }
+    else if (u.vendor_result === 'rejected') { failed = 4; why = 'Rejected by the centre'; }
+    else if (u.vendor_result === 'lost') { failed = 5; why = 'Lost at the centre'; }
+    var back = _shortDate(u.expected_back_at);
+    switch (st) {
+      case 'logged':    cur = 0; sub = 'Not here yet'; break;
+      case 'with_tech': cur = 0; sub = 'With our technician'; break;
+      case 'received':
+      case 'testing':
+        if (failed === 1) { cur = 1; sub = 'Tell the customer'; }
+        else if (u.check_result === 'fault_confirmed') { cur = 2; sub = 'Check the bill and the part'; }
+        else { cur = 1; sub = st === 'received' ? 'To check' : 'Checking'; }
+        break;
+      case 'awaiting_docs':
+        cur = 2; sub = u.verify_problem === 'invoice_missing' ? 'Waiting for the invoice' : 'Waiting on documents';
+        if (failed === 2 && u.verify_problem === 'invoice_missing') failed = -1;   // a wait, not a dead end
+        break;
+      case 'ready_to_ship': cur = 3; sub = 'Ready to submit'; break;
+      case 'with_vendor':
+        if (u.vendor_ready_at) {
+          cur = 5;
+          sub = u.vendor_ready_via === 'courier' ? 'Coming to us by courier' : (back ? 'Collect by ' + back : 'Collect it');
+        } else if (u.vendor_accepted_at) {
+          cur = 4;
+          sub = (own(RMA_VENDOR_PROGRESS, u.vendor_progress) || 'Accepted') + (back ? ' · back by ' + back : '');
+        } else { cur = 3; sub = 'Waiting for the centre to accept'; }
+        break;
+      case 'back_from_vendor': cur = 6; sub = failed >= 0 ? 'Back with us — tell the customer' : 'Back with us — test it'; break;
+      case 'customer_decision': cur = failed >= 0 ? failed : 2; sub = 'Customer to decide'; break;
+      case 'ready_to_return': {
+        var m = _method(u);
+        cur = 6;
+        sub = u.return_confirmed === false ? 'Choose how it goes back'
+            : m === 'courier' ? 'Packing for courier' : m === 'with_device' ? 'Fitting back in their device' : 'Ready for the customer';
+        break;
+      }
+      case 'returning': cur = 7; sub = 'Dispatched'; break;
+      case 'closed':    cur = 7; sub = own(RMA_DISPOSITIONS, u.disposition) || 'Closed'; break;
+      default:          cur = 0;
+    }
+    // A closed claim that stopped early (withdrawn, moved to a paid repair…)
+    // with no failed gate on record: the steps it never reached are skipped.
+    var lastFact = -1;
+    if (st === 'closed' && failed < 0 && !RMA_GOOD_RESULTS[u.vendor_result] && u.disposition !== 'restocked' && u.disposition !== 'refitted') {
+      lastFact = 0;
+      if (u.check_result) lastFact = 1;
+      if (u.verified_at) lastFact = 2;
+      if (u.submitted_at || u.vendor_result) lastFact = 3;
+      if (u.vendor_accepted_at) lastFact = 4;
+      if (u.vendor_ready_at) lastFact = 5;
+    }
+    var states = [];
+    for (var i = 0; i < n; i++) {
+      var s;
+      if (failed >= 0 && i === failed) s = 'failed';
+      else if (failed >= 0 && i > failed && i < 6) s = 'skipped';      // the claim stopped; the part still goes back
+      else if (lastFact >= 0 && i > lastFact && i < 7) s = 'skipped';
+      else if (st === 'closed' || i < cur) s = 'done';
+      else if (i === cur) s = 'now';
+      else s = 'todo';
+      states.push(s);
+    }
+    return { steps: RMA_STEPS, current: cur, failed: failed, states: states, sub: sub, why: why };
+  }
+
+  // ── 1.15: which centre takes a part (brand + type + model) ──────────────
+  // routes: rma_routes rows; brands: rma_brands rows; vendors: rma_vendors.
+  // Every matching route, most specific first: a model match beats a type
+  // match beats "any part of this brand". The owner's example: ADATA RAM goes
+  // to Acro, some ADATA SSD models to Gigabyte's centre.
+  function _norm(s) { return trim(s).toLowerCase().replace(/\s+/g, ' '); }
+  function rmaBrandOf(name, brands) {
+    var b = _norm(name);
+    if (!b || !Array.isArray(brands)) return null;
+    for (var i = 0; i < brands.length; i++) if (brands[i] && _norm(brands[i].name) === b) return brands[i];
+    return null;
+  }
+  function rmaRoutesFor(part, routes, brands, vendors) {
+    var p = part || {};
+    var brand = rmaBrandOf(p.brand, brands);
+    if (!brand || !Array.isArray(routes)) return [];
+    var model = _norm(p.model);
+    var vById = {};
+    (vendors || []).forEach(function (v) { if (v) vById[String(v.id)] = v; });
+    var out = [];
+    routes.forEach(function (r) {
+      if (!r || String(r.brand_id) !== String(brand.id)) return;
+      if (r.kind && r.kind !== p.kind) return;
+      var hint = _norm(r.model_hint);
+      if (hint && (!model || model.indexOf(hint) === -1)) return;
+      var v = vById[String(r.vendor_id)];
+      if (!v || v.active === false) return;
+      out.push({ route: r, vendor: v, brand: brand, score: (hint ? 4 : 0) + (r.kind ? 2 : 0) });
+    });
+    out.sort(function (a, b) { return b.score - a.score || String(a.vendor.name).localeCompare(String(b.vendor.name)); });
+    return out;
+  }
+
+  // Warranty valid till = invoice date + the brand's warranty months
+  // (owner, 24 Nov 2026). 'YYYY-MM-DD', or '' when either is unknown.
+  function rmaWarrantyUntil(purchaseDate, months) {
+    var m = Number(months);
+    var s = trim(purchaseDate).slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(s) || !(m > 0)) return '';
+    var y = Number(s.slice(0, 4)), mo = Number(s.slice(5, 7)) - 1 + m, d = Number(s.slice(8, 10));
+    var dt = new Date(Date.UTC(y, mo, 1));
+    var last = new Date(Date.UTC(dt.getUTCFullYear(), dt.getUTCMonth() + 1, 0)).getUTCDate();
+    dt.setUTCDate(Math.min(d, last));
+    return dt.toISOString().slice(0, 10);
+  }
+
+  // What the customer is told when a step is recorded — the same sentences
+  // the server writes to the part's history (rma_step), for the WhatsApp
+  // message staff send with it. party: the brand the customer knows.
+  function rmaStepMessage(step, unit, extra) {
+    var u = unit || {};
+    var x = extra || {};
+    var what = (has(ITEM_KINDS, u.kind) ? ITEM_KINDS[u.kind] : 'part').toLowerCase();
+    var party = trim(x.party) || trim(u.brand) || 'the manufacturer';
+    if (step === 'check') {
+      return x.result === 'no_fault'
+        ? 'We tested your ' + what + ' and it works correctly. We found no fault, so there is nothing to claim under warranty. We’ll talk to you about the next step.'
+        : 'We checked your ' + what + ' and confirmed the fault. Next we check the warranty.';
+    }
+    if (step === 'verify') {
+      var nope = ' will not accept a claim. We can offer a paid repair or a replacement.';
+      if (x.problem === 'out_of_warranty') return 'The warranty on your ' + what + ' has ended' + (x.until ? ' (on ' + x.until + ')' : '') + ', so ' + party + nope;
+      if (x.problem === 'physical_damage') return 'Your ' + what + ' has physical damage, which the warranty does not cover, so ' + party + nope;
+      if (x.problem === 'tampered') return 'The warranty sticker or serial label on your ' + what + ' is damaged or missing, so ' + party + nope;
+      if (x.problem === 'invoice_missing') return 'We need the purchase invoice for your ' + what + ' to claim the warranty. Please send us a photo or a copy of it.';
+      return 'Your ' + what + ' passed our warranty check. We’re preparing the claim with ' + party + '.';
+    }
+    if (step === 'accepted' || step === 'progress') {
+      var p = x.progress === 'in_repair' ? 'It is being repaired'
+        : x.progress === 'awaiting_stock' ? 'They are waiting for a replacement to come into stock'
+        : x.progress === 'model_change' ? 'The same model is not available, so they have offered an equal model. We’ll call you to agree it'
+        : 'They will settle it with a credit note. We’ll call you about the options';
+      p += (x.expected ? ', expected by ' + x.expected : '') + '.';
+      return step === 'accepted' ? party + ' accepted the warranty claim for your ' + what + '. ' + p : 'Update from ' + party + ': ' + p;
+    }
+    if (step === 'ready') {
+      return x.via === 'courier'
+        ? 'Your ' + what + ' is on its way back to us from ' + party + '’s service centre.'
+        : 'Your ' + what + ' is ready at ' + party + '’s service centre. We’ll collect it within ' + RMA_COLLECT_DAYS + ' days.';
+    }
+    return '';
+  }
 
   // Human reasons a move would be refused, mirroring the SQL gates (§1.4).
   // Empty array = ok. Pass the unit MERGED with the values about to be sent
@@ -1087,18 +1305,26 @@
     var fee = u.fee_status || 'n_a';
 
     if (toStage === 'ready_to_ship' || toStage === 'with_vendor') {
+      // 1.15 (v2.11): steps 2 and 3 come first. Pass skipSteps to list only
+      // what else stands in the way (the verify dialog does).
+      if (!u.skipSteps) {
+        if (u.check_result !== 'fault_confirmed') out.push('Check the part first and confirm the fault is real.');
+        if (!u.verified_at || u.verify_problem) out.push('Verify the bill and the part first: warranty date, no physical damage.');
+      }
       if (!trim(u.serial)) out.push('Add the serial number (as printed on the label).');
       if (mediaKnown && !roles.serial_label) out.push('Add a photo of the serial label.');
       if (!u.purchase_source || u.purchase_source === 'unknown') {
         out.push('Say where it was bought: Neo Tokyo or elsewhere.');
       }
-      if (u.vendor_id == null || u.vendor_id === '') out.push('Choose the vendor.');
+      if (u.vendor_id == null || u.vendor_id === '') out.push('Choose the service centre.');
       // A11: a drive leaves only once we have said what happened to its data.
       if (needsDataHandling(u.kind) && !has(DATA_HANDLING, u.data_handling)) out.push(DATA_GATE_MSG);
       if (u.purchase_source === 'elsewhere') {
         // A12: a screenshot of the brand's warranty-check page proves the
-        // warranty as well as the invoice does.
-        if (mediaKnown && !roles.invoice && !roles.vendor_doc) {
+        // warranty as well as the invoice does. 1.15: a brand that needs no
+        // invoice (Intel, WD…; rma_brands.invoice_needed) is exempt — the
+        // caller sets invoice_exempt from the directory.
+        if (mediaKnown && !roles.invoice && !roles.vendor_doc && !u.invoice_exempt) {
           out.push("Add the customer's invoice (or a warranty-check screenshot).");
         }
         if (fee !== 'accepted' && fee !== 'paid' && fee !== 'waived') {
@@ -1117,7 +1343,11 @@
       } else if (u.vendor_result === 'replaced' && !trim(u.replacement_serial)) {
         out.push('Add the serial of the replacement part.');
       }
+      if (u.return_confirmed === false) out.push(RETURN_GATE_MSG);
     }
+
+    // 1.15 (v2.11): "How does it go back?" is asked here, never earlier.
+    if (toStage === 'ready_to_return' && u.return_confirmed === false) out.push(RETURN_GATE_MSG);
 
     if (toStage === 'returning') {
       if (from === 'with_vendor') {
@@ -1394,6 +1624,22 @@
     rmaWaitingSentence: rmaWaitingSentence,
     rmaGateProblems: rmaGateProblems,
     rmaDispositionsFor: rmaDispositionsFor,
+    // 1.15: the RMA steps and the centre directory
+    RMA_STEPS: RMA_STEPS,
+    RMA_CHECK_RESULTS: RMA_CHECK_RESULTS,
+    RMA_VERIFY_PROBLEMS: RMA_VERIFY_PROBLEMS,
+    RMA_VENDOR_PROGRESS: RMA_VENDOR_PROGRESS,
+    RMA_READY_VIA: RMA_READY_VIA,
+    RMA_COLLECT_DAYS: RMA_COLLECT_DAYS,
+    VENDOR_SUBMIT_HOW: VENDOR_SUBMIT_HOW,
+    VENDOR_INVOICE_RULES: VENDOR_INVOICE_RULES,
+    VENDOR_RETURN_HOW: VENDOR_RETURN_HOW,
+    RETURN_GATE_MSG: RETURN_GATE_MSG,
+    rmaStepsFor: rmaStepsFor,
+    rmaBrandOf: rmaBrandOf,
+    rmaRoutesFor: rmaRoutesFor,
+    rmaWarrantyUntil: rmaWarrantyUntil,
+    rmaStepMessage: rmaStepMessage,
     itemLabel: itemLabel,
     unitLabel: unitLabel,
 

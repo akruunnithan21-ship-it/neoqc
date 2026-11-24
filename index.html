@@ -32,6 +32,8 @@
   <link rel="stylesheet" href="vendor/leaflet/leaflet.css">
   <!-- v1.11 NeoHR (hr- prefix). -->
   <link rel="stylesheet" href="neohr.css">
+  <!-- v1.15 Jidoka orb in the titlebar. -->
+  <link rel="stylesheet" href="jidoka.css">
 </head>
 <body class="light-mode">
   
@@ -41,6 +43,23 @@
       <svg class="titlebar-logo-svg" viewBox="0 0 100 100"><circle cx="50" cy="50" r="40" stroke="currentColor" stroke-width="10" fill="none" stroke-dasharray="78.776 5" stroke-dashoffset="60.332" /><path d="M 50,23 L 72,70 C 58,58 50,56 50,56 C 50,56 42,58 28,70 Z" fill="currentColor" /></svg>
       <span class="titlebar-text">NEO SERVICE</span>
       <span id="update-status-pill" class="update-status-pill" style="display:none;"></span>
+    </div>
+    <!-- v1.15 Jidoka (jidoka.css): the owner's AI brain, still being created.
+         The orb does nothing yet; hovering it shows the banner. -->
+    <div id="jidoka" class="jdk hidden">
+      <button type="button" class="jdk-orb" aria-label="Jidoka. She is being created." aria-describedby="jidoka-banner">
+        <svg viewBox="0 0 100 100" aria-hidden="true"><circle cx="50" cy="50" r="40" stroke="currentColor" stroke-width="10" fill="none" stroke-dasharray="78.776 5" stroke-dashoffset="60.332" /><path d="M 50,23 L 72,70 C 58,58 50,56 50,56 C 50,56 42,58 28,70 Z" fill="currentColor" /></svg>
+      </button>
+      <div class="jdk-banner" id="jidoka-banner" role="tooltip">
+        <span class="jdk-orb jdk-orb-lg" aria-hidden="true">
+          <svg viewBox="0 0 100 100"><circle cx="50" cy="50" r="40" stroke="currentColor" stroke-width="10" fill="none" stroke-dasharray="78.776 5" stroke-dashoffset="60.332" /><path d="M 50,23 L 72,70 C 58,58 50,56 50,56 C 50,56 42,58 28,70 Z" fill="currentColor" /></svg>
+        </span>
+        <span class="jdk-banner-text">
+          <span class="jdk-banner-eyebrow">JIDOKA</span>
+          <span class="jdk-banner-msg">She is being created.</span>
+          <span class="jdk-banner-bar"></span>
+        </span>
+      </div>
     </div>
     <button id="titlebar-user" class="titlebar-user hidden" title="Sign out">
       <span class="tbu-avatar" id="tbu-avatar"></span>
@@ -2636,20 +2655,24 @@
     <div class="glass-slab modal-card" style="max-width: 650px; width: 100%; padding: 30px; border-radius: 20px;">
       <div class="modal-header" style="border-bottom: 1px solid var(--glass-border); padding-bottom: 15px; margin-bottom: 20px;">
         <h2 style="font-family: 'Syncopate', sans-serif; font-size: 1.3rem; color: var(--primary-pink); letter-spacing: 0.05em; margin: 0;">NEO SERVICE UPDATED</h2>
-        <span data-app-version style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; font-weight: 700; background: rgba(var(--primary-pink-rgb), 0.1); color: var(--primary-pink); padding: 4px 8px; border-radius: 4px;">v1.14.1</span>
+        <span data-app-version style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; font-weight: 700; background: rgba(var(--primary-pink-rgb), 0.1); color: var(--primary-pink); padding: 4px 8px; border-radius: 4px;">v1.15.0</span>
       </div>
       <div class="modal-body" style="font-size: 0.92rem; line-height: 1.6; color: var(--text-dark); max-height: 420px; overflow-y: auto; padding-right: 5px;">
-        <p style="margin-top: 0;">Here's what's new in <strong data-app-version>v1.14.1</strong>:</p>
+        <p style="margin-top: 0;">Here's what's new in <strong data-app-version>v1.15.0</strong>:</p>
         <ul style="padding-left: 20px; display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px;">
-          <li><strong>Builds ask for the customer's mobile.</strong> A new build can't be saved without it: the customer opens their build online with its last 4 digits. Older builds can have it added when you open them.</li>
-          <li><strong>Tracking link, WhatsApp and Customer view on every build</strong>, at the bottom of the build window. They appear once the new customer website, <strong>service.neotokyo.in</strong>, is live.</li>
-          <li><strong>Customer view</strong> on repairs and warranty parts too: it opens the customer's own page for the ticket with their phone digits filled in, so you see exactly what they see.</li>
-          <li><strong>QC reports and delivery receipts</strong> show where to follow the PC online, with a QR code to scan, once the new website is live.</li>
-          <li>Tracking links move to <strong>service.neotokyo.in</strong> by themselves the moment it goes live. Until then they work as before.</li>
+          <li><strong style="color:#17a35a;">Jidoka has been summoned</strong>, and she is being carefully crafted. Look for the green orb beside your name at the top.</li>
+          <li><strong>Every RMA part shows its 8 steps on top</strong>: Ticket created, Component checked, Bill verified, Submitted, RMA Accepted, Ready at centre, Collected, Completed. A <strong>Next step</strong> button says what to do now.</li>
+          <li><strong>Each step is a check.</strong> The part is tested before any claim, then the bill and the part are verified: warranty valid till (from the invoice date), and no physical damage. When a check fails, the customer is told the reason.</li>
+          <li><strong>Submitted and RMA Accepted</strong> record who submitted it and when, the centre's RMA or job number, the receipt or job sheet (PDF or photo), and where the claim stands: in repair, waiting for stock, model change or credit note, with the expected date.</li>
+          <li><strong>Ready at the centre:</strong> we have 2 days to collect it. After that it shows as late for everyone.</li>
+          <li><strong>“How does it go back?”</strong> is asked when the part is back, not when the RMA is created.</li>
+          <li><strong>New Centres &amp; brands tab:</strong> service centres and brand portals, each brand's warranty and invoice rule, and which centre each brand goes to by part type or model. Add new ones any time; the right centre is suggested when you verify a part.</li>
+          <li><strong>New RMA form:</strong> name first, “Who brought or sent it to Neo Tokyo?”, and for SSDs and hard drives the customer is told their data will be lost.</li>
+          <li>After each step, one button tells the customer on <strong>WhatsApp</strong> with the same words their tracking page shows.</li>
         </ul>
       </div>
       <div class="modal-footer" style="border-top: 1px solid var(--glass-border); padding-top: 15px; display: flex; justify-content: flex-end; margin-top: 20px;">
-        <button id="btn-close-changelog" data-app-version-label class="primary-pink-btn" style="padding: 10px 24px; font-weight: 700; font-size: 0.95rem;">Launch Neo Service v1.14.1</button>
+        <button id="btn-close-changelog" data-app-version-label class="primary-pink-btn" style="padding: 10px 24px; font-weight: 700; font-size: 0.95rem;">Launch Neo Service v1.15.0</button>
       </div>
     </div>
   </div>
