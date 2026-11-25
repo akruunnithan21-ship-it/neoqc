@@ -18,6 +18,11 @@ try { app.setPath('userData', path.join(app.getPath('appData'), 'neo-qc')); } ca
 if (!app.isPackaged && process.env.NEOQC_USER_DATA) {
   try { app.setPath('userData', path.resolve(process.env.NEOQC_USER_DATA)); } catch (e) { /* keep neo-qc */ }
 }
+// 1.17.1 smooth scrolling: let Chromium scroll every list on the GPU. On a
+// 100–125 % display it otherwise keeps see-through scroll areas on the main
+// thread (to keep coloured LCD text edges) and redraws them on every frame.
+// Text in scroll areas uses greyscale smoothing instead, as on any 4K screen.
+app.commandLine.appendSwitch('enable-prefer-compositing-to-lcd-text');
 const cinebenchLib = require('./cinebench');
 // 1.16: QC after a service: drive health, idle temps, WHEA, PresentMon FPS,
 // app crashes (service-qc-bench.js). The stability run is sys:run-diagnostics

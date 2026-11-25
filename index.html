@@ -2822,19 +2822,20 @@
     <div class="glass-slab modal-card" style="max-width: 650px; width: 100%; padding: 30px; border-radius: 20px;">
       <div class="modal-header" style="border-bottom: 1px solid var(--glass-border); padding-bottom: 15px; margin-bottom: 20px;">
         <h2 style="font-family: 'Syncopate', sans-serif; font-size: 1.3rem; color: var(--primary-pink); letter-spacing: 0.05em; margin: 0;">NEO SERVICE UPDATED</h2>
-        <span data-app-version style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; font-weight: 700; background: rgba(var(--primary-pink-rgb), 0.1); color: var(--primary-pink); padding: 4px 8px; border-radius: 4px;">v1.17.0</span>
+        <span data-app-version style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; font-weight: 700; background: rgba(var(--primary-pink-rgb), 0.1); color: var(--primary-pink); padding: 4px 8px; border-radius: 4px;">v1.17.1</span>
       </div>
       <div class="modal-body" style="font-size: 0.92rem; line-height: 1.6; color: var(--text-dark); max-height: 420px; overflow-y: auto; padding-right: 5px;">
-        <p style="margin-top: 0;">Here's what's new in <strong data-app-version>v1.17.0</strong>:</p>
+        <p style="margin-top: 0;">Here's what's new in <strong data-app-version>v1.17.1</strong>:</p>
         <ul style="padding-left: 20px; display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px;">
-          <li><strong>Serial lookup.</strong> Type a serial on a new RMA part or a service item and Neo Service shows what it already knows about that part: earlier warranty claims (a repeat fault), the service tickets it came in on, and the Neo Tokyo build it went into.</li>
-          <li><strong>Use these details:</strong> on a repeat claim, one click copies the type, brand, model, invoice, purchase date and where it was bought from the earlier claim.</li>
-          <li>Claims whose warranty has ended are no longer suggested; they stay in the customer's history.</li>
-          <li><strong>Customer history:</strong> one page per customer with every service ticket, every RMA part (including expired warranties) and the builds they bought. Open it with <strong>Customer history</strong> on any ticket summary, <strong>Full history</strong> on the returning-customer card, or from the New RMA phone lookup. Click any entry to open it.</li>
+          <li><strong>Smoother scrolling.</strong> Lists, boards, forms and ticket pages now scroll on the graphics card instead of being redrawn on every step, so scrolling stays smooth.</li>
+          <li><strong>Lighter when idle.</strong> Neo Service no longer keeps redrawing the window when nothing is happening, so switching screens is quicker.</li>
+          <li>The background aurora holds still while you scroll, while a page or dialog is open, and while the window is in the background.</li>
+          <li>Scrollbars are the slim Windows 11 style, in the same colours.</li>
+          <li>Behind dialogs and full-screen pages the app is dimmed instead of blurred. Dialogs keep their frosted glass.</li>
         </ul>
       </div>
       <div class="modal-footer" style="border-top: 1px solid var(--glass-border); padding-top: 15px; display: flex; justify-content: flex-end; margin-top: 20px;">
-        <button id="btn-close-changelog" data-app-version-label class="primary-pink-btn" style="padding: 10px 24px; font-weight: 700; font-size: 0.95rem;">Launch Neo Service v1.17.0</button>
+        <button id="btn-close-changelog" data-app-version-label class="primary-pink-btn" style="padding: 10px 24px; font-weight: 700; font-size: 0.95rem;">Launch Neo Service v1.17.1</button>
       </div>
     </div>
   </div>
@@ -2888,6 +2889,8 @@
   <script src="owner-tools.js"></script>
   <!-- 1.16.1 Neo Glass suggestion lists for <input list> (replaces the native datalist popup). -->
   <script src="neo-combo.js"></script>
+  <!-- 1.17.1 smooth scrolling: the aurora pauses while scrolling and in the background. -->
+  <script src="perf-guard.js"></script>
   <script src="ticket-summary.js"></script>
   <!-- 1.17 the serial lookup and the customer history (brief §5, §6; server v2.14). -->
   <script src="serial-history.js"></script>

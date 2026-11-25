@@ -549,7 +549,7 @@ body.motion-reduced *, body.motion-reduced *::before, body.motion-reduced *::aft
 }
 .app-rail::before {
   content: ''; position: absolute; left: -20px; right: -20px; height: 180px; pointer-events: none;
-  top: calc(var(--rail-my, -400px) - 90px);
+  top: -90px; transform: translateY(var(--rail-my, -400px)); will-change: transform;
   background: radial-gradient(50% 50% at 50% 50%, rgba(var(--primary-pink-rgb), 0.16), transparent 72%);
   opacity: 0; transition: opacity 0.35s ease;
 }
@@ -839,3 +839,47 @@ body.dark-mode .svi-n { color: var(--nt-brand); }
 @media (max-width: 1400px) { .rma-tb { justify-content: flex-start; flex-wrap: wrap; row-gap: 10px; } }
 /* Dev harness bar: its role select stays inside the 32 px bar. */
 .hx-bar select { min-height: 0 !important; padding-top: 2px; padding-bottom: 2px; }
+
+
+/* ══ 1.17.1 Performance ═════════════════════════════════════════════════════
+   Owner, 25 Nov 2026: "scrolling through the app feels stuttery and sluggish".
+   Measured in the harness with a Chrome trace: every scroll frame repainted
+   the whole screen, and the Jidoka orb repainted the window about 100 times
+   a second while nothing happened (fixed in jidoka.css). Same look, less work.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* Standard scrollbars. Styled ::-webkit-scrollbar parts (style.css) are drawn
+   by the page itself, so each scroll step repainted the screen behind the
+   list. With these standard properties set, Chromium ignores the -webkit-
+   parts and scrolls on the GPU. Same thin, rounded, tinted thumb. */
+* { scrollbar-width: thin; }
+body { scrollbar-color: rgba(var(--primary-pink-rgb), 0.3) transparent; }
+body.dark-mode { scrollbar-color: rgba(255, 255, 255, 0.16) transparent; }
+.settings-sidebar { scrollbar-width: none; }
+
+/* The aurora holds still while a list scrolls and while the window is in the
+   background (perf-guard.js), and while a dialog or a full-screen page covers
+   it. Its sweep takes 46–62 s, so the pause cannot be seen. */
+.nt-aurora.nt-hold span,
+.nt-aurora.nt-away span,
+body:has(> .modal-overlay.active, > .tk-overlay.open, > .bs-overlay.open, > .ch-overlay.open, > .qcb-overlay.open) > .nt-aurora span {
+  animation-play-state: paused;
+}
+
+/* Full-screen pages (ticket and build summaries, customer history, the QC
+   bench, the photo viewer): a plain dim behind them instead of a live blur of
+   the whole window. The page covers nearly all of it, so the blur was only
+   seen in the margin, but it was redrawn on every frame. */
+.tk-overlay, .bs-overlay, .ch-overlay, .qcb-overlay, #ops-lightbox.active {
+  backdrop-filter: none; -webkit-backdrop-filter: none;
+}
+.tk-overlay, .ch-overlay, .qcb-overlay { background: rgba(10, 10, 15, 0.5); }
+body.dark-mode .tk-overlay, body.dark-mode .ch-overlay, body.dark-mode .qcb-overlay,
+body.dark-mode .bs-overlay { background: rgba(3, 3, 6, 0.62); }
+
+/* Dialogs: a plain dim behind the dialog; the dialog card keeps its frosted
+   glass. The blurred dim (12 px) sat under the blurred card (24 px), so every
+   scroll step inside a form was blurred twice. */
+.modal-overlay, .modal-overlay.active { backdrop-filter: none; -webkit-backdrop-filter: none; }
+.modal-overlay { background: rgba(10, 10, 15, 0.28); }
+body.dark-mode .modal-overlay { background: rgba(5, 5, 8, 0.6); }

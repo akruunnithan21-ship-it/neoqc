@@ -229,10 +229,18 @@
   function bindRailMotion(rail) {
     if (!rail || rail.dataset.motion) return;
     rail.dataset.motion = '1';
+    // 1.17.1: at most once per frame (mousemove can fire several times a frame).
+    var lastY = 0, queued = false;
     rail.addEventListener('mousemove', function (e) {
-      var r = rail.getBoundingClientRect();
-      rail.style.setProperty('--rail-my', (e.clientY - r.top) + 'px');
-    });
+      lastY = e.clientY;
+      if (queued) return;
+      queued = true;
+      requestAnimationFrame(function () {
+        queued = false;
+        var r = rail.getBoundingClientRect();
+        rail.style.setProperty('--rail-my', Math.round(lastY - r.top) + 'px');
+      });
+    }, { passive: true });
     window.addEventListener('resize', function () {
       placeRailIndicator(rail.querySelector('.rail-item.active'));
     });
