@@ -278,7 +278,9 @@
     // job sheet / acknowledgement, and the delivery challan or receipts at the end.
     submission:       'At submission',
     job_sheet:        'Receipt / job sheet',
-    delivery_doc:     'Delivery challan / receipt'
+    delivery_doc:     'Delivery challan / receipt',
+    // 1.16 (v2.12): a photo taken for a note; seen by whoever can read the note.
+    note:             'With a note'
   };
   var PRIVATE_MEDIA_ROLES = ['invoice', 'serial_label', 'vendor_doc', 'job_sheet', 'delivery_doc'];
 

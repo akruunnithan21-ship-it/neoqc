@@ -35,7 +35,7 @@
   // than before. SPEC-GAP: the spec assumes the registry is always present.
   var FALLBACK_REGISTRY = [
     { id: 'overview', label: 'Overview', icon: '◎', screenId: 'overview-screen', mode: 'overview', needs: { tier: 3 } },
-    { id: 'builds',   label: 'Builds',   icon: '🖥', screenId: 'staff-screen',    mode: 'staff',    needs: { tier: 3 } },
+    { id: 'builds',   label: 'QC',       icon: '🧪', screenId: 'staff-screen',    mode: 'staff',    needs: { tier: 3 } },
     { id: 'service',  label: 'Service',  icon: '🔧', screenId: 'service-screen',  mode: 'service',  needs: { tier: 3 } },
     { spacer: true },
     { id: 'bench',    label: 'Bench',    icon: '⚗', action: 'bench',    needs: { tier: 2 } },
@@ -676,6 +676,8 @@
     if (tiles) {
       // Deliberately the five questions a lead walks in asking — not a count of
       // everything that exists. Counted over the visible kinds only.
+      // 1.16: each card says one more thing under its number.
+      var subs = tileSubs(all);
       tiles.innerHTML = [
         ['late',   't-late',   counts.late,   'Late or overdue'],
         ['cust',   't-cust',   counts.cust,   'Waiting on a customer'],
@@ -684,9 +686,20 @@
         ['open',   't-open',   counts.open,   'Open altogether']
       ].map(function (t) {
         return '<div class="ov-tile ' + t[1] + (ovFilter === 'attention' && t[0] === 'late' ? ' sel' : '') +
-               '" data-tile="' + t[0] + '" role="button" tabindex="0"><div class="ov-tile-n">' + t[2] +
-               '</div><div class="ov-tile-l">' + esc(t[3]) + '</div></div>';
+               '" data-tile="' + t[0] + '" role="button" tabindex="0"><div class="ov-tile-l">' + esc(t[3]) + '</div>' +
+               '<div class="ov-tile-n">' + t[2] + '</div>' +
+               (subs[t[0]] ? '<div class="ov-tile-s">' + esc(subs[t[0]]) + '</div>' : '') + '</div>';
       }).join('');
+    }
+    renderHero(counts);
+    renderPipes();
+    renderDue();
+    renderTeam(all);
+    var lh = el('ov-list-h');
+    if (lh) {
+      var fsel = el('ov-filter');
+      var flabel = fsel && fsel.selectedIndex >= 0 ? fsel.options[fsel.selectedIndex].text : 'Everything open';
+      lh.textContent = flabel;
     }
 
     var qEl = el('ov-search');
@@ -742,6 +755,220 @@
     }).join('');
   }
 
+  // ── 1.16: the Overview's new pieces (owner, 24 Nov 2026: "the overview looks
+  //    bad, dull and boring") ────────────────────────────────────────────────
+  var DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  var MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+  var MON3 = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  function firstName() {
+    var p = profile();
+    var n = p ? String(p.full_name || p.email || '').trim() : '';
+    return n ? n.split(/\s+/)[0] : '';
+  }
+  function plural(n, one, many) { return n + ' ' + (n === 1 ? one : (many || one + 's')); }
+  function renderHero(counts) {
+    var host = el('ov-hero');
+    if (!host) return;
+    var now = new Date();
+    var h = now.getHours();
+    var hello = (h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening') + (firstName() ? ', ' + firstName() : '');
+    var day = DAYS[now.getDay()] + ', ' + now.getDate() + ' ' + MONTHS[now.getMonth()];
+    var bits = [plural(counts.open, 'open job')];
+    bits.push(counts.late ? plural(counts.late, 'late job') : 'nothing late');
+    if (counts.cust) bits.push(counts.cust + ' waiting on customers');
+    if (counts.ready) bits.push(counts.ready + ' ready to collect');
+    var html = '<div class="ov2-hero-main">' +
+        '<div class="ov2-eyebrow">NEO TOKYO // OVERVIEW</div>' +
+        '<h2 class="ov2-hello">' + esc(hello) + '</h2>' +
+        '<p class="ov2-hero-s"><span>' + esc(day) + '</span> · ' + esc(bits.join(' · ')) + '</p>' +
+      '</div>' +
+      '<div class="ov2-hanko" aria-hidden="true">ネオ東京</div>';
+    if (host.dataset.sig !== html) { host.dataset.sig = html; host.innerHTML = html; }
+  }
+  function tileSubs(all) {
+    var out = {};
+    var open = all.filter(function (r) { return r.open; });
+    var oldest = function (list) { return list.reduce(function (m, r) { return Math.max(m, r.ageMs); }, 0); };
+    var late = open.filter(function (r) { return r.late; });
+    if (late.length) out.late = 'Oldest ' + fmtAge(oldest(late)) + ' at its step';
+    else out.late = 'All on time';
+    var cust = all.filter(function (r) { return r.waitingCustomer; });
+    if (cust.length) out.cust = 'Longest ' + fmtAge(oldest(cust));
+    var vend = all.filter(function (r) { return r.waitingVendor; });
+    if (vend.length) out.vendor = 'At service centres and suppliers';
+    var ready = all.filter(function (r) { return r.ready; });
+    if (ready.length) out.ready = 'Call them to collect';
+    var k = { build: 0, service: 0, rma: 0 };
+    open.forEach(function (r) { k[r.kind] = (k[r.kind] || 0) + 1; });
+    var parts = [];
+    if (k.build) parts.push(plural(k.build, 'build'));
+    if (k.service) parts.push(k.service + ' service');
+    if (k.rma) parts.push(k.rma + ' RMA');
+    out.open = parts.join(' · ');
+    return out;
+  }
+
+  // Open work by step, for each board the person can see. The steps are the
+  // boards' own (Service BOARD_ROWS, the 8 RMA steps, the build statuses).
+  var BUILD_STEPS = [['pending', 'Pending'], ['awaiting', 'Awaiting parts'], ['building', 'Building'],
+                     ['waiting_qc', 'Awaiting QC'], ['qc_testing', 'QC testing']];
+  function pipeHtml(title, go, cols) {
+    var total = cols.reduce(function (a, c) { return a + c.n; }, 0);
+    var max = cols.reduce(function (a, c) { return Math.max(a, c.n); }, 1);
+    var late = cols.reduce(function (a, c) { return a + c.late; }, 0);
+    return '<div class="ov2-pipe" data-go="' + esc(go) + '" role="button" tabindex="0" aria-label="' + esc(title + ': ' + total + ' open') + '">' +
+      '<div class="ov2-pipe-h"><span class="ov2-pipe-t">' + esc(title) + '</span>' +
+        '<span class="ov2-pipe-n">' + total + ' open' + (late ? ' · <span class="ov2-late">' + late + ' late</span>' : '') + '</span></div>' +
+      '<ol class="ov2-pipe-cols" style="--cols:' + cols.length + '">' + cols.map(function (c) {
+        var pct = c.n ? Math.max(8, Math.round(c.n / max * 100)) : 0;
+        return '<li class="ov2-pc' + (c.n ? '' : ' is-empty') + (c.late ? ' has-late' : '') + '" title="' + esc(c.label + ': ' + c.n + (c.late ? ', ' + c.late + ' late' : '')) + '">' +
+          '<span class="ov2-pc-bar"><span class="ov2-pc-fill" style="height:' + pct + '%"></span>' +
+            (c.late ? '<span class="ov2-pc-late" style="height:' + Math.round(c.late / max * 100) + '%"></span>' : '') + '</span>' +
+          '<span class="ov2-pc-n">' + c.n + '</span>' +
+          '<span class="ov2-pc-l">' + esc(c.label) + '</span></li>';
+      }).join('') + '</ol></div>';
+  }
+  function renderPipes() {
+    var host = el('ov-pipes');
+    if (!host) return;
+    var M = S();
+    var kinds = visibleKinds();
+    var now = Date.now();
+    var out = [];
+    if (kinds.service && M && Array.isArray(M.BOARD_ROWS)) {
+      var jobs = serviceJobs().filter(function (j) { return j && j.stage !== 'closed'; });
+      M.BOARD_ROWS.forEach(function (row) {
+        var cols = row.cols.map(function (c) { return { label: c.label, n: 0, late: 0 }; });
+        jobs.forEach(function (j) {
+          var t = typeof M.typeOf === 'function' ? M.typeOf(j) : (j.service_type || 'in_store');
+          if (row.types.indexOf(t) === -1) return;
+          for (var i = 0; i < row.cols.length; i++) {
+            if (row.cols[i].stages.indexOf(j.stage) !== -1) {
+              cols[i].n++;
+              if (typeof M.serviceRisk === 'function' && M.serviceRisk(j, now) === 2) cols[i].late++;
+              break;
+            }
+          }
+        });
+        if (cols.some(function (c) { return c.n; }) || row.key === 'shop') out.push(pipeHtml('Service · ' + row.label, 'service', cols));
+      });
+    }
+    if (kinds.rma && M && typeof M.rmaStepsFor === 'function' && Array.isArray(M.RMA_STEPS)) {
+      var vend = vendorsById();
+      var rc = M.RMA_STEPS.map(function (s) { return { label: s.label, n: 0, late: 0 }; });
+      rmaUnits().forEach(function (u) {
+        if (!u || u.stage === 'closed') return;
+        var st = M.rmaStepsFor(u);
+        var c = rc[st.current];
+        if (!c) return;
+        c.n++;
+        var v = u.vendor_id != null ? vend[String(u.vendor_id)] : null;
+        if (typeof M.rmaRisk === 'function' && M.rmaRisk(u, now, v) === 2) c.late++;
+      });
+      out.push(pipeHtml('RMA · warranty parts', 'rma', rc));
+    }
+    if (kinds.build) {
+      var bc = BUILD_STEPS.map(function (s) { return { key: s[0], label: s[1], n: 0, late: 0 }; });
+      builds().forEach(function (t) {
+        if (!t || t.status === 'completed') return;
+        var key = t.status || 'pending';
+        var c = bc.filter(function (x) { return x.key === key; })[0] || bc[0];
+        c.n++;
+        if (typeof deadlineRisk === 'function' && deadlineRisk(t.deadline) === 'overdue') c.late++;
+      });
+      out.push(pipeHtml('Builds', 'staff', bc));
+    }
+    var html = out.join('') || '<p class="ov2-muted">Nothing open you can see.</p>';
+    if (host.dataset.sig !== html) { host.dataset.sig = html; host.innerHTML = html; }
+  }
+
+  // Promised, booked or to collect in the next 48 hours (or already past).
+  function renderDue() {
+    var host = el('ov-due');
+    if (!host) return;
+    var M = S();
+    var kinds = visibleKinds();
+    var now = Date.now();
+    var horizon = now + 2 * DAY;
+    var items = [];
+    var when = function (t) {
+      var d = new Date(t);
+      var today = new Date(now); today.setHours(0, 0, 0, 0);
+      var diff = Math.round((new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime() - today.getTime()) / DAY);
+      var hh = d.getHours(), mm = d.getMinutes();
+      var time = (hh % 12 || 12) + (mm ? ':' + (mm < 10 ? '0' : '') + mm : '') + (hh < 12 ? ' am' : ' pm');
+      return diff === 0 ? 'Today ' + time : diff === 1 ? 'Tomorrow ' + time : diff === -1 ? 'Yesterday' : d.getDate() + ' ' + MON3[d.getMonth()];
+    };
+    if (kinds.service) {
+      serviceJobs().forEach(function (j) {
+        if (!j || j.stage === 'closed') return;
+        var v = msOf(j.visit_start, null);
+        if (v != null && v <= horizon && v >= now - DAY) items.push({ t: v, kind: 'service', id: j.id, what: (M && M.typeOf(j) === 'remote' ? 'Remote session' : 'Visit'), who: j.customer_name || '—' });
+        var p = msOf(j.promised_at, null);
+        if (p != null && p <= horizon && j.stage !== 'ready') items.push({ t: p, kind: 'service', id: j.id, what: 'Promised', who: j.customer_name || '—' });
+      });
+    }
+    if (kinds.rma) {
+      rmaUnits().forEach(function (u) {
+        if (!u || u.stage !== 'with_vendor' || !u.vendor_ready_at || u.vendor_ready_via !== 'collect') return;
+        var t = msOf(u.expected_back_at, null);
+        if (t != null && t <= horizon) items.push({ t: t, kind: 'rma', id: u.id, what: 'Collect from the centre', who: (u.public_code || '') + ' · ' + ([u.brand, u.model].filter(Boolean).join(' ') || 'Part') });
+      });
+    }
+    if (kinds.build) {
+      builds().forEach(function (b) {
+        if (!b || b.status === 'completed') return;
+        var t = msOf(b.deadline, null);
+        if (t != null && t <= horizon) items.push({ t: t, kind: 'build', id: b.id, what: 'Build due', who: b.customerName || '—' });
+      });
+    }
+    items.sort(function (a, b) { return a.t - b.t; });
+    var html = items.length ? '<ul class="ov2-due-list">' + items.slice(0, 8).map(function (it) {
+      var past = it.t < now;
+      return '<li><button type="button" class="ov2-due-i k-' + it.kind + (past ? ' is-past' : '') + '" data-kind="' + it.kind + '" data-id="' + esc(it.id) + '">' +
+        '<span class="ov2-due-t">' + esc(past && it.what !== 'Visit' ? 'Overdue' : when(it.t)) + '</span>' +
+        '<span class="ov2-due-w">' + esc(it.what) + '</span>' +
+        '<span class="ov2-due-who">' + esc(it.who) + '</span></button></li>';
+    }).join('') + '</ul>' + (items.length > 8 ? '<p class="ov2-muted">+' + (items.length - 8) + ' more</p>' : '')
+      : '<p class="ov2-muted">Nothing due in the next two days.</p>';
+    if (host.dataset.sig !== html) { host.dataset.sig = html; host.innerHTML = html; }
+  }
+
+  // Open work per person, from the rows (builds, tickets, RMA parts).
+  function renderTeam(all) {
+    var host = el('ov-team');
+    if (!host) return;
+    var by = {};
+    all.forEach(function (r) {
+      if (!r.open) return;
+      var name = String(r.tech || '').trim();
+      if (!name || /^(no technician yet|unassigned|nobody yet)$/i.test(name)) name = 'Nobody yet';
+      if (/queue|offered|not sent/i.test(name)) name = 'Nobody yet';
+      var t = by[name] || (by[name] = { name: name, n: 0, late: 0, kinds: {} });
+      t.n++;
+      if (r.late) t.late++;
+      t.kinds[r.kind] = (t.kinds[r.kind] || 0) + 1;
+    });
+    var list = Object.keys(by).map(function (k) { return by[k]; })
+      .sort(function (a, b) { return (a.name === 'Nobody yet') - (b.name === 'Nobody yet') || b.n - a.n; });
+    var max = list.reduce(function (a, t) { return Math.max(a, t.n); }, 1);
+    var initials = function (n) {
+      if (n === 'Nobody yet') return '?';
+      var words = n.replace(/\(.*?\)/g, ' ').split(/\s+/).filter(function (w) { return /^[A-Za-z]/.test(w); });
+      return (words.map(function (w) { return w.charAt(0); }).join('').slice(0, 2) || '?').toUpperCase();
+    };
+    var html = list.length ? '<ul class="ov2-team-list">' + list.slice(0, 10).map(function (t) {
+      var what = [t.kinds.service ? t.kinds.service + ' service' : '', t.kinds.rma ? t.kinds.rma + ' RMA' : '', t.kinds.build ? plural(t.kinds.build, 'build') : '']
+        .filter(Boolean).join(' · ');
+      return '<li class="ov2-tm' + (t.name === 'Nobody yet' ? ' is-none' : '') + '">' +
+        '<span class="ov2-av" aria-hidden="true">' + esc(initials(t.name)) + '</span>' +
+        '<span class="ov2-tm-main"><span class="ov2-tm-n">' + esc(t.name) + '</span><span class="ov2-tm-s">' + esc(what) + '</span>' +
+          '<span class="ov2-tm-bar"><span style="width:' + Math.round(t.n / max * 100) + '%"></span></span></span>' +
+        '<span class="ov2-tm-c">' + t.n + (t.late ? '<span class="ov2-late">' + t.late + ' late</span>' : '') + '</span></li>';
+    }).join('') + '</ul>' : '<p class="ov2-muted">No open work.</p>';
+    if (host.dataset.sig !== html) { host.dataset.sig = html; host.innerHTML = html; }
+  }
+
   function openRow(row) {
     if (!row) return;
     var kind = row.dataset.kind;
@@ -752,18 +979,40 @@
       if (typeof openTicketModal === 'function') openTicketModal(id);
     } else if (kind === 'service') {
       goSection('service');
-      if (currentSection === 'service' && window.NeoQcServiceUI && window.NeoQcServiceUI.openJob) {
+      // 1.16: the read-only summary first, as on the boards (ticket-summary.js).
+      if (currentSection === 'service' && window.NeoTicketSummary) window.NeoTicketSummary.openJob(id);
+      else if (currentSection === 'service' && window.NeoQcServiceUI && window.NeoQcServiceUI.openJob) {
         window.NeoQcServiceUI.openJob(id);
       }
     } else if (kind === 'rma') {
       goSection('rma');
-      if (currentSection === 'rma' && window.NeoQcRmaUI && window.NeoQcRmaUI.openUnit) {
+      if (currentSection === 'rma' && window.NeoTicketSummary) window.NeoTicketSummary.openUnit(id);
+      else if (currentSection === 'rma' && window.NeoQcRmaUI && window.NeoQcRmaUI.openUnit) {
         window.NeoQcRmaUI.openUnit(id);
       }
     }
   }
 
   function initOverview() {
+    var pipes = el('ov-pipes');
+    if (pipes && !pipes.dataset.bound) {
+      pipes.dataset.bound = '1';
+      var goPipe = function (p) { if (p) goSection(p.getAttribute('data-go')); };
+      pipes.addEventListener('click', function (e) { goPipe(e.target.closest('.ov2-pipe')); });
+      pipes.addEventListener('keydown', function (e) {
+        if (e.key !== 'Enter' && e.key !== ' ') return;
+        var p = e.target.closest('.ov2-pipe');
+        if (p) { e.preventDefault(); goPipe(p); }
+      });
+    }
+    var due = el('ov-due');
+    if (due && !due.dataset.bound) {
+      due.dataset.bound = '1';
+      due.addEventListener('click', function (e) {
+        var b = e.target.closest('.ov2-due-i');
+        if (b) openRow({ dataset: { kind: b.getAttribute('data-kind'), id: b.getAttribute('data-id') } });
+      });
+    }
     var host = el('ov-list');
     if (host && !host.dataset.bound) {
       host.dataset.bound = '1';

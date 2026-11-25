@@ -6029,7 +6029,7 @@ function openSettingsModal() {
 // textContent — never innerHTML with a value in it.
 let opsSettingsSeq = 0;
 const OPS_ROLE_OPTIONS = [['', '—'], ['desk', 'Desk'], ['tech', 'Tech'], ['lead', 'Lead']];
-const OPS_MODULE_LABELS = { service: 'Service', rma: 'RMA', qc: 'Builds', neohr: 'NeoHR' };
+const OPS_MODULE_LABELS = { service: 'Service', rma: 'RMA', qc: 'QC', neohr: 'NeoHR' };   // 1.16: Builds became QC
 // A person's roles, in the People list and its Edit dialog. NeoHR is set here
 // by hand only: designation presets never touch it (sql/work-queue.sql).
 const OPS_PERSON_MODULES = ['service', 'rma', 'qc', 'neohr'];
@@ -9295,7 +9295,8 @@ const THEME_CHOICES = ['light', 'dark', 'system'];
 // main colour, its rgb channels (for rgba(var(--primary-pink-rgb), a)), the
 // hover shade, and the light/dark ends of the logo gradient.
 const ACCENTS = {
-  pink:   { primary: '#e7014e', rgb: '231, 1, 78',   hover: '#c4003f', light: '#ff1a75', dark: '#b3003b' },
+  // 1.16: Neo pink = Rubylicious, the brand pink (Neo Glass theme, neo-theme.css).
+  pink:   { primary: '#DA1A5D', rgb: '218, 26, 93',  hover: '#BC1F59', light: '#E83C7E', dark: '#BC1F59' },
   red:    { primary: '#ef4444', rgb: '239, 68, 68',  hover: '#dc2626', light: '#f87171', dark: '#b91c1c' },
   purple: { primary: '#8b5cf6', rgb: '139, 92, 246', hover: '#7c3aed', light: '#a78bfa', dark: '#6d28d9' },
   blue:   { primary: '#3b82f6', rgb: '59, 130, 246', hover: '#2563eb', light: '#60a5fa', dark: '#1d4ed8' },

@@ -48,7 +48,8 @@
     // the screen is hidden: nobody opens it and it is never a landing screen.
     { id: 'queue',    label: 'Queue',    icon: '⏱', screenId: 'queue-screen',    mode: 'queue', hidden: true,
       needs: { anyOf: [{ module: 'qc', role: 'desk' }, { module: 'service', role: 'desk' }] } },
-    { id: 'builds',   label: 'Builds',   icon: '🖥', screenId: 'staff-screen',    mode: 'staff',    needs: { module: 'qc', role: 'desk' } },
+    // 1.16 (owner): Builds became QC — new builds and QC after a service.
+    { id: 'builds',   label: 'QC',       icon: '🧪', screenId: 'staff-screen',    mode: 'staff',    needs: { module: 'qc', role: 'desk' } },
     { id: 'service',  label: 'Service',  icon: '🔧', screenId: 'service-screen',  mode: 'service',  needs: { module: 'service', role: 'desk' } },
     { id: 'rma',      label: 'RMA',      icon: '📦', screenId: 'rma-screen',      mode: 'rma',      needs: { module: 'rma', role: 'desk' } },
     // NeoHR (v1.11): the people side — who is at work today, everyone's work

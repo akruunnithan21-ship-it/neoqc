@@ -19,6 +19,15 @@ if (!app.isPackaged && process.env.NEOQC_USER_DATA) {
   try { app.setPath('userData', path.resolve(process.env.NEOQC_USER_DATA)); } catch (e) { /* keep neo-qc */ }
 }
 const cinebenchLib = require('./cinebench');
+// 1.16: QC after a service: drive health, idle temps, WHEA, PresentMon FPS,
+// app crashes (service-qc-bench.js). The stability run is sys:run-diagnostics
+// with { serviceQc: true } below.
+require('./service-qc-bench').register(ipcMain, {
+  diagnosticsPath: () => (app.isPackaged
+    ? path.join(process.resourcesPath, 'app.asar.unpacked', 'assets', 'diagnostics')
+    : path.join(__dirname, 'assets', 'diagnostics')),
+  logger: log
+});
 
 // Configure auto updater logging
 autoUpdater.logger = log;
@@ -1360,12 +1369,20 @@ ipcMain.handle('sys:run-diagnostics', async (event, config) => {
   const p95Exe = resolveExecutable(config.pathPrime95, ['prime95.exe'])
     || path.join(diagnosticsPath, 'Prime95', 'prime95.exe');
 
-  const duration = config && config.duration ? parseInt(config.duration) : 60;
+  // 1.16 — QC after a service (service-qc-bench.js): on a CUSTOMER's PC only the
+  // stability part runs, Prime95 + FurMark together for 15 / 30 / 60 minutes.
+  // No Cinebench (a build-grade score means nothing here), no DiskSpd (it writes
+  // test files to the customer's drive), no RAM worker (Prime95 Blend covers it).
+  const serviceQc = !!(config && config.serviceQc);
+  const duration = serviceQc
+    ? [900, 1800, 3600].includes(parseInt(config.duration)) ? parseInt(config.duration) : 900
+    : config && config.duration ? parseInt(config.duration) : 60;
   // Prime95 is opt-in (checkbox) and has its own, much longer duration floor —
   // running it is NOT gated by the short `duration` used for Cinebench/FurMark/RAM,
   // so a quick smoke-test run never accidentally blocks for 15-30 minutes.
-  const runPrime95 = !!(config && config.runPrime95);
-  const prime95Duration = config && config.prime95Duration ? parseInt(config.prime95Duration) : 1200; // default 20 min
+  const runPrime95 = serviceQc || !!(config && config.runPrime95);
+  const prime95Duration = serviceQc ? duration
+    : config && config.prime95Duration ? parseInt(config.prime95Duration) : 1200; // default 20 min
 
   // Verify that the files exist
   const hasCb = fs.existsSync(cbExe);
@@ -1382,7 +1399,8 @@ ipcMain.handle('sys:run-diagnostics', async (event, config) => {
   // the tech knows what to install (or run download-tools.js for). No
   // fabricated numbers can reach the report.
   const missing = [];
-  if (!hasCb) missing.push('Cinebench.exe (assets/diagnostics/Cinebench/)');
+  if (!hasCb && !serviceQc) missing.push('Cinebench.exe (assets/diagnostics/Cinebench/)');
+  if (!hasP95 && serviceQc) missing.push('prime95.exe (assets/diagnostics/Prime95/)');
   if (!hasFm) missing.push('FurMark.exe (assets/diagnostics/FurMark/FurMark_win64/)');
   if (!hasMonitor) missing.push('LibreHardwareMonitorLib.dll + monitor.ps1 (assets/diagnostics/LibreHardwareMonitor/)');
   if (missing.length) {
@@ -1489,7 +1507,11 @@ ipcMain.handle('sys:run-diagnostics', async (event, config) => {
     // stress tool below starts only after this await resolves.
     let cinebenchDone = false;
     let cinebenchScore = 0;
-    {
+    if (serviceQc) {
+      cinebenchDone = true;
+      cinebenchScore = null;
+      event.sender.send('sys:diag-log', `Service QC stability test: Prime95 + FurMark together for ${Math.round(duration / 60)} minutes.`);
+    } else {
       const isSingleCore = config && config.useCase === 'gaming';
       event.sender.send('sys:diag-log',
         `Running Cinebench R23 ALONE in ${isSingleCore ? 'Single-Core (Gaming)' : 'Multi-Core (Studio)'} mode — R23 runs its own full benchmark (~10 min). Stress tools start after it.`);
@@ -1524,10 +1546,13 @@ ipcMain.handle('sys:run-diagnostics', async (event, config) => {
       }
       cinebenchDone = true;
     }
-    event.sender.send('sys:diag-log', "Cinebench phase complete — starting stress tools (Prime95 / FurMark / RAM / SSD).");
-
-    event.sender.send('sys:diag-log', "Enumerating SSD volumes for benchmark...");
-    const diskSpeedsPromise = (async () => {
+    if (!serviceQc) {
+      event.sender.send('sys:diag-log', "Cinebench phase complete — starting stress tools (Prime95 / FurMark / RAM / SSD).");
+      event.sender.send('sys:diag-log', "Enumerating SSD volumes for benchmark...");
+    }
+    const diskSpeedsPromise = serviceQc
+      ? Promise.resolve({ driveBenchmarks: [], ssdRead: null, ssdWrite: null, missing: 'service-qc' })
+      : (async () => {
       const dsExe = diskSpdExe();
       if (!dsExe) {
         event.sender.send('sys:diag-log', "[SSD] DiskSpd missing — run `node download-tools.js` in the project root. Skipping SSD benchmark for this run.");
@@ -1582,10 +1607,10 @@ ipcMain.handle('sys:run-diagnostics', async (event, config) => {
     const safeCap = Math.max(512 * 1024 * 1024, freeBytes - safetyBytes);
     const ramTargetBytes = Math.max(512 * 1024 * 1024, Math.min(desiredBytes, safeCap));
     const ramTargetMB = Math.round(ramTargetBytes / 1048576);
-    event.sender.send('sys:diag-log',
+    if (!serviceQc) event.sender.send('sys:diag-log',
       `Starting RAM stress test (target ~${ramTargetMB} MB, sustained write/verify) for ${duration}s...`);
 
-    const ramPromise = new Promise((ramResolve) => {
+    const ramPromise = serviceQc ? Promise.resolve({ success: null, skipped: true }) : new Promise((ramResolve) => {
       const workerPath = path.join(diagnosticsPath, 'ram-stress-worker.js');
       let ramFinal = null; // rich result from the worker's 'result' message
       let worker;
@@ -1880,7 +1905,8 @@ ipcMain.handle('sys:run-diagnostics', async (event, config) => {
           durationRequestedSec: duration,
           prime95Requested: runPrime95,
           prime95RequestedSec: runPrime95 ? prime95Duration : 0,
-          stressMode: (config && config.mode) || null,
+          stressMode: serviceQc ? 'service-qc' : (config && config.mode) || null,
+          serviceQc,
           cpuTempMin: cpuMin,
           cpuTempMax: cpuMax,
           cpuTempAvg: cpuAvg,

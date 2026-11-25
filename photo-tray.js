@@ -56,7 +56,8 @@
     // 1.15 (v2.11): RMA submission and completion
     submission: 'At submission',
     job_sheet: 'Receipt / job sheet',
-    delivery_doc: 'Delivery challan / receipt'
+    delivery_doc: 'Delivery challan / receipt',
+    note: 'With a note'                           // 1.16 (v2.12)
   };
   // Never shown to the customer. The database refuses customer_visible on these
   // too (service_media_private_roles); hiding the tick just stops a click that
@@ -799,12 +800,12 @@
     if (tray._busy()) throw new Error('These photos are already uploading.');
 
     var batch = tray._entries();
-    var total = batch.length, ok = 0, failed = [], stopWith = null;
+    var total = batch.length, ok = 0, failed = [], stopWith = null, rows = [];
     var report = function (done, info) {
       if (typeof onProgress !== 'function') return;
       try { onProgress(done, total, info || {}); } catch (e) { /* a progress painter must not stop the upload */ }
     };
-    if (!total) { report(0, { ok: 0, failed: 0 }); return { ok: 0, failed: [] }; }
+    if (!total) { report(0, { ok: 0, failed: 0 }); return { ok: 0, failed: [], rows: [] }; }
 
     tray._setBusy(true);
     try {
@@ -823,10 +824,11 @@
           continue;
         }
         try {
-          await data.uploadMedia({
+          var row = await data.uploadMedia({
             jobId: jobId, caseId: caseId, itemId: itemId,
             role: e.role, remark: remark || null, file: e.file
           });
+          if (row) rows.push(row);                // 1.16: a note links its photos by id
           ok++;
           tray._remove(e.id);
         } catch (err) {
@@ -843,7 +845,7 @@
     }
     if (!tray._isDestroyed()) tray.retain(failed);
     report(total, { ok: ok, failed: failed.length, done: true });
-    return { ok: ok, failed: failed };
+    return { ok: ok, failed: failed, rows: rows };
   }
 
   // ── gallery ────────────────────────────────────────────────────────────────

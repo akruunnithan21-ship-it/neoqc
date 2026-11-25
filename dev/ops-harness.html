@@ -56,12 +56,9 @@
       node -e "const c=require('crypto'),h=require('fs').readFileSync('dev/ops-harness.html','utf8').replace(/\r\n/g,'\n');for(const m of h.matchAll(/<(script)>([\s\S]*?)<\/\1>/g))console.log('sha256-'+c.createHash('sha256').update(m[2]).digest('base64'))"
     This folder is excluded from the packaged app (electron-builder.json).
   -->
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-KTH5/X/U+YoH8lDHCKjWulZF8V8I2B3jUHDdrMmbmWM=' 'sha256-9h0FcT/arbKDOz5sHOgy4ZdUPBgZLqSDGQ/IWRb4jaA=' 'sha256-ZYJyftR9Qit73jEYvj+NtWjk0Pcup3Gk4ZlBDCTSHvg='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: blob: https:; font-src 'self' https://fonts.gstatic.com data:; connect-src 'self' https: wss: data: blob:; worker-src 'self' blob:; child-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-WHm7G5+bbF/8C3eflPz9k9M3tFW4fpwsBWZeVuDlOZc=' 'sha256-9h0FcT/arbKDOz5sHOgy4ZdUPBgZLqSDGQ/IWRb4jaA=' 'sha256-ZYJyftR9Qit73jEYvj+NtWjk0Pcup3Gk4ZlBDCTSHvg='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: blob: https:; font-src 'self' https://fonts.gstatic.com data:; connect-src 'self' https: wss: data: blob:; worker-src 'self' blob:; child-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'">
   <link rel="icon" href="data:,">
   <title>Ops harness — Overview, Service and RMA (demo data)</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Syncopate:wght@700&family=Hanken+Grotesk:ital,wght@0,100..900;1,100..900&family=JetBrains+Mono:ital,wght@0,100..800;1,100..800&family=Space+Grotesk:wght@300..700&display=swap" rel="stylesheet">
   <!-- Same sheets, same order as index.html. -->
   <link rel="stylesheet" href="../style.css">
   <link rel="stylesheet" href="../print-report.css">
@@ -74,6 +71,11 @@
   <link rel="stylesheet" href="../vendor/leaflet/leaflet.css">
   <link rel="stylesheet" href="../neohr.css">
   <link rel="stylesheet" href="../jidoka.css">
+  <link rel="stylesheet" href="../ticket-summary.css">
+  <link rel="stylesheet" href="../neo-theme.css">
+  <link rel="stylesheet" href="../overview.css">
+  <link rel="stylesheet" href="../qc-service.css">
+  <link rel="stylesheet" href="../qc-bench.css">
   <style>
     /* Harness chrome only. The bar sits where the app's titlebar sits (32 px),
        so the rail and every screen are offset exactly as in the app. */
@@ -183,10 +185,34 @@
         </select>
       </div>
     </header>
-    <main class="dashboard-container">
-      <div id="ov-tiles" class="ov-tiles"></div>
-      <p class="sv-lead">Everything the shop has open.</p>
-      <div id="ov-list" class="ov-list"></div>
+    <main class="dashboard-container ov2">
+      <!-- 1.16 the Overview in the Neo Glass theme (shell.js renderOverview):
+           the day at a glance, where the work is by step, what is due soon,
+           the team's load, and everything open (late first). -->
+      <section id="ov-hero" class="ov2-hero" aria-label="Today"></section>
+      <div id="ov-tiles" class="ov-tiles ov2-tiles"></div>
+      <div class="ov2-grid">
+        <div class="ov2-main">
+          <section class="ov2-card" aria-labelledby="ov-pipes-h">
+            <header class="ov2-card-h"><h3 id="ov-pipes-h" class="ov2-h">Where the work is</h3><span class="ov2-card-s">Open work by step. Click a row to open its board.</span></header>
+            <div id="ov-pipes" class="ov2-pipes"></div>
+          </section>
+          <section class="ov2-card" aria-labelledby="ov-list-h">
+            <header class="ov2-card-h"><h3 id="ov-list-h" class="ov2-h">Everything open</h3><span class="ov2-card-s">Late work first. The number is how long it has sat at its step.</span></header>
+            <div id="ov-list" class="ov-list"></div>
+          </section>
+        </div>
+        <aside class="ov2-side">
+          <section class="ov2-card" aria-labelledby="ov-due-h">
+            <header class="ov2-card-h"><h3 id="ov-due-h" class="ov2-h">Due soon</h3><span class="ov2-card-s">Promised, booked or to collect in the next two days</span></header>
+            <div id="ov-due" class="ov2-due"></div>
+          </section>
+          <section class="ov2-card" aria-labelledby="ov-team-h">
+            <header class="ov2-card-h"><h3 id="ov-team-h" class="ov2-h">Team</h3><span class="ov2-card-s">Open work per person</span></header>
+            <div id="ov-team" class="ov2-team"></div>
+          </section>
+        </aside>
+      </div>
     </main>
   </div>
 
@@ -286,9 +312,16 @@
   <!-- Stand-ins for the screens the harness does not carry, so the rail's
        Builds and Bench items, and routing, land somewhere honest. -->
   <div id="staff-screen" class="screen has-rail">
+    <header class="glass-slab navbar"><div class="nav-brand"><span class="nav-title">NEO TOKYO // QC</span></div></header>
     <main class="dashboard-container">
+      <!-- 1.16 QC (was Builds): new builds and QC after a service (qc-service.js). -->
+      <nav class="qc-tabs" role="tablist" aria-label="QC">
+        <button type="button" class="qc-tab active" role="tab" aria-selected="true" data-qc-tab="builds">New builds</button>
+        <button type="button" class="qc-tab" role="tab" aria-selected="false" data-qc-tab="service">After service <span class="qc-tab-n" id="qc-service-n"></span></button>
+      </nav>
+      <section id="qc-service-root" class="qc-svc" aria-label="QC after a service"></section>
       <div class="hx-placeholder">
-        <h2>Builds are not part of this harness</h2>
+        <h2>New builds are not part of this harness</h2>
         <p>The build dashboard needs Electron and the local database. Open the app to see it.</p>
       </div>
     </main>
@@ -369,6 +402,8 @@
 // ── Stubs for what app.js provides in the real app ──────────────────────────
 // Kept deliberately small: just enough of each for the ops scripts to run.
 var HX_ELECTRON = {
+  // qc-bench.js: no bench tools here, so it runs its practice adapter.
+  harness: true,
   ipcRenderer: {
     invoke: async function () { return null; },
     send: function () {},
@@ -1149,6 +1184,9 @@ function switchScreen(mode) {
   <script src="../service-intake.js"></script>
   <script src="../service.js"></script>
   <script src="../rma.js"></script>
+  <script src="../ticket-summary.js"></script>
+  <script src="../qc-bench.js"></script>
+  <script src="../qc-service.js"></script>
   <script src="../queue.js"></script>
   <script src="../vendor/leaflet/leaflet.js"></script>
   <script src="../neohr.js"></script>

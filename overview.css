@@ -1,0 +1,180 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   Neo Service 1.16 — the Overview, redesigned in the Neo Glass theme
+   (shell.js renderOverview; tokens from neo-theme.css). Owner, 24 Nov 2026:
+   "the overview looks bad, dull and boring".
+
+   The day at a glance (greeting, the hanko), five stat cards with an edge
+   bar, open work by step for each board, what is due in the next two days,
+   the team's load, and everything open (late first).
+   ══════════════════════════════════════════════════════════════════════════ */
+
+.ov2 { gap: 18px; }
+/* .dashboard-container is a flex column: its blocks keep their height. */
+.ov2 > * { flex: none; }
+.ov2-muted { color: var(--text-muted); font-size: 0.84rem; margin: 0; }
+.ov2-late { color: var(--nt-danger-text); font-weight: 600; }
+
+/* ── The day at a glance ────────────────────────────────────────────────── */
+.ov2-hero {
+  position: relative; overflow: hidden;
+  display: flex; align-items: center; justify-content: space-between; gap: 18px;
+  padding: 24px 28px; border-radius: 24px;
+  background:
+    radial-gradient(60% 140% at 0% 0%, rgba(var(--primary-pink-rgb), 0.10), transparent 60%),
+    radial-gradient(50% 120% at 100% 100%, rgba(139, 92, 246, 0.08), transparent 60%),
+    var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--glass-shadow);
+}
+.ov2-eyebrow {
+  font-size: 0.75rem; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--nt-brand); font-variant-numeric: tabular-nums;
+}
+.ov2-hello {
+  margin: 6px 0 4px; font-size: clamp(1.6rem, 1.2rem + 1.2vw, 2.25rem); font-weight: 600;
+  letter-spacing: -0.02em; line-height: 1.1; color: var(--text-dark); text-wrap: balance;
+}
+.ov2-hero-s { margin: 0; font-size: 0.92rem; color: var(--text-muted); }
+.ov2-hero-s span { color: var(--text-dark); font-weight: 600; }
+.ov2-hanko {
+  flex: none; padding: 6px 10px; border: 2px solid var(--primary-pink); border-radius: 6px;
+  color: var(--primary-pink); font-family: 'Yu Mincho', 'MS Mincho', 'Hiragino Mincho ProN', serif;
+  font-size: 1.15rem; font-weight: 700; letter-spacing: 0.12em; transform: rotate(6deg);
+  opacity: 0.85; user-select: none;
+}
+
+/* ── Stat cards ─────────────────────────────────────────────────────────── */
+.ov2-tiles.ov-tiles { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 14px; }
+@media (max-width: 1100px) { .ov2-tiles.ov-tiles { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+.ov2-tiles .ov-tile {
+  position: relative; overflow: hidden;
+  display: flex; flex-direction: column; gap: 4px;
+  padding: 16px 18px 15px 20px; border-radius: 16px;
+  background: var(--glass-bg); border: 1px solid var(--glass-border); box-shadow: var(--glass-shadow);
+  cursor: pointer;
+  transition: transform var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
+}
+.ov2-tiles .ov-tile::before {
+  content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
+  background: var(--t-c, var(--text-muted));
+}
+.ov2-tiles .ov-tile:hover { transform: translateY(-1px); box-shadow: var(--nt-lift); }
+.ov2-tiles .ov-tile.sel { border-color: rgba(var(--primary-pink-rgb), 0.5); box-shadow: 0 0 0 3px var(--nt-brand-tint); }
+.ov2-tiles .ov-tile-l {
+  order: 0; margin: 0; font-size: 0.72rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--text-muted);
+}
+.ov2-tiles .ov-tile-n {
+  order: 1; font-family: var(--nt-font); font-size: 2.25rem; font-weight: 600; line-height: 1.05;
+  letter-spacing: -0.02em; font-variant-numeric: tabular-nums; color: var(--text-dark);
+}
+.ov2-tiles .ov-tile-s { order: 2; font-size: 0.78rem; color: var(--text-muted); }
+.ov2-tiles .ov-tile.t-late   { --t-c: var(--status-urgent); }
+.ov2-tiles .ov-tile.t-cust   { --t-c: var(--status-awaiting); }
+.ov2-tiles .ov-tile.t-vendor { --t-c: var(--status-building); }
+.ov2-tiles .ov-tile.t-ready  { --t-c: var(--status-completed); }
+.ov2-tiles .ov-tile.t-open   { --t-c: var(--primary-pink); }
+.ov2-tiles .ov-tile.t-late .ov-tile-n { color: var(--nt-danger-text); }
+.ov2-tiles .ov-tile.t-ready .ov-tile-n { color: var(--nt-success-text); }
+
+/* ── Layout: the main column and the side column ───────────────────────── */
+.ov2-grid { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 18px; align-items: start; }
+@media (max-width: 1200px) { .ov2-grid { grid-template-columns: 1fr; } }
+.ov2-main, .ov2-side { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
+.ov2-card {
+  padding: 18px 20px 20px; border-radius: 16px;
+  background: var(--glass-bg); border: 1px solid var(--glass-border); box-shadow: var(--glass-shadow);
+}
+.ov2-card-h { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; margin-bottom: 14px; }
+.ov2-h { margin: 0; font-size: 1.05rem; font-weight: 600; letter-spacing: -0.005em; color: var(--text-dark); }
+.ov2-card-s { font-size: 0.8rem; color: var(--text-muted); }
+
+/* ── Where the work is: one row of bars per board ──────────────────────── */
+.ov2-pipes { display: flex; flex-direction: column; gap: 12px; }
+.ov2-pipe {
+  padding: 14px 16px 12px; border-radius: 14px; cursor: pointer;
+  background: var(--nt-sunken); border: 1px solid transparent;
+  transition: border-color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease);
+}
+.ov2-pipe:hover { border-color: rgba(var(--primary-pink-rgb), 0.35); background: var(--nt-brand-tint); }
+.ov2-pipe-h { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; margin-bottom: 10px; }
+.ov2-pipe-t { font-weight: 600; font-size: 0.9rem; }
+.ov2-pipe-n { font-size: 0.8rem; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.ov2-pipe-cols {
+  list-style: none; margin: 0; padding: 0;
+  display: grid; grid-template-columns: repeat(var(--cols, 6), minmax(0, 1fr)); gap: 8px; align-items: end;
+}
+.ov2-pc { display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 0; }
+.ov2-pc-bar {
+  position: relative; width: 100%; max-width: 56px; height: 64px; border-radius: 10px;
+  background: rgba(127, 127, 160, 0.10); overflow: hidden; display: block;
+}
+.ov2-pc-fill {
+  position: absolute; left: 0; right: 0; bottom: 0; border-radius: 10px 10px 8px 8px;
+  background: linear-gradient(180deg, #E83C7E 0%, #DA1A5D 55%, #BC1F59 100%);
+  transition: height var(--dur-base) var(--ease);
+}
+.ov2-pc-late {
+  position: absolute; left: 0; right: 0; bottom: 0;
+  background: repeating-linear-gradient(135deg, var(--status-urgent) 0 4px, rgba(217, 45, 32, 0.75) 4px 8px);
+  border-radius: 0 0 8px 8px;
+}
+.ov2-pc.is-empty .ov2-pc-n { color: var(--text-muted); font-weight: 500; }
+.ov2-pc-n { font-size: 1rem; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1; }
+.ov2-pc-l {
+  font-size: 0.68rem; color: var(--text-muted); text-align: center; line-height: 1.2;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+
+/* ── Due soon ──────────────────────────────────────────────────────────── */
+.ov2-due-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.ov2-due-i {
+  width: 100%; display: grid; grid-template-columns: 104px minmax(0, 1fr); gap: 2px 10px; text-align: left;
+  padding: 9px 12px; border-radius: 12px; border: 1px solid transparent; background: var(--nt-sunken);
+  color: var(--text-dark); font: inherit; cursor: pointer;
+}
+.ov2-due-i:hover { border-color: rgba(var(--primary-pink-rgb), 0.35); }
+.ov2-due-t { grid-row: span 2; align-self: center; font-size: 0.8rem; font-weight: 600; color: var(--nt-brand); font-variant-numeric: tabular-nums; }
+.ov2-due-i.is-past .ov2-due-t { color: var(--nt-danger-text); }
+.ov2-due-w { font-size: 0.84rem; font-weight: 600; }
+.ov2-due-who { font-size: 0.78rem; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ── Team ──────────────────────────────────────────────────────────────── */
+.ov2-team-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.ov2-tm { display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; gap: 10px; align-items: center; }
+.ov2-av {
+  width: 34px; height: 34px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center;
+  background: linear-gradient(135deg, #E83C7E, #BC1F59); color: #FFFFFF; font-weight: 700; font-size: 0.78rem;
+}
+.ov2-tm.is-none .ov2-av { background: rgba(127, 127, 160, 0.22); color: var(--text-muted); }
+.ov2-tm-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.ov2-tm-n { font-weight: 600; font-size: 0.88rem; }
+.ov2-tm-s { font-size: 0.74rem; color: var(--text-muted); }
+.ov2-tm-bar { height: 4px; border-radius: 4px; background: rgba(127, 127, 160, 0.14); overflow: hidden; margin-top: 3px; }
+.ov2-tm-bar span { display: block; height: 100%; border-radius: 4px; background: var(--primary-pink); }
+.ov2-tm-c { display: flex; flex-direction: column; align-items: flex-end; font-size: 1.1rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+.ov2-tm-c .ov2-late { font-size: 0.7rem; }
+
+/* ── Everything open: the rows sit inside the card now ─────────────────── */
+.ov2 .ov-list { gap: 6px; }
+.ov2 .ov-row {
+  background: var(--nt-surface); border: 1px solid var(--nt-hairline); border-radius: 14px; box-shadow: none;
+}
+body.dark-mode .ov2 .ov-row { background: rgba(255, 255, 255, 0.03); }
+.ov2 .ov-row:hover { border-color: rgba(var(--primary-pink-rgb), 0.4); box-shadow: var(--nt-lift); transform: none; }
+.ov2 .ov-row.k-build   { --row-c: var(--status-building); }
+.ov2 .ov-row.k-service { --row-c: var(--primary-pink); }
+.ov2 .ov-row.k-rma     { --row-c: var(--status-awaiting); }
+.ov2 .ov-row.is-late   { --row-c: var(--status-urgent); background: linear-gradient(90deg, var(--nt-danger-tint) 0%, var(--nt-surface) 45%); }
+body.dark-mode .ov2 .ov-row.is-late { background: linear-gradient(90deg, var(--nt-danger-tint) 0%, rgba(255, 255, 255, 0.03) 45%); }
+.ov2 .ov-chip { border-radius: 8px; font-weight: 600; letter-spacing: 0.04em; }
+.ov2 .k-build .ov-chip   { color: var(--nt-info-text); background: var(--nt-info-tint); }
+.ov2 .k-service .ov-chip { color: var(--nt-brand); background: var(--nt-brand-tint); }
+.ov2 .k-rma .ov-chip     { color: var(--nt-warning-text); background: var(--nt-warning-tint); }
+.ov2 .ov-who { font-weight: 600; }
+.ov2 .ov-age { font-family: var(--nt-font); font-variant-numeric: tabular-nums; font-weight: 700; }
+
+@media (prefers-reduced-motion: reduce) {
+  .ov2-tiles .ov-tile, .ov2-pc-fill { transition: none; }
+  .ov2-tiles .ov-tile:hover { transform: none; }
+}

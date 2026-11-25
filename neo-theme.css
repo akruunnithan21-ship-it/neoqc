@@ -1,0 +1,470 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   Neo Service 1.16 — the Neo Glass theme across the whole app.
+
+   Owner, 24 Nov 2026: "overhaul the UI with the current theme and make use of
+   the Neo Configurator theme (which i created and not ronys)". The values are
+   the Configurator's tokens (configurator-landing-v2/frontend/src/design/
+   tokens.ts and docs/architecture/design-system.md): Outfit for every role,
+   Rubylicious #DA1A5D for actions, Dark Raspberry #BC1F59 for pink text and
+   hover, Vivid Pink #E83C7E for focus, neutral greys and Sand, Night #0A0A0F
+   for dark, 12 px buttons and fields, 16 px cards, 20 px sheets, the calm
+   dotted backdrop, and the stepper (done = ink, now = pink ring + halo).
+
+   Loaded LAST, so it re-tokens every older stylesheet in place: the app's own
+   variables take the Configurator's values, and the older font families are
+   served by Outfit (the @font-face aliases below), so no screen had to be
+   rewritten. Fonts are the Configurator test copy's own (owner, 25 Nov 2026):
+   Outfit for everything, codes and serials included (Outfit with tabular
+   figures, as the Configurator's "mono" role), and League Spartan for the
+   rupee sign only ("NT Rupee"), because Outfit has no ₹.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* ── Fonts: the Configurator test copy's (NAS, @fontsource-variable 5.3.0) ──
+   Outfit (SIL OFL 1.1, vendor/fonts/outfit/LICENSE) and League Spartan for ₹
+   (SIL OFL 1.1, vendor/fonts/league-spartan/LICENSE). Every family the older
+   sheets name is served by the same files, so the whole app is Outfit. ₹
+   (U+20B9) is left out of Outfit's latin-ext range and drawn by League
+   Spartan in every family, like the Configurator's "NT Rupee" face. */
+@font-face {
+  font-family: 'NT Rupee'; font-style: normal; font-display: swap; font-weight: 100 900;
+  src: url('vendor/fonts/league-spartan/league-spartan-latin-ext-wght-normal.woff2') format('woff2-variations');
+  unicode-range: U+20B9;
+}
+@font-face {
+  font-family: 'Outfit'; font-style: normal; font-display: swap; font-weight: 100 900;
+  src: url('vendor/fonts/outfit/outfit-latin-wght-normal.woff2') format('woff2-variations');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329,
+                 U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Outfit'; font-style: normal; font-display: swap; font-weight: 100 900;
+  src: url('vendor/fonts/outfit/outfit-latin-ext-wght-normal.woff2') format('woff2-variations');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+1D00-1DBF, U+1E00-1E9F,
+                 U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20B8, U+20BA-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Outfit'; font-style: normal; font-display: swap; font-weight: 100 900;
+  src: url('vendor/fonts/league-spartan/league-spartan-latin-ext-wght-normal.woff2') format('woff2-variations');
+  unicode-range: U+20B9;
+}
+@font-face {
+  font-family: 'JetBrains Mono'; font-style: normal; font-display: swap; font-weight: 100 900;
+  src: url('vendor/fonts/outfit/outfit-latin-wght-normal.woff2') format('woff2-variations');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329,
+                 U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'JetBrains Mono'; font-style: normal; font-display: swap; font-weight: 100 900;
+  src: url('vendor/fonts/outfit/outfit-latin-ext-wght-normal.woff2') format('woff2-variations');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+1D00-1DBF, U+1E00-1E9F,
+                 U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20B8, U+20BA-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: 'JetBrains Mono'; font-style: normal; font-display: swap; font-weight: 100 900;
+  src: url('vendor/fonts/league-spartan/league-spartan-latin-ext-wght-normal.woff2') format('woff2-variations');
+  unicode-range: U+20B9;
+}
+@font-face {
+  font-family: 'Hanken Grotesk'; font-style: normal; font-display: swap; font-weight: 100 900;
+  src: url('vendor/fonts/outfit/outfit-latin-wght-normal.woff2') format('woff2-variations');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329,
+                 U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Hanken Grotesk'; font-style: normal; font-display: swap; font-weight: 100 900;
+  src: url('vendor/fonts/outfit/outfit-latin-ext-wght-normal.woff2') format('woff2-variations');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+1D00-1DBF, U+1E00-1E9F,
+                 U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20B8, U+20BA-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Hanken Grotesk'; font-style: normal; font-display: swap; font-weight: 100 900;
+  src: url('vendor/fonts/league-spartan/league-spartan-latin-ext-wght-normal.woff2') format('woff2-variations');
+  unicode-range: U+20B9;
+}
+@font-face {
+  font-family: 'Space Grotesk'; font-style: normal; font-display: swap; font-weight: 100 900;
+  src: url('vendor/fonts/outfit/outfit-latin-wght-normal.woff2') format('woff2-variations');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329,
+                 U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Space Grotesk'; font-style: normal; font-display: swap; font-weight: 100 900;
+  src: url('vendor/fonts/outfit/outfit-latin-ext-wght-normal.woff2') format('woff2-variations');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+1D00-1DBF, U+1E00-1E9F,
+                 U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20B8, U+20BA-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Space Grotesk'; font-style: normal; font-display: swap; font-weight: 100 900;
+  src: url('vendor/fonts/league-spartan/league-spartan-latin-ext-wght-normal.woff2') format('woff2-variations');
+  unicode-range: U+20B9;
+}
+@font-face {
+  font-family: 'Syncopate'; font-style: normal; font-display: swap; font-weight: 100 900;
+  src: url('vendor/fonts/outfit/outfit-latin-wght-normal.woff2') format('woff2-variations');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329,
+                 U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Syncopate'; font-style: normal; font-display: swap; font-weight: 100 900;
+  src: url('vendor/fonts/outfit/outfit-latin-ext-wght-normal.woff2') format('woff2-variations');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+1D00-1DBF, U+1E00-1E9F,
+                 U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20B8, U+20BA-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Syncopate'; font-style: normal; font-display: swap; font-weight: 100 900;
+  src: url('vendor/fonts/league-spartan/league-spartan-latin-ext-wght-normal.woff2') format('woff2-variations');
+  unicode-range: U+20B9;
+}
+/* Codes, serials and numbers that used JetBrains Mono: Outfit with tabular
+   figures (the Configurator's "mono" role). Selectors collected from the
+   older sheets; inline styles are caught by the attribute selector. */
+.svi-n,
+.svi-pw-val,
+.svi-wa .svi-field textarea,
+.svi-pk-time,
+.svi-pk-rtime,
+.svi-sum-v,
+.svi-done-code,
+.svi-tray-count,
+.jdk-banner-eyebrow,
+.hr-tile-n,
+.hr-load-n,
+.hr-lastlog-t,
+.hr-day-n,
+.hr-log-t,
+.hr-table .hr-n,
+.hr-ver,
+.hr-ltile-n,
+.hr-grid thead th.hr-gd,
+.hr-gcell,
+.hr-gkey,
+.hr-ev-t,
+.ops-dialog-sub,
+.ops-mono,
+.ops-kpi-n,
+.ops-lb-count,
+#print-report-container .print-page-subheader .print-page-ref,
+#print-report-container .print-sparkline-stats,
+#print-report-container .print-bar-value,
+#print-report-container .print-integrity,
+#print-report-container .inv-print-table .inv-p-ser,
+.qcb-code,
+.qcb-log,
+.qcb-timer-n,
+body.qcb-printing .qr-code,
+.q-sec-count,
+.q-code,
+.q-clock,
+.q-progress b,
+.q-person-nums,
+.q-tech-history time,
+.rma-seg-n,
+.rma-idle,
+.rma-table .num,
+.rma-fee-amt,
+.rma-in-done-code,
+body.rma-printing .rma-label-code,
+.sv2-count,
+.sv2-kpi-n,
+.sv2-group-n,
+.sv2-qage,
+.sv2-offer-left,
+.sv2-vtime,
+.sv2-tabn,
+.sv2-pw-val,
+.sv2-step-dot,
+.sv2-q-table .num,
+.sv2-ql-amt,
+.sv2-ql-total strong,
+.sv2-qa-a,
+.sv2-qa-sum strong,
+body.sv-printing .svr-code,
+body.sv-printing .num,
+.sv2-sb-dot,
+.sv2-sb-count,
+.sv2-sb-time,
+.sv2-sb-code,
+.sv2-sb-chip-c,
+.login-input,
+.font-mono,
+.splash-status-text,
+.card-id,
+.ppi-usecase-name,
+.ppi-cell-input,
+.ppi-sum-cell,
+.hud-card-value,
+.input-unit-wrapper input,
+.client-sync-status,
+.port-details-list,
+.settings-header-eyebrow,
+.settings-version-badge,
+.settings-sidebar-version,
+.settings-field-note code,
+.settings-pin-input,
+.settings-slider-val,
+.event-log-user,
+.event-log-time,
+.section-title .badge,
+.cv-sval,
+.cv-scan,
+.cv-scan-extra,
+.proc-name,
+.proc-partno,
+.proc-serial,
+.build-timer,
+.notif-when,
+.bench-stat span,
+.bench-cid,
+.bench-bar b,
+.bench-deadline,
+.peek-id,
+.peek-bar b,
+.card-deadline,
+.sv-text,
+.inv-ser,
+.stress-pct,
+.portcert-summary,
+.portcert-runner-step code,
+.sv-stat,
+.sv-col-count,
+.sv-idle,
+.sv-code,
+.sv-job-sub,
+.sv-job-idle,
+.ov-tile-n,
+.ov-age,
+.sv-ev-move,
+.tk-code,
+.tk-tl-when,
+[style*="JetBrains Mono"] { font-variant-numeric: tabular-nums; }
+
+/* ── Tokens ─────────────────────────────────────────────────────────────── */
+:root {
+  --primary-pink: #DA1A5D;            /* Rubylicious (the "Neo pink" accent; app.js ACCENTS.pink) */
+  --primary-pink-rgb: 218, 26, 93;
+  --primary-pink-hover: #BC1F59;      /* Dark Raspberry */
+  --secondary-pink: #E83C7E;          /* Vivid Pink */
+  --bg-color: #F5F5F5;
+  --bg-gradient: linear-gradient(135deg, #F5F5F5 0%, #F4F3EF 100%);
+  --text-dark: #25282A;               /* "Primary Black" */
+  --text-muted: #5E5E5E;
+  --stat-text: #25282A;
+  --glass-bg: rgba(255, 255, 255, 0.82);          /* glass-2: cards */
+  --glass-border: rgba(0, 0, 0, 0.07);
+  --glass-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);  /* e1 */
+  --card-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+  --status-awaiting: #D97706;
+  --status-building: #24508F;
+  --status-completed: #17803D;
+  --status-urgent: #D92D20;
+
+  --nt-brand: #BC1F59;                /* pink TEXT (AA on white) */
+  --nt-focus: #E83C7E;
+  --nt-focus-halo: rgba(232, 60, 126, 0.18);
+  --nt-brand-tint: rgba(218, 26, 93, 0.08);
+  --nt-hairline: rgba(0, 0, 0, 0.08);
+  --nt-input-border: #8C8C8C;
+  --nt-sunken: rgba(0, 0, 0, 0.04);
+  --nt-chrome: rgba(255, 255, 255, 0.9);
+  --nt-surface: #FFFFFF;
+  --nt-e2: 0 4px 12px rgba(0, 0, 0, 0.15);
+  --nt-e3: 0 24px 64px rgba(0, 0, 0, 0.14), 0 2px 8px rgba(0, 0, 0, 0.04);
+  --nt-lift: 0 2px 6px rgba(0, 0, 0, 0.05), 0 14px 36px rgba(0, 0, 0, 0.1);
+  --nt-shadow-brand: 0 8px 24px rgba(218, 26, 93, 0.25);
+  --nt-success-text: #146C34; --nt-success-tint: #DCF5E3;
+  --nt-warning-text: #8A4B00; --nt-warning-tint: #FCEBD2;
+  --nt-danger-text: #B42318;  --nt-danger-tint: #FEE4E2;
+  --nt-info-text: #24508F;    --nt-info-tint: #E6EEF9;
+  --nt-step-done: #25282A;    --nt-step-done-fg: #FFFFFF;
+  --nt-dot-brand: rgba(218, 26, 93, 0.07);
+  --nt-dot-neutral: rgba(0, 0, 0, 0.05);
+  --nt-aurora-pink: rgba(218, 26, 93, 0.06);
+  --nt-aurora-blue: rgba(59, 130, 246, 0.07);
+  --nt-aurora-violet: rgba(139, 92, 246, 0.07);
+  --nt-font: 'NT Rupee', 'Outfit', 'Segoe UI', system-ui, sans-serif;
+}
+body.dark-mode {
+  --bg-color: #0A0A0F;                /* Night */
+  --bg-gradient: linear-gradient(140deg, #0A0A0F 0%, #121217 55%, #0D0D12 100%);
+  --text-dark: #F5F5F7;
+  --text-muted: #A9A9B2;
+  --stat-text: #F5F5F7;
+  --glass-bg: rgba(20, 20, 25, 0.78);
+  --glass-border: rgba(255, 255, 255, 0.08);
+  --glass-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 6px 28px rgba(0, 0, 0, 0.22);
+  --card-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 6px 28px rgba(0, 0, 0, 0.22);
+  --glass-highlight: rgba(255, 255, 255, 0.06);
+  --status-awaiting: #F59E0B;
+  --status-building: #3B82F6;
+  --status-completed: #10B981;
+  --status-urgent: #F04438;
+
+  --nt-brand: #EE73A0;
+  --nt-focus-halo: rgba(232, 60, 126, 0.28);
+  --nt-brand-tint: rgba(232, 60, 126, 0.12);
+  --nt-hairline: rgba(255, 255, 255, 0.08);
+  --nt-input-border: #6E6E79;
+  --nt-sunken: rgba(255, 255, 255, 0.04);
+  --nt-chrome: rgba(20, 20, 25, 0.9);
+  --nt-surface: #141419;
+  --nt-e2: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 10px 40px rgba(0, 0, 0, 0.35);
+  --nt-e3: inset 0 1px 0 rgba(255, 255, 255, 0.07), 0 24px 64px rgba(0, 0, 0, 0.55);
+  --nt-lift: inset 0 1px 0 rgba(255, 255, 255, 0.09), 0 14px 48px rgba(0, 0, 0, 0.42);
+  --nt-shadow-brand: 0 8px 28px rgba(218, 26, 93, 0.38);
+  --nt-success-text: #34D399; --nt-success-tint: rgba(16, 185, 129, 0.14);
+  --nt-warning-text: #FBBF24; --nt-warning-tint: rgba(245, 158, 11, 0.14);
+  --nt-danger-text: #F97066;  --nt-danger-tint: rgba(240, 68, 56, 0.14);
+  --nt-info-text: #60A5FA;    --nt-info-tint: rgba(59, 130, 246, 0.14);
+  --nt-step-done: #F5F5F7;    --nt-step-done-fg: #0A0A0F;
+  --nt-dot-brand: rgba(232, 60, 126, 0.10);
+  --nt-dot-neutral: rgba(255, 255, 255, 0.045);
+  --nt-aurora-pink: rgba(218, 26, 93, 0.14);
+  --nt-aurora-blue: rgba(59, 130, 246, 0.12);
+  --nt-aurora-violet: rgba(139, 92, 246, 0.20);
+}
+
+/* ── Base ───────────────────────────────────────────────────────────────── */
+body { background: var(--bg-gradient); color: var(--text-dark); font-family: var(--nt-font); }
+::selection { background: rgba(218, 26, 93, 0.16); }
+body.dark-mode ::selection { background: rgba(232, 60, 126, 0.32); }
+:where(button, a, input, select, textarea, [role="button"], [tabindex]):focus-visible {
+  outline: 2px solid var(--nt-focus);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 5px var(--nt-focus-halo);
+}
+
+/* The calm backdrop (Configurator "calm" variant): the page gradient, a soft
+   static aurora, and the 24 px dot grid (brand + neutral dots, offset by half
+   a cell), faded towards the edges. */
+.blueprint-dots {
+  background-image: radial-gradient(var(--nt-dot-brand) 1.2px, transparent 1.3px),
+                    radial-gradient(var(--nt-dot-neutral) 1.2px, transparent 1.3px);
+  background-size: 24px 24px;
+  background-position: 0 0, 12px 12px;
+  -webkit-mask-image: radial-gradient(ellipse 120% 100% at 50% 30%, #000 55%, transparent 100%);
+  mask-image: radial-gradient(ellipse 120% 100% at 50% 30%, #000 55%, transparent 100%);
+}
+.blueprint-dots::before {
+  content: ''; position: fixed; inset: 32px 0 0 0; pointer-events: none; z-index: -1;
+  background:
+    radial-gradient(40% 50% at 12% 8%, var(--nt-aurora-pink), transparent 70%),
+    radial-gradient(38% 46% at 92% 14%, var(--nt-aurora-blue), transparent 70%),
+    radial-gradient(46% 52% at 70% 96%, var(--nt-aurora-violet), transparent 72%);
+  opacity: 0.5;
+}
+
+/* ── Chrome: the titlebar and the rail are glass-chrome ─────────────────── */
+.custom-titlebar {
+  background: var(--nt-chrome);
+  border-bottom: 1px solid var(--nt-hairline);
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  font-family: var(--nt-font);
+}
+.titlebar-text { letter-spacing: 0.14em; font-weight: 600; }
+.titlebar-user { font-family: var(--nt-font); border-color: var(--nt-hairline); background: var(--nt-sunken); }
+.tbu-avatar { background: linear-gradient(135deg, #E83C7E, #BC1F59); }
+
+.app-rail {
+  background: var(--nt-chrome);
+  border-right: 1px solid var(--nt-hairline);
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+}
+.rail-item { border-radius: 12px; }
+.rail-item:hover { background: var(--nt-brand-tint); }
+.rail-item.active {
+  background: var(--nt-brand-tint);
+  border-color: rgba(var(--primary-pink-rgb), 0.22);
+  color: var(--nt-brand);
+  box-shadow: inset 3px 0 0 var(--primary-pink);
+}
+.rail-label { font-weight: 600; letter-spacing: 0.06em; }
+
+/* ── Surfaces ───────────────────────────────────────────────────────────── */
+/* Cards (glass-2): white glass, hairline, the guidelines' card shadow, never
+   blurred. The navbar is chrome, so it keeps a blur. */
+.glass-slab { border-radius: 16px; background: var(--glass-bg); border: 1px solid var(--glass-border); box-shadow: var(--glass-shadow); }
+.navbar.glass-slab {
+  background: var(--nt-chrome);
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  border-radius: 16px;
+}
+.nav-title { font-family: var(--nt-font); font-weight: 700; letter-spacing: 0.08em; }
+.modal-card, .ops-dialog { border-radius: 20px; box-shadow: var(--nt-e3); }
+.modal-overlay { background: rgba(10, 10, 15, 0.18); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); }
+body.dark-mode .modal-overlay { background: rgba(5, 5, 8, 0.55); }
+
+/* ── Buttons: 12 px corners, Medium labels; primary = Rubylicious with a top
+   sheen, hover Dark Raspberry + the brand shadow; secondary = glass + hairline */
+.primary-pink-btn, .secondary-btn { border-radius: 12px; font-family: var(--nt-font); font-weight: 600; letter-spacing: 0.005em; }
+.primary-pink-btn {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.08) 0%, rgba(255, 255, 255, 0) 35%) var(--primary-pink);
+  color: #FFFFFF;
+  border: 1px solid transparent;
+}
+.primary-pink-btn:hover:not(:disabled) {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.08) 0%, rgba(255, 255, 255, 0) 35%) var(--primary-pink-hover);
+  box-shadow: var(--nt-shadow-brand);
+  transform: translateY(-1px);
+}
+.primary-pink-btn:active:not(:disabled) { transform: translateY(1px); box-shadow: none; }
+.secondary-btn {
+  background: var(--glass-bg);
+  border: 1px solid var(--nt-hairline);
+  color: var(--text-dark);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+body.dark-mode .secondary-btn { background: rgba(255, 255, 255, 0.05); border-color: var(--nt-hairline); }
+.secondary-btn:hover:not(:disabled) { background: var(--nt-surface); border-color: rgba(var(--primary-pink-rgb), 0.35); }
+body.dark-mode .secondary-btn:hover:not(:disabled) { background: rgba(255, 255, 255, 0.1); }
+
+/* ── Fields: 12 px corners, a 3:1 boundary, the focus halo ───────────────── */
+.settings-input, .settings-select, .sv-search, .filter-select, .login-input, .large-select,
+.sv-field input, .sv-field select, .sv-field textarea, .rma-dlg textarea, .tk-note-add textarea {
+  border-radius: 12px;
+  border: 1px solid var(--nt-input-border);
+  font-family: var(--nt-font);
+}
+.settings-input:focus, .settings-select:focus, .sv-search:focus, .filter-select:focus, .login-input:focus,
+.sv-field input:focus, .sv-field select:focus, .sv-field textarea:focus {
+  border-color: var(--nt-focus);
+  box-shadow: 0 0 0 3px var(--nt-focus-halo);
+  outline: none;
+}
+
+/* ── The stepper (Configurator): done = ink with a check, now = a pink ring
+   with a brand-tint halo, later = muted; 2 px connectors ───────────────── */
+.sv2-step-dot { width: 28px; height: 28px; font-family: var(--nt-font); font-weight: 700; }
+.sv2-step:not(:last-child)::after { top: 13px; height: 2px; left: calc(50% + 16px); right: calc(-50% + 16px); }
+.sv2-step.is-done .sv2-step-dot { background: var(--nt-step-done); border-color: var(--nt-step-done); color: var(--nt-step-done-fg); }
+.sv2-step.is-done:not(:last-child)::after { background: var(--nt-step-done); }
+.sv2-step.is-now .sv2-step-dot {
+  border-color: var(--primary-pink); color: var(--nt-brand); background: var(--nt-surface);
+  box-shadow: 0 0 0 4px var(--nt-brand-tint);
+}
+.sv2-step.is-now .sv2-step-l { color: var(--text-dark); }
+.sv2-step-s, .sv2-step.is-now .sv2-step-s, .rma-steps .sv2-step.is-now .sv2-step-s { color: var(--nt-brand); }
+body.dark-mode .sv2-step-s, body.dark-mode .sv2-step.is-now .sv2-step-dot { color: var(--nt-brand); }
+.rma-steps .sv2-step.is-done .sv2-step-s { color: var(--text-muted); }
+.rma-steps .sv2-step.is-failed .sv2-step-dot { background: var(--status-urgent); border-color: var(--status-urgent); }
+
+/* ── Small things ───────────────────────────────────────────────────────── */
+.sv-tab { font-family: var(--nt-font); }
+.sv-tab.active { color: var(--nt-brand); border-color: var(--primary-pink); }
+.sv-code, .tk-code { color: var(--nt-brand); }
+.sv2-next { border-radius: 14px; border-color: rgba(var(--primary-pink-rgb), 0.3); background: var(--nt-brand-tint); }
+.rma-card, .sv2-card, .sv2-qcard, .ticket-card, .tk-sec, .tk-status, .ov-row { border-radius: 16px; }
+.tk-sheet { border-radius: 20px; background: var(--bg-gradient); }
+
+@media (prefers-reduced-motion: reduce) {
+  .primary-pink-btn:hover:not(:disabled) { transform: none; }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .custom-titlebar, .app-rail, .navbar.glass-slab { backdrop-filter: none; -webkit-backdrop-filter: none; background: var(--nt-surface); }
+}
+
+/* 1.16: the new Neo Tokyo mark (three pinks) is shown calm, as in the
+   Configurator: no pulsing glow around it. */
+.brand-logo-svg, .splash-logo-svg { animation: none; filter: none; }

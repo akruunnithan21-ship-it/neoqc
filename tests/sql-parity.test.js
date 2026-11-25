@@ -440,7 +440,10 @@ test('v2.1 data answers: three offered, two legacy, all five valid on both sides
     }
     // service-v2.11.sql (1.15) adds three RMA document roles and the brand portal, and only those.
     if (k === 'media_role' && last[k].indexOf('job_sheet') !== -1) {
-      assert.deepStrictEqual(last[k], first[k].concat(['submission', 'job_sheet', 'delivery_doc']), "v2.11 changed _vocab_list('media_role') beyond the three RMA roles");
+      // ... and service-v2.12.sql (1.16) the 'note' role.
+      var want = first[k].concat(['submission', 'job_sheet', 'delivery_doc']);
+      if (last[k].indexOf('note') !== -1) want = want.concat(['note']);
+      assert.deepStrictEqual(last[k], want, "v2.11/v2.12 changed _vocab_list('media_role') beyond the RMA roles and 'note'");
       return;
     }
     if (k === 'vendor_kind' && last[k].indexOf('portal') !== -1) {

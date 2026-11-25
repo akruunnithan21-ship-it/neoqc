@@ -1117,14 +1117,20 @@
     var oj = t.closest('[data-open-job]');
     if (oj) { e.stopPropagation(); openJob(oj.getAttribute('data-open-job'), { tab: oj.getAttribute('data-tab') || null }); return; }
     var card = t.closest('[data-job]');
-    if (card) openJob(card.getAttribute('data-job'));
+    if (card) openFromBoard(card.getAttribute('data-job'));
+  }
+  // 1.16: a card opens the read-only summary first (ticket-summary.js); its
+  // Edit button opens this panel. Without the summary file, the panel as before.
+  function openFromBoard(id) {
+    if (window.NeoTicketSummary && typeof window.NeoTicketSummary.openJob === 'function') { window.NeoTicketSummary.openJob(id); return; }
+    openJob(id);
   }
   function onRootKey(e) {
     if (e.key !== 'Enter' && e.key !== ' ') return;
     var t = e.target;
     if (!t || !t.getAttribute || t.getAttribute('role') !== 'button' || !t.getAttribute('data-job')) return;
     e.preventDefault();
-    openJob(t.getAttribute('data-job'));
+    openFromBoard(t.getAttribute('data-job'));
   }
   function kpiClick(key) {
     if (key === 'queue') { setView('queue'); return; }
@@ -2505,7 +2511,18 @@
         if (u && canOpenRma()) A.push({ label: 'Open the RMA', kind: 'open-rma', unit: u.id });
       }
       else if (st === 'in_service') { mv('Start testing', 'verifying'); mv('Needs a part', 'parts_to_order'); A.push({ label: 'Extra work — send a quote', kind: 'quote' }); }
-      else if (st === 'verifying') mv('Mark ready', 'ready', true);
+      else if (st === 'verifying') {
+        // 1.16 (v2.13): QC after a service, only when the customer asks.
+        var qc = qcOf(job.id);
+        if (qc && (qc.status === 'queued' || qc.status === 'testing')) {
+          A.push({ label: qc.status === 'testing' ? 'In QC — being tested' : 'In QC — waiting for the bench', kind: 'qc-wait', disabled: true,
+                   why: 'The QC team runs it on the bench PC. The result comes back here.' });
+          A.push({ label: 'Cancel QC…', kind: 'qc-cancel', qc: qc.id });
+        } else {
+          mv('Mark ready', 'ready', true);
+          A.push({ label: qc && qc.status === 'failed' ? 'QC again…' : 'Send to QC…', kind: 'qc' });
+        }
+      }
       else if (st === 'ready') A.push({ label: 'Hand over', kind: 'handover' });
     } else if (t === 'on_site') {
       var field = canFieldTap(job);
@@ -2564,6 +2581,8 @@
     else if (a.kind === 'field') fieldTap(a.field);
     else if (a.kind === 'visit') switchTab('visit');
     else if (a.kind === 'handover') handoverDialog(jobId);
+    else if (a.kind === 'qc') qcDialog(jobId);
+    else if (a.kind === 'qc-cancel') qcCancelDialog(jobId, a.qc);
   }
   async function showMoveBox() {
     if (jobTab !== 'details') { await switchTab('details'); if (jobTab !== 'details') return; }
@@ -5226,6 +5245,127 @@
     afterQueueWrite(jobId);
   }
 
+  // ── 1.16 (v2.13): QC after a service ─────────────────────────────────────
+  // The customer's own goals (a game at their settings with a target average
+  // FPS, or a piece of work that has to finish), the stability length and
+  // whether it is charged. The bench PC does the rest (QC screen, After
+  // service). Owner, 25 Nov 2026: no "before" test, no serials, no gates.
+  function qcOf(jobId) {
+    var d = D();
+    try { return (d && typeof d.qcOfJob === 'function') ? d.qcOfJob(jobId) : null; } catch (e) { return null; }
+  }
+  function qcGoalRow(kind, i) {
+    if (kind === 'game') {
+      return '<div class="sv2-qc-goal" data-goal="game" data-i="' + i + '">' +
+        '<span class="sv2-qc-goal-k">Game</span>' +
+        '<input type="text" data-g="name" placeholder="Game, e.g. Valorant" autocomplete="off" spellcheck="false">' +
+        '<input type="text" data-g="settings" placeholder="Resolution and quality, e.g. 1080p low" autocomplete="off" spellcheck="false">' +
+        '<input type="number" data-g="target_fps" placeholder="Target avg FPS" min="1" max="2000" step="1" inputmode="numeric">' +
+        '<button type="button" class="sv-linkbtn" data-goal-x="1" aria-label="Remove this goal">Remove</button></div>';
+    }
+    return '<div class="sv2-qc-goal" data-goal="work" data-i="' + i + '">' +
+      '<span class="sv2-qc-goal-k">Work</span>' +
+      '<input type="text" data-g="app" placeholder="App, e.g. Premiere Pro" autocomplete="off" spellcheck="false">' +
+      '<input type="text" data-g="task" placeholder="What has to work, e.g. export the wedding project" autocomplete="off" spellcheck="false">' +
+      '<input type="number" data-g="max_minutes" placeholder="Within (min, optional)" min="1" max="600" step="1" inputmode="numeric">' +
+      '<button type="button" class="sv-linkbtn" data-goal-x="1" aria-label="Remove this goal">Remove</button></div>';
+  }
+  async function qcDialog(jobIdArg) {
+    var jobId = jobIdArg || openJobId;
+    var d = D();
+    var job = jobById(jobId);
+    if (!d || !job) return;
+    if (typeof d.sendToQc !== 'function') { toast('The data layer did not load. Restart the app.', 'error'); return; }
+    var n = 0;
+    var html = '<p>For a customer who wants proof the repair worked. The bench PC runs a health check and a CPU + GPU stability test, then the customer’s own goals. No serial numbers or build checks.</p>' +
+      '<div class="sv-field sv-span2"><span>The customer’s goals (optional)</span>' +
+        '<div class="sv2-qc-goals" id="svd-qc-goals">' + qcGoalRow('game', n++) + '</div>' +
+        '<div class="sv2-qc-add"><button type="button" class="secondary-btn sv2-small" data-add-goal="game">+ Game goal</button>' +
+        '<button type="button" class="secondary-btn sv2-small" data-add-goal="work">+ Work goal</button></div></div>' +
+      field('In the customer’s words (optional)', 'svd-qc-words', '', { textarea: true, wide: true, rows: 2, placeholder: 'e.g. “I want 450 fps in Valorant and Premiere to stop crashing on export”' }) +
+      '<div class="sv-field"><span>Stability test</span><select id="svd-qc-min" class="settings-select">' +
+        '<option value="15" selected>15 minutes</option><option value="30">30 minutes</option><option value="60">60 minutes</option></select>' +
+        '<small class="sv-hint">30 or 60 when the fault was crashes or freezes.</small></div>' +
+      '<div class="sv-field"><span>Charge</span><select id="svd-qc-charge" class="settings-select">' +
+        '<option value="free" selected>Free</option><option value="paid">Paid</option></select></div>' +
+      '<label class="sv-field svd-qc-amt hidden"><span>QC charge (₹)</span>' +
+        '<input type="number" id="svd-qc-amount" min="1" step="1" inputmode="decimal" autocomplete="off"></label>';
+    var node = dlgNode('qc', html);
+    node.addEventListener('click', function (e) {
+      var add = e.target.closest('[data-add-goal]');
+      var list = node.querySelector('#svd-qc-goals');
+      if (add && list) {
+        if (list.querySelectorAll('.sv2-qc-goal').length >= 6) { toast('Up to 6 goals.', 'warning'); return; }
+        list.insertAdjacentHTML('beforeend', qcGoalRow(add.getAttribute('data-add-goal'), n++));
+        return;
+      }
+      var x = e.target.closest('[data-goal-x]');
+      if (x) { var row = x.closest('.sv2-qc-goal'); if (row) row.remove(); }
+    });
+    node.addEventListener('change', function (e) {
+      if (e.target && e.target.id === 'svd-qc-charge') {
+        var amt = node.querySelector('.svd-qc-amt');
+        if (amt) amt.classList.toggle('hidden', e.target.value !== 'paid');
+      }
+    });
+    await openDialog({
+      title: 'Send ' + (job.public_code || 'this ticket') + ' to QC', body: node, okText: 'Send to QC', wide: true,
+      onOk: async function (root) {
+        var s = scopeOf(root, node, 'qc');
+        var goals = [];
+        var rows = s.querySelectorAll('.sv2-qc-goal');
+        for (var i = 0; i < rows.length; i++) {
+          var r = rows[i], kind = r.getAttribute('data-goal');
+          var v = function (k) { var x = r.querySelector('[data-g="' + k + '"]'); return x ? String(x.value || '').trim() : ''; };
+          if (kind === 'game') {
+            if (!v('name') && !v('settings') && !v('target_fps')) continue;          // an empty row is no goal
+            if (!v('name')) return 'Name the game.';
+            var fps = Number(v('target_fps'));
+            if (!(fps >= 1 && fps <= 2000)) return 'Give the target average FPS for ' + v('name') + '.';
+            goals.push({ kind: 'game', name: v('name'), settings: v('settings'), target_fps: Math.round(fps) });
+          } else {
+            if (!v('app') && !v('task') && !v('max_minutes')) continue;
+            if (!v('app')) return 'Name the app for the work goal.';
+            if (!v('task')) return 'Say what has to work in ' + v('app') + '.';
+            var mx = v('max_minutes') ? Number(v('max_minutes')) : null;
+            if (mx != null && !(mx >= 1 && mx <= 600)) return 'The time target should be 1 to 600 minutes.';
+            goals.push({ kind: 'work', app: v('app'), task: v('task'), max_minutes: mx });
+          }
+        }
+        var charge = nval(s, '#svd-qc-charge') || 'free';
+        var amount = charge === 'paid' ? Number(nval(s, '#svd-qc-amount')) : null;
+        if (charge === 'paid' && !(amount > 0)) return 'Enter what the QC test costs.';
+        try {
+          await d.sendToQc(jobId, { goals: goals, charge: charge, amount: amount, minutes: Number(nval(s, '#svd-qc-min')) || 15,
+                                    words: nval(s, '#svd-qc-words') });
+        } catch (e) { demoToast(e); return errMsg(e); }
+        toast((job.public_code || 'The ticket') + ' is in the QC queue.', 'success');
+        scheduleRender();
+        if (openJobId === jobId) paintJobHeader();
+        return true;
+      }
+    });
+  }
+  async function qcCancelDialog(jobIdArg, qcId) {
+    var jobId = jobIdArg || openJobId;
+    var d = D();
+    var job = jobById(jobId);
+    if (!d || !job || qcId == null) return;
+    var node = dlgNode('qcx', '<p>Takes it off the QC bench. The ticket stays at Testing.</p>' +
+      field('Why? (optional)', 'svd-qcx-reason', '', { textarea: true, wide: true, rows: 2, placeholder: 'e.g. The customer no longer wants it' }));
+    await openDialog({
+      title: 'Cancel QC for ' + (job.public_code || 'this ticket'), body: node, okText: 'Cancel QC', danger: true,
+      onOk: async function (root) {
+        var s = scopeOf(root, node, 'qcx');
+        try { await d.cancelQc(qcId, nval(s, '#svd-qcx-reason')); } catch (e) { demoToast(e); return errMsg(e); }
+        toast('QC cancelled.', 'success');
+        scheduleRender();
+        if (openJobId === jobId) paintJobHeader();
+        return true;
+      }
+    });
+  }
+
   async function releaseDialog(jobIdArg) {
     var jobId = jobIdArg || openJobId;             // bound once
     var d = D();
@@ -5772,7 +5912,7 @@
     try {
       d.on('*', function (evs) {
         var kinds = Array.isArray(evs) ? evs : [String(evs || '')];
-        if (kinds.some(function (k) { return ['jobs', 'items', 'units', 'vendors', 'access', 'staff', 'techs'].indexOf(k) !== -1; })) onDataChange(kinds);
+        if (kinds.some(function (k) { return ['jobs', 'items', 'units', 'vendors', 'access', 'staff', 'techs', 'qc'].indexOf(k) !== -1; })) onDataChange(kinds);
       });
     } catch (e) { subscribed = false; }
   }

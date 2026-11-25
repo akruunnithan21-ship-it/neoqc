@@ -1,0 +1,83 @@
+/* Neo Service 1.16 — the QC screen's tabs and its "After service" board
+   (qc-service.js). Tokens from neo-theme.css. */
+
+.qc-tabs {
+  display: inline-flex; gap: 4px; padding: 4px; border-radius: 14px; align-self: flex-start; flex: none;
+  background: var(--nt-sunken, rgba(0, 0, 0, 0.04)); border: 1px solid var(--nt-hairline, rgba(0, 0, 0, 0.08));
+}
+.qc-tab {
+  display: inline-flex; align-items: center; gap: 8px; padding: 8px 16px; border-radius: 11px; border: 0;
+  background: transparent; color: var(--text-muted); font: inherit; font-weight: 600; font-size: 0.88rem; cursor: pointer;
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+.qc-tab:hover { color: var(--text-dark); }
+.qc-tab.active { background: var(--nt-surface, #fff); color: var(--nt-brand, var(--primary-pink)); box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1); }
+.qc-tab-n:empty { display: none; }
+.qc-tab-n {
+  min-width: 20px; height: 20px; padding: 0 6px; border-radius: 10px; display: inline-flex; align-items: center; justify-content: center;
+  background: var(--primary-pink); color: #fff; font-size: 0.72rem; font-weight: 700;
+}
+
+/* The service tab hides the builds parts of the screen. */
+#staff-screen.qc-show-service .dashboard-container > :not(.qc-tabs):not(#qc-service-root) { display: none !important; }
+#staff-screen:not(.qc-show-service) #qc-service-root { display: none; }
+#qc-service-root { flex: none; }
+
+.qcs-lead { margin: 0 0 14px; font-size: 0.88rem; color: var(--text-muted); max-width: 90ch; }
+.qcs-board { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; align-items: start; }
+@media (max-width: 1100px) { .qcs-board { grid-template-columns: 1fr; } }
+.qcs-col {
+  padding: 14px; border-radius: 16px; background: var(--glass-bg); border: 1px solid var(--glass-border); box-shadow: var(--glass-shadow);
+  display: flex; flex-direction: column; gap: 10px;
+}
+.qcs-col-h { display: flex; align-items: center; justify-content: space-between; }
+.qcs-col-h h3 { margin: 0; font-size: 1rem; font-weight: 600; }
+.qcs-n {
+  min-width: 24px; height: 24px; border-radius: 12px; display: inline-flex; align-items: center; justify-content: center;
+  background: var(--nt-sunken); font-weight: 700; font-size: 0.8rem;
+}
+.c-queued .qcs-n { background: var(--nt-warning-tint); color: var(--nt-warning-text); }
+.c-testing .qcs-n { background: var(--nt-brand-tint); color: var(--nt-brand); }
+.c-done .qcs-n { background: var(--nt-success-tint); color: var(--nt-success-text); }
+.qcs-col-s { margin: -6px 0 2px; font-size: 0.78rem; color: var(--text-muted); }
+.qcs-empty { padding: 18px; text-align: center; color: var(--text-muted); font-size: 0.84rem; border: 1px dashed var(--nt-hairline); border-radius: 12px; }
+
+.qcs-card {
+  position: relative; padding: 14px 14px 12px 16px; border-radius: 14px; cursor: pointer;
+  background: var(--nt-surface); border: 1px solid var(--nt-hairline);
+  transition: border-color var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease);
+}
+.qcs-card::before { content: ''; position: absolute; left: 0; top: 10px; bottom: 10px; width: 3px; border-radius: 0 3px 3px 0; background: var(--status-awaiting); }
+.qcs-card.is-testing::before { background: var(--primary-pink); }
+.qcs-card.is-passed::before { background: var(--status-completed); }
+.qcs-card.is-failed::before { background: var(--status-urgent); }
+.qcs-card:hover { border-color: rgba(var(--primary-pink-rgb), 0.4); box-shadow: var(--nt-lift); }
+body.dark-mode .qcs-card { background: rgba(255, 255, 255, 0.03); }
+.qcs-card-h { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.qcs-who { font-weight: 700; font-size: 0.98rem; }
+.qcs-verdict { font-size: 0.74rem; font-weight: 700; padding: 2px 8px; border-radius: 8px; }
+.qcs-verdict.ok { background: var(--nt-success-tint); color: var(--nt-success-text); }
+.qcs-verdict.bad { background: var(--nt-danger-tint); color: var(--nt-danger-text); }
+.qcs-sub { font-size: 0.78rem; color: var(--text-muted); margin-top: 2px; }
+.qcs-goals { list-style: none; margin: 10px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.qcs-goal { font-size: 0.84rem; line-height: 1.35; display: flex; gap: 8px; align-items: baseline; }
+.qcs-goal-k {
+  flex: none; font-size: 0.66rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
+  padding: 2px 6px; border-radius: 6px; background: var(--nt-info-tint); color: var(--nt-info-text);
+}
+.qcs-goal.k-work .qcs-goal-k { background: var(--nt-warning-tint); color: var(--nt-warning-text); }
+.qcs-none { margin: 10px 0 0; font-size: 0.82rem; color: var(--text-muted); }
+.qcs-words { margin: 8px 0 0; font-size: 0.8rem; color: var(--text-muted); font-style: italic; }
+.qcs-summary { margin: 8px 0 0; font-size: 0.82rem; line-height: 1.4; }
+.qcs-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 10px; }
+.qcs-chip { font-size: 0.72rem; font-weight: 600; padding: 2px 8px; border-radius: 8px; background: var(--nt-sunken); }
+.qcs-chip.paid { background: var(--nt-brand-tint); color: var(--nt-brand); }
+.qcs-state { margin-left: auto; font-size: 0.74rem; color: var(--text-muted); }
+
+/* The QC dialog on a service ticket (service.js qcDialog). */
+.sv2-qc-goals { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
+.sv2-qc-goal { display: grid; grid-template-columns: 56px 1.2fr 1.4fr 0.8fr auto; gap: 8px; align-items: center; }
+.sv2-qc-goal input { min-width: 0; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--nt-input-border, #8c8c8c); background: var(--bg-color); color: var(--text-dark); font: inherit; font-size: 0.86rem; }
+.sv2-qc-goal-k { font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); }
+.sv2-qc-add { display: flex; gap: 8px; margin-top: 8px; }
+@media (max-width: 760px) { .sv2-qc-goal { grid-template-columns: 1fr; } }

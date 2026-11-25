@@ -187,6 +187,19 @@
     function rmaDisposition(d) { return (St && St.RMA_DISPOSITIONS && St.RMA_DISPOSITIONS[d]) || 'Closed'; }
 
     var jobs = [], items = [], units = [], intakes = [], events = [], rmaEvents = [], customers = [];
+    var media = [];
+    var serviceQc = [];
+    // A placeholder picture for demo photos: a coloured card with a caption
+    // (an SVG data URI, so nothing has to be fetched).
+    function demoPhoto(id, jobId, caption, colour, at) {
+      var svg = '<svg xmlns="http://www.w3.org/2000/svg" width="400" height="300"><rect width="400" height="300" fill="' + colour +
+        '"/><circle cx="200" cy="125" r="44" fill="none" stroke="#fff" stroke-width="10"/><rect x="150" y="80" width="40" height="18" fill="#fff"/>' +
+        '<text x="200" y="230" font-family="sans-serif" font-size="30" fill="#fff" text-anchor="middle">' + caption + '</text></svg>';
+      return { id: id, job_id: jobId, rma_case_id: null, service_item_id: null, path: 'demo/note-' + id + '.jpg', caption: null,
+               phase: 'during', role: 'note', customer_visible: false, uploaded_by: STAFF.vinayak.email, uploaded_name: STAFF.vinayak.full_name,
+               created_at: at, remark: null, remark_by: null, remark_at: null,
+               url: 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg) };
+    }
     var shipments = [], shipmentItems = [];
     var quotes = [];
     var J = {}, U = {}, I = {}, CU = {};
@@ -484,6 +497,9 @@
                            address: 'Varghese Family Clinic, ground floor, Kaloor-Kadavanthra Road, Kaloor', area: 'Kaloor', pincode: '682017',
                            landmark: 'Near Kaloor bus stand', maps_url: 'https://www.google.com/maps/@10.0004,76.2995,17z',
                            lat: 10.0004, lng: 76.2995 });
+    // 1.16: two PCs at Testing whose owners asked for a QC test.
+    customer('kiran',    { phone_norm: '9847001090', name: 'Kiran Das', area: 'Kakkanad' });
+    customer('devika',   { phone_norm: '9847001091', name: 'Devika Menon', area: 'Panampilly Nagar' });
     customer('ramesh',   { phone_norm: '9847001008', name: 'Ramesh Iyer', address: '14/220, Temple Road, Thrippunithura',
                            area: 'Thrippunithura', pincode: '682301', landmark: 'Behind the Poornathrayeesa temple' });
     customer('sneha',    { phone_norm: '9847001009', name: 'Sneha T', email: 'sneha.t@example.com' });
@@ -624,6 +640,76 @@
     move('sandeep', 2.4 * D, 'verifying', 'ready', 'adhil',
          'Ready to collect. Cleaned and repasted; temperatures under load down from 94 °C to 71 °C.');
     sev('sandeep', 1 * D, 'note', extend(by('ancy'), { body: 'Reminder sent on WhatsApp.' }));
+
+    // 1.16 (v2.13): QC after a service. Kiran's PC waits for the bench; Devika's
+    // is on it now; Sandeep's passed before it was marked ready.
+    t = job('kiran', extend(cust('kiran'), {
+      public_code: 'NT-DEMOQ2C7', created_at: ago(3 * D), received_at: ago(3 * D),
+      job_kind: 'repair_own', stage: 'verifying', stage_since: ago(3 * H),
+      category: 'repair', priority: 'normal', priority_reason: 'Games crash or stutter, Driver problems',
+      fault_keys: ['game_crash', 'driver_crash'], est_minutes: 120,
+      reported_fault: 'Valorant crashes to desktop after 10 minutes; FPS drops in fights.',
+      diagnosis: 'GPU driver corrupted and the RAM running at a wrong XMP voltage.',
+      work_done: 'Clean GPU driver install, XMP profile corrected, Windows updates.',
+      data_consent: 'no_important_data', accessories: ['Power cable'], powers_on: true
+    }));
+    creator(t, 'ancy'); assign(t, 'adhil', ago(2.9 * D));
+    item('kiran', { kind: 'pc', label: 'Gaming PC — Ryzen 5 7600, RTX 4060 Ti', serial: null, purchase_source: 'elsewhere',
+                    accessories: ['Power cable'], powers_on: true, condition_remarks: 'No visible damage.' });
+    move('kiran', 3 * D, null, 'received', 'ancy', 'Received at counter. Reported fault: Valorant crashes to desktop after 10 minutes.');
+    move('kiran', 2.8 * D, 'received', 'diagnosing', 'adhil');
+    move('kiran', 1.5 * D, 'diagnosing', 'in_service', 'adhil');
+    move('kiran', 3 * H, 'in_service', 'verifying', 'adhil');
+
+    t = job('devika', extend(cust('devika'), {
+      public_code: 'NT-DEMOQ3T6', created_at: ago(2 * D), received_at: ago(2 * D),
+      job_kind: 'repair_own', stage: 'verifying', stage_since: ago(5 * H),
+      category: 'upgrade', priority: 'low', priority_reason: 'Upgrade, Slow or hangs',
+      fault_keys: ['upgrade_request', 'slow'], est_minutes: 80,
+      reported_fault: 'Premiere Pro crashes when exporting 4K; wants it faster.',
+      diagnosis: '16 GB RAM is not enough for 4K exports.',
+      work_done: 'RAM upgraded from 16 GB to 32 GB; GPU acceleration turned on in Premiere.',
+      data_consent: 'customer_backed_up', has_customer_data: true, accessories: ['Power cable'], powers_on: true
+    }));
+    creator(t, 'anagha'); assign(t, 'vinayak', ago(1.9 * D));
+    item('devika', { kind: 'pc', label: 'Editing PC — i7-12700, RTX 3060', serial: null, purchase_source: 'neo_tokyo',
+                     accessories: ['Power cable'], powers_on: true, condition_remarks: 'No visible damage.' });
+    move('devika', 2 * D, null, 'received', 'anagha', 'Received at counter. Reported fault: Premiere Pro crashes when exporting 4K.');
+    move('devika', 1.8 * D, 'received', 'diagnosing', 'vinayak');
+    move('devika', 1 * D, 'diagnosing', 'in_service', 'vinayak');
+    move('devika', 5 * H, 'in_service', 'verifying', 'vinayak');
+
+    function qcRow(id, jobKey, o) {
+      var row = extend({
+        id: id, job_id: J[jobKey].id, status: 'queued', goals: [], customer_words: null, charge: 'free', amount: null,
+        stability_minutes: 15, results: {}, summary: null,
+        requested_by: STAFF.ancy.email, requested_by_name: STAFF.ancy.full_name, requested_at: ago(2 * H),
+        tested_by: null, tested_by_name: null, started_at: null, finished_at: null, cancel_reason: null, updated_at: ago(2 * H)
+      }, o);
+      serviceQc.push(row);
+      return row;
+    }
+    qcRow(701, 'kiran', {
+      goals: [{ kind: 'game', name: 'Valorant', settings: '1080p low', target_fps: 450 }],
+      customer_words: 'I want 450 fps in Valorant and no more crashes.', charge: 'paid', amount: 500, stability_minutes: 30,
+      requested_at: ago(2 * H), updated_at: ago(2 * H)
+    });
+    qcRow(702, 'devika', {
+      status: 'testing',
+      goals: [{ kind: 'work', app: 'Premiere Pro', task: 'Export the 4K wedding project', max_minutes: 25 },
+              { kind: 'game', name: 'Forza Horizon 5', settings: '1080p high', target_fps: 90 }],
+      customer_words: 'The export always crashed at 60%.', requested_by: STAFF.anagha.email, requested_by_name: STAFF.anagha.full_name,
+      requested_at: ago(4 * H), tested_by: STAFF.adhil.email, tested_by_name: STAFF.adhil.full_name, started_at: ago(40 * MIN), updated_at: ago(40 * MIN)
+    });
+    qcRow(703, 'sandeep', {
+      status: 'passed',
+      goals: [{ kind: 'game', name: 'Cyberpunk 2077', settings: '1440p high', target_fps: 60 }],
+      requested_at: ago(2.8 * D), tested_by: STAFF.adhil.email, tested_by_name: STAFF.adhil.full_name,
+      started_at: ago(2.7 * D), finished_at: ago(2.5 * D), updated_at: ago(2.5 * D),
+      results: { stability: { minutes: 15, cpu_max_c: 71, gpu_max_c: 69, whea: 0, passed: true },
+                 goals: [{ avg_fps: 74, low1_fps: 58, passed: true }] },
+      summary: 'QC passed: Cyberpunk 2077 at 1440p high averaged 74 fps (target 60); 15 minutes of full load with the CPU at 71 °C.'
+    });
 
     // 5. Vishnu P — in-store, waiting 16 days on ASUS for the RTX 4070 Ti
     //    (holding: the PC waits for it). His Antec PSU went separately
@@ -1150,6 +1236,13 @@
     sev('vishnu', 1 * D - 30 * MIN, 'note', extend(by('athul'), {
       body: 'Chased the ASUS service centre: overdue against their 14 days. Escalated, reference A4471.'
     }));
+    // 1.16 (v2.12): a note with its photos (placeholders in the demo).
+    sev('vishnu', 20 * H, 'note', extend(by('vinayak'), {
+      body: 'Photos of the job sheet F1 gave us, and the card on their bench.',
+      meta: { media_ids: [9001, 9002] }
+    }));
+    media.push(demoPhoto(9001, J.vishnu.id, 'Job sheet', '#24508f', ago(20 * H)));
+    media.push(demoPhoto(9002, J.vishnu.id, 'On the bench', '#17803d', ago(20 * H)));
 
     rmove('rx6600', 1 * D, null, 'logged', 'ancy', 'Expected — Website. Courier: Professional Couriers PCKCH20871234.');
 
@@ -1248,9 +1341,10 @@
       vendors: vendors,
       brands: brands,
       routes: routes,
+      service_qc: serviceQc,
       events: events.concat(rmaEvents).sort(function (a, b) { return a.at < b.at ? -1 : a.at > b.at ? 1 : 0; }),
       staff: staff,
-      media: [],
+      media: media,
       rma_events: rmaEvents,
       techs: techs,
       customers: customers,

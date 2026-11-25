@@ -83,12 +83,24 @@ var JOBS = byId(d.jobs), UNITS = byId(d.units), INTAKES = byId(d.intakes), ITEMS
 
 // ═══ Shape ════════════════════════════════════════════════════════════════
 
-test('build returns every table, media is empty, and it is deterministic', function () {
+test('build returns every table, media holds only note photos, and it is deterministic', function () {
   ['jobs', 'items', 'units', 'intakes', 'vendors', 'events', 'staff', 'media', 'rma_events', 'techs', 'customers',
    'shipments', 'shipment_items', 'quotes'].forEach(function (k) {
     assert.ok(Array.isArray(d[k]), k);
   });
-  assert.deepStrictEqual(d.media, []);
+  // 1.16 (v2.12): the only demo photos are the placeholders of a note with
+  // photos, and every id a note lists is a photo on that note's ticket.
+  d.media.forEach(function (m) {
+    assert.strictEqual(m.role, 'note', m.id + ' is a note photo');
+    assert.ok(/^data:image\/svg\+xml/.test(m.url), m.id + ' is an inline placeholder');
+  });
+  var mediaById = {};
+  d.media.forEach(function (m) { mediaById[m.id] = m; });
+  d.events.filter(function (e) { return e.kind === 'note' && e.meta && e.meta.media_ids; }).forEach(function (e) {
+    e.meta.media_ids.forEach(function (id) {
+      assert.ok(mediaById[id] && mediaById[id].job_id === e.job_id, e.id + ' photo ' + id + ' is on its ticket');
+    });
+  });
   assert.deepStrictEqual(Demo.build(NOW), d);
   assert.strictEqual(sevents.length + revents.length, d.events.length, 'every event belongs to a ticket or a part');
   assert.deepStrictEqual(d.rma_events.map(function (e) { return e.id; }).sort(), revents.map(function (e) { return e.id; }).sort());

@@ -1532,7 +1532,12 @@
           return;
         }
         var card = t.closest('.rma-card');
-        if (card && card.getAttribute('data-unit')) openUnit(card.getAttribute('data-unit'));
+        if (card && card.getAttribute('data-unit')) {
+          // 1.16: the read-only summary first (ticket-summary.js); Edit there opens the panel.
+          var sumApi = window.NeoTicketSummary;
+          if (sumApi && typeof sumApi.openUnit === 'function') sumApi.openUnit(card.getAttribute('data-unit'));
+          else openUnit(card.getAttribute('data-unit'));
+        }
       });
       root.addEventListener('change', function (e) {
         var t = e.target;

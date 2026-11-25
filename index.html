@@ -13,9 +13,6 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: blob: https:; font-src 'self' https://fonts.gstatic.com data:; connect-src 'self' https: wss: data: blob: file:; worker-src 'self' blob:; child-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'">
   <title>Neo Service</title>
   <!-- Google Fonts: Space Grotesk, Hanken Grotesk, JetBrains Mono -->
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Syncopate:wght@700&family=Hanken+Grotesk:ital,wght@0,100..900;1,100..900&family=JetBrains+Mono:ital,wght@0,100..800;1,100..800&family=Space+Grotesk:wght@300..700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
   <link rel="stylesheet" href="print-report.css">
   <link rel="stylesheet" href="shared/diagnostics-tokens.css">
@@ -34,13 +31,22 @@
   <link rel="stylesheet" href="neohr.css">
   <!-- v1.15 Jidoka orb in the titlebar. -->
   <link rel="stylesheet" href="jidoka.css">
+  <!-- 1.16 the ticket summary page. -->
+  <link rel="stylesheet" href="ticket-summary.css">
+  <!-- 1.16 the Neo Glass theme (the Configurator's tokens, Outfit). LAST on
+       purpose: it re-tokens every sheet above. -->
+  <link rel="stylesheet" href="neo-theme.css">
+  <link rel="stylesheet" href="overview.css">
+  <!-- 1.16 QC after a service. -->
+  <link rel="stylesheet" href="qc-service.css">
+  <link rel="stylesheet" href="qc-bench.css">
 </head>
 <body class="light-mode">
   
   <!-- CUSTOM DRAGGABLE TITLEBAR -->
   <div class="custom-titlebar">
     <div class="titlebar-drag-area">
-      <svg class="titlebar-logo-svg" viewBox="0 0 100 100"><circle cx="50" cy="50" r="40" stroke="currentColor" stroke-width="10" fill="none" stroke-dasharray="78.776 5" stroke-dashoffset="60.332" /><path d="M 50,23 L 72,70 C 58,58 50,56 50,56 C 50,56 42,58 28,70 Z" fill="currentColor" /></svg>
+      <svg class="titlebar-logo-svg" viewBox="0 0 100 100" role="img" aria-label="Neo Tokyo"><path fill="#DA1A5D" d="M82.49 69.63L17.41 69.63L18.7 68.85L17.67 69.54L49.96 51.95L82.49 69.63Z"/><path fill="#BC1F59" d="M49.95 12.55L48.36 49.19L18.71 68.15L18.7 68.15L17.41 68.9L49.95 12.55Z"/><path fill="#E83C7E" d="M82.49 68.9L51.54 49.19L49.95 12.65L49.95 12.54L82.49 68.9Z"/><path fill="#BC1F59" d="M12.59 50C12.59 29.39 29.34 12.61 49.95 12.59L49.95 0C22.4 0.03 0 22.45 0 50C0 59.12 2.46 67.68 6.74 75.05L17.67 68.81C14.44 63.28 12.59 56.85 12.59 50Z"/><path fill="#DA1A5D" d="M50 87.41C36.22 87.41 24.16 79.93 17.67 68.81L6.74 75.05C15.4 89.95 31.55 100 50 100C68.6 100 84.85 89.79 93.46 74.69L82.42 68.66C75.95 79.86 63.84 87.41 50 87.41Z"/><path fill="#E83C7E" d="M100 50C100 22.43 77.57 0 50 0C49.98 0 49.96 0 49.95 0L49.95 12.59C49.96 12.59 49.98 12.59 50 12.59C70.63 12.59 87.41 29.37 87.41 50C87.41 56.79 85.6 63.17 82.42 68.66L93.46 74.69C93.5 74.63 93.53 74.57 93.56 74.52C97.66 67.27 100 58.9 100 50Z"/></svg>
       <span class="titlebar-text">NEO SERVICE</span>
       <span id="update-status-pill" class="update-status-pill" style="display:none;"></span>
     </div>
@@ -89,17 +95,7 @@
     <div class="splash-content">
       <div class="hanko-stamp">ネオ東京</div>
       <div class="splash-logo-ring">
-        <svg class="splash-logo-svg" viewBox="0 0 100 100">
-          <defs>
-            <linearGradient id="splash-logo-grad" x1="0%" y1="0%" x2="100%" y2="100%">
-              <stop offset="0%" stop-color="#ff1a75" />
-              <stop offset="50%" stop-color="#e7014e" />
-              <stop offset="100%" stop-color="#b3003b" />
-            </linearGradient>
-          </defs>
-          <circle cx="50" cy="50" r="40" stroke="url(#splash-logo-grad)" stroke-width="10" fill="none" stroke-dasharray="78.776 5" stroke-dashoffset="60.332" />
-          <path d="M 50,23 L 72,70 C 58,58 50,56 50,56 C 50,56 42,58 28,70 Z" fill="url(#splash-logo-grad)" />
-        </svg>
+        <svg class="splash-logo-svg" viewBox="0 0 100 100" role="img" aria-label="Neo Tokyo"><path fill="#DA1A5D" d="M82.49 69.63L17.41 69.63L18.7 68.85L17.67 69.54L49.96 51.95L82.49 69.63Z"/><path fill="#BC1F59" d="M49.95 12.55L48.36 49.19L18.71 68.15L18.7 68.15L17.41 68.9L49.95 12.55Z"/><path fill="#E83C7E" d="M82.49 68.9L51.54 49.19L49.95 12.65L49.95 12.54L82.49 68.9Z"/><path fill="#BC1F59" d="M12.59 50C12.59 29.39 29.34 12.61 49.95 12.59L49.95 0C22.4 0.03 0 22.45 0 50C0 59.12 2.46 67.68 6.74 75.05L17.67 68.81C14.44 63.28 12.59 56.85 12.59 50Z"/><path fill="#DA1A5D" d="M50 87.41C36.22 87.41 24.16 79.93 17.67 68.81L6.74 75.05C15.4 89.95 31.55 100 50 100C68.6 100 84.85 89.79 93.46 74.69L82.42 68.66C75.95 79.86 63.84 87.41 50 87.41Z"/><path fill="#E83C7E" d="M100 50C100 22.43 77.57 0 50 0C49.98 0 49.96 0 49.95 0L49.95 12.59C49.96 12.59 49.98 12.59 50 12.59C70.63 12.59 87.41 29.37 87.41 50C87.41 56.79 85.6 63.17 82.42 68.66L93.46 74.69C93.5 74.63 93.53 74.57 93.56 74.52C97.66 67.27 100 58.9 100 50Z"/></svg>
         <div class="splash-spin-ring animate-spin"></div>
       </div>
       <h1 class="logo-title">NEO TOKYO</h1>
@@ -119,17 +115,7 @@
       <div class="brand-header">
         <div class="hanko-stamp">ネオ東京</div>
         <div class="brand-logo-wrapper">
-          <svg class="brand-logo-svg" viewBox="0 0 100 100">
-            <defs>
-              <linearGradient id="login-logo-grad" x1="0%" y1="0%" x2="100%" y2="100%">
-                <stop offset="0%" stop-color="#ff1a75" />
-                <stop offset="50%" stop-color="#e7014e" />
-                <stop offset="100%" stop-color="#b3003b" />
-              </linearGradient>
-            </defs>
-            <circle cx="50" cy="50" r="40" stroke="url(#login-logo-grad)" stroke-width="10" fill="none" stroke-dasharray="78.776 5" stroke-dashoffset="60.332" />
-            <path d="M 50,23 L 72,70 C 58,58 50,56 50,56 C 50,56 42,58 28,70 Z" fill="url(#login-logo-grad)" />
-          </svg>
+          <svg class="brand-logo-svg" viewBox="0 0 100 100" role="img" aria-label="Neo Tokyo"><path fill="#DA1A5D" d="M82.49 69.63L17.41 69.63L18.7 68.85L17.67 69.54L49.96 51.95L82.49 69.63Z"/><path fill="#BC1F59" d="M49.95 12.55L48.36 49.19L18.71 68.15L18.7 68.15L17.41 68.9L49.95 12.55Z"/><path fill="#E83C7E" d="M82.49 68.9L51.54 49.19L49.95 12.65L49.95 12.54L82.49 68.9Z"/><path fill="#BC1F59" d="M12.59 50C12.59 29.39 29.34 12.61 49.95 12.59L49.95 0C22.4 0.03 0 22.45 0 50C0 59.12 2.46 67.68 6.74 75.05L17.67 68.81C14.44 63.28 12.59 56.85 12.59 50Z"/><path fill="#DA1A5D" d="M50 87.41C36.22 87.41 24.16 79.93 17.67 68.81L6.74 75.05C15.4 89.95 31.55 100 50 100C68.6 100 84.85 89.79 93.46 74.69L82.42 68.66C75.95 79.86 63.84 87.41 50 87.41Z"/><path fill="#E83C7E" d="M100 50C100 22.43 77.57 0 50 0C49.98 0 49.96 0 49.95 0L49.95 12.59C49.96 12.59 49.98 12.59 50 12.59C70.63 12.59 87.41 29.37 87.41 50C87.41 56.79 85.6 63.17 82.42 68.66L93.46 74.69C93.5 74.63 93.53 74.57 93.56 74.52C97.66 67.27 100 58.9 100 50Z"/></svg>
           <div class="brand-text-col">
             <h1 class="logo-title">NEO TOKYO</h1>
             <p class="logo-tagline">ACCELERATING YOUR INFRA</p>
@@ -173,7 +159,7 @@
     <header class="glass-slab navbar">
       <div class="nav-brand">
         <button id="btn-welcome-show-settings" class="hamburger-btn" title="Open Settings Sidebar">☰</button>
-        <svg class="brand-logo-svg" viewBox="0 0 100 100" style="width: 22px; height: 22px; vertical-align: middle; margin-right: 6px; color: var(--primary-pink);"><circle cx="50" cy="50" r="40" stroke="currentColor" stroke-width="10" fill="none" stroke-dasharray="78.776 5" stroke-dashoffset="60.332" /><path d="M 50,23 L 72,70 C 58,58 50,56 50,56 C 50,56 42,58 28,70 Z" fill="currentColor" /></svg>
+        <svg class="brand-logo-svg" style="width: 22px; height: 22px; vertical-align: middle; margin-right: 6px;" viewBox="0 0 100 100" role="img" aria-label="Neo Tokyo"><path fill="#DA1A5D" d="M82.49 69.63L17.41 69.63L18.7 68.85L17.67 69.54L49.96 51.95L82.49 69.63Z"/><path fill="#BC1F59" d="M49.95 12.55L48.36 49.19L18.71 68.15L18.7 68.15L17.41 68.9L49.95 12.55Z"/><path fill="#E83C7E" d="M82.49 68.9L51.54 49.19L49.95 12.65L49.95 12.54L82.49 68.9Z"/><path fill="#BC1F59" d="M12.59 50C12.59 29.39 29.34 12.61 49.95 12.59L49.95 0C22.4 0.03 0 22.45 0 50C0 59.12 2.46 67.68 6.74 75.05L17.67 68.81C14.44 63.28 12.59 56.85 12.59 50Z"/><path fill="#DA1A5D" d="M50 87.41C36.22 87.41 24.16 79.93 17.67 68.81L6.74 75.05C15.4 89.95 31.55 100 50 100C68.6 100 84.85 89.79 93.46 74.69L82.42 68.66C75.95 79.86 63.84 87.41 50 87.41Z"/><path fill="#E83C7E" d="M100 50C100 22.43 77.57 0 50 0C49.98 0 49.96 0 49.95 0L49.95 12.59C49.96 12.59 49.98 12.59 50 12.59C70.63 12.59 87.41 29.37 87.41 50C87.41 56.79 85.6 63.17 82.42 68.66L93.46 74.69C93.5 74.63 93.53 74.57 93.56 74.52C97.66 67.27 100 58.9 100 50Z"/></svg>
         <span class="nav-title">NEO TOKYO // TESTING CLIENT</span>
       </div>
       <div class="nav-controls">
@@ -225,8 +211,8 @@
     <header class="glass-slab navbar">
       <div class="nav-brand">
         <button id="btn-show-settings" class="hamburger-btn" title="Open Settings Sidebar">☰</button>
-        <svg class="brand-logo-svg" viewBox="0 0 100 100" style="width: 22px; height: 22px; vertical-align: middle; margin-right: 6px; color: var(--primary-pink);"><circle cx="50" cy="50" r="40" stroke="currentColor" stroke-width="10" fill="none" stroke-dasharray="78.776 5" stroke-dashoffset="60.332" /><path d="M 50,23 L 72,70 C 58,58 50,56 50,56 C 50,56 42,58 28,70 Z" fill="currentColor" /></svg>
-        <span class="nav-title">NEO TOKYO // ADMIN DASHBOARD</span>
+        <svg class="brand-logo-svg" style="width: 22px; height: 22px; vertical-align: middle; margin-right: 6px;" viewBox="0 0 100 100" role="img" aria-label="Neo Tokyo"><path fill="#DA1A5D" d="M82.49 69.63L17.41 69.63L18.7 68.85L17.67 69.54L49.96 51.95L82.49 69.63Z"/><path fill="#BC1F59" d="M49.95 12.55L48.36 49.19L18.71 68.15L18.7 68.15L17.41 68.9L49.95 12.55Z"/><path fill="#E83C7E" d="M82.49 68.9L51.54 49.19L49.95 12.65L49.95 12.54L82.49 68.9Z"/><path fill="#BC1F59" d="M12.59 50C12.59 29.39 29.34 12.61 49.95 12.59L49.95 0C22.4 0.03 0 22.45 0 50C0 59.12 2.46 67.68 6.74 75.05L17.67 68.81C14.44 63.28 12.59 56.85 12.59 50Z"/><path fill="#DA1A5D" d="M50 87.41C36.22 87.41 24.16 79.93 17.67 68.81L6.74 75.05C15.4 89.95 31.55 100 50 100C68.6 100 84.85 89.79 93.46 74.69L82.42 68.66C75.95 79.86 63.84 87.41 50 87.41Z"/><path fill="#E83C7E" d="M100 50C100 22.43 77.57 0 50 0C49.98 0 49.96 0 49.95 0L49.95 12.59C49.96 12.59 49.98 12.59 50 12.59C70.63 12.59 87.41 29.37 87.41 50C87.41 56.79 85.6 63.17 82.42 68.66L93.46 74.69C93.5 74.63 93.53 74.57 93.56 74.52C97.66 67.27 100 58.9 100 50Z"/></svg>
+        <span class="nav-title">NEO TOKYO // QC</span>
       </div>
       <div class="nav-controls">
         <!-- Notification bell — open flags raised on any build segment -->
@@ -252,6 +238,12 @@
 
     <!-- Main Content Area -->
     <main class="dashboard-container">
+      <!-- 1.16 QC (was Builds): new builds and QC after a service (qc-service.js). -->
+      <nav class="qc-tabs" role="tablist" aria-label="QC">
+        <button type="button" class="qc-tab active" role="tab" aria-selected="true" data-qc-tab="builds">New builds</button>
+        <button type="button" class="qc-tab" role="tab" aria-selected="false" data-qc-tab="service">After service <span class="qc-tab-n" id="qc-service-n"></span></button>
+      </nav>
+      <section id="qc-service-root" class="qc-svc" aria-label="QC after a service"></section>
       <!-- Search and filter panel -->
       <section class="glass-slab search-filter-slab">
         <input type="text" id="search-input" placeholder="Search by customer, technician, serial number..." />
@@ -368,10 +360,34 @@
         </select>
       </div>
     </header>
-    <main class="dashboard-container">
-      <div id="ov-tiles" class="ov-tiles"></div>
-      <p class="sv-lead">Everything the shop has open, newest first. A <strong>Build</strong> is a machine we are making; a <strong>Service</strong> job is one we are fixing. The number on the right is how long it has sat in its current state.</p>
-      <div id="ov-list" class="ov-list"></div>
+    <main class="dashboard-container ov2">
+      <!-- 1.16 the Overview in the Neo Glass theme (shell.js renderOverview):
+           the day at a glance, where the work is by step, what is due soon,
+           the team's load, and everything open (late first). -->
+      <section id="ov-hero" class="ov2-hero" aria-label="Today"></section>
+      <div id="ov-tiles" class="ov-tiles ov2-tiles"></div>
+      <div class="ov2-grid">
+        <div class="ov2-main">
+          <section class="ov2-card" aria-labelledby="ov-pipes-h">
+            <header class="ov2-card-h"><h3 id="ov-pipes-h" class="ov2-h">Where the work is</h3><span class="ov2-card-s">Open work by step. Click a row to open its board.</span></header>
+            <div id="ov-pipes" class="ov2-pipes"></div>
+          </section>
+          <section class="ov2-card" aria-labelledby="ov-list-h">
+            <header class="ov2-card-h"><h3 id="ov-list-h" class="ov2-h">Everything open</h3><span class="ov2-card-s">Late work first. The number is how long it has sat at its step.</span></header>
+            <div id="ov-list" class="ov-list"></div>
+          </section>
+        </div>
+        <aside class="ov2-side">
+          <section class="ov2-card" aria-labelledby="ov-due-h">
+            <header class="ov2-card-h"><h3 id="ov-due-h" class="ov2-h">Due soon</h3><span class="ov2-card-s">Promised, booked or to collect in the next two days</span></header>
+            <div id="ov-due" class="ov2-due"></div>
+          </section>
+          <section class="ov2-card" aria-labelledby="ov-team-h">
+            <header class="ov2-card-h"><h3 id="ov-team-h" class="ov2-h">Team</h3><span class="ov2-card-s">Open work per person</span></header>
+            <div id="ov-team" class="ov2-team"></div>
+          </section>
+        </aside>
+      </div>
     </main>
   </div>
 
@@ -381,7 +397,7 @@
   <div id="queue-screen" class="screen has-rail">
     <header class="glass-slab navbar">
       <div class="nav-brand">
-        <svg class="brand-logo-svg" viewBox="0 0 100 100" style="width:22px;height:22px;vertical-align:middle;margin-right:6px;color:var(--primary-pink);"><circle cx="50" cy="50" r="40" stroke="currentColor" stroke-width="10" fill="none" stroke-dasharray="78.776 5" stroke-dashoffset="60.332" /><path d="M 50,23 L 72,70 C 58,58 50,56 50,56 C 50,56 42,58 28,70 Z" fill="currentColor" /></svg>
+        <svg class="brand-logo-svg" style="width:22px;height:22px;vertical-align:middle;margin-right:6px;" viewBox="0 0 100 100" role="img" aria-label="Neo Tokyo"><path fill="#DA1A5D" d="M82.49 69.63L17.41 69.63L18.7 68.85L17.67 69.54L49.96 51.95L82.49 69.63Z"/><path fill="#BC1F59" d="M49.95 12.55L48.36 49.19L18.71 68.15L18.7 68.15L17.41 68.9L49.95 12.55Z"/><path fill="#E83C7E" d="M82.49 68.9L51.54 49.19L49.95 12.65L49.95 12.54L82.49 68.9Z"/><path fill="#BC1F59" d="M12.59 50C12.59 29.39 29.34 12.61 49.95 12.59L49.95 0C22.4 0.03 0 22.45 0 50C0 59.12 2.46 67.68 6.74 75.05L17.67 68.81C14.44 63.28 12.59 56.85 12.59 50Z"/><path fill="#DA1A5D" d="M50 87.41C36.22 87.41 24.16 79.93 17.67 68.81L6.74 75.05C15.4 89.95 31.55 100 50 100C68.6 100 84.85 89.79 93.46 74.69L82.42 68.66C75.95 79.86 63.84 87.41 50 87.41Z"/><path fill="#E83C7E" d="M100 50C100 22.43 77.57 0 50 0C49.98 0 49.96 0 49.95 0L49.95 12.59C49.96 12.59 49.98 12.59 50 12.59C70.63 12.59 87.41 29.37 87.41 50C87.41 56.79 85.6 63.17 82.42 68.66L93.46 74.69C93.5 74.63 93.53 74.57 93.56 74.52C97.66 67.27 100 58.9 100 50Z"/></svg>
         <span class="nav-title">NEO TOKYO // WORK QUEUE</span>
         <span id="q-stat" class="sv-stat">—</span>
       </div>
@@ -395,7 +411,7 @@
   <div id="service-screen" class="screen has-rail">
     <header class="glass-slab navbar">
       <div class="nav-brand">
-        <svg class="brand-logo-svg" viewBox="0 0 100 100" style="width:22px;height:22px;vertical-align:middle;margin-right:6px;color:var(--primary-pink);"><circle cx="50" cy="50" r="40" stroke="currentColor" stroke-width="10" fill="none" stroke-dasharray="78.776 5" stroke-dashoffset="60.332" /><path d="M 50,23 L 72,70 C 58,58 50,56 50,56 C 50,56 42,58 28,70 Z" fill="currentColor" /></svg>
+        <svg class="brand-logo-svg" style="width:22px;height:22px;vertical-align:middle;margin-right:6px;" viewBox="0 0 100 100" role="img" aria-label="Neo Tokyo"><path fill="#DA1A5D" d="M82.49 69.63L17.41 69.63L18.7 68.85L17.67 69.54L49.96 51.95L82.49 69.63Z"/><path fill="#BC1F59" d="M49.95 12.55L48.36 49.19L18.71 68.15L18.7 68.15L17.41 68.9L49.95 12.55Z"/><path fill="#E83C7E" d="M82.49 68.9L51.54 49.19L49.95 12.65L49.95 12.54L82.49 68.9Z"/><path fill="#BC1F59" d="M12.59 50C12.59 29.39 29.34 12.61 49.95 12.59L49.95 0C22.4 0.03 0 22.45 0 50C0 59.12 2.46 67.68 6.74 75.05L17.67 68.81C14.44 63.28 12.59 56.85 12.59 50Z"/><path fill="#DA1A5D" d="M50 87.41C36.22 87.41 24.16 79.93 17.67 68.81L6.74 75.05C15.4 89.95 31.55 100 50 100C68.6 100 84.85 89.79 93.46 74.69L82.42 68.66C75.95 79.86 63.84 87.41 50 87.41Z"/><path fill="#E83C7E" d="M100 50C100 22.43 77.57 0 50 0C49.98 0 49.96 0 49.95 0L49.95 12.59C49.96 12.59 49.98 12.59 50 12.59C70.63 12.59 87.41 29.37 87.41 50C87.41 56.79 85.6 63.17 82.42 68.66L93.46 74.69C93.5 74.63 93.53 74.57 93.56 74.52C97.66 67.27 100 58.9 100 50Z"/></svg>
         <span class="nav-title">NEO TOKYO // SERVICE</span>
         <span id="sv-stat" class="sv-stat">0 open</span>
       </div>
@@ -439,7 +455,7 @@
   <div id="rma-screen" class="screen has-rail">
     <header class="glass-slab navbar">
       <div class="nav-brand">
-        <svg class="brand-logo-svg" viewBox="0 0 100 100" style="width:22px;height:22px;vertical-align:middle;margin-right:6px;color:var(--primary-pink);"><circle cx="50" cy="50" r="40" stroke="currentColor" stroke-width="10" fill="none" stroke-dasharray="78.776 5" stroke-dashoffset="60.332" /><path d="M 50,23 L 72,70 C 58,58 50,56 50,56 C 50,56 42,58 28,70 Z" fill="currentColor" /></svg>
+        <svg class="brand-logo-svg" style="width:22px;height:22px;vertical-align:middle;margin-right:6px;" viewBox="0 0 100 100" role="img" aria-label="Neo Tokyo"><path fill="#DA1A5D" d="M82.49 69.63L17.41 69.63L18.7 68.85L17.67 69.54L49.96 51.95L82.49 69.63Z"/><path fill="#BC1F59" d="M49.95 12.55L48.36 49.19L18.71 68.15L18.7 68.15L17.41 68.9L49.95 12.55Z"/><path fill="#E83C7E" d="M82.49 68.9L51.54 49.19L49.95 12.65L49.95 12.54L82.49 68.9Z"/><path fill="#BC1F59" d="M12.59 50C12.59 29.39 29.34 12.61 49.95 12.59L49.95 0C22.4 0.03 0 22.45 0 50C0 59.12 2.46 67.68 6.74 75.05L17.67 68.81C14.44 63.28 12.59 56.85 12.59 50Z"/><path fill="#DA1A5D" d="M50 87.41C36.22 87.41 24.16 79.93 17.67 68.81L6.74 75.05C15.4 89.95 31.55 100 50 100C68.6 100 84.85 89.79 93.46 74.69L82.42 68.66C75.95 79.86 63.84 87.41 50 87.41Z"/><path fill="#E83C7E" d="M100 50C100 22.43 77.57 0 50 0C49.98 0 49.96 0 49.95 0L49.95 12.59C49.96 12.59 49.98 12.59 50 12.59C70.63 12.59 87.41 29.37 87.41 50C87.41 56.79 85.6 63.17 82.42 68.66L93.46 74.69C93.5 74.63 93.53 74.57 93.56 74.52C97.66 67.27 100 58.9 100 50Z"/></svg>
         <span class="nav-title">NEO TOKYO // RMA</span>
         <span id="rma-stat" class="sv-stat">—</span>
       </div>
@@ -482,7 +498,7 @@
   <div id="neohr-screen" class="screen has-rail">
     <header class="glass-slab navbar">
       <div class="nav-brand">
-        <svg class="brand-logo-svg" viewBox="0 0 100 100" style="width:22px;height:22px;vertical-align:middle;margin-right:6px;color:var(--primary-pink);"><circle cx="50" cy="50" r="40" stroke="currentColor" stroke-width="10" fill="none" stroke-dasharray="78.776 5" stroke-dashoffset="60.332" /><path d="M 50,23 L 72,70 C 58,58 50,56 50,56 C 50,56 42,58 28,70 Z" fill="currentColor" /></svg>
+        <svg class="brand-logo-svg" style="width:22px;height:22px;vertical-align:middle;margin-right:6px;" viewBox="0 0 100 100" role="img" aria-label="Neo Tokyo"><path fill="#DA1A5D" d="M82.49 69.63L17.41 69.63L18.7 68.85L17.67 69.54L49.96 51.95L82.49 69.63Z"/><path fill="#BC1F59" d="M49.95 12.55L48.36 49.19L18.71 68.15L18.7 68.15L17.41 68.9L49.95 12.55Z"/><path fill="#E83C7E" d="M82.49 68.9L51.54 49.19L49.95 12.65L49.95 12.54L82.49 68.9Z"/><path fill="#BC1F59" d="M12.59 50C12.59 29.39 29.34 12.61 49.95 12.59L49.95 0C22.4 0.03 0 22.45 0 50C0 59.12 2.46 67.68 6.74 75.05L17.67 68.81C14.44 63.28 12.59 56.85 12.59 50Z"/><path fill="#DA1A5D" d="M50 87.41C36.22 87.41 24.16 79.93 17.67 68.81L6.74 75.05C15.4 89.95 31.55 100 50 100C68.6 100 84.85 89.79 93.46 74.69L82.42 68.66C75.95 79.86 63.84 87.41 50 87.41Z"/><path fill="#E83C7E" d="M100 50C100 22.43 77.57 0 50 0C49.98 0 49.96 0 49.95 0L49.95 12.59C49.96 12.59 49.98 12.59 50 12.59C70.63 12.59 87.41 29.37 87.41 50C87.41 56.79 85.6 63.17 82.42 68.66L93.46 74.69C93.5 74.63 93.53 74.57 93.56 74.52C97.66 67.27 100 58.9 100 50Z"/></svg>
         <span class="nav-title">NEO TOKYO // NEOHR</span>
         <span id="hr-stat" class="sv-stat">—</span>
       </div>
@@ -498,7 +514,7 @@
     <header class="glass-slab navbar">
       <div class="nav-brand">
         <button id="btn-client-show-settings" class="hamburger-btn" title="Open Settings Sidebar">☰</button>
-        <svg class="brand-logo-svg" viewBox="0 0 100 100" style="width: 22px; height: 22px; vertical-align: middle; margin-right: 6px; color: var(--primary-pink);"><circle cx="50" cy="50" r="40" stroke="currentColor" stroke-width="10" fill="none" stroke-dasharray="78.776 5" stroke-dashoffset="60.332" /><path d="M 50,23 L 72,70 C 58,58 50,56 50,56 C 50,56 42,58 28,70 Z" fill="currentColor" /></svg>
+        <svg class="brand-logo-svg" style="width: 22px; height: 22px; vertical-align: middle; margin-right: 6px;" viewBox="0 0 100 100" role="img" aria-label="Neo Tokyo"><path fill="#DA1A5D" d="M82.49 69.63L17.41 69.63L18.7 68.85L17.67 69.54L49.96 51.95L82.49 69.63Z"/><path fill="#BC1F59" d="M49.95 12.55L48.36 49.19L18.71 68.15L18.7 68.15L17.41 68.9L49.95 12.55Z"/><path fill="#E83C7E" d="M82.49 68.9L51.54 49.19L49.95 12.65L49.95 12.54L82.49 68.9Z"/><path fill="#BC1F59" d="M12.59 50C12.59 29.39 29.34 12.61 49.95 12.59L49.95 0C22.4 0.03 0 22.45 0 50C0 59.12 2.46 67.68 6.74 75.05L17.67 68.81C14.44 63.28 12.59 56.85 12.59 50Z"/><path fill="#DA1A5D" d="M50 87.41C36.22 87.41 24.16 79.93 17.67 68.81L6.74 75.05C15.4 89.95 31.55 100 50 100C68.6 100 84.85 89.79 93.46 74.69L82.42 68.66C75.95 79.86 63.84 87.41 50 87.41Z"/><path fill="#E83C7E" d="M100 50C100 22.43 77.57 0 50 0C49.98 0 49.96 0 49.95 0L49.95 12.59C49.96 12.59 49.98 12.59 50 12.59C70.63 12.59 87.41 29.37 87.41 50C87.41 56.79 85.6 63.17 82.42 68.66L93.46 74.69C93.5 74.63 93.53 74.57 93.56 74.52C97.66 67.27 100 58.9 100 50Z"/></svg>
         <span class="nav-title">NEO TOKYO // TESTING CLIENT</span>
       </div>
       <div class="nav-controls">
@@ -1812,7 +1828,7 @@
               <div class="settings-section-title">Accent colour</div>
               <p class="settings-section-desc">Buttons, highlights and the Neo Tokyo mark follow this colour.</p>
               <div class="appearance-swatches" role="radiogroup" aria-label="Accent colour">
-                <button type="button" class="appearance-swatch" data-accent="pink" role="radio" aria-checked="false" style="--sw:#e7014e"><span class="sw-dot" aria-hidden="true"></span><span class="sw-label">Neo pink</span></button>
+                <button type="button" class="appearance-swatch" data-accent="pink" role="radio" aria-checked="false" style="--sw:#DA1A5D"><span class="sw-dot" aria-hidden="true"></span><span class="sw-label">Neo pink</span></button>
                 <button type="button" class="appearance-swatch" data-accent="red" role="radio" aria-checked="false" style="--sw:#ef4444"><span class="sw-dot" aria-hidden="true"></span><span class="sw-label">Red</span></button>
                 <button type="button" class="appearance-swatch" data-accent="purple" role="radio" aria-checked="false" style="--sw:#8b5cf6"><span class="sw-dot" aria-hidden="true"></span><span class="sw-label">Purple</span></button>
                 <button type="button" class="appearance-swatch" data-accent="blue" role="radio" aria-checked="false" style="--sw:#3b82f6"><span class="sw-dot" aria-hidden="true"></span><span class="sw-label">Blue</span></button>
@@ -2084,7 +2100,7 @@
     <div class="print-header">
       <div class="print-logo-section">
         <div style="display:flex;align-items:center;gap:8px;">
-          <svg viewBox="0 0 100 100" style="width:30px;height:30px;fill:none;stroke:#000;stroke-width:10;flex-shrink:0;"><circle cx="50" cy="50" r="40" stroke="#000" stroke-width="10" fill="none" stroke-dasharray="78.776 5" stroke-dashoffset="60.332"/><path d="M 50,23 L 72,70 C 58,58 50,56 50,56 C 50,56 42,58 28,70 Z" fill="#000"/></svg>
+          <svg style="width:30px;height:30px;flex-shrink:0;" viewBox="0 0 100 100" role="img" aria-label="Neo Tokyo"><path fill="#DA1A5D" d="M82.49 69.63L17.41 69.63L18.7 68.85L17.67 69.54L49.96 51.95L82.49 69.63Z"/><path fill="#BC1F59" d="M49.95 12.55L48.36 49.19L18.71 68.15L18.7 68.15L17.41 68.9L49.95 12.55Z"/><path fill="#E83C7E" d="M82.49 68.9L51.54 49.19L49.95 12.65L49.95 12.54L82.49 68.9Z"/><path fill="#BC1F59" d="M12.59 50C12.59 29.39 29.34 12.61 49.95 12.59L49.95 0C22.4 0.03 0 22.45 0 50C0 59.12 2.46 67.68 6.74 75.05L17.67 68.81C14.44 63.28 12.59 56.85 12.59 50Z"/><path fill="#DA1A5D" d="M50 87.41C36.22 87.41 24.16 79.93 17.67 68.81L6.74 75.05C15.4 89.95 31.55 100 50 100C68.6 100 84.85 89.79 93.46 74.69L82.42 68.66C75.95 79.86 63.84 87.41 50 87.41Z"/><path fill="#E83C7E" d="M100 50C100 22.43 77.57 0 50 0C49.98 0 49.96 0 49.95 0L49.95 12.59C49.96 12.59 49.98 12.59 50 12.59C70.63 12.59 87.41 29.37 87.41 50C87.41 56.79 85.6 63.17 82.42 68.66L93.46 74.69C93.5 74.63 93.53 74.57 93.56 74.52C97.66 67.27 100 58.9 100 50Z"/></svg>
           <h1 style="margin:0;font-family:'Syncopate',sans-serif;font-weight:700;font-size:20pt;letter-spacing:0.05em;line-height:1;">NEO TOKYO</h1>
         </div>
         <p style="margin:3px 0 1px 0;font-size:8pt;color:#444;text-transform:uppercase;letter-spacing:0.1em;">Service, Assembly &amp; Quality Assurance Department</p>
@@ -2655,24 +2671,22 @@
     <div class="glass-slab modal-card" style="max-width: 650px; width: 100%; padding: 30px; border-radius: 20px;">
       <div class="modal-header" style="border-bottom: 1px solid var(--glass-border); padding-bottom: 15px; margin-bottom: 20px;">
         <h2 style="font-family: 'Syncopate', sans-serif; font-size: 1.3rem; color: var(--primary-pink); letter-spacing: 0.05em; margin: 0;">NEO SERVICE UPDATED</h2>
-        <span data-app-version style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; font-weight: 700; background: rgba(var(--primary-pink-rgb), 0.1); color: var(--primary-pink); padding: 4px 8px; border-radius: 4px;">v1.15.0</span>
+        <span data-app-version style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; font-weight: 700; background: rgba(var(--primary-pink-rgb), 0.1); color: var(--primary-pink); padding: 4px 8px; border-radius: 4px;">v1.16.0</span>
       </div>
       <div class="modal-body" style="font-size: 0.92rem; line-height: 1.6; color: var(--text-dark); max-height: 420px; overflow-y: auto; padding-right: 5px;">
-        <p style="margin-top: 0;">Here's what's new in <strong data-app-version>v1.15.0</strong>:</p>
+        <p style="margin-top: 0;">Here's what's new in <strong data-app-version>v1.16.0</strong>:</p>
         <ul style="padding-left: 20px; display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px;">
-          <li><strong style="color:#17a35a;">Jidoka has been summoned</strong>, and she is being carefully crafted. Look for the green orb beside your name at the top.</li>
-          <li><strong>Every RMA part shows its 8 steps on top</strong>: Ticket created, Component checked, Bill verified, Submitted, RMA Accepted, Ready at centre, Collected, Completed. A <strong>Next step</strong> button says what to do now.</li>
-          <li><strong>Each step is a check.</strong> The part is tested before any claim, then the bill and the part are verified: warranty valid till (from the invoice date), and no physical damage. When a check fails, the customer is told the reason.</li>
-          <li><strong>Submitted and RMA Accepted</strong> record who submitted it and when, the centre's RMA or job number, the receipt or job sheet (PDF or photo), and where the claim stands: in repair, waiting for stock, model change or credit note, with the expected date.</li>
-          <li><strong>Ready at the centre:</strong> we have 2 days to collect it. After that it shows as late for everyone.</li>
-          <li><strong>“How does it go back?”</strong> is asked when the part is back, not when the RMA is created.</li>
-          <li><strong>New Centres &amp; brands tab:</strong> service centres and brand portals, each brand's warranty and invoice rule, and which centre each brand goes to by part type or model. Add new ones any time; the right centre is suggested when you verify a part.</li>
-          <li><strong>New RMA form:</strong> name first, “Who brought or sent it to Neo Tokyo?”, and for SSDs and hard drives the customer is told their data will be lost.</li>
-          <li>After each step, one button tells the customer on <strong>WhatsApp</strong> with the same words their tracking page shows.</li>
+          <li><strong>Click a ticket to see its summary</strong>: the steps on top, what is happening now and for how many days, the details, flags and notes in one read-only page. <strong>Edit</strong> opens the full ticket as before.</li>
+          <li><strong>Photos on notes:</strong> add photos when you write a note. They show under the note, and the customer sees them only when the note is shared with them.</li>
+          <li><strong>A new look</strong> from the Neo Configurator: the new Neo Tokyo logo, Neo pink, the Outfit font everywhere (no more downloads from Google), softer glass cards. The installer has the same look and no longer asks who to install for.</li>
+          <li><strong>A new Overview:</strong> today at a glance, where the work is by step, what is due in the next two days, each person's open work, and everything open with late work first.</li>
+          <li><strong>Builds is now QC</strong>, with two tabs: <strong>New builds</strong> (as before) and <strong>After service</strong>.</li>
+          <li><strong>QC after a service:</strong> at Testing, the service desk can <strong>Send to QC</strong> with the customer's goals: a game at a target FPS (for example Valorant at 450 fps), or the work that used to fail. Choose a 15, 30 or 60-minute stability test, free or paid.</li>
+          <li><strong>The bench test</strong> runs on the customer's PC: a health check (drives, idle temperatures, hardware errors), Prime95 + FurMark stability, game FPS measured with Intel PresentMon (average and 1% low), and a timer with a crash check for work. The result goes on the ticket and the tracking page, with a one-page <strong>Service QC report</strong> to print or send as PDF.</li>
         </ul>
       </div>
       <div class="modal-footer" style="border-top: 1px solid var(--glass-border); padding-top: 15px; display: flex; justify-content: flex-end; margin-top: 20px;">
-        <button id="btn-close-changelog" data-app-version-label class="primary-pink-btn" style="padding: 10px 24px; font-weight: 700; font-size: 0.95rem;">Launch Neo Service v1.15.0</button>
+        <button id="btn-close-changelog" data-app-version-label class="primary-pink-btn" style="padding: 10px 24px; font-weight: 700; font-size: 0.95rem;">Launch Neo Service v1.16.0</button>
       </div>
     </div>
   </div>
@@ -2719,6 +2733,11 @@
   <script src="service-intake.js"></script>
   <script src="service.js"></script>
   <script src="rma.js"></script>
+  <!-- 1.16 the read-only ticket summary page (Service and RMA). -->
+  <script src="ticket-summary.js"></script>
+  <!-- 1.16 the QC screen's "After service" tab, and its bench test. -->
+  <script src="qc-bench.js"></script>
+  <script src="qc-service.js"></script>
   <script src="queue.js"></script>
   <script src="vendor/leaflet/leaflet.js"></script>
   <script src="neohr.js"></script>

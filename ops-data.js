@@ -83,7 +83,8 @@
   var RELEASE_TARGETS = ['ready', 'in_service', 'revisit_needed', 'work_done'];
   var MEDIA_ROLES = ['condition', 'serial_label', 'invoice', 'damage', 'packing', 'unboxing',
                      'during', 'after', 'vendor_doc', 'return_condition', 'other',
-                     'submission', 'job_sheet', 'delivery_doc'];   // 1.15 (v2.11)
+                     'submission', 'job_sheet', 'delivery_doc',   // 1.15 (v2.11)
+                     'note'];                                     // 1.16 (v2.12): a photo taken for a note
   var PDF_ROLES = ['invoice', 'vendor_doc', 'job_sheet', 'delivery_doc'];
   var PRIVATE_ROLES = ['invoice', 'serial_label', 'vendor_doc', 'job_sheet', 'delivery_doc'];
   var INTAKE_PHASE_ROLES = ['condition', 'serial_label', 'invoice', 'unboxing', 'damage', 'packing'];
@@ -138,6 +139,8 @@
   // 1.15 (v2.11): the centre directory — brands and routes (brand + part type
   // + model → centre). Empty until the server has v2.11.
   var brandList = [], routeList = [];
+  // 1.16 (v2.13): QC after a service. Empty until the server has v2.13.
+  var qcList = [];
   var staffList = [], techList = [];
   var accessData = null;
   var mediaById = {};
@@ -409,7 +412,7 @@
   var emitTimer = null;
   // 'work': the work queue changed (any successful work_* write, a work_alerts
   // realtime row, a tick that moved something). Screens refetch workQueue().
-  var ALL_EVENTS = ['jobs', 'items', 'units', 'intakes', 'vendors', 'staff', 'techs', 'access', 'work'];
+  var ALL_EVENTS = ['jobs', 'items', 'units', 'intakes', 'vendors', 'staff', 'techs', 'access', 'work', 'qc'];
 
   function emit(ev) {
     pending[ev] = true;
@@ -558,6 +561,7 @@
     intakeById = {};
     vendorById = {}; vendorList = null;
     brandList = []; routeList = [];
+    qcList = [];
     staffList = []; techList = [];
     mediaById = {};
     demoData = null;
@@ -731,7 +735,19 @@
     emit('access');
   }
 
-  var LOADERS = { jobs: loadJobs, units: loadUnits, vendors: loadVendors, staff: loadStaff, techs: loadTechs, access: loadAccess };
+  // 1.16 (v2.13): QC jobs after a service, newest first. Before v2.13 the
+  // table does not exist: the list is just empty, never an error banner.
+  async function loadQc(gen) {
+    var c = readable();
+    var r = null;
+    try { r = await timed(c.from('service_qc').select('*').order('requested_at', { ascending: false }).limit(200), READ_MS); }
+    catch (e) { r = null; }
+    if (gen !== generation) return;
+    qcList = (r && !r.error && r.data) || [];
+    emit('qc');
+  }
+
+  var LOADERS = { jobs: loadJobs, units: loadUnits, vendors: loadVendors, staff: loadStaff, techs: loadTechs, access: loadAccess, qc: loadQc };
 
   async function runKind(kind, gen) {
     try {
@@ -1130,6 +1146,7 @@
     intakeById = indexBy(d.intakes);
     vendorById = indexBy(d.vendors); vendorList = null;
     brandList = asArray(d.brands); routeList = asArray(d.routes);
+    qcList = asArray(d.service_qc);
     staffList = asArray(d.staff).filter(function (s) { return s && (s.full_name || s.name); }).map(function (s) {
       return Object.assign({ full_name: s.name, active: true }, s);
     });
@@ -1269,6 +1286,14 @@
   }
   function vendor(id) { return (id != null && id !== '' && cacheValid() && vendorById[String(id)]) || null; }
   function brands() { return cacheValid() ? brandList.slice() : []; }
+  function qcJobs() { return cacheValid() ? qcList.slice() : []; }
+  // The ticket's QC job: the open one, else the latest.
+  function qcOfJob(jobId) {
+    if (!cacheValid() || jobId == null) return null;
+    var mine = qcList.filter(function (q) { return q && String(q.job_id) === String(jobId); });
+    var open = mine.filter(function (q) { return q.status === 'queued' || q.status === 'testing'; })[0];
+    return open || mine.sort(function (a, b) { return String(b.requested_at).localeCompare(String(a.requested_at)); })[0] || null;
+  }
   function routes() { return cacheValid() ? routeList.slice() : []; }
   function staff() { return cacheValid() ? staffList.slice() : []; }
   function techs() { return cacheValid() ? techList.slice() : []; }
@@ -1793,11 +1818,20 @@
     return res;
   }
 
-  async function addNote(jobId, body, visible) {
+  // mediaIds (1.16, server v2.12): photos already uploaded for this note. Sent
+  // only when there are some, so a note without photos works on any server.
+  function noteMediaIds(ids) {
+    return (Array.isArray(ids) ? ids : []).map(function (x) { return Number(x); })
+      .filter(function (x) { return isFinite(x) && x > 0; });
+  }
+  async function addNote(jobId, body, visible, mediaIds) {
     writable();
     requireId(jobId, 'ticket');
     var text = need(body, 'Write something first.');
-    return rpc('service_add_note', { p_job_id: jobId, p_body: text, p_visible: visible === true });
+    var params = { p_job_id: jobId, p_body: text, p_visible: visible === true };
+    var ids = noteMediaIds(mediaIds);
+    if (ids.length) params.p_media_ids = ids;
+    return rpc('service_add_note', params);
   }
 
   // ── device password (sql/service-v2.1.sql) ────────────────────────────────
@@ -2058,6 +2092,43 @@
     return vendorById[String(data.id)];
   }
 
+  // 1.16 (v2.13): QC after a service.
+  function mergeQc(row) {
+    if (!row || row.id == null) return;
+    qcList = [row].concat(qcList.filter(function (q) { return String(q.id) !== String(row.id); }));
+    emit('qc');
+  }
+  async function sendToQc(jobId, o) {
+    writable();
+    requireId(jobId, 'ticket');
+    o = o || {};
+    var res = await rpc('service_qc_send', {
+      p_job_id: jobId, p_goals: Array.isArray(o.goals) ? o.goals : [], p_charge: o.charge === 'paid' ? 'paid' : 'free',
+      p_amount: o.charge === 'paid' ? toNum(o.amount) : null, p_minutes: Number(o.minutes) || 15, p_words: clean(o.words)
+    });
+    mergeQc(res);
+    try { await fetchJobsInto([String(jobId)], true); } catch (e) { quiet('jobs')(e); }
+    return res;
+  }
+  async function cancelQc(id, reason) {
+    writable();
+    var res = await rpc('service_qc_cancel', { p_id: Number(id), p_reason: clean(reason) });
+    mergeQc(res);
+    return res;
+  }
+  async function startQc(id) {
+    writable();
+    var res = await rpc('service_qc_start', { p_id: Number(id) });
+    mergeQc(res);
+    return res;
+  }
+  async function finishQc(id, passed, results, summary) {
+    writable();
+    var res = await rpc('service_qc_finish', { p_id: Number(id), p_passed: passed === true, p_results: results || {}, p_summary: clean(summary) });
+    mergeQc(res);
+    return res;
+  }
+
   async function vendorResult(id, result, reason, replacementSerial, courier, awb, note) {
     writable();
     requireId(id, 'RMA part');
@@ -2129,11 +2200,14 @@
     return afterRmaWrite(res, [id]);
   }
 
-  async function rmaNote(id, body, visible) {
+  async function rmaNote(id, body, visible, mediaIds) {
     writable();
     requireId(id, 'RMA part');
     var text = need(body, 'Write something first.');
-    return rpc('rma_add_note', { p_case_id: id, p_body: text, p_visible: visible === true });
+    var params = { p_case_id: id, p_body: text, p_visible: visible === true };
+    var ids = noteMediaIds(mediaIds);
+    if (ids.length) params.p_media_ids = ids;
+    return rpc('rma_add_note', params);
   }
 
   // Column-diff UPDATE, only the columns the server grants.
@@ -3451,6 +3525,13 @@
     saveRoute: saveRoute,
     deleteRoute: deleteRoute,
     saveVendor: saveVendor,
+    // 1.16 (v2.13): QC after a service
+    qcJobs: qcJobs,
+    qcOfJob: qcOfJob,
+    sendToQc: sendToQc,
+    cancelQc: cancelQc,
+    startQc: startQc,
+    finishQc: finishQc,
 
     // media
     uploadMedia: uploadMedia,
