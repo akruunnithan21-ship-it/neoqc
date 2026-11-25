@@ -4562,6 +4562,10 @@
         }).join('') +
         '<p class="sv-hint">If this part came out of that machine, send it from the ticket’s Items tab instead — then the ticket follows the part.</p></div>';
     }
+    // 1.17 (brief §6): everything for this customer on its own page.
+    if (window.NeoCustomerHistory && res && (res.customer || Number(res.jobs_total) || openR.length)) {
+      html += '<div class="rma-in-hist"><button type="button" class="rma-linkbtn" data-lookup-history="' + esc(n) + '">Customer history</button></div>';
+    }
     box.innerHTML = html;
     syncIntake(f);
   }
@@ -4907,6 +4911,11 @@
           f.touched = true;
           syncIntake(f);
         }
+        return;
+      }
+      var lh = t.closest('[data-lookup-history]');
+      if (lh) {
+        if (window.NeoCustomerHistory) window.NeoCustomerHistory.open(lh.getAttribute('data-lookup-history'), (el('rma-in-name') || {}).value || '');
         return;
       }
       var lo = t.closest('[data-lookup-open]');

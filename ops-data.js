@@ -1227,6 +1227,69 @@
     };
   }
 
+  // 1.17 (v2.14) — demo answers for serial_history / customer_history, from
+  // the demo caches, in the server's shapes.
+  function normSerial(v) { return String(v || '').toUpperCase().replace(/[^A-Z0-9]/g, ''); }
+  function demoUnitRow(u, sn) {
+    var it = intakeById[String(u.intake_id)] || {};
+    var v = vendorById ? vendorById[String(u.vendor_id)] : null;
+    return {
+      id: u.id, public_code: u.public_code, kind: u.kind, brand: u.brand || null, model: u.model || null,
+      serial: u.serial || null, replacement_serial: u.replacement_serial || null,
+      matched: sn && normSerial(u.serial) === sn ? 'serial' : 'replacement',
+      stage: u.stage, disposition: u.disposition || null, vendor_result: u.vendor_result || null,
+      fault: u.fault || null, our_finding: u.our_finding || null,
+      purchase_source: u.purchase_source || null, invoice_no: u.invoice_no || null, purchase_date: u.purchase_date || null,
+      build_ticket_id: u.build_ticket_id || null, warranty_until: u.warranty_until || null,
+      warranty_over: !!(u.warranty_until && String(u.warranty_until).slice(0, 10) < new Date().toISOString().slice(0, 10)),
+      vendor_id: u.vendor_id || null, vendor_name: v ? (v.public_name || v.name) : null,
+      owner_name: u.owner_name || null, owner_phone: u.owner_phone || null,
+      sender_name: it.sender_name || null, sender_phone: it.sender_phone || null,
+      service_job_id: u.service_job_id || null, created_at: u.created_at, closed_at: u.closed_at || null
+    };
+  }
+  function demoJobRow(j) {
+    return { id: j.id, public_code: j.public_code, service_type: j.service_type || 'in_store', stage: j.stage, outcome: j.outcome || null,
+      device_label: j.device_label || null, reported_fault: j.reported_fault || null, work_done: j.work_done || null,
+      assignee: j.assignee || null, bill_total: j.bill_total || null, customer_name: j.customer_name || null,
+      customer_phone: j.customer_phone || null, created_at: j.created_at, closed_at: j.closed_at || null };
+  }
+  function demoSerialHistory(sn) {
+    var today = new Date().toISOString().slice(0, 10);
+    var hits = Object.keys(unitById).map(function (k) { return unitById[k]; })
+      .filter(function (u) { return normSerial(u.serial) === sn || normSerial(u.replacement_serial) === sn; });
+    var hidden = hits.filter(function (u) { return u.stage === 'closed' && u.warranty_until && String(u.warranty_until).slice(0, 10) < today; });
+    var jobs = Object.keys(jobsById).map(function (k) { return jobsById[k]; }).filter(function (j) {
+      if (normSerial(j.device_serial) === sn) return true;
+      return (itemsByJob[String(j.id)] || []).some(function (it) { return normSerial(it.serial) === sn; });
+    }).map(function (j) {
+      var it = (itemsByJob[String(j.id)] || []).filter(function (x) { return normSerial(x.serial) === sn; })[0];
+      var row = demoJobRow(j);
+      row.item_label = it ? it.label : null;
+      row.item_kind = it ? it.kind : null;
+      return row;
+    });
+    return {
+      serial: sn,
+      rma: hits.filter(function (u) { return hidden.indexOf(u) === -1; }).map(function (u) { return demoUnitRow(u, sn); })
+        .sort(function (a, b) { return String(b.created_at || '').localeCompare(String(a.created_at || '')); }),
+      hidden_rma: hidden.length,
+      jobs: jobs.sort(function (a, b) { return String(b.created_at || '').localeCompare(String(a.created_at || '')); }),
+      builds: []
+    };
+  }
+  function demoCustomerHistory(n) {
+    var base = demoLookup(n);
+    var jobs = Object.keys(jobsById).map(function (k) { return jobsById[k]; })
+      .filter(function (j) { return normPhone(j.customer_phone) === n; })
+      .sort(function (a, b) { return String(b.created_at || '').localeCompare(String(a.created_at || '')); });
+    var rma = Object.keys(unitById).map(function (k) { return unitById[k]; }).filter(function (u) {
+      var it = intakeById[String(u.intake_id)];
+      return normPhone(u.owner_phone) === n || normPhone(it && it.sender_phone) === n;
+    }).sort(function (a, b) { return String(b.created_at || '').localeCompare(String(a.created_at || '')); });
+    return { phone_norm: n, customer: base.customer, jobs: jobs.map(demoJobRow), rma: rma.map(function (u) { return demoUnitRow(u, ''); }), builds: [] };
+  }
+
   function isDemo() { return demoFlag; }
 
   // Switching swaps every cache. Resolves with the new load's status.
@@ -1514,6 +1577,33 @@
     accessData = a || null;
     emit('access');
     return accessData;
+  }
+
+  // 1.17 (server v2.14, owner's brief §5): everything known about one part by
+  // its serial — earlier RMA claims (claims whose warranty has ended are only
+  // counted, owner's rule), service tickets it came in on, builds it went into.
+  async function serialHistory(serial) {
+    var sn = normSerial(serial);
+    var empty = { serial: sn, rma: [], hidden_rma: 0, jobs: [], builds: [] };
+    if (sn.length < 4) return empty;
+    if (demoFlag) return demoSerialHistory(sn);
+    var res = await rpc('serial_history', { p_serial: sn }, READ_MS);
+    if (!res || typeof res !== 'object') return empty;
+    var out = Object.assign({}, empty, res);
+    ['rma', 'jobs', 'builds'].forEach(function (k) { if (!Array.isArray(out[k])) out[k] = []; });
+    return out;
+  }
+  // 1.17 (server v2.14, brief §6): one customer, everything — every service
+  // ticket (never purged), every RMA part (expired warranties included) and
+  // the builds they bought.
+  async function customerHistory(phone) {
+    var n = normPhone(phone);
+    if (!phoneOk(n)) throw new Error('NEO_GATE: That phone number is not complete.');
+    if (demoFlag) return demoCustomerHistory(n);
+    var res = await rpc('customer_history', { p_phone: n }, READ_MS);
+    var out = Object.assign({ phone_norm: n, customer: null, jobs: [], rma: [], builds: [] }, res || {});
+    ['jobs', 'rma', 'builds'].forEach(function (k) { if (!Array.isArray(out[k])) out[k] = []; });
+    return out;
   }
 
   // SPEC-AMENDMENTS A20: find a past build by receipt code, name or serial.
@@ -3474,6 +3564,8 @@
     rmaEvents: rmaEvents,
     media: media,
     lookupCustomer: lookupCustomer,
+    serialHistory: serialHistory,
+    customerHistory: customerHistory,
     myModules: myModules,
     findBuilds: findBuilds,
     myRequests: myRequests,

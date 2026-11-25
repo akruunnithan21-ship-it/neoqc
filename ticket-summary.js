@@ -237,7 +237,7 @@
     '</div>' +
     '<div id="tk-notes" class="tk-notes"><p class="tk-muted">Loading notes…</p></div>';
   }
-  function head(code, kicker, title, sub, chips) {
+  function head(code, kicker, title, sub, chips, phone, histName) {
     return '<header class="tk-head">' +
       '<div class="tk-head-main">' +
         '<div class="tk-kicker"><span class="tk-code">' + esc(code) + '</span>' + (kicker ? ' · ' + esc(kicker) : '') + (chips || '') + '</div>' +
@@ -245,6 +245,8 @@
         (sub ? '<div class="tk-sub">' + sub + '</div>' : '') +
       '</div>' +
       '<div class="tk-head-acts">' +
+        // 1.17 (brief §6): everything for this customer, on its own page.
+        (phone && window.NeoCustomerHistory ? '<button type="button" class="secondary-btn tk-hist-btn" data-tk="history" data-phone="' + esc(phone) + '" data-name="' + esc(histName || '') + '">Customer history</button>' : '') +
         '<button type="button" class="primary-pink-btn" data-tk="edit">Edit</button>' +
         '<button type="button" class="secondary-btn" data-tk="copy-link">Copy tracking link</button>' +
         '<button type="button" class="tk-x" data-tk="close" aria-label="Close" title="Close">&times;</button>' +
@@ -342,7 +344,7 @@
     ]);
     var rail = section('Status', status, 'tk-card') + section('Flags', flagsHtml(flags), 'tk-card') + section('Notes', notesBox(), 'tk-card');
 
-    return head(job.public_code || '', [m.typeLabel(type), cat].filter(Boolean).join(' · '), job.customer_name || 'Customer', sub, pri) +
+    return head(job.public_code || '', [m.typeLabel(type), cat].filter(Boolean).join(' · '), job.customer_name || 'Customer', sub, pri, job.customer_phone, job.customer_name) +
       '<div class="tk-status">' + stepBar(s.steps, states, subs, 'Where this ticket is') +
         nowRow(tv.ball, tv.sentence, m.daysInStage(job, now), tv.risk, '') + '</div>' +
       '<div class="tk-grid"><div class="tk-main">' + main + '</div><aside class="tk-rail">' + rail + '</aside></div>';
@@ -479,7 +481,7 @@
     // days from when the current step began, not from the stage.
     var since = u.stage === 'with_vendor' ? (ms(u.vendor_ready_at) || ms(u.vendor_accepted_at) || ms(u.submitted_at) || ms(u.stage_since)) : null;
     var days = since != null ? Math.max(0, (now - since) / 86400000) : m.daysInStage(u, now);
-    return head(u.public_code || '', 'Warranty claim', title, sub, '') +
+    return head(u.public_code || '', 'Warranty claim', title, sub, '', u.owner_phone || (it && it.sender_phone) || '', u.owner_name || (it && it.sender_name) || '') +
       '<div class="tk-status">' + stepBar(rs.steps, rs.states, subs, 'Where this RMA is') +
         nowRow(m.rmaBallOf(u), sentence, days, risk, '') + '</div>' +
       '<div class="tk-grid"><div class="tk-main">' + main + '</div><aside class="tk-rail">' + rail + '</aside></div>';
@@ -618,6 +620,12 @@
     if (!a) return;
     var act = a.getAttribute('data-tk');
     if (act === 'close') { close(); return; }
+    if (act === 'history') {
+      var ph = a.getAttribute('data-phone'), nm = a.getAttribute('data-name');
+      close();
+      if (window.NeoCustomerHistory) window.NeoCustomerHistory.open(ph, nm);
+      return;
+    }
     if (act === 'qc-report' || act === 'qc-bench') {
       var qid = a.getAttribute('data-qc');
       if (window.NeoQcBench && qid) {

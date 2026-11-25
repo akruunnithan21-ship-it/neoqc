@@ -1819,7 +1819,10 @@
     var head = h('div', { cls: 'svi-lk-head' + (cust ? ' is-found' : '') }, [
       h('strong', { text: cust ? (cust.name ? String(cust.name) : 'Returning customer') : (total ? 'Known number' : 'New customer') }),
       cust && cust.kind && cust.kind !== 'person' ? h('span', { cls: 'svi-tag', text: cust.kind === 'trade_partner' ? 'Trade partner' : 'Business' }) : null,
-      h('span', { cls: 'svi-lk-count', text: cust || total ? countTxt : 'Nothing on file for this number.' })
+      h('span', { cls: 'svi-lk-count', text: cust || total ? countTxt : 'Nothing on file for this number.' }),
+      // 1.17 (brief §6): the customer's whole history on its own page.
+      (cust || total || openRma.length) && window.NeoCustomerHistory
+        ? h('button', { type: 'button', cls: 'svi-linkbtn', 'data-act': 'cust-history', text: 'Full history' }) : null
     ]);
     host.appendChild(head);
 
@@ -3415,6 +3418,12 @@
         if (sb) { sb.textContent = ''; sb.classList.add('hidden'); }
         return;
       }
+    }
+    if (act === 'cust-history') {
+      var lr = F.lookup && F.lookup.result;
+      var ph = (lr && lr.phone_norm) || (byId('svi-phone') || {}).value || '';
+      if (window.NeoCustomerHistory && ph) window.NeoCustomerHistory.open(ph, (lr && lr.customer && lr.customer.name) || '');
+      return;
     }
     if (act === 'use-name') {
       var cust = F.lookup.result && F.lookup.result.customer;

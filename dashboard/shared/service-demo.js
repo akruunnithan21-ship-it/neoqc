@@ -969,6 +969,46 @@
     });
     handler(t, 'amal');
 
+    // 1.17 (brief §5): Rahul's board was claimed before, 7 months ago, and
+    // repaired — a repeat fault the serial lookup finds (still in warranty).
+    // His old hard drive claim's warranty has ended: hidden from the lookup,
+    // kept in his customer history.
+    intake('rahul_old', {
+      source: 'walk_in', sender_kind: 'customer', sender_name: CU.rahul.name, sender_phone: CU.rahul.phone_norm,
+      sender_customer_id: CU.rahul.id, received_at: ago(215 * D), return_method: 'collect',
+      created_at: ago(215 * D), created_by_email: STAFF.ancy.email, created_by_name: STAFF.ancy.full_name
+    });
+    unit('b550_old', 'rahul_old', {
+      public_code: 'RM-DEMO2P7W', kind: 'motherboard', brand: 'ASUS', model: 'TUF Gaming B550-Plus', serial: 'M9M0KC012345',
+      fault: 'Random restarts; one RAM slot dead.', diagnosed_by: 'us',
+      our_finding: 'Slot B2 dead with a known-good kit. Board fault confirmed.',
+      purchase_source: 'neo_tokyo', invoice_no: 'NT/INV/25-26/0918', purchase_date: dateAgo(240),
+      vendor_id: V['F1 Info Services'].id, vendor_rma_no: 'F1-ASUS-20431', expected_back_at: ago(195 * D),
+      check_result: 'fault_confirmed', checked_at: ago(214 * D), checked_by: STAFF.amal.full_name,
+      verified_at: ago(214 * D), verified_by: STAFF.anagha.full_name, warranty_until: dateAgo(-855),
+      submitted_at: ago(213 * D), submitted_by: STAFF.amal.full_name,
+      vendor_accepted_at: ago(212 * D), vendor_progress: 'in_repair', vendor_ready_at: ago(192 * D), vendor_ready_via: 'collect',
+      vendor_result: 'repaired', disposition: 'repaired',
+      stage: 'closed', stage_since: ago(188 * D), closed_at: ago(188 * D), closed_by: STAFF.ancy.email
+    });
+    intake('rahul_older', {
+      source: 'walk_in', sender_kind: 'customer', sender_name: CU.rahul.name, sender_phone: CU.rahul.phone_norm,
+      sender_customer_id: CU.rahul.id, received_at: ago(1040 * D), return_method: 'collect',
+      created_at: ago(1040 * D), created_by_email: STAFF.ancy.email, created_by_name: STAFF.ancy.full_name
+    });
+    unit('hdd_old', 'rahul_older', {
+      public_code: 'RM-DEMO3Q9X', kind: 'hdd', brand: 'Seagate', model: 'Barracuda 1TB', serial: 'Z9K0PLD1',
+      fault: 'Clicking, not detected.', diagnosed_by: 'customer', our_finding: 'Clicks on power-up; not detected on two PCs.',
+      purchase_source: 'neo_tokyo', invoice_no: 'NT/INV/22-23/0412', purchase_date: dateAgo(1130),
+      vendor_id: V.Kaizen.id, vendor_rma_no: 'KZ-SG-7781', expected_back_at: ago(1015 * D), data_handling: 'wiped_by_us',
+      check_result: 'fault_confirmed', checked_at: ago(1039 * D), checked_by: STAFF.amal.full_name,
+      verified_at: ago(1039 * D), verified_by: STAFF.anagha.full_name, warranty_until: dateAgo(400),
+      submitted_at: ago(1038 * D), submitted_by: STAFF.amal.full_name,
+      vendor_accepted_at: ago(1037 * D), vendor_progress: 'awaiting_stock', vendor_ready_at: ago(1014 * D), vendor_ready_via: 'collect',
+      vendor_result: 'replaced', replacement_serial: 'Z9K0RXT4', disposition: 'replaced',
+      stage: 'closed', stage_since: ago(1010 * D), closed_at: ago(1010 * D), closed_by: STAFF.ancy.email
+    });
+
     // C. From Arjun's ticket: the RTX 3060 goes on its own (does not hold the ticket).
     //    A part taken OUT of the ticket's PC is not the ticket's item, so
     //    service_item_id stays null: linking the PC itself would make it a
@@ -1171,6 +1211,20 @@
     rev('rm750', 2 * H + 5 * MIN, 'system', extend(by('amal'), { body: 'Taken by Amal C Abi' }));
     rmove('rm750', 2 * H, 'received', 'testing', 'amal');
 
+    rmove('b550_old', 215 * D, null, 'received', 'ancy', 'Received (Walk-in). Fault: Random restarts; one RAM slot dead.');
+    rmove('b550_old', 214.5 * D, 'received', 'testing', 'amal');
+    rmove('b550_old', 214 * D, 'testing', 'ready_to_ship', 'amal');
+    rmove('b550_old', 213 * D, 'ready_to_ship', 'with_vendor', 'amal', 'Submitted at F1 Info Services');
+    rmove('b550_old', 190 * D, 'with_vendor', 'back_from_vendor', 'amal', 'Back from F1: repaired');
+    rmove('b550_old', 189 * D, 'back_from_vendor', 'ready_to_return', 'amal', 'Repaired board tested. Ready to collect.');
+    rmove('b550_old', 188 * D, 'ready_to_return', 'closed', 'ancy', 'Collected by Rahul Menon. Repaired under warranty.');
+    rmove('hdd_old', 1040 * D, null, 'received', 'ancy', 'Received (Walk-in). Fault: Clicking, not detected.');
+    rmove('hdd_old', 1039.5 * D, 'received', 'testing', 'amal');
+    rmove('hdd_old', 1039 * D, 'testing', 'ready_to_ship', 'amal');
+    rmove('hdd_old', 1038 * D, 'ready_to_ship', 'with_vendor', 'amal', 'Submitted at Kaizen');
+    rmove('hdd_old', 1013 * D, 'with_vendor', 'back_from_vendor', 'amal', 'Back from Kaizen: replaced');
+    rmove('hdd_old', 1012 * D, 'back_from_vendor', 'ready_to_return', 'amal', 'Replacement tested. Ready to collect.');
+    rmove('hdd_old', 1010 * D, 'ready_to_return', 'closed', 'ancy', 'Collected. Replaced under warranty.');
     rmove('b550', 1.5 * D, null, 'received', 'ancy', 'Received (Walk-in). Fault: No display. The DRAM light stays on.');
     rmove('b550', 1.4 * D, 'received', 'testing', 'amal');
     rmove('b550', 1 * D, 'testing', 'ready_to_ship', 'amal', 'Fault confirmed. Warranty claim being prepared.');
@@ -1263,6 +1317,14 @@
     ship(['rx6600'], {
       direction: 'in_from_customer', courier: 'Professional Couriers', awb: 'PCKCH20871234',
       dispatched_at: ago(1 * D), created_by_email: STAFF.ancy.email
+    });
+    ship(['b550_old'], {
+      vendor_id: V['F1 Info Services'].id, courier: 'DTDC', awb: 'D45110022711', cost: 110,
+      dispatched_at: ago(213 * D), created_by_email: STAFF.amal.email
+    });
+    ship(['hdd_old'], {
+      vendor_id: V.Kaizen.id, courier: 'DTDC', awb: 'D44990018832', cost: 90,
+      dispatched_at: ago(1038 * D), created_by_email: STAFF.amal.email
     });
     ship(['msi650'], {
       vendor_id: V['F1 Info Services'].id, courier: 'DTDC', awb: 'D45118876501', cost: 120,

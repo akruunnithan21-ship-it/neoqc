@@ -40,6 +40,7 @@
   <link rel="stylesheet" href="overview.css">
   <!-- 1.16 QC after a service. -->
   <link rel="stylesheet" href="qc-service.css">
+  <link rel="stylesheet" href="customer-history.css">
   <link rel="stylesheet" href="qc-bench.css">
   <link rel="stylesheet" href="build-summary.css">
   <link rel="stylesheet" href="qc-builds.css">
@@ -2821,24 +2822,19 @@
     <div class="glass-slab modal-card" style="max-width: 650px; width: 100%; padding: 30px; border-radius: 20px;">
       <div class="modal-header" style="border-bottom: 1px solid var(--glass-border); padding-bottom: 15px; margin-bottom: 20px;">
         <h2 style="font-family: 'Syncopate', sans-serif; font-size: 1.3rem; color: var(--primary-pink); letter-spacing: 0.05em; margin: 0;">NEO SERVICE UPDATED</h2>
-        <span data-app-version style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; font-weight: 700; background: rgba(var(--primary-pink-rgb), 0.1); color: var(--primary-pink); padding: 4px 8px; border-radius: 4px;">v1.16.1</span>
+        <span data-app-version style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; font-weight: 700; background: rgba(var(--primary-pink-rgb), 0.1); color: var(--primary-pink); padding: 4px 8px; border-radius: 4px;">v1.17.0</span>
       </div>
       <div class="modal-body" style="font-size: 0.92rem; line-height: 1.6; color: var(--text-dark); max-height: 420px; overflow-y: auto; padding-right: 5px;">
-        <p style="margin-top: 0;">Here's what's new in <strong data-app-version>v1.16.1</strong>:</p>
+        <p style="margin-top: 0;">Here's what's new in <strong data-app-version>v1.17.0</strong>:</p>
         <ul style="padding-left: 20px; display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px;">
-          <li><strong>A faint aurora</strong> now drifts behind the glass on every screen, and the red tint and dots in the background are lighter.</li>
-          <li><strong>New themes:</strong> Neo Glass Light and Dark, Sand (warm light) and Midnight (deep black). Every highlight follows the accent colour you pick.</li>
-          <li><strong>A new Settings window:</strong> themes, aurora, glass blur, interface size, reduce motion, your start screen, the bench's FPS timing, and Updates &amp; about with "Check for updates".</li>
-          <li><strong>A more beautiful left bar</strong> with new icons that react as you move the mouse. The extra ☰ button is gone where the bar is.</li>
-          <li><strong>Dropdowns in Neo Glass.</strong> "Move to" lists are grouped under the step each choice belongs to, and the RMA brand list opens right under its field.</li>
-          <li><strong>QC page:</strong> a cleaner New builds board, and a click on a build opens its full-screen summary with <strong>Edit</strong> at the top right.</li>
-          <li><strong>The bench</strong> has a fresh look and reads this PC's hardware as soon as you open a build, checking it against the build's invoice.</li>
-          <li><strong>QC finishes with the stress test.</strong> A build moves to Finished builds only after QC presses "I have tortured this PC enough" and that sign-off has saved and synced. Ticking every box no longer finishes it early.</li>
-          <li><strong>A better installer:</strong> sharp on high-resolution screens, three steps (Welcome, Installing, Finish).</li>
+          <li><strong>Serial lookup.</strong> Type a serial on a new RMA part or a service item and Neo Service shows what it already knows about that part: earlier warranty claims (a repeat fault), the service tickets it came in on, and the Neo Tokyo build it went into.</li>
+          <li><strong>Use these details:</strong> on a repeat claim, one click copies the type, brand, model, invoice, purchase date and where it was bought from the earlier claim.</li>
+          <li>Claims whose warranty has ended are no longer suggested; they stay in the customer's history.</li>
+          <li><strong>Customer history:</strong> one page per customer with every service ticket, every RMA part (including expired warranties) and the builds they bought. Open it with <strong>Customer history</strong> on any ticket summary, <strong>Full history</strong> on the returning-customer card, or from the New RMA phone lookup. Click any entry to open it.</li>
         </ul>
       </div>
       <div class="modal-footer" style="border-top: 1px solid var(--glass-border); padding-top: 15px; display: flex; justify-content: flex-end; margin-top: 20px;">
-        <button id="btn-close-changelog" data-app-version-label class="primary-pink-btn" style="padding: 10px 24px; font-weight: 700; font-size: 0.95rem;">Launch Neo Service v1.16.1</button>
+        <button id="btn-close-changelog" data-app-version-label class="primary-pink-btn" style="padding: 10px 24px; font-weight: 700; font-size: 0.95rem;">Launch Neo Service v1.17.0</button>
       </div>
     </div>
   </div>
@@ -2893,6 +2889,9 @@
   <!-- 1.16.1 Neo Glass suggestion lists for <input list> (replaces the native datalist popup). -->
   <script src="neo-combo.js"></script>
   <script src="ticket-summary.js"></script>
+  <!-- 1.17 the serial lookup and the customer history (brief §5, §6; server v2.14). -->
+  <script src="serial-history.js"></script>
+  <script src="customer-history.js"></script>
   <!-- 1.16 the QC screen's "After service" tab, and its bench test. -->
   <script src="build-summary.js"></script>
   <script src="qc-bench.js"></script>
