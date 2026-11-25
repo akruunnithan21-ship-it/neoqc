@@ -10,6 +10,21 @@
 ; PC, which the app needs anyway (it runs as administrator). An older "only for
 ; me" install is removed by electron-builder's installer before it installs.
 
+; 1.16.1 (owner: "the installer looked sub par"): it was not DPI-aware, so on a
+; 125–150 % display Windows stretched the whole window as a bitmap and every
+; letter and image went soft. Now it draws at the screen's real resolution,
+; and the sidebar / header bitmaps are 2x (328x628, 300x114), which MUI scales
+; down to fit their controls (FitControl), so they stay sharp too.
+ManifestDPIAware true
+
+; The pages are Welcome → Installing → Finish (no folder page: electron-builder
+; allowToChangeInstallationDirectory is off), and the finish page says it plainly.
+!ifndef BUILD_UNINSTALLER
+  !define MUI_FINISHPAGE_TITLE "Neo Service is ready"
+  !define MUI_FINISHPAGE_TEXT "Neo Service ${VERSION} is installed for everyone on this PC.$\r$\n$\r$\nSign in with your Neo Tokyo email and PIN."
+  !define MUI_FINISHPAGE_RUN_TEXT "Open Neo Service now"
+!endif
+
 ; A welcome page with the sidebar. Updates (--updated) skip it, like the
 ; directory page, so an auto-update shows only the progress.
 !macro customWelcomePage

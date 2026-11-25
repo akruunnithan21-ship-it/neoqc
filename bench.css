@@ -1,0 +1,702 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   Neo Service 1.16 — the Bench (Testing Client) in Neo Glass.
+
+   Owner, 25 Nov 2026: "make the bench look good and redesign it too". Two
+   screens: #client-welcome-screen (My Bench, the board of builds to test) and
+   #client-screen (the testing console). Loaded right after neo-theme.css, so
+   it uses the theme's tokens: Outfit, 16 px glass cards, 12 px buttons and
+   fields, the accent (--primary-pink / -rgb, --nt-brand for accent text; all
+   follow Settings → Appearance → Accent), hairlines, sunken wells.
+
+   Console layout (index.html): a hero with the build picker, then two
+   columns: the tests and live telemetry (#client-panel-right.bc-main) and the
+   checks (specs, Windows, ports; .bc-side). A save bar stays in view.
+   Every element keeps its id; nothing here changes what a control does.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+#client-welcome-screen,
+#client-screen {
+  --bc-track: color-mix(in srgb, var(--text-dark) 9%, transparent);
+  --bc-accent-grad: linear-gradient(90deg, color-mix(in srgb, var(--primary-pink) 62%, #fff) 0%, var(--primary-pink) 100%);
+  --bc-well: var(--nt-sunken);
+  --bc-well-inset: inset 0 1px 2px rgba(0, 0, 0, 0.05);
+  --bc-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 4.5 6 8l3.5-3.5' fill='none' stroke='%238C8C96' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+body.dark-mode #client-welcome-screen,
+body.dark-mode #client-screen {
+  --bc-track: rgba(255, 255, 255, 0.09);
+  --bc-well: rgba(0, 0, 0, 0.26);
+  --bc-well-inset: inset 0 1px 3px rgba(0, 0, 0, 0.35);
+}
+
+/* Small shared pieces: the eyebrow over a title. */
+.bench-eyebrow,
+.bc-eyebrow {
+  display: inline-block;
+  font-size: 0.7rem; font-weight: 700; letter-spacing: 0.16em; text-transform: uppercase;
+  color: var(--nt-brand);
+}
+
+/* ══ 1. MY BENCH (the board) ════════════════════════════════════════════════ */
+
+/* The board scrolls inside the screen (the screen itself never scrolls), and
+   takes the full width: a centred flex item with auto margins shrank to one
+   column of cards. */
+#client-welcome-screen .bench-container {
+  flex: 1 1 auto;
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  overflow-y: auto;
+  box-sizing: border-box;
+  padding: 6px max(24px, calc((100% - 1280px) / 2)) 48px;
+}
+
+#client-welcome-screen .bench-head {
+  display: flex; align-items: flex-end; justify-content: space-between;
+  gap: 20px; flex-wrap: wrap;
+  margin: 6px 0 22px;
+}
+#client-welcome-screen .bench-head-text { display: flex; flex-direction: column; gap: 2px; }
+#client-welcome-screen .bench-title {
+  font-family: var(--nt-font);
+  font-size: 2rem; font-weight: 700; letter-spacing: -0.015em; line-height: 1.15;
+  color: var(--text-dark); margin: 2px 0 0;
+}
+#client-welcome-screen .bench-sub { margin: 2px 0 0; color: var(--text-muted); font-size: 0.92rem; }
+
+#client-welcome-screen .bench-head-right { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+
+#client-welcome-screen .bench-stat {
+  flex-direction: row; align-items: baseline; gap: 8px;
+  height: 44px; box-sizing: border-box; padding: 0 16px; border-radius: 12px;
+  background: var(--nt-brand-tint);
+  border: 1px solid rgba(var(--primary-pink-rgb), 0.22);
+  display: inline-flex; align-items: center;
+}
+#client-welcome-screen .bench-stat span {
+  font-family: var(--nt-font); font-variant-numeric: tabular-nums;
+  font-size: 1.35rem; font-weight: 700; line-height: 1; color: var(--nt-brand);
+}
+#client-welcome-screen .bench-stat small {
+  margin: 0; font-size: 0.64rem; font-weight: 700; letter-spacing: 0.14em; color: var(--text-muted);
+}
+
+#client-welcome-screen .bench-search-wrap { position: relative; display: inline-flex; align-items: center; margin: 0; }
+#client-welcome-screen .bench-search-ic {
+  position: absolute; left: 13px; width: 17px; height: 17px; pointer-events: none;
+  fill: none; stroke: var(--text-muted); stroke-width: 1.9; stroke-linecap: round;
+}
+#client-welcome-screen .bench-search {
+  height: 44px; box-sizing: border-box; min-width: 300px;
+  padding: 0 14px 0 40px; border-radius: 12px;
+  border: 1px solid var(--nt-input-border);
+  background: var(--nt-surface); color: var(--text-dark);
+  font-family: var(--nt-font); font-size: 0.9rem;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+#client-welcome-screen .bench-search:focus { border-color: var(--nt-focus); box-shadow: 0 0 0 3px var(--nt-focus-halo); outline: none; }
+#client-welcome-screen .bench-search::placeholder { color: var(--text-muted); opacity: 0.85; }
+#client-welcome-screen #btn-bench-refresh { height: 44px; padding: 0 16px; }
+
+/* The cards. */
+#client-welcome-screen .bench-grid {
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 16px;
+}
+#client-welcome-screen .bench-card {
+  position: relative; overflow: hidden;
+  gap: 12px; padding: 18px 18px 14px;
+  border-radius: 16px;
+  font-family: var(--nt-font);
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--glass-shadow);
+  backdrop-filter: none; -webkit-backdrop-filter: none;
+  transition: transform 0.25s cubic-bezier(0.2, 0.9, 0.25, 1), box-shadow 0.25s ease, border-color 0.25s ease;
+}
+/* An accent hairline along the top: quiet at rest, full on hover; red when
+   the deadline is close. */
+#client-welcome-screen .bench-card::before {
+  content: ''; position: absolute; left: 0; right: 0; top: 0; height: 3px;
+  background: var(--bc-accent-grad);
+  opacity: 0.35; transition: opacity 0.25s ease;
+}
+#client-welcome-screen .bench-card.urgent::before { background: var(--status-urgent); opacity: 0.85; }
+#client-welcome-screen .bench-card:hover {
+  transform: translateY(-3px);
+  border-color: rgba(var(--primary-pink-rgb), 0.3);
+  box-shadow: var(--nt-lift);
+}
+#client-welcome-screen .bench-card:hover::before { opacity: 1; }
+#client-welcome-screen .bench-card:active { transform: translateY(-1px); }
+#client-welcome-screen .bench-card:focus-visible { outline: 2px solid var(--nt-focus); outline-offset: 2px; }
+
+#client-welcome-screen .bench-stage {
+  font-size: 0.64rem; font-weight: 700; letter-spacing: 0.1em;
+  color: var(--nt-brand); background: var(--nt-brand-tint);
+  border-radius: 999px; padding: 4px 10px;
+}
+#client-welcome-screen .bench-cid {
+  font-family: var(--nt-font); font-variant-numeric: tabular-nums;
+  font-size: 0.74rem; letter-spacing: 0.04em; color: var(--text-muted);
+}
+#client-welcome-screen .bench-cust {
+  font-family: var(--nt-font); font-size: 1.14rem; font-weight: 700; letter-spacing: -0.005em;
+  color: var(--text-dark); line-height: 1.25;
+}
+#client-welcome-screen .bench-specline { font-size: 0.8rem; color: var(--text-muted); margin-top: -6px; }
+
+#client-welcome-screen .bench-bars { gap: 7px; }
+#client-welcome-screen .bench-bar { gap: 10px; font-size: 0.72rem; }
+#client-welcome-screen .bench-bar span { width: 40px; font-weight: 600; }
+#client-welcome-screen .bench-bar b {
+  width: 38px; font-family: var(--nt-font); font-variant-numeric: tabular-nums;
+  font-weight: 700; font-size: 0.76rem; color: var(--text-dark);
+}
+#client-welcome-screen .bench-track { height: 6px; background: var(--bc-track); }
+#client-welcome-screen .bench-track i { background: var(--bc-accent-grad); }
+#client-welcome-screen .bench-track i.qc { background: linear-gradient(90deg, #A78BFA, #7C3AED); }
+
+#client-welcome-screen .bench-card-foot { padding-top: 11px; border-top: 1px solid var(--nt-hairline); }
+#client-welcome-screen .bench-deadline {
+  font-family: var(--nt-font); font-variant-numeric: tabular-nums;
+  font-size: 0.78rem; font-weight: 600; color: var(--text-muted);
+}
+#client-welcome-screen .bench-deadline.urgent,
+#client-welcome-screen .bench-deadline.risk-overdue { color: var(--nt-danger-text); font-weight: 700; }
+#client-welcome-screen .bench-deadline.risk-soon { color: var(--nt-warning-text); font-weight: 700; }
+#client-welcome-screen .bench-go,
+body.dark-mode #client-welcome-screen .bench-go {
+  font-size: 0.78rem; font-weight: 700; color: var(--nt-brand);
+  transition: transform 0.25s ease;
+}
+#client-welcome-screen .bench-card:hover .bench-go { transform: translateX(3px); }
+
+#client-welcome-screen .bench-empty {
+  padding: 56px 24px; border-radius: 20px;
+  border: 1px dashed color-mix(in srgb, var(--text-dark) 16%, transparent);
+  background: var(--glass-bg);
+}
+#client-welcome-screen .bench-empty.hidden { display: none; }
+#client-welcome-screen .bench-empty-icon {
+  display: grid; place-items: center; width: 64px; height: 64px; margin: 0 auto 14px;
+  border-radius: 18px; font-size: 1.9rem;
+  background: var(--nt-brand-tint); border: 1px solid rgba(var(--primary-pink-rgb), 0.18);
+}
+#client-welcome-screen .bench-empty h3 { font-size: 1.12rem; font-weight: 700; margin-bottom: 6px; }
+#client-welcome-screen .bench-empty p { font-size: 0.9rem; color: var(--text-muted); }
+
+/* ══ 2. THE TESTING CONSOLE ═════════════════════════════════════════════════ */
+
+/* The theme's animated aurora sits behind every screen; the console's own
+   older (and stronger) aurora layer doubled it. */
+#client-screen::before { display: none; }
+
+#client-screen .client-container {
+  display: block;
+  padding: 0 20px;
+}
+#client-screen .client-card.bc-wrap {
+  max-width: 1480px; margin: 0 auto; width: 100%;
+  padding: 0;
+  background: none; border: 0; box-shadow: none;
+  display: flex; flex-direction: column; gap: 16px;
+}
+
+/* Cards: the theme's glass-2 (never blurred). */
+#client-screen .bc-hero,
+#client-screen .bc-card,
+#client-screen .hud-card,
+#client-screen .bc-main .dr-card,
+#client-screen .ssd-health-card {
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: 16px;
+  box-shadow: var(--glass-shadow);
+}
+
+/* ── The hero: what this console is, and which build it is testing ───────── */
+#client-screen .bc-hero {
+  position: relative; overflow: hidden;
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(360px, 600px);
+  gap: 28px; align-items: center;
+  padding: 22px 24px 22px 28px;
+  background:
+    radial-gradient(90% 160% at 0% 0%, rgba(var(--primary-pink-rgb), 0.075), transparent 60%),
+    var(--glass-bg);
+}
+#client-screen .bc-hero h2 {
+  font-family: var(--nt-font);
+  font-size: 1.65rem; font-weight: 700; letter-spacing: -0.015em; line-height: 1.2;
+  color: var(--text-dark); margin: 4px 0 4px;
+}
+#client-screen .bc-hero .card-subtitle { margin: 0; font-size: 0.9rem; line-height: 1.5; max-width: 60ch; }
+
+#client-screen .bc-ticket {
+  display: flex; flex-direction: column; gap: 8px;
+  padding: 14px 16px 16px; border-radius: 14px;
+  background: var(--bc-well); border: 1px solid var(--nt-hairline);
+  box-shadow: var(--bc-well-inset);
+}
+#client-screen .bc-ticket-label {
+  font-size: 0.68rem; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--nt-brand); margin: 0;
+}
+#client-screen .bc-ticket-row {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(150px, 190px);
+  gap: 10px; align-items: center;
+}
+#client-screen .bc-or { font-size: 0.72rem; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.08em; }
+/* The two fields carry older inline styles (white text on a dark fill) that
+   only suited dark mode; these win over them in both themes. */
+#client-screen #client-ticket-select,
+#client-screen #client-ticket-input {
+  width: 100%; min-width: 0; height: 46px; box-sizing: border-box;
+  padding: 0 14px !important; border-radius: 12px !important;
+  background-color: var(--nt-surface) !important; color: var(--text-dark) !important;
+  border: 1px solid var(--nt-input-border) !important;
+  font-family: var(--nt-font) !important; font-size: 0.92rem !important; font-weight: 600 !important;
+  font-variant-numeric: tabular-nums;
+  box-shadow: none;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+#client-screen #client-ticket-select {
+  -webkit-appearance: none; appearance: none;
+  padding-right: 38px !important;
+  font-size: 1rem !important; font-weight: 700 !important;
+  background-image: var(--bc-chevron) !important;
+  background-repeat: no-repeat !important; background-position: right 14px center !important; background-size: 12px 12px !important;
+  text-overflow: ellipsis; cursor: pointer;
+}
+#client-screen #client-ticket-select:focus,
+#client-screen #client-ticket-input:focus {
+  border-color: var(--nt-focus) !important; box-shadow: 0 0 0 3px var(--nt-focus-halo); outline: none;
+}
+#client-screen #client-ticket-input::placeholder { color: var(--text-muted); font-weight: 500; }
+
+/* ── Two columns: tests (main) | checks (side) ───────────────────────────── */
+#client-screen .client-grid-row.bc-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.65fr) minmax(360px, 1fr);
+  gap: 16px; margin: 0; align-items: start;
+}
+#client-screen .bc-layout > .bc-main { grid-column: 1; grid-row: 1; }
+#client-screen .bc-layout > .bc-side { grid-column: 2; grid-row: 1; }
+#client-screen .bc-layout > .client-panel,
+body.dark-mode #client-screen .bc-layout > .client-panel {
+  display: flex; flex-direction: column; gap: 16px; min-width: 0;
+  padding: 0; border: 0; border-radius: 0;
+  background: none; box-shadow: none;
+  backdrop-filter: none; -webkit-backdrop-filter: none;
+}
+#client-screen .bc-layout > .client-panel > * { margin-top: 0; }
+#client-screen #c-prime95-panel:empty,
+#client-screen #c-passport-grid:empty { display: none; }
+
+/* Section labels in the main column (its h3 is one). */
+#client-screen .bc-main > h3,
+#client-screen .bc-section-title {
+  font-family: var(--nt-font);
+  font-size: 0.72rem; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--text-muted);
+}
+/* The main column's "2. Benchmark & Thermal Logging" heading stays for screen
+   readers; on screen the run card's own title says it, and both columns then
+   start on the same line. */
+#client-screen .bc-main > h3 {
+  position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; border: 0;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap;
+}
+#client-screen .bc-section-head {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
+  margin: 6px 4px -6px;
+}
+#client-screen .bc-section-note { font-size: 0.78rem; color: var(--text-muted); }
+/* "Results" shows only once a run has filled something in. */
+#client-screen .bc-results-head:has(+ #c-prime95-panel:empty + #c-passport-grid:empty + .ssd-health-card.hidden) { display: none; }
+
+/* Card titles in the side column. */
+#client-screen .bc-card { padding: 20px 22px; }
+#client-screen .bc-side .bc-card > h3,
+#client-screen .bc-side .bc-card > h4 {
+  font-family: var(--nt-font) !important;
+  font-size: 1.02rem !important; font-weight: 700 !important; letter-spacing: -0.005em !important;
+  text-transform: none !important; color: var(--text-dark) !important;
+  margin: 0 0 14px !important; padding: 0 !important; border: 0 !important;
+}
+
+/* ── The run card: mode, duration, and the big Run button ────────────────── */
+#client-screen .stress-mode-card.bc-card {
+  margin: 0; padding: 20px 22px 22px;
+  background:
+    radial-gradient(70% 120% at 100% 0%, rgba(var(--primary-pink-rgb), 0.07), transparent 60%),
+    var(--glass-bg);
+}
+#client-screen .stress-mode-head { margin-bottom: 14px; }
+#client-screen .stress-mode-title { font-family: var(--nt-font); font-size: 1.12rem; font-weight: 700; letter-spacing: -0.005em; }
+#client-screen .stress-mode-badge {
+  font-family: var(--nt-font); font-variant-numeric: tabular-nums;
+  font-size: 0.72rem; font-weight: 700; padding: 4px 11px;
+  color: var(--text-muted); background: var(--bc-well); border: 1px solid var(--nt-hairline);
+}
+
+#client-screen .stress-mode-tabs { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-bottom: 16px; }
+#client-screen .stress-mode-tab {
+  gap: 4px; padding: 12px 14px; border-radius: 12px;
+  font-family: var(--nt-font);
+  border: 1px solid var(--nt-hairline);
+  background: var(--nt-surface);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+  transition: border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease, transform 0.15s ease;
+}
+body.dark-mode #client-screen .stress-mode-tab { background: rgba(255, 255, 255, 0.04); }
+#client-screen .stress-mode-tab:hover { border-color: rgba(var(--primary-pink-rgb), 0.35); transform: translateY(-1px); }
+#client-screen .stress-mode-tab .smt-name { font-size: 0.95rem; font-weight: 700; color: var(--text-dark); }
+#client-screen .stress-mode-tab .smt-desc { font-size: 0.72rem; color: var(--text-muted); line-height: 1.35; }
+#client-screen .stress-mode-tab.active,
+body.dark-mode #client-screen .stress-mode-tab.active {
+  border-color: var(--primary-pink);
+  background: var(--nt-brand-tint);
+  box-shadow: 0 0 0 3px rgba(var(--primary-pink-rgb), 0.12);
+}
+#client-screen .stress-mode-tab.active .smt-name { color: var(--nt-brand); }
+
+#client-screen .bc-run-row {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto;
+  gap: 20px; align-items: center;
+}
+#client-screen .stress-mode-config { margin: 0; min-width: 0; }
+#client-screen .smc-row { gap: 6px 12px; }
+#client-screen .smc-label { font-size: 0.68rem; letter-spacing: 0.12em; }
+#client-screen .smc-select {
+  -webkit-appearance: none; appearance: none;
+  height: 40px; padding: 0 36px 0 12px; border-radius: 12px;
+  border: 1px solid var(--nt-input-border); background-color: var(--nt-surface); color: var(--text-dark);
+  background-image: var(--bc-chevron); background-repeat: no-repeat; background-position: right 12px center; background-size: 12px 12px;
+  font-family: var(--nt-font); font-size: 0.9rem; font-weight: 600; cursor: pointer;
+}
+#client-screen .smc-select:focus { border-color: var(--nt-focus); box-shadow: 0 0 0 3px var(--nt-focus-halo); outline: none; }
+#client-screen .smc-note { font-size: 0.74rem; line-height: 1.45; color: var(--text-muted); }
+
+/* The primary action of the whole console. */
+#client-screen .stress-run-btn {
+  width: auto; min-width: 250px; height: 54px; padding: 0 30px;
+  border: 1px solid transparent; border-radius: 12px;
+  font-family: var(--nt-font); font-size: 1.04rem; font-weight: 700; letter-spacing: 0.005em;
+  color: #FFFFFF;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.12) 0%, rgba(255, 255, 255, 0) 45%) var(--primary-pink);
+  box-shadow: var(--nt-shadow-brand);
+  transition: background-color 0.2s ease, box-shadow 0.2s ease, transform 0.15s ease, opacity 0.2s ease;
+}
+#client-screen .stress-run-btn:hover:not(:disabled) {
+  opacity: 1; transform: translateY(-1px);
+  background-color: var(--primary-pink-hover);
+  box-shadow: 0 12px 30px rgba(var(--primary-pink-rgb), 0.38);
+}
+#client-screen .stress-run-btn:active:not(:disabled) { transform: translateY(1px); box-shadow: none; }
+#client-screen .stress-run-btn:disabled { opacity: 0.42; box-shadow: none; cursor: not-allowed; }
+
+#client-screen .stress-mode-status {
+  margin-top: 14px; padding: 9px 14px; border-radius: 10px;
+  background: var(--bc-well); border: 1px solid var(--nt-hairline);
+  font-family: var(--nt-font); font-variant-numeric: tabular-nums;
+  font-size: 0.8rem; line-height: 1.5; color: var(--text-muted);
+}
+
+/* Stress sign-off, as a well inside the run card. */
+#client-screen #c-stress-progress-wrap.stress-wrap {
+  margin-top: 14px !important;
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center;
+  grid-template-areas: "head head" "bar bar" "meta btn";
+  gap: 8px 16px;
+  padding: 14px 16px; border-radius: 12px;
+  background: var(--bc-well); border: 1px solid var(--nt-hairline);
+}
+#client-screen .stress-wrap .stress-head { grid-area: head; margin: 0; }
+#client-screen .stress-wrap .stress-bar-bg { grid-area: bar; height: 8px; background: var(--bc-track); }
+#client-screen .stress-wrap .stress-meta { grid-area: meta; margin: 0; font-size: 0.78rem; }
+#client-screen .stress-title { font-family: var(--nt-font); font-size: 0.86rem; font-weight: 700; }
+#client-screen .stress-pct { font-family: var(--nt-font); font-variant-numeric: tabular-nums; font-size: 0.92rem; font-weight: 700; color: var(--nt-brand); }
+#client-screen .stress-pct.complete { color: var(--nt-success-text); }
+#client-screen .stress-bar-fill { background: var(--bc-accent-grad); }
+#client-screen .stress-bar-fill.complete { background: linear-gradient(90deg, #34D399, var(--status-completed)); }
+#client-screen .stress-wrap .stress-btn {
+  grid-area: btn; width: auto; margin: 0;
+  height: 36px; padding: 0 14px; border-radius: 10px;
+  font-family: var(--nt-font); font-size: 0.8rem; font-weight: 700;
+  color: var(--nt-brand); background: var(--nt-surface);
+  border: 1px solid rgba(var(--primary-pink-rgb), 0.35);
+}
+body.dark-mode #client-screen .stress-wrap .stress-btn { background: rgba(255, 255, 255, 0.05); }
+#client-screen .stress-wrap .stress-btn:hover:not(:disabled) { opacity: 1; background: var(--nt-brand-tint); border-color: var(--primary-pink); }
+#client-screen .stress-wrap .stress-btn:disabled { opacity: 0.5; }
+
+/* ── Live telemetry: one grid of metric tiles ────────────────────────────── */
+#client-screen .telemetry-hud-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px; margin: 0;
+}
+#client-screen .hud-card {
+  justify-content: flex-start; gap: 10px;
+  padding: 16px 16px 14px; min-width: 0;
+  transition: border-color 0.25s ease, box-shadow 0.25s ease;
+}
+#client-screen .hud-card:hover { border-color: rgba(var(--primary-pink-rgb), 0.22); }
+#client-screen .hud-card-header {
+  flex-direction: column; align-items: flex-start; justify-content: flex-start;
+  flex-wrap: nowrap; gap: 4px; margin: 0; min-width: 0;
+}
+#client-screen .hud-card-title {
+  display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis;
+  font-family: var(--nt-font);
+  font-size: 0.68rem; font-weight: 700; letter-spacing: 0.11em; text-transform: uppercase;
+  color: var(--text-muted);
+}
+#client-screen .hud-card-value {
+  font-family: var(--nt-font); font-variant-numeric: tabular-nums;
+  font-size: 1.95rem; font-weight: 650; letter-spacing: -0.02em; line-height: 1.1;
+  color: var(--text-dark);
+  max-width: 100%; overflow: hidden; text-overflow: ellipsis;
+}
+#client-screen .ssd-card .hud-card-value { font-size: 1.4rem; line-height: 1.55; }
+#client-screen .hud-bar-bg { height: 6px; border-radius: 999px; background: var(--bc-track); }
+#client-screen .hud-bar-fill { border-radius: 999px; transition: width 0.5s cubic-bezier(0.16, 1, 0.3, 1), background 0.3s ease; }
+/* Temperature bars keep their meaning (app.js colours them cool / warm / hot);
+   the RAM and SSD progress bars wear the accent. */
+#client-screen .hud-bar-fill.progress-bar { background: var(--bc-accent-grad); }
+#client-screen .hud-card-desc {
+  margin-top: auto; font-family: var(--nt-font); font-variant-numeric: tabular-nums;
+  font-size: 0.76rem; color: var(--text-muted);
+}
+
+#client-screen .hud-card .triple-input,
+#client-screen .hud-card .double-input {
+  display: grid; gap: 8px; margin-top: 2px;
+}
+#client-screen .hud-card .triple-input { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+#client-screen .hud-card .double-input { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+#client-screen .hud-card .form-group.mini { gap: 4px; min-width: 0; }
+#client-screen .hud-card .form-group.mini label { font-size: 0.62rem; letter-spacing: 0.1em; margin: 0; }
+#client-screen .hud-card .form-group input {
+  height: 36px; border-radius: 10px;
+  background: var(--nt-surface); border: 1px solid var(--nt-hairline);
+  box-shadow: none; backdrop-filter: none; -webkit-backdrop-filter: none;
+  font-family: var(--nt-font); font-variant-numeric: tabular-nums; font-weight: 600;
+  color: var(--text-dark);
+}
+body.dark-mode #client-screen .hud-card .form-group input { background: rgba(0, 0, 0, 0.22); border-color: var(--nt-hairline); }
+#client-screen .hud-card .form-group input:hover { border-color: rgba(var(--primary-pink-rgb), 0.35); }
+#client-screen .hud-card .form-group input:focus { border-color: var(--nt-focus); box-shadow: 0 0 0 3px var(--nt-focus-halo); }
+#client-screen .hud-card .form-group input[readonly] { background: var(--bc-well) !important; border-color: transparent !important; }
+#client-screen .hud-card .form-group.mini input { padding: 0 8px !important; font-size: 0.92rem !important; }
+#client-screen .hud-card .unit-label { font-family: var(--nt-font); font-weight: 600; }
+
+/* The two benchmark scores read like the other tiles: a label, then a big
+   number (still a field, so a score can be typed in). */
+#client-screen .bc-score-card .form-group { gap: 10px; }
+#client-screen .bc-score-card .form-group label.hud-card-title { margin: 0; }
+#client-screen .bc-score-card .form-group:focus-within label.hud-card-title { color: var(--nt-brand); }
+#client-screen .bc-score-card .input-unit-wrapper input {
+  height: 54px; padding: 0 44px 0 12px !important;
+  font-size: 1.6rem; font-weight: 650; letter-spacing: -0.01em;
+}
+#client-screen .bc-score-card .input-unit-wrapper .unit-label { right: 14px; font-size: 0.78rem; }
+#client-screen .bc-score-card .hud-card-desc { margin-top: auto; }
+
+/* ── The console: a calm sunken well, Outfit with tabular figures ─────────── */
+#client-screen .hud-console-container {
+  margin: 0;
+  border-radius: 16px;
+  background: var(--bc-well);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--bc-well-inset);
+}
+#client-screen .console-header {
+  padding: 11px 16px;
+  background: transparent; border-bottom: 1px solid var(--nt-hairline);
+  font-family: var(--nt-font); font-size: 0.7rem; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--text-muted);
+}
+#client-screen .console-box {
+  height: 232px; padding: 12px 16px 14px; gap: 3px;
+  font-family: var(--nt-font); font-variant-numeric: tabular-nums;
+  font-size: 0.84rem; line-height: 1.55; color: var(--text-dark);
+  scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--text-dark) 22%, transparent) transparent;
+}
+#client-screen .console-line { word-break: break-word; overflow-wrap: anywhere; }
+#client-screen .console-line.system { color: var(--nt-info-text); }
+/* app.js paints "Launching / Starting" lines a light blue that was made for a
+   black terminal; on glass it needs the theme's info ink. */
+#client-screen .console-line[style*="56, 189, 248"],
+#client-screen .console-line[style*="38bdf8"] { color: var(--nt-info-text) !important; }
+#client-screen .console-line.success { color: var(--nt-success-text); }
+#client-screen .console-line.error { color: var(--nt-danger-text); }
+
+#client-screen .pulse-dot { width: 9px; height: 9px; }
+#client-screen .pulse-dot.idle { background: color-mix(in srgb, var(--text-muted) 55%, transparent); }
+#client-screen .pulse-dot.testing { background: var(--primary-pink); animation: bc-pulse 1.4s ease-in-out infinite; }
+@keyframes bc-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(var(--primary-pink-rgb), 0.55); }
+  50%      { box-shadow: 0 0 0 6px rgba(var(--primary-pink-rgb), 0); }
+}
+
+/* ── Results: Prime95, the component passport, SSD health ────────────────── */
+#client-screen {
+  --dr-card-radius: 16px;
+  --dr-card-padding: 16px 18px;
+  --dr-card-gap: 12px;
+  --dr-text: var(--text-dark);
+  --dr-text-muted: var(--text-muted);
+  --dr-border: var(--glass-border);
+}
+#client-screen .bc-main .dr-card { font-family: var(--nt-font); }
+#client-screen #c-passport-grid .dr-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+/* style.css spaces stacked .dr-cards with a top margin; in a grid that only
+   pushed every card but the first out of line. */
+#client-screen .dr-grid > .dr-card { margin-top: 0; }
+#client-screen .dr-card-header { gap: 9px; font-weight: 700; }
+#client-screen .dr-card-title { font-size: 0.98rem; }
+#client-screen .dr-row { padding: 5px 0; border-bottom: 1px solid var(--nt-hairline); font-size: 0.86rem; }
+#client-screen .dr-row:last-child { border-bottom: 0; }
+#client-screen .dr-row-value { font-family: var(--nt-font); font-variant-numeric: tabular-nums; font-weight: 600; }
+#client-screen .dr-empty-state { font-style: normal; color: var(--text-muted); }
+
+#client-screen .ssd-health-card { padding: 16px 18px; }
+#client-screen .ssd-health-title { font-family: var(--nt-font); font-size: 0.7rem; letter-spacing: 0.12em; }
+#client-screen .ssd-health-label { color: var(--text-muted); }
+#client-screen .ssd-health-val { font-family: var(--nt-font); font-variant-numeric: tabular-nums; font-weight: 600; color: var(--text-dark); }
+#client-screen .ssd-health-badge { color: var(--text-muted); background: var(--bc-well); border-color: var(--nt-hairline); }
+#client-screen .ssd-health-badge.healthy  { color: var(--nt-success-text); background: var(--nt-success-tint); border-color: transparent; }
+#client-screen .ssd-health-badge.warning  { color: var(--nt-warning-text); background: var(--nt-warning-tint); border-color: transparent; }
+#client-screen .ssd-health-badge.critical { color: var(--nt-danger-text);  background: var(--nt-danger-tint);  border-color: transparent; }
+#client-screen .ssd-health-bar-bg { height: 6px; border-radius: 999px; background: var(--bc-track); }
+#client-screen .ssd-health-bar-fill { border-radius: 999px; background: var(--status-completed); }
+
+/* ── The side column: specs, Windows, ports ──────────────────────────────── */
+#client-screen .bc-side .sv-list {
+  border: 1px solid var(--nt-hairline); border-radius: 12px;
+  background: var(--bc-well);
+}
+#client-screen .bc-side .sv-row {
+  grid-template-columns: 56px minmax(0, 1fr) auto;
+  gap: 10px; padding: 10px 12px; border-bottom: 1px solid var(--nt-hairline);
+}
+#client-screen .bc-side .sv-row:last-child { border-bottom: 0; }
+#client-screen .bc-side .sv-cat { font-size: 0.66rem; font-weight: 700; letter-spacing: 0.1em; }
+#client-screen .bc-side .sv-tag { width: 58px; font-size: 0.6rem; letter-spacing: 0.08em; }
+#client-screen .bc-side .sv-tag-target { color: var(--nt-brand); }
+#client-screen .bc-side .sv-tag-detected { color: var(--nt-success-text); }
+#client-screen .bc-side .sv-text { font-family: var(--nt-font); font-variant-numeric: tabular-nums; font-size: 0.8rem; font-weight: 500; }
+#client-screen .bc-side .sv-checkline label { font-size: 0.76rem; }
+#client-screen .bc-side .sv-checkline input { accent-color: var(--primary-pink); width: 15px; height: 15px; }
+#client-screen .bc-side .sv-chip { font-family: var(--nt-font); background: var(--nt-surface); border-color: var(--nt-hairline); }
+body.dark-mode #client-screen .bc-side .sv-chip { background: rgba(255, 255, 255, 0.05); }
+#client-screen .bc-side .sv-chip.match,
+#client-screen .bc-side .sv-chip.physical { color: var(--nt-success-text); background: var(--nt-success-tint); border-color: transparent; }
+#client-screen .bc-side .sv-chip.mismatch { color: var(--nt-danger-text); background: var(--nt-danger-tint); border-color: transparent; }
+#client-screen .bc-side .sv-chip.unknown { color: var(--nt-warning-text); background: var(--nt-warning-tint); border-color: transparent; }
+
+#client-screen .bc-side .full-width { width: 100%; margin-top: 14px; height: 44px; }
+#client-screen .bc-win .full-width { margin-top: 0; }
+#client-screen .bc-side .win-activation-status {
+  flex-direction: row; justify-content: space-between; align-items: center; gap: 10px;
+  margin-top: 10px; padding: 10px 14px; border-radius: 12px;
+  background: var(--bc-well); border: 1px solid var(--nt-hairline);
+  font-size: 0.85rem; font-weight: 600; color: var(--text-dark);
+}
+#client-screen .bc-side .win-activation-status .badge { border-radius: 999px; padding: 3px 10px; font-size: 0.74rem; font-weight: 700; }
+#client-screen #client-win-key { font-family: var(--nt-font) !important; font-variant-numeric: tabular-nums; letter-spacing: 0.04em; }
+
+/* Ports: the inner cards become wells inside the Ports card. */
+#client-screen .bc-ports .dr-card,
+#client-screen .bc-ports .portcert-card {
+  margin-top: 0;
+  border-radius: 14px; border: 1px solid var(--nt-hairline);
+  background: var(--bc-well); box-shadow: none;
+}
+#client-screen .bc-ports .dr-card { padding: 14px 16px; }
+#client-screen .bc-ports .portcert-card { padding: 18px 16px; }
+#client-screen .bc-ports .dr-card-title { font-size: 0.9rem; }
+#client-screen .portcert-title { font-size: 0.98rem; font-weight: 700; }
+#client-screen .portcert-summary {
+  font-family: var(--nt-font); font-variant-numeric: tabular-nums;
+  color: var(--nt-warning-text); background: var(--nt-warning-tint); border-color: transparent;
+}
+#client-screen .portcert-summary.all-good,
+body.dark-mode #client-screen .portcert-summary.all-good { color: var(--nt-success-text); background: var(--nt-success-tint); }
+#client-screen .portcert-explain {
+  font-size: 0.76rem; border-left-color: var(--primary-pink);
+  background: var(--nt-brand-tint); border-radius: 0 10px 10px 0;
+}
+#client-screen .portcert-group-tag.tag-case { color: var(--nt-brand); background: var(--nt-brand-tint); border-color: rgba(var(--primary-pink-rgb), 0.25); }
+#client-screen .portcert-row,
+#client-screen .portcert-mobo-row {
+  padding: 11px 12px; gap: 11px; border-radius: 12px;
+  background: var(--nt-surface); border-color: var(--nt-hairline);
+}
+body.dark-mode #client-screen .portcert-row,
+body.dark-mode #client-screen .portcert-mobo-row { background: rgba(255, 255, 255, 0.04); }
+#client-screen .portcert-row.pass { background: var(--nt-success-tint); }
+#client-screen .portcert-row.fail { background: var(--nt-danger-tint); }
+#client-screen .portcert-test-btn { border-radius: 10px; background: var(--primary-pink); font-family: var(--nt-font); }
+#client-screen .portcert-test-btn:hover { background: var(--primary-pink-hover); }
+#client-screen .portcert-layout .settings-select,
+#client-screen .portcert-add .settings-select,
+#client-screen .portcert-input { height: 40px; border-radius: 12px; }
+#client-screen .portcert-input { background: var(--nt-surface); border-color: var(--nt-input-border); }
+#client-screen .portcert-runner-fill { background: var(--bc-accent-grad); }
+
+/* The hardware check panel (#bench-hw-check, filled by app.js) reads as one
+   more card when it sits in a column or straight under the hero. */
+#client-screen .bc-wrap > #bench-hw-check,
+#client-screen .bc-layout > .client-panel > #bench-hw-check {
+  background: var(--glass-bg); border: 1px solid var(--glass-border);
+  border-radius: 16px; box-shadow: var(--glass-shadow); padding: 18px 22px;
+}
+#client-screen #bench-hw-check:empty,
+#client-screen #bench-hw-check.hidden { display: none; }
+
+/* ── The save bar: always in reach at the bottom of the console ──────────── */
+#client-screen .bc-savebar {
+  position: sticky; bottom: 14px; z-index: 20;
+  display: flex; align-items: center; justify-content: flex-end; gap: 14px;
+  margin: 4px 0 14px; padding: 8px 8px 8px 20px;
+  border-radius: 16px;
+  background: var(--nt-chrome);
+  border: 1px solid var(--glass-border);
+  backdrop-filter: blur(var(--nt-blur)) saturate(180%);
+  -webkit-backdrop-filter: blur(var(--nt-blur)) saturate(180%);
+  box-shadow: var(--nt-e2);
+}
+#client-screen .bc-savebar .client-actions-row { margin: 0; gap: 10px; flex: none; }
+#client-screen .bc-savebar .large-btn { height: 46px; padding: 0 22px !important; font-size: 0.94rem !important; }
+#client-screen .bc-savebar .client-sync-status {
+  flex: 1 1 auto; min-width: 0; margin: 0; text-align: left;
+  font-family: var(--nt-font); font-variant-numeric: tabular-nums; font-size: 0.84rem; font-weight: 600;
+  padding: 9px 14px; border-radius: 10px; background: var(--bc-well);
+}
+#client-screen .bc-savebar .client-sync-status.hidden { display: none; }
+#client-screen .bc-savebar-hint { flex: 1 1 auto; min-width: 0; font-size: 0.84rem; color: var(--text-muted); }
+#client-screen .bc-savebar .client-sync-status:not(.hidden) ~ .bc-savebar-hint { display: none; }
+#client-screen .client-sync-status.syncing { color: var(--nt-brand); }
+#client-screen .client-sync-status.success { color: var(--nt-success-text); border-color: transparent; background: var(--nt-success-tint); }
+#client-screen .client-sync-status.error   { color: var(--nt-danger-text);  border-color: transparent; background: var(--nt-danger-tint); }
+
+/* ── Narrower windows ─────────────────────────────────────────────────────── */
+@media (max-width: 1180px) {
+  #client-screen .bc-hero { grid-template-columns: 1fr; gap: 16px; }
+  #client-screen .client-grid-row.bc-layout { grid-template-columns: minmax(0, 1fr); }
+  #client-screen .bc-layout > .bc-main,
+  #client-screen .bc-layout > .bc-side { grid-column: 1; grid-row: auto; }
+}
+@media (max-width: 820px) {
+  #client-screen .telemetry-hud-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  #client-screen .bc-run-row { grid-template-columns: 1fr; }
+  #client-screen .stress-run-btn { width: 100%; }
+  #client-welcome-screen .bench-search { min-width: 220px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  #client-screen .pulse-dot.testing { animation: none; }
+  #client-welcome-screen .bench-card:hover { transform: none; }
+}

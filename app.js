@@ -1974,6 +1974,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   initPpiTuning(); // seed + apply saved PPI engine tuning before any PPI compute
   // Restore this PC's theme (Settings → Appearance; v1.10 adds "Match Windows").
   applyThemeChoice(themeChoiceFromSettings(appState.settings));
+  // 1.16.1 — aurora, dots, glass, interface size, motion (settings-plus.js).
+  try { if (window.NeoPrefs) window.NeoPrefs.apply(); } catch (e) { console.warn('appearance options failed:', e && e.message); }
   setSplashStatus('Preparing workspace…');
   setupEventListeners();
   startCustomerSiteCheck();
@@ -2344,7 +2346,7 @@ function switchScreen(mode, selectedId = null) {
 // nobody signed in means the sign-in screen.
 function goHome() {
   if (!currentProfile) { showLoginScreen(); return; }
-  const home = firstHomeMode(currentProfile);
+  const home = preferredHome(currentProfile);
   if (!home || home === 'selector' || (NON_OFFICE_MODES.indexOf(home) === -1 && !canOpenOfficeMode(home))) {
     showTierNotice();
     return;
@@ -2487,6 +2489,18 @@ function legacyHomeMode(profile) {
   return tier >= 3 ? 'overview' : tier === 2 ? 'client' : null;
 }
 
+// 1.16.1 — Settings → General → Start screen: this PC's chosen first screen,
+// when the signed-in person can open it; otherwise the automatic home. Bench
+// technicians (home = the Testing Client) are never moved.
+function preferredHome(profile) {
+  const home = firstHomeMode(profile);
+  try {
+    const pick = appState.settings && appState.settings.startScreen;
+    if (pick && pick !== 'auto' && home && home !== 'client' && canOpenOfficeMode(pick)) return pick;
+  } catch (e) { /* keep the automatic home */ }
+  return home;
+}
+
 function firstHomeMode(profile) {
   const M = window.NeoQcModules;
   if (M && typeof M.firstHome === 'function') {
@@ -2545,7 +2559,7 @@ async function routeByTier() {
         showToast('Couldn’t confirm your module access just now — using what this PC remembers.', 'warning', 7000);
       }
     }
-    const home = firstHomeMode(profile);
+    const home = preferredHome(profile);
     // A home the gate would refuse would bounce straight back here; the tier
     // notice is the safe end of that road.
     if (!home || (NON_OFFICE_MODES.indexOf(home) === -1 && !canOpenOfficeMode(home))) {
@@ -3139,70 +3153,62 @@ function renderDashboard() {
       const damagedCount = damaged ? (t.damagedComponents || (t.specs && t.specs.__damaged) || []).length : 0;
       const techInfo = buildTechInfo(t);
 
+      // 1.16.1 — the card in Neo Glass (qc-builds.css): who, code and stage
+      // first, then the parts line, anything blocking, the three progress bars,
+      // and the technician and deadline at the foot. A click opens the build
+      // summary (build-summary.js); Edit there opens this ticket's form.
       const card = document.createElement('div');
-      card.className = `glass-slab ticket-card ${t.status} ${isUrgent ? "urgent" : ""} ${dRisk ? "risk-" + dRisk : ""} ${damaged ? "has-damage" : ""}`;
+      card.className = `qb-card s-${t.status} ${isUrgent ? "urgent" : ""} ${dRisk ? "risk-" + dRisk : ""} ${damaged ? "has-damage" : ""}`;
+      card.setAttribute('role', 'button');
+      card.setAttribute('tabindex', '0');
+      card.setAttribute('aria-label', `Open the summary for ${t.customerName}`);
+      card.dataset.ticket = t.id;
+      const specLine = [t.specs && t.specs.cpu, t.specs && t.specs.gpu].filter(Boolean).join('  ·  ');
+      const qbBar = (label, pct) => `
+          <div class="qb-bar${pct >= 100 ? ' is-done' : ''}${pct <= 0 ? ' is-zero' : ''}">
+            <div class="qb-bar-h"><span>${label}</span><b>${pct}%</b></div>
+            <div class="qb-track"><i style="width:${pct}%"></i></div>
+          </div>`;
+      const queries = ticketQueryCounts[t.id] || 0;
       card.innerHTML = `
-        <div class="ticket-card-header">
-          <span class="card-id">#${t.id.slice(-6)}</span>
-          <div style="display:flex;align-items:center;gap:6px;">
-            <span class="card-status-label ${t.status}">${statusText}</span>
-            <span class="card-status-dot ${t.status}"></span>
+        <div class="qb-card-top">
+          <div class="qb-who">
+            <h3 class="qb-cust">${escapeHtmlLite(t.customerName)}</h3>
+            <div class="qb-meta"><span class="qb-code">#${escapeHtmlLite(t.id.slice(-6))}</span><span class="qb-type">${t.type === 'build' ? 'Build' : 'Repair'}</span></div>
           </div>
+          <span class="qb-stage s-${t.status}">${statusText}</span>
         </div>
-        ${damaged ? `<div class="card-damage-banner">⚠ DOA / Damaged Components (${damagedCount})</div>` : ''}
-        ${ticketQueryCounts[t.id] ? `<div class="card-query-banner"><span>💬 ${ticketQueryCounts[t.id]} sales quer${ticketQueryCounts[t.id] > 1 ? 'ies' : 'y'} awaiting reply</span><span class="cqb-cta">Reply ›</span></div>` : ''}
-        <h3 class="card-cust-name">${escapeHtmlLite(t.customerName)}</h3>
-        <div style="margin-bottom:14px;">
-          <span class="tech-chip q-tone-${techInfo.tone}">
-            <span class="tech-chip-dot"></span>
-            ${escapeHtmlLite(techInfo.label)}
-          </span>
-          ${canPickBuildTech() && t.status !== 'completed' && !ticketIsAssigned(t) ? '<button type="button" class="secondary-btn card-assign-btn" style="margin-left:6px;padding:2px 10px;font-size:0.75rem;">Assign…</button>' : ''}
+        <div class="qb-specs" title="${escapeHtmlLite(specLine)}">${escapeHtmlLite(specLine || 'Specs not set')}</div>
+        ${damaged ? `<div class="qb-note bad"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5 2.5 20h19L12 3.5Z"/><path d="M12 10v4.5M12 17.2v.3"/></svg><span>DOA / damaged parts (${damagedCount})</span></div>` : ''}
+        ${isAwaitingParts ? `<div class="qb-note warn"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 7.5 12 3l8.5 4.5v9L12 21l-8.5-4.5v-9Z"/><path d="M3.5 7.5 12 12l8.5-4.5M12 12v9"/></svg><span><strong>Awaiting:</strong> ${escapeHtmlLite(formatMissingComponentsHuman(t.missingComponents))}</span></div>` : ''}
+        ${queries ? `<button type="button" class="qb-note query qb-query"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5.5h16v10H9l-5 4v-14Z"/></svg><span>${queries} sales quer${queries > 1 ? 'ies' : 'y'} awaiting reply</span><b>Reply ›</b></button>` : ''}
+        <div class="qb-bars">${qbBar('Assembly', buildPct)}${qbBar('QC', qcPct)}${qbBar('Stress', stressPct)}
         </div>
-        
-        <div class="card-progress-section">
-          <div class="card-progress-label">
-            <span>Assembly</span>
-            <span style="font-family:'JetBrains Mono',monospace;font-weight:800;">${buildPct}%</span>
+        <div class="qb-card-foot">
+          <div class="qb-foot-who">
+            <span class="tech-chip qb-tech q-tone-${techInfo.tone}" title="${escapeHtmlLite(techInfo.label)}"><span class="tech-chip-dot"></span><span class="qb-tech-l">${escapeHtmlLite(techInfo.label)}</span></span>
+            ${canPickBuildTech() && t.status !== 'completed' && !ticketIsAssigned(t) ? '<button type="button" class="secondary-btn card-assign-btn qb-assign">Assign…</button>' : ''}
           </div>
-          <div class="progress-bar-bg">
-            <div class="progress-bar-fill build" style="width: ${buildPct}%"></div>
-          </div>
-        </div>
-
-        <div class="card-progress-section">
-          <div class="card-progress-label">
-            <span>QC Testing</span>
-            <span style="font-family:'JetBrains Mono',monospace;font-weight:800;">${qcPct}%</span>
-          </div>
-          <div class="progress-bar-bg">
-            <div class="progress-bar-fill qc" style="width: ${qcPct}%"></div>
-          </div>
-        </div>
-
-        <div class="card-progress-section">
-          <div class="card-progress-label">
-            <span>Stress ${t.stressSignedOff ? '✓' : ''}</span>
-            <span style="font-family:'JetBrains Mono',monospace;font-weight:800;">${stressPct}%</span>
-          </div>
-          <div class="progress-bar-bg">
-            <div class="progress-bar-fill stress" style="width: ${stressPct}%; background: ${t.stressSignedOff ? 'linear-gradient(90deg,#10b981,#22c55e)' : 'linear-gradient(90deg,#f59e0b,#ef4444)'};"></div>
-          </div>
-        </div>
-
-        ${isAwaitingParts ? `
-          <div class="card-missing-parts">
-            ⚠️ <strong>Awaiting:</strong> ${escapeHtmlLite(formatMissingComponentsHuman(t.missingComponents))}
-          </div>
-        ` : ''}
-
-        <div class="card-meta-footer">
-          <span class="card-type-badge">${t.type === 'build' ? '⚙️ Build' : '🔧 Repair'}</span>
-          <span class="card-deadline ${isUrgent ? 'urgent' : ''}${dRisk ? ' risk-' + dRisk : ''}">📅 ${formatDateShort(t.deadline)} · <strong>${deadlineCountdown(t.deadline)}</strong></span>
+          ${t.deadline
+            ? `<span class="qb-due${dRisk ? ' risk-' + dRisk : ''}" title="Deadline ${escapeHtmlLite(formatDateShort(t.deadline))}"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15.5" rx="2.5"/><path d="M3.5 10h17M8 3v4M16 3v4"/></svg><b>${escapeHtmlLite(deadlineCountdown(t.deadline))}</b><span>${escapeHtmlLite(formatDateShort(t.deadline))}</span></span>`
+            : '<span class="qb-due none">No deadline</span>'}
         </div>
       `;
 
-      card.addEventListener('click', () => openTicketModal(t.id));
+      const openBuildSummary = () => {
+        const S = window.NeoBuildSummary;
+        if (S && typeof S.open === 'function') S.open(t.id);
+        else openTicketModal(t.id);
+      };
+      card.addEventListener('click', openBuildSummary);
+      card.addEventListener('keydown', (e) => {
+        if (e.target !== card || (e.key !== 'Enter' && e.key !== ' ')) return;
+        e.preventDefault();
+        openBuildSummary();
+      });
+      // Sales queries are answered in the ticket's form.
+      const queryBtn = card.querySelector('.qb-query');
+      if (queryBtn) queryBtn.addEventListener('click', (e) => { e.stopPropagation(); openTicketModal(t.id); });
       // 1.12.5 — assign straight from the list (Builds desk / lead).
       const assignBtn = card.querySelector('.card-assign-btn');
       if (assignBtn) assignBtn.addEventListener('click', (e) => {
@@ -4441,6 +4447,30 @@ function setupFormCalculations() {
   });
 }
 
+// 1.16.1 — the automatic hardware read when a build is opened on the bench.
+// It presses the bench's own "Detect hardware" (sys:detect-hw + the full
+// inventory, then checkSpecsMatch against the invoice specs). Once per build
+// per minute, only when the bench console is on screen and idle.
+let benchAutoDetect = { id: null, at: 0, pending: false };
+function scheduleBenchAutoDetect(ticketId) {
+  if (!ticketId) return;
+  if (benchAutoDetect.id === ticketId && Date.now() - benchAutoDetect.at < 60000) return;
+  benchAutoDetect = { id: ticketId, at: Date.now(), pending: true };
+  let tries = 0;
+  const attempt = () => {
+    const btn = document.getElementById('btn-client-detect-hw');
+    const sel = document.getElementById('client-ticket-select');
+    const scr = document.getElementById('client-screen');
+    if (!btn || !sel || sel.value !== ticketId) return;
+    if (!scr || !scr.classList.contains('active') || btn.disabled) {
+      if (++tries < 12) setTimeout(attempt, 400);
+      return;
+    }
+    btn.click();
+  };
+  setTimeout(attempt, 300);
+}
+
 function handleClientTicketSelect() {
   const ticketId = document.getElementById('client-ticket-select').value;
   const submitBtn = document.getElementById('btn-client-submit');
@@ -4549,6 +4579,10 @@ function handleClientTicketSelect() {
     document.getElementById('c-spec-ram').textContent = 'Not detected';
     document.getElementById('c-spec-storage').textContent = 'Not detected';
   }
+  // 1.16.1 (owner): opening a build on the bench reads THIS PC's hardware
+  // straight away and checks it against the build's invoice components (the
+  // target column) — no need to press "Detect hardware" first.
+  scheduleBenchAutoDetect(ticketId);
 
   // Load physical checklist state
   document.getElementById('c-verify-cooler').checked = !!(ticket.detectedSpecs && ticket.detectedSpecs.coolerVerified);
@@ -4969,9 +5003,14 @@ async function handleTicketFormSubmit(e) {
     // values are still saved when present; they just no longer gate the
     // completion status. Fixed 2026-07-14: field-reported tickets that
     // clearly said 100% + 100% weren't moving to the Completed column.
-    if (isQcComplete) {
+    // 1.16.1 (owner): QC is complete only when the QC person has finished the
+    // stress testing — for as long as she wants — and pressed "I have tortured
+    // this PC enough". Ticking every QC box no longer finishes the build; it
+    // waits in QC testing until that sign-off (which moves it, once saved and
+    // synced: see finishBuildAfterSignOff).
+    if (isQcComplete && existingTicket && existingTicket.stressSignedOff) {
       status = 'completed';
-    } else if (qcChecks.physCabinet || diagnostics.cpuTempAvg !== null) {
+    } else if (isQcComplete || qcChecks.physCabinet || diagnostics.cpuTempAvg !== null) {
       status = 'qc_testing';
     }
   } else if (missingComponentsToggle) {
@@ -5435,6 +5474,10 @@ async function setupClientMode() {
 
     try {
       detectedSpecs = await ipcRenderer.invoke('sys:detect-hw');
+      // 1.16.1 — detection can come back empty (no WMI answer): say so, never throw.
+      if (!detectedSpecs || typeof detectedSpecs !== 'object') {
+        detectedSpecs = { cpu: 'Failed to detect', gpu: 'None', igpu: 'None', dgpu: 'None', ram: 'Failed to detect', storage: 'Failed to detect', motherboard: 'Failed to detect' };
+      }
 
       // v1.5.1 — full inventory (brand / model / part no. / SERIAL per part).
       // Attached to detectedSpecs so it rides the existing sync path
@@ -5463,14 +5506,28 @@ async function setupClientMode() {
 
       checkClientFormReady();
       checkSpecsMatch();
+      if (benchAutoDetect.pending) {
+        benchAutoDetect.pending = false;
+        try {
+          const t = (appState.tickets || []).find(x => x && x.id === document.getElementById('client-ticket-select').value);
+          const B = window.NeoBenchMatch;
+          const r = t && B && typeof B.compare === 'function' ? B.compare(detectedSpecs, t.specs || {}) : null;
+          if (r && r.match === false) {
+            showToast('This PC does not match the invoice: ' + r.mismatches.map(m => m.part.toUpperCase() + ' here is ' + m.here).join('; ') + '. Check before testing.', 'warning', 9000);
+          } else {
+            showToast('This PC was read and checked against the build’s invoice components.', 'success', 4000);
+          }
+        } catch (e) { /* the chips still show the result */ }
+      }
     } catch (err) {
       console.error("Client specs detection error:", err);
       showToast("Specs detection failed: " + err.message, 'error', 8000);
     } finally {
       btn.disabled = false;
-      if (btn.textContent === "🔍 Detecting hardware...") {
+      if (btn.textContent === "🔍 Detecting hardware..." || /Reading full hardware inventory/.test(btn.textContent)) {
         btn.textContent = oldText;
       }
+      if (benchAutoDetect.pending) benchAutoDetect.pending = false;
     }
   });
 
@@ -5999,13 +6056,15 @@ function openSettingsModal() {
 
   // Reset active tab in settings modal
   document.querySelectorAll('.settings-tab-btn').forEach(btn => btn.classList.remove('active'));
-  document.querySelector('.settings-tab-btn[data-tab="tab-general"]').classList.add('active');
+  document.querySelector('.settings-tab-btn[data-tab="tab-appearance"]').classList.add('active');
   document.querySelectorAll('.settings-tab-content').forEach(c => c.classList.add('hidden'));
-  document.getElementById('tab-general').classList.remove('hidden');
+  document.getElementById('tab-appearance').classList.remove('hidden');
 
   // v1.10 — Operations (demo data + module access). Its own function so a
   // failure there can never stop the rest of Settings from opening.
   try { renderOpsSettings(); } catch (e) { console.error('Operations settings failed to render:', e); }
+  // 1.16.1 — the new options (settings-plus.js): mark the saved choices, fill About.
+  try { if (window.NeoPrefs) window.NeoPrefs.onOpen(); } catch (e) { console.warn('settings options failed:', e && e.message); }
 
   modal.classList.add('active');
 }
@@ -9290,7 +9349,9 @@ function renderSsdHealthCard(prefix, h) {
 // it in this PC's local database (appState.settings). darkMode is still
 // written alongside, so a PC rolled back to 1.9.x keeps the same look.
 // ==========================================================================
-const THEME_CHOICES = ['light', 'dark', 'system'];
+// 1.16.1 — Sand (warm light) and Midnight (deep dark) join Light and Dark;
+// all four are Neo Glass (neo-theme.css body.theme-sand / body.theme-midnight).
+const THEME_CHOICES = ['light', 'dark', 'sand', 'midnight', 'system'];
 
 // main colour, its rgb channels (for rgba(var(--primary-pink-rgb), a)), the
 // hover shade, and the light/dark ends of the logo gradient.
@@ -9320,13 +9381,15 @@ function resolvedTheme(choice) {
     try { return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'; }
     catch (e) { return 'light'; }
   }
-  return choice === 'dark' ? 'dark' : 'light';
+  return (choice === 'dark' || choice === 'midnight') ? 'dark' : 'light';
 }
 
 function applyThemeChoice(choice) {
   const dark = resolvedTheme(choice) === 'dark';
   document.body.classList.toggle('dark-mode', dark);
   document.body.classList.toggle('light-mode', !dark);
+  document.body.classList.toggle('theme-sand', choice === 'sand');
+  document.body.classList.toggle('theme-midnight', choice === 'midnight');
   // "Match Windows" follows a Windows theme change live, without a restart.
   if (!systemThemeQuery) {
     try {
@@ -10013,6 +10076,65 @@ function recordStressRun(ticketId, runInfo) {
   if (currentMode === 'staff') renderDashboard();
 }
 
+// 1.16.1 (owner): "only mark the QC complete after the QC person has finished
+// the stress testing as long as she wants" — the "I have tortured this PC
+// enough" sign-off is what finishes a build. It moves to Finished builds only
+// when every assembly and QC check is ticked AND the sign-off has been saved on
+// this PC and synced to the cloud. If the sync fails it stays in the active
+// builds (signed off) and the next sign-off finishes it.
+const BUILD_CHECK_KEYS = ['cpuRamSsd', 'moboCase', 'cooler', 'cables', 'posted'];
+const QC_CHECK_KEYS = ['physCabinet', 'physMobo', 'physRam', 'physScrews', 'softWindows', 'softDrivers', 'softBios',
+  'portUsb', 'portVideo', 'portAudio', 'portWifi'];
+const QC_CHECK_NAMES = { physCabinet: 'Cabinet scratch-free', physMobo: 'Socket and pins', physRam: 'RAM checked', physScrews: 'Screws secured',
+  softWindows: 'Windows', softDrivers: 'Drivers', softBios: 'BIOS', portUsb: 'USB ports', portVideo: 'Video ports', portAudio: 'Audio', portWifi: 'Wi-Fi' };
+function openChecksOf(t) {
+  const b = t.buildChecks || {}, q = t.qcChecks || {};
+  return { build: BUILD_CHECK_KEYS.filter(k => !b[k]), qc: QC_CHECK_KEYS.filter(k => !q[k]) };
+}
+function signOffQuestion(t) {
+  const open = openChecksOf(t);
+  const runs = t.stressRuns || 0;
+  let msg = `Is the stress testing of ${t.customerName}'s PC finished?\n\n${runs} stress run${runs === 1 ? '' : 's'} done` +
+    (t.stressTotalSec ? `, ${fmtDuration(t.stressTotalSec * 1000)} under load` : '') + '.';
+  if (!open.build.length && !open.qc.length) {
+    msg += '\n\nEvery check is ticked, so the build moves to Finished builds as soon as this sign-off is saved and synced.';
+  } else {
+    const names = open.qc.map(k => QC_CHECK_NAMES[k] || k);
+    const parts = [];
+    if (open.build.length) parts.push(open.build.length + ' assembly check' + (open.build.length === 1 ? '' : 's'));
+    if (names.length) parts.push(names.join(', '));
+    msg += `\n\nStill open: ${parts.join('; ')}. The build stays in QC until they are ticked, then it moves to Finished builds.`;
+  }
+  return msg;
+}
+async function finishBuildAfterSignOff(t) {
+  const now = new Date().toISOString();
+  const prev = { status: t.status, completedAt: t.completedAt || null };
+  t.stressSignedOff = true;
+  t.stressSignedOffAt = now;
+  t.updatedAt = now;
+  const open = openChecksOf(t);
+  const finish = !open.build.length && !open.qc.length;
+  if (finish) { t.status = 'completed'; t.completedAt = t.completedAt || now; }
+  try { addEventLog(t, 'Stress testing signed off' + (finish ? ' — QC complete' : ''), (currentProfile && currentProfile.full_name) || 'QC'); } catch (e) { /* the log is a nicety */ }
+  try { await saveDatabase(); } catch (e) { console.warn('saving the sign-off failed:', e && e.message); }
+  let synced = false;
+  try { synced = await syncTicketToCloud(t); } catch (e) { synced = false; }
+  if (finish && !synced) {
+    // Not in the cloud yet: keep it in the active builds until it is.
+    t.status = prev.status === 'completed' ? 'qc_testing' : prev.status;
+    t.completedAt = prev.completedAt;
+    try { await saveDatabase(); } catch (e) { /* stays signed off locally */ }
+    showToast('Signed off, but it could not sync yet, so the build stays in active builds. Check the connection and press the sign-off again.', 'warning', 10000);
+  } else if (finish) {
+    showToast(`QC complete for ${t.customerName}: saved, synced and moved to Finished builds.`, 'success', 6000);
+  } else {
+    showToast(`Stress testing signed off${synced ? ' and synced' : ''}. The build moves to Finished builds once its open checks are ticked.`, 'info', 8000);
+  }
+  if (currentMode === 'staff') renderDashboard();
+  return synced;
+}
+
 // Sign-off button — the ONLY way stress testing reaches 100%.
 document.addEventListener('DOMContentLoaded', () => {
   const btn = document.getElementById('btn-tortured-enough');
@@ -10022,14 +10144,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const t = appState.tickets.find(x => x.id === editingTicketId);
     if (!t) return;
     if (!(t.stressRuns > 0)) { showToast('Run the stress test at least once before signing off.', 'warning'); return; }
-    if (!(await showConfirm(`Sign off stress testing for ${t.customerName}?\n\n${t.stressRuns} run(s) completed. This marks stress testing 100% complete.`, { title: 'Sign off stress testing', okText: 'Sign off' }))) return;
-    t.stressSignedOff = true;
-    t.stressSignedOffAt = new Date().toISOString();
-    t.updatedAt = new Date().toISOString();
-    saveDatabase();
-    syncTicketToCloud(t);
+    if (!(await showConfirm(signOffQuestion(t), { title: 'Stress testing done?', okText: 'Yes, sign off' }))) return;
+    await finishBuildAfterSignOff(t);
     renderStressProgress(t);
-    renderDashboard();
   });
 });
 
@@ -10497,6 +10614,11 @@ const GODMODE_FIELDS = [
 ];
 
 function openGodMode() {
+  // 1.16.1 — the old God Mode had no gate. It is now Owner tools
+  // (owner-tools.js): tier 5 only, the owner's own password every 15 minutes.
+  if (window.NeoOwnerTools) { window.NeoOwnerTools.open(editingTicketId || null); return; }
+  return;
+  // eslint-disable-next-line no-unreachable
   if (currentMode !== 'staff') return;
   if (!editingTicketId) {
     showToast('God Mode edits a specific report.\n\nOpen the ticket you want to edit, then press Ctrl+Alt+W.', 'info', 7000);
@@ -10675,9 +10797,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const t = id ? appState.tickets.find(x => x.id === id) : null;
     if (!t) { showToast('Select a build first.', 'warning'); return; }
     if (!(t.stressRuns > 0)) { showToast('Run at least one stress test before signing off.', 'warning'); return; }
-    if (!(await showConfirm(`Mark stress testing complete for ${t.customerName}?\n\n${t.stressRuns} run(s) done.`, { title: 'Complete stress testing', okText: 'Mark complete' }))) return;
-    t.stressSignedOff = true; t.stressSignedOffAt = new Date().toISOString(); t.updatedAt = new Date().toISOString();
-    saveDatabase(); syncTicketToCloud(t); renderClientStressProgress();
+    if (!(await showConfirm(signOffQuestion(t), { title: 'Stress testing done?', okText: 'Yes, sign off' }))) return;
+    await finishBuildAfterSignOff(t);
+    renderClientStressProgress();
   });
 });
 

@@ -125,6 +125,9 @@
   </style>
 </head>
 <body class="light-mode">
+  <!-- 1.16.1 the app's backdrop: dots and the animated aurora (neo-theme.css). -->
+  <div class="blueprint-dots"></div>
+  <div class="nt-aurora" aria-hidden="true"><span class="a1"></span><span class="a2"></span><span class="a3"></span><span class="a4"></span></div>
 
   <div id="hx-bar" class="custom-titlebar hx-bar">
     <div class="hx-title">
@@ -1184,6 +1187,8 @@ function switchScreen(mode) {
   <script src="../service-intake.js"></script>
   <script src="../service.js"></script>
   <script src="../rma.js"></script>
+  <!-- 1.16.1 Neo Glass suggestion lists for <input list> (replaces the native datalist popup). -->
+  <script src="../neo-combo.js"></script>
   <script src="../ticket-summary.js"></script>
   <script src="../qc-bench.js"></script>
   <script src="../qc-service.js"></script>

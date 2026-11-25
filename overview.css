@@ -111,7 +111,7 @@
 }
 .ov2-pc-fill {
   position: absolute; left: 0; right: 0; bottom: 0; border-radius: 10px 10px 8px 8px;
-  background: linear-gradient(180deg, #E83C7E 0%, #DA1A5D 55%, #BC1F59 100%);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--primary-pink) 78%, #fff) 0%, var(--primary-pink) 55%, color-mix(in srgb, var(--primary-pink) 84%, #000) 100%);
   transition: height var(--dur-base) var(--ease);
 }
 .ov2-pc-late {
@@ -144,7 +144,7 @@
 .ov2-tm { display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; gap: 10px; align-items: center; }
 .ov2-av {
   width: 34px; height: 34px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center;
-  background: linear-gradient(135deg, #E83C7E, #BC1F59); color: #FFFFFF; font-weight: 700; font-size: 0.78rem;
+  background: linear-gradient(135deg, color-mix(in srgb, var(--primary-pink) 75%, #fff), color-mix(in srgb, var(--primary-pink) 84%, #000)); color: #FFFFFF; font-weight: 700; font-size: 0.78rem;
 }
 .ov2-tm.is-none .ov2-av { background: rgba(127, 127, 160, 0.22); color: var(--text-muted); }
 .ov2-tm-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }

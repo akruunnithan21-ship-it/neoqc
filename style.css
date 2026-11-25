@@ -4855,7 +4855,7 @@ body.dark-mode .bench-go { color: var(--bench-accent); }
 .peek-bar span { width: 58px; flex: none; }
 .peek-bar b { width: 34px; text-align: right; font-family: 'JetBrains Mono', monospace; color: var(--text-dark); }
 .peek-track { flex: 1; height: 5px; border-radius: 99px; background: rgba(127,127,127,0.22); overflow: hidden; }
-.peek-track i { display: block; height: 100%; border-radius: 99px; background: linear-gradient(90deg, #ff2d6f, #e7014e); }
+.peek-track i { display: block; height: 100%; border-radius: 99px; background: linear-gradient(90deg, color-mix(in srgb, var(--primary-pink) 80%, #fff), var(--primary-pink)); }
 .peek-track i.qc { background: linear-gradient(90deg, #38bdf8, #6366f1); }
 
 .peek-specs, .peek-foot { display: flex; flex-direction: column; gap: 3px; }

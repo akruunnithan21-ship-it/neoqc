@@ -36,10 +36,13 @@
   <!-- 1.16 the Neo Glass theme (the Configurator's tokens, Outfit). LAST on
        purpose: it re-tokens every sheet above. -->
   <link rel="stylesheet" href="neo-theme.css">
+  <link rel="stylesheet" href="bench.css">
   <link rel="stylesheet" href="overview.css">
   <!-- 1.16 QC after a service. -->
   <link rel="stylesheet" href="qc-service.css">
   <link rel="stylesheet" href="qc-bench.css">
+  <link rel="stylesheet" href="build-summary.css">
+  <link rel="stylesheet" href="qc-builds.css">
 </head>
 <body class="light-mode">
   
@@ -87,6 +90,8 @@
 
   <!-- BACKGROUND BLUEPRINT DOTS -->
   <div class="blueprint-dots"></div>
+  <!-- 1.16.1 the animated aurora behind the glass (neo-theme.css .nt-aurora). -->
+  <div class="nt-aurora" aria-hidden="true"><span class="a1"></span><span class="a2"></span><span class="a3"></span><span class="a4"></span></div>
 
   <!-- SPLASH / BOOT SCREEN -->
   <div id="splash-screen" class="screen active">
@@ -173,14 +178,19 @@
          the dashboard's language but wears its own cyan identity so nobody
          confuses the bench with the admin floor view. -->
     <main class="bench-container">
+      <!-- 1.16 Neo Glass bench (bench.css): eyebrow, count, search with an icon. -->
       <section class="bench-head">
-        <div>
+        <div class="bench-head-text">
+          <span class="bench-eyebrow">Testing client</span>
           <h2 class="bench-title">My Bench</h2>
           <p class="bench-sub" id="bench-subtitle">Builds assigned to you.</p>
         </div>
         <div class="bench-head-right">
-          <input type="text" id="bench-search" class="bench-search" placeholder="Search customer / #id / spec…" />
           <div class="bench-stat"><span id="bench-count">0</span><small>ASSIGNED</small></div>
+          <label class="bench-search-wrap">
+            <svg class="bench-search-ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5"/></svg>
+            <input type="text" id="bench-search" class="bench-search" placeholder="Search customer / #id / spec…" aria-label="Search builds" />
+          </label>
           <button type="button" id="btn-bench-refresh" class="secondary-btn">↻ Refresh</button>
         </div>
       </section>
@@ -244,46 +254,52 @@
         <button type="button" class="qc-tab" role="tab" aria-selected="false" data-qc-tab="service">After service <span class="qc-tab-n" id="qc-service-n"></span></button>
       </nav>
       <section id="qc-service-root" class="qc-svc" aria-label="QC after a service"></section>
-      <!-- Search and filter panel -->
-      <section class="glass-slab search-filter-slab">
-        <input type="text" id="search-input" placeholder="Search by customer, technician, serial number..." />
-        <select id="filter-status">
-          <option value="all">All Statuses</option>
-          <option value="awaiting">Awaiting Components</option>
-          <option value="building">Build Commenced</option>
-          <option value="waiting_qc">Awaiting QC</option>
-          <option value="qc_testing">QC & Testing</option>
-          <option value="completed">Completed / Passed</option>
-        </select>
-        <select id="filter-tech">
-          <option value="all">All Technicians</option>
-        </select>
-      </section>
+      <!-- 1.16.1 New builds in Neo Glass (qc-builds.css): the numbers, then the
+           board with its search and filters, then the finished builds. A card
+           opens the build summary (build-summary.js); Edit there opens the form. -->
+      <div class="qb-kpis" id="stats-summary-bar">
+        <div class="qb-kpi k-active">
+          <span class="qb-kpi-ic" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.2L3.5 17.3a1.8 1.8 0 0 0 2.5 2.5l5.8-5.8a4 4 0 0 0 5.2-5.4l-2.5 2.5-2.1-.4-.4-2.1 2.7-2.3Z"/></svg></span>
+          <span class="qb-kpi-t"><span class="qb-kpi-n" id="stat-active">0</span><span class="qb-kpi-l">Active builds</span><span class="qb-kpi-s">On the floor now</span></span>
+        </div>
+        <div class="qb-kpi k-qc">
+          <span class="qb-kpi-ic" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M9 3h6M10 3v6.2L4.8 18a2 2 0 0 0 1.7 3h11a2 2 0 0 0 1.7-3L14 9.2V3"/><path d="M7.5 14h9"/></svg></span>
+          <span class="qb-kpi-t"><span class="qb-kpi-n" id="stat-qc">0</span><span class="qb-kpi-l">Under QC</span><span class="qb-kpi-s">Waiting for or in testing</span></span>
+        </div>
+        <div class="qb-kpi k-risk">
+          <span class="qb-kpi-ic" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="13" r="8"/><path d="M12 9v4.5l2.5 1.5M9.5 2.5h5"/></svg></span>
+          <span class="qb-kpi-t"><span class="qb-kpi-n" id="stat-urgent">0</span><span class="qb-kpi-l">At risk</span><span class="qb-kpi-s">Due in 24 hours or late</span></span>
+        </div>
+        <div class="qb-kpi k-done">
+          <span class="qb-kpi-ic" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="m8 12.3 2.7 2.7L16.2 9.5"/></svg></span>
+          <span class="qb-kpi-t"><span class="qb-kpi-n" id="stat-completed">0</span><span class="qb-kpi-l">Completed</span><span class="qb-kpi-s">Passed QC</span></span>
+        </div>
+      </div>
 
       <!-- Active Tickets Grid -->
-      <section class="tickets-grid-section">
-        <!-- Premium Stats Summary Bar -->
-        <div class="stats-summary-bar" id="stats-summary-bar">
-          <div class="stat-pill">
-            <div class="stat-pill-value" id="stat-active">0</div>
-            <div class="stat-pill-label">🔨 Active Builds</div>
+      <section class="tickets-grid-section qb-section">
+        <header class="qb-head">
+          <h2 class="qb-title">Active builds <span id="active-count" class="qb-count">0</span></h2>
+          <div class="qb-toolbar" role="search">
+            <label class="qb-search">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5"/></svg>
+              <span class="qb-vh">Search builds</span>
+              <input type="text" id="search-input" placeholder="Search customer, technician, serial…" autocomplete="off" />
+            </label>
+            <select id="filter-status" class="qb-select" aria-label="Filter by status">
+              <option value="all">All Statuses</option>
+              <option value="awaiting">Awaiting Components</option>
+              <option value="building">Build Commenced</option>
+              <option value="waiting_qc">Awaiting QC</option>
+              <option value="qc_testing">QC & Testing</option>
+              <option value="completed">Completed / Passed</option>
+            </select>
+            <select id="filter-tech" class="qb-select" aria-label="Filter by technician">
+              <option value="all">All Technicians</option>
+            </select>
           </div>
-          <div class="stat-pill">
-            <div class="stat-pill-value" id="stat-completed">0</div>
-            <div class="stat-pill-label">✅ Build Completed</div>
-          </div>
-          <div class="stat-pill">
-            <div class="stat-pill-value" id="stat-qc">0</div>
-            <div class="stat-pill-label">🧪 Under QC</div>
-          </div>
-          <div class="stat-pill">
-            <div class="stat-pill-value" id="stat-urgent">0</div>
-            <div class="stat-pill-label">⚠️ At Risk</div>
-          </div>
-        </div>
-
-        <h2 class="section-title">TICKET PROGRESS / STATUS <span id="active-count" class="badge">0</span></h2>
-        <div id="tickets-grid" class="grid-container">
+        </header>
+        <div id="tickets-grid" class="grid-container qb-grid">
           <!-- Grid items dynamically injected -->
           <div class="empty-state">
             <p>No active builds or repairs found. Click "+ New Ticket" to create one.</p>
@@ -292,10 +308,10 @@
       </section>
 
       <!-- Archive / Completed Tickets Section -->
-      <section class="archive-section">
+      <section class="archive-section qb-archive">
         <div class="glass-slab archive-slab">
           <button type="button" class="archive-header archive-toggle" id="archive-toggle" aria-expanded="true">
-            <h3>COMPLETED / PASSED SYSTEMS <span id="completed-count" class="badge green">0</span></h3>
+            <h3>Completed builds <span id="completed-count" class="badge green">0</span></h3>
             <span class="archive-chevron" id="archive-chevron">▾</span>
           </button>
           <div class="table-container archive-collapsible" id="archive-collapsible">
@@ -524,25 +540,34 @@
     </header>
 
     <div class="client-container">
-      <div class="glass-slab client-card">
-        <h2>Target PC Diagnostic Panel</h2>
-        <p class="card-subtitle">Connect this PC to an active ticket to run automated benchmarks and thermal analysis.</p>
-        
-        <!-- Ticket Association Redesigned -->
-        <div class="ticket-association-panel" style="background: rgba(var(--primary-pink-rgb),0.04); border: 1px solid rgba(var(--primary-pink-rgb),0.15); padding: 14px; border-radius: 12px; margin-bottom: 20px;">
-          <label style="font-weight: 700; color: var(--primary-pink); display: block; margin-bottom: 8px; font-size: 0.82rem; text-transform: uppercase; letter-spacing: 0.05em;">🔗 Connect to Active Ticket</label>
-          <div style="display: flex; gap: 12px; align-items: center;">
-            <input type="text" id="client-ticket-input" placeholder="Type Ticket ID (e.g. #AB12CD)" class="large-select" style="flex-grow: 1; padding: 8px 12px; background: rgba(0,0,0,0.25); border: 1px solid var(--glass-border); color: white; border-radius: 6px; font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; outline: none; transition: border-color 0.2s;" onfocus="this.style.borderColor='var(--primary-pink)'" onblur="this.style.borderColor='var(--glass-border)'">
-            <span style="color: var(--text-muted); font-size: 0.75rem; font-weight: 700;">OR</span>
-            <select id="client-ticket-select" class="large-select" style="flex-grow: 1; padding: 8px 12px; border-radius: 6px; background: rgba(0,0,0,0.25); border: 1px solid var(--glass-border); color: white; font-size: 0.85rem; outline: none; transition: border-color 0.2s;" onfocus="this.style.borderColor='var(--primary-pink)'" onblur="this.style.borderColor='var(--glass-border)'">
-              <option value="">-- Choose Ticket --</option>
-            </select>
+      <!-- 1.16 Neo Glass console (bench.css): a hero with the build picker, then
+           two columns placed by CSS: tests + live telemetry (#client-panel-right,
+           main) and the checks (specs, Windows, ports; side). The ports block is
+           .bc-ports, not .port-checker-section, so app.js's v1.8.2 column
+           rebalance finds nothing to move and leaves this layout alone. -->
+      <div class="client-card bc-wrap">
+        <section class="bc-hero">
+          <div class="bc-hero-text">
+            <span class="bc-eyebrow">Testing console</span>
+            <h2>Target PC Diagnostic Panel</h2>
+            <p class="card-subtitle">Connect this PC to an active ticket to run automated benchmarks and thermal analysis.</p>
           </div>
-        </div>
+          <div class="ticket-association-panel bc-ticket">
+            <label class="bc-ticket-label" for="client-ticket-select">Connected build</label>
+            <div class="bc-ticket-row">
+              <select id="client-ticket-select" class="large-select" style="flex-grow: 1; padding: 8px 12px; border-radius: 6px; background: rgba(0,0,0,0.25); border: 1px solid var(--glass-border); color: white; font-size: 0.85rem; outline: none; transition: border-color 0.2s;" onfocus="this.style.borderColor='var(--primary-pink)'" onblur="this.style.borderColor='var(--glass-border)'">
+                <option value="">-- Choose Ticket --</option>
+              </select>
+              <span class="bc-or">or</span>
+              <input type="text" id="client-ticket-input" placeholder="Ticket ID, e.g. #AB12CD" class="large-select" style="flex-grow: 1; padding: 8px 12px; background: rgba(0,0,0,0.25); border: 1px solid var(--glass-border); color: white; border-radius: 6px; font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; outline: none; transition: border-color 0.2s;" onfocus="this.style.borderColor='var(--primary-pink)'" onblur="this.style.borderColor='var(--glass-border)'">
+            </div>
+          </div>
+        </section>
 
-        <div class="client-grid-row">
+        <div class="client-grid-row bc-layout">
           <!-- Hardware specs auto detect Redesigned -->
-          <div class="client-panel">
+          <div class="client-panel bc-side">
+            <div class="bc-card bc-specs">
             <h3>1. Specification Verification</h3>
             
             <!-- v1.4.9 — unified per-component verification rows (target vs detected
@@ -617,7 +642,10 @@
             
             <button id="btn-client-detect-hw" class="primary-pink-btn full-width margin-top">🔍 Auto-Detect Local Specs</button>
             <div id="specs-match-status" class="margin-top hidden" style="text-align: center; font-size: 0.75rem; font-weight: bold; padding: 6px; border-radius: 6px; border: 1px dashed transparent;"></div>
+            </div>
 
+            <div class="bc-card bc-win">
+            <h4 class="bc-card-title">Windows</h4>
             <button id="btn-client-check-win" class="secondary-btn full-width margin-top">🛡️ Check Windows Activation State</button>
             <div id="client-win-status" class="win-activation-status margin-top">
               <span>Activation Status</span>
@@ -627,9 +655,10 @@
               <span>Product Key</span>
               <span id="client-win-key" style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; font-weight: 700; color: var(--text-dark);">--</span>
             </div>
+            </div>
 
             <!-- Port Verification Checker (v2 — guided verify flow) -->
-            <div class="port-checker-section margin-top">
+            <div class="bc-card bc-ports">
               <h4 style="color: var(--primary-pink); font-size: 0.82rem; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 12px; display: flex; align-items: center; gap: 6px;"><span class="dr-inline-icon" data-icon="port"></span>Port Verification</h4>
 
               <div style="display: flex; flex-direction: column; gap: 12px;">
@@ -722,11 +751,11 @@
           </div>
 
           <!-- Diagnostic Log File Parsers -->
-          <div class="client-panel" id="client-panel-right">
+          <div class="client-panel bc-main" id="client-panel-right">
             <h3>2. Benchmark & Thermal Logging</h3>
-            
+
             <!-- v1.8.1 — Testing Client stress/benchmark modes (Throttle / Stability) -->
-            <div class="stress-mode-card">
+            <div class="stress-mode-card bc-card">
               <div class="stress-mode-head">
                 <span class="stress-mode-title"><span class="dr-inline-icon" data-icon="torture"></span> Stress &amp; Benchmark</span>
                 <span id="c-stress-run-badge" class="stress-mode-badge">0 runs</span>
@@ -747,6 +776,7 @@
                 </button>
               </div>
 
+              <div class="bc-run-row">
               <div class="stress-mode-config">
                 <div class="smc-row" id="c-throttle-config" style="display:none;">
                   <label class="smc-label">Duration</label>
@@ -777,6 +807,7 @@
               </div>
 
               <button type="button" id="btn-run-auto-diagnostics" class="stress-run-btn" disabled>▶ Run Stability Test</button>
+              </div>
 
               <div id="c-diagnostics-status" class="font-mono stress-mode-status">
                 CPU: [Idle] · GPU: [Idle] · RAM: [Idle] · SSD: [Idle]
@@ -793,10 +824,11 @@
                 <button type="button" id="c-btn-tortured-enough" class="stress-btn">😈 I have tortured this PC enough</button>
               </div>
             </div>
-            <div id="c-prime95-panel"></div>
-            <div id="c-passport-grid" class="margin-top"></div>
-
-            <!-- telemetry hud grid -->
+            <!-- telemetry hud grid: the live tiles, then the two benchmark scores -->
+            <div class="bc-section-head">
+              <span class="bc-section-title">Live telemetry</span>
+              <span class="bc-section-note">Temperatures update while a test runs</span>
+            </div>
             <div class="telemetry-hud-grid">
               <!-- CPU Temp Card -->
               <div class="hud-card temp-card cpu">
@@ -904,7 +936,48 @@
                   </div>
                 </div>
               </div>
+
+              <!-- Benchmark scores, as tiles beside the live cards -->
+              <div class="hud-card bc-score-card">
+                <div class="form-group">
+                  <label for="c-cinebench-score" class="hud-card-title">Cinebench R23 Score</label>
+                  <div class="input-unit-wrapper unit-pts">
+                    <input type="number" id="c-cinebench-score" placeholder="e.g. 14850">
+                    <span class="unit-label">pts</span>
+                  </div>
+                </div>
+                <div class="hud-card-desc">CPU · multi-core</div>
+              </div>
+              <div class="hud-card bc-score-card">
+                <div class="form-group">
+                  <label for="c-furmark-score" class="hud-card-title">FurMark GPU Score</label>
+                  <div class="input-unit-wrapper unit-pts">
+                    <input type="number" id="c-furmark-score" placeholder="e.g. 9250">
+                    <span class="unit-label">pts</span>
+                  </div>
+                </div>
+                <div class="hud-card-desc">GPU · stress run</div>
+              </div>
             </div>
+
+            <!-- Scrollable Console Terminal Output -->
+            <div class="hud-console-container margin-top">
+              <div class="console-header">
+                <span>Diagnostics Console Outputs</span>
+                <span class="pulse-dot idle" id="c-console-pulse"></span>
+              </div>
+              <div class="console-box font-mono" id="c-console-box">
+                <div class="console-line system">[SYS] Diagnostics system idle. Press "Run Stress Test" to begin...</div>
+              </div>
+            </div>
+
+            <!-- Results (filled by app.js after a run): Prime95, the component
+                 passport, SSD health. The heading hides while all are empty. -->
+            <div class="bc-section-head bc-results-head">
+              <span class="bc-section-title">Results</span>
+            </div>
+            <div id="c-prime95-panel"></div>
+            <div id="c-passport-grid" class="margin-top"></div>
 
             <!-- SSD Health Card -->
             <div id="c-ssd-health-card" class="ssd-health-card hidden margin-top">
@@ -935,44 +1008,18 @@
               </div>
             </div>
 
-            <!-- Benchmarks & Comparisons Row -->
-            <div class="form-grid-2 margin-top" style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
-              <div class="form-group">
-                <label for="c-cinebench-score">Cinebench R23 Score</label>
-                <div class="input-unit-wrapper unit-pts">
-                  <input type="number" id="c-cinebench-score" placeholder="e.g. 14850">
-                  <span class="unit-label">pts</span>
-                </div>
-              </div>
-              <div class="form-group">
-                <label for="c-furmark-score">FurMark GPU Score</label>
-                <div class="input-unit-wrapper unit-pts">
-                  <input type="number" id="c-furmark-score" placeholder="e.g. 9250">
-                  <span class="unit-label">pts</span>
-                </div>
-              </div>
-            </div>
-
-            <!-- Scrollable Console Terminal Output -->
-            <div class="hud-console-container margin-top">
-              <div class="console-header">
-                <span>Diagnostics Console Outputs</span>
-                <span class="pulse-dot idle" id="c-console-pulse"></span>
-              </div>
-              <div class="console-box font-mono" id="c-console-box">
-                <div class="console-line system">[SYS] Diagnostics system idle. Press "Run Stress Test" to begin...</div>
-              </div>
-            </div>
-            
-
           </div>
         </div>
 
-        <div class="client-actions-row">
-          <button id="btn-client-submit" class="primary-pink-btn large-btn" disabled>💾 Sync & Save</button>
-          <button id="btn-client-export" class="secondary-btn large-btn">💾 Export Offline Config File (.json)</button>
+        <!-- Save bar: stays in view at the bottom while the console scrolls. -->
+        <div class="bc-savebar">
+          <div id="client-sync-status" class="client-sync-status hidden"></div>
+          <span class="bc-savebar-hint">Sync &amp; Save sends this PC's checks and test results to the build.</span>
+          <div class="client-actions-row">
+            <button id="btn-client-export" class="secondary-btn large-btn">💾 Export Offline Config File (.json)</button>
+            <button id="btn-client-submit" class="primary-pink-btn large-btn" disabled>💾 Sync & Save</button>
+          </div>
         </div>
-        <div id="client-sync-status" class="client-sync-status hidden"></div>
       </div>
     </div>
   </div>
@@ -1690,7 +1737,7 @@
       <div class="settings-header">
         <div class="settings-header-left">
           <span class="settings-header-eyebrow">NEO SERVICE</span>
-          <h2 class="settings-header-title">Application Settings</h2>
+          <h2 class="settings-header-title">Settings</h2>
         </div>
         <div class="settings-header-right">
           <span id="settings-app-version" class="settings-version-badge">v1.1.0</span>
@@ -1702,14 +1749,18 @@
       <div class="modal-body settings-layout">
 
         <!-- Sidebar Navigation -->
-        <nav class="settings-sidebar">
-          <button class="settings-tab-btn active" data-tab="tab-general" type="button">
+        <nav class="settings-sidebar" aria-label="Settings sections">
+          <button class="settings-tab-btn active" data-tab="tab-appearance" type="button">
+            <svg class="stb-icon" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M4 2a2 2 0 00-2 2v11a3 3 0 106 0V4a2 2 0 00-2-2H4zm1 14a1 1 0 100-2 1 1 0 000 2zm5-1.757l4.9-4.9a2 2 0 000-2.828L13.485 5.1a2 2 0 00-2.828 0L10 5.757v8.486zM16 18H9.071l6-6H16a2 2 0 012 2v2a2 2 0 01-2 2z" clip-rule="evenodd"/></svg>
+            <span class="stb-label">Appearance</span>
+          </button>
+          <button class="settings-tab-btn" data-tab="tab-general" type="button">
             <svg class="stb-icon" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 012.287.947c.379 1.561 2.6 1.561 2.978 0a1.533 1.533 0 012.287-.947c1.372.836 2.942-.734 2.106-2.106a1.533 1.533 0 01.947-2.287c1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.287-.947zM10 13a3 3 0 100-6 3 3 0 000 6z" clip-rule="evenodd"/></svg>
             <span class="stb-label">General</span>
           </button>
-          <button class="settings-tab-btn" data-tab="tab-appearance" type="button">
-            <svg class="stb-icon" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M4 2a2 2 0 00-2 2v11a3 3 0 106 0V4a2 2 0 00-2-2H4zm1 14a1 1 0 100-2 1 1 0 000 2zm5-1.757l4.9-4.9a2 2 0 000-2.828L13.485 5.1a2 2 0 00-2.828 0L10 5.757v8.486zM16 18H9.071l6-6H16a2 2 0 012 2v2a2 2 0 01-2 2z" clip-rule="evenodd"/></svg>
-            <span class="stb-label">Appearance</span>
+          <button class="settings-tab-btn" data-tab="tab-people" type="button">
+            <svg class="stb-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="7.5" cy="7" r="2.8"/><path d="M2.5 16.5a5 5 0 0 1 10 0"/><path d="M13 4.4a2.8 2.8 0 0 1 0 5.2"/><path d="M14.6 12a5 5 0 0 1 2.9 4.5"/></svg>
+            <span class="stb-label">People &amp; access</span>
           </button>
           <button class="settings-tab-btn" data-tab="tab-thresholds" type="button">
             <svg class="stb-icon" viewBox="0 0 20 20" fill="currentColor"><path d="M2 11a1 1 0 011-1h2a1 1 0 011 1v5a1 1 0 01-1 1H3a1 1 0 01-1-1v-5zM8 7a1 1 0 011-1h2a1 1 0 011 1v9a1 1 0 01-1 1H9a1 1 0 01-1-1V7zM14 4a1 1 0 011-1h2a1 1 0 011 1v12a1 1 0 01-1 1h-2a1 1 0 01-1-1V4z"/></svg>
@@ -1717,9 +1768,13 @@
           </button>
           <button class="settings-tab-btn" data-tab="tab-portal" type="button">
             <svg class="stb-icon" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM4.332 8.027a6.012 6.012 0 011.912-2.706C6.512 5.73 6.974 6 7.5 6A1.5 1.5 0 019 7.5V8a2 2 0 004 0 2 2 0 011.523-1.943A5.977 5.977 0 0116 10c0 .34-.028.675-.083 1H15a2 2 0 00-2 2v2.197A5.973 5.973 0 0110 16v-2a2 2 0 00-2-2 2 2 0 01-2-2 2 2 0 00-1.668-1.973z" clip-rule="evenodd"/></svg>
-            <span class="stb-label">Dashboard Portal</span>
+            <span class="stb-label">Tracker portal</span>
           </button>
           <div class="settings-sidebar-divider"></div>
+          <button class="settings-tab-btn" data-tab="tab-updates" type="button">
+            <svg class="stb-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M16.5 10a6.5 6.5 0 1 1-2-4.7"/><path d="M16.5 3.5v3.3h-3.3"/><path d="M10 6.8V10l2.2 1.4"/></svg>
+            <span class="stb-label">Updates &amp; about</span>
+          </button>
           <button class="settings-tab-btn" data-tab="tab-advanced" type="button">
             <svg class="stb-icon" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M3 5a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM3 10a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM3 15a1 1 0 011-1h6a1 1 0 110 2H4a1 1 0 01-1-1z" clip-rule="evenodd"/></svg>
             <span class="stb-label">System</span>
@@ -1732,10 +1787,17 @@
         <div class="settings-content">
 
           <!-- ══ TAB: GENERAL ══ -->
-          <div id="tab-general" class="settings-tab-content">
+          <div id="tab-general" class="settings-tab-content hidden">
+            <!-- 1.16.1: where Neo Service opens after sign-in (applies at once). -->
+            <div class="settings-section">
+              <div class="settings-section-title">Start screen</div>
+              <p class="settings-section-desc">Where Neo Service opens after you sign in on this PC. Screens you can't open are skipped.</p>
+              <div class="nt-seg" data-pref="startScreen" role="radiogroup" aria-label="Start screen">
+                <button type="button" data-v="auto">Automatic</button><button type="button" data-v="overview">Overview</button><button type="button" data-v="service">Service</button><button type="button" data-v="rma">RMA</button><button type="button" data-v="staff">QC</button>
+              </div>
+            </div>
 
             <!-- v1.10 — Operations: demo data switch + module access (tier 4+). Filled by app.js renderOpsSettings(); hidden for anyone with no Service or RMA access. -->
-            <div class="settings-section hidden" id="settings-ops"></div>
 
             <!-- v1.8.1 — Catalogue editor: edit / add / remove components + prices -->
             <div class="settings-section">
@@ -1817,11 +1879,13 @@
           <div id="tab-appearance" class="settings-tab-content hidden">
             <div class="settings-section">
               <div class="settings-section-title">Theme</div>
-              <p class="settings-section-desc">Changes every screen straight away and is remembered on this PC.</p>
-              <div class="appearance-theme-row" role="radiogroup" aria-label="Theme">
-                <button type="button" class="appearance-theme-btn" data-theme-choice="light" role="radio" aria-checked="false"><span class="atb-preview atb-light" aria-hidden="true"></span><span class="atb-label">Light</span></button>
-                <button type="button" class="appearance-theme-btn" data-theme-choice="dark" role="radio" aria-checked="false"><span class="atb-preview atb-dark" aria-hidden="true"></span><span class="atb-label">Dark</span></button>
-                <button type="button" class="appearance-theme-btn" data-theme-choice="system" role="radio" aria-checked="false"><span class="atb-preview atb-system" aria-hidden="true"></span><span class="atb-label">Match Windows</span></button>
+              <p class="settings-section-desc">Every theme is Neo Glass. It changes every screen straight away and is remembered on this PC.</p>
+              <div class="nt-theme-grid" role="radiogroup" aria-label="Theme">
+                <button type="button" class="nt-theme-card" data-theme-choice="light" role="radio" aria-checked="false"><span class="ntc-prev ntc-light" aria-hidden="true"><i></i><i></i><i></i></span><span class="ntc-label">Neo Glass Light</span><span class="ntc-sub">The Configurator, light</span></button>
+                <button type="button" class="nt-theme-card" data-theme-choice="dark" role="radio" aria-checked="false"><span class="ntc-prev ntc-dark" aria-hidden="true"><i></i><i></i><i></i></span><span class="ntc-label">Neo Glass Dark</span><span class="ntc-sub">Night glass</span></button>
+                <button type="button" class="nt-theme-card" data-theme-choice="sand" role="radio" aria-checked="false"><span class="ntc-prev ntc-sand" aria-hidden="true"><i></i><i></i><i></i></span><span class="ntc-label">Sand</span><span class="ntc-sub">Warm light glass</span></button>
+                <button type="button" class="nt-theme-card" data-theme-choice="midnight" role="radio" aria-checked="false"><span class="ntc-prev ntc-midnight" aria-hidden="true"><i></i><i></i><i></i></span><span class="ntc-label">Midnight</span><span class="ntc-sub">Deep black, vivid glass</span></button>
+                <button type="button" class="nt-theme-card" data-theme-choice="system" role="radio" aria-checked="false"><span class="ntc-prev ntc-system" aria-hidden="true"><i></i><i></i><i></i></span><span class="ntc-label">Match Windows</span><span class="ntc-sub">Light or Dark with Windows</span></button>
               </div>
             </div>
             <div class="settings-section">
@@ -1837,10 +1901,63 @@
                 <button type="button" class="appearance-swatch" data-accent="gold" role="radio" aria-checked="false" style="--sw:#f59e0b"><span class="sw-dot" aria-hidden="true"></span><span class="sw-label">Gold</span></button>
               </div>
             </div>
+          
+            <div class="settings-section">
+              <div class="settings-section-title">Background</div>
+              <p class="settings-section-desc">The aurora drifts slowly behind the glass. The dots are the Configurator's calm grid.</p>
+              <div class="settings-row-2">
+                <div class="settings-field">
+                  <span class="settings-label">Aurora</span>
+                  <div class="nt-seg" data-pref="aurora" role="radiogroup" aria-label="Aurora">
+                    <button type="button" data-v="off">Off</button><button type="button" data-v="subtle">Subtle</button><button type="button" data-v="normal">Normal</button><button type="button" data-v="vivid">Vivid</button>
+                  </div>
+                </div>
+                <label class="nt-switch-row"><span><span class="settings-label">Backdrop dots</span><small>The faint dot grid behind every screen.</small></span>
+                  <span class="nt-switch"><input type="checkbox" data-pref="dots"><i></i></span></label>
+              </div>
+            </div>
+            <div class="settings-section">
+              <div class="settings-section-title">Glass and size</div>
+              <div class="settings-row-2">
+                <div class="settings-field">
+                  <span class="settings-label">Glass blur</span>
+                  <div class="nt-seg" data-pref="glass" role="radiogroup" aria-label="Glass blur">
+                    <button type="button" data-v="soft">Soft</button><button type="button" data-v="normal">Normal</button><button type="button" data-v="strong">Strong</button>
+                  </div>
+                </div>
+                <div class="settings-field">
+                  <span class="settings-label">Interface size</span>
+                  <div class="nt-seg" data-pref="zoom" role="radiogroup" aria-label="Interface size">
+                    <button type="button" data-v="0.9">90%</button><button type="button" data-v="1">100%</button><button type="button" data-v="1.1">110%</button><button type="button" data-v="1.25">125%</button>
+                  </div>
+                </div>
+              </div>
+              <label class="nt-switch-row margin-top"><span><span class="settings-label">Reduce motion</span><small>Stops the aurora and shortens animations. Windows' own "Animation effects" setting is respected too.</small></span>
+                <span class="nt-switch"><input type="checkbox" data-pref="reduceMotion"><i></i></span></label>
+            </div>
           </div>
 
           <!-- ══ TAB: QC & TESTING ══ -->
           <div id="tab-thresholds" class="settings-tab-content hidden">
+            <!-- 1.16.1: QC after a service (qc-bench.js). Applies at once. -->
+            <div class="settings-section">
+              <div class="settings-section-title">QC after a service: game FPS</div>
+              <p class="settings-section-desc">How the bench measures a customer's game with PresentMon.</p>
+              <div class="settings-row-2">
+                <div class="settings-field">
+                  <span class="settings-label">Recording length</span>
+                  <div class="nt-seg" data-pref="qcFpsSeconds" role="radiogroup" aria-label="Recording length">
+                    <button type="button" data-v="30">30 s</button><button type="button" data-v="60">60 s</button><button type="button" data-v="120">2 min</button>
+                  </div>
+                </div>
+                <div class="settings-field">
+                  <span class="settings-label">Time to switch to the game</span>
+                  <div class="nt-seg" data-pref="qcFpsDelay" role="radiogroup" aria-label="Time to switch to the game">
+                    <button type="button" data-v="5">5 s</button><button type="button" data-v="10">10 s</button><button type="button" data-v="15">15 s</button>
+                  </div>
+                </div>
+              </div>
+            </div>
 
             <div class="settings-section">
               <div class="settings-section-title">Temperature Safety Limits</div>
@@ -1992,6 +2109,39 @@
           </div>
 
           <!-- ══ TAB: SYSTEM ══ -->
+          <!-- ══ TAB: PEOPLE & ACCESS (1.16.1: was inside General) ══ -->
+          <div id="tab-people" class="settings-tab-content hidden">
+            <!-- v1.10 — Operations: demo data switch + module access (tier 4+). Filled by app.js renderOpsSettings(); hidden for anyone with no Service or RMA access. -->
+            <div class="settings-section hidden" id="settings-ops"></div>
+            <div class="settings-section" id="settings-ops-none">
+              <div class="settings-section-title">People &amp; access</div>
+              <p class="settings-section-desc">Demo data, people, their roles and work pools appear here for anyone with Service or RMA access. Leads (tier 4+) can change them.</p>
+            </div>
+          </div>
+
+          <!-- ══ TAB: UPDATES & ABOUT (1.16.1) ══ -->
+          <div id="tab-updates" class="settings-tab-content hidden">
+            <div class="settings-section">
+              <div class="settings-section-title">Updates</div>
+              <p class="settings-section-desc">Neo Service updates itself over the air. Check now, or see what changed in this version.</p>
+              <div class="nt-update-box">
+                <div><div class="nt-update-state" id="nt-update-state">Checking…</div><div class="nt-update-sub" id="nt-update-sub"></div></div>
+                <div class="nt-update-acts">
+                  <button type="button" class="secondary-btn" id="nt-btn-whats-new">What's new</button>
+                  <button type="button" class="primary-pink-btn" id="nt-btn-check-update">Check for updates</button>
+                </div>
+              </div>
+            </div>
+            <div class="settings-section">
+              <div class="settings-section-title">About this copy</div>
+              <dl class="nt-about" id="nt-about"></dl>
+              <div class="settings-action-buttons margin-top">
+                <button type="button" class="secondary-btn" id="nt-btn-open-logs">Open the log folder</button>
+                <button type="button" class="secondary-btn" id="nt-btn-relaunch">Restart Neo Service</button>
+              </div>
+            </div>
+          </div>
+
           <div id="tab-advanced" class="settings-tab-content hidden">
 
             <div class="settings-section">
@@ -2084,7 +2234,7 @@
       </div>
 
       <div class="modal-footer">
-        <span class="settings-footer-hint">Changes take effect immediately on save.</span>
+        <span class="settings-footer-hint">Appearance, Start screen, QC FPS and People apply at once. The other fields save with Save Settings.</span>
         <button id="btn-save-settings" class="primary-pink-btn">Save Settings</button>
       </div>
     </div>
@@ -2671,22 +2821,24 @@
     <div class="glass-slab modal-card" style="max-width: 650px; width: 100%; padding: 30px; border-radius: 20px;">
       <div class="modal-header" style="border-bottom: 1px solid var(--glass-border); padding-bottom: 15px; margin-bottom: 20px;">
         <h2 style="font-family: 'Syncopate', sans-serif; font-size: 1.3rem; color: var(--primary-pink); letter-spacing: 0.05em; margin: 0;">NEO SERVICE UPDATED</h2>
-        <span data-app-version style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; font-weight: 700; background: rgba(var(--primary-pink-rgb), 0.1); color: var(--primary-pink); padding: 4px 8px; border-radius: 4px;">v1.16.0</span>
+        <span data-app-version style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; font-weight: 700; background: rgba(var(--primary-pink-rgb), 0.1); color: var(--primary-pink); padding: 4px 8px; border-radius: 4px;">v1.16.1</span>
       </div>
       <div class="modal-body" style="font-size: 0.92rem; line-height: 1.6; color: var(--text-dark); max-height: 420px; overflow-y: auto; padding-right: 5px;">
-        <p style="margin-top: 0;">Here's what's new in <strong data-app-version>v1.16.0</strong>:</p>
+        <p style="margin-top: 0;">Here's what's new in <strong data-app-version>v1.16.1</strong>:</p>
         <ul style="padding-left: 20px; display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px;">
-          <li><strong>Click a ticket to see its summary</strong>: the steps on top, what is happening now and for how many days, the details, flags and notes in one read-only page. <strong>Edit</strong> opens the full ticket as before.</li>
-          <li><strong>Photos on notes:</strong> add photos when you write a note. They show under the note, and the customer sees them only when the note is shared with them.</li>
-          <li><strong>A new look</strong> from the Neo Configurator: the new Neo Tokyo logo, Neo pink, the Outfit font everywhere (no more downloads from Google), softer glass cards. The installer has the same look and no longer asks who to install for.</li>
-          <li><strong>A new Overview:</strong> today at a glance, where the work is by step, what is due in the next two days, each person's open work, and everything open with late work first.</li>
-          <li><strong>Builds is now QC</strong>, with two tabs: <strong>New builds</strong> (as before) and <strong>After service</strong>.</li>
-          <li><strong>QC after a service:</strong> at Testing, the service desk can <strong>Send to QC</strong> with the customer's goals: a game at a target FPS (for example Valorant at 450 fps), or the work that used to fail. Choose a 15, 30 or 60-minute stability test, free or paid.</li>
-          <li><strong>The bench test</strong> runs on the customer's PC: a health check (drives, idle temperatures, hardware errors), Prime95 + FurMark stability, game FPS measured with Intel PresentMon (average and 1% low), and a timer with a crash check for work. The result goes on the ticket and the tracking page, with a one-page <strong>Service QC report</strong> to print or send as PDF.</li>
+          <li><strong>A faint aurora</strong> now drifts behind the glass on every screen, and the red tint and dots in the background are lighter.</li>
+          <li><strong>New themes:</strong> Neo Glass Light and Dark, Sand (warm light) and Midnight (deep black). Every highlight follows the accent colour you pick.</li>
+          <li><strong>A new Settings window:</strong> themes, aurora, glass blur, interface size, reduce motion, your start screen, the bench's FPS timing, and Updates &amp; about with "Check for updates".</li>
+          <li><strong>A more beautiful left bar</strong> with new icons that react as you move the mouse. The extra ☰ button is gone where the bar is.</li>
+          <li><strong>Dropdowns in Neo Glass.</strong> "Move to" lists are grouped under the step each choice belongs to, and the RMA brand list opens right under its field.</li>
+          <li><strong>QC page:</strong> a cleaner New builds board, and a click on a build opens its full-screen summary with <strong>Edit</strong> at the top right.</li>
+          <li><strong>The bench</strong> has a fresh look and reads this PC's hardware as soon as you open a build, checking it against the build's invoice.</li>
+          <li><strong>QC finishes with the stress test.</strong> A build moves to Finished builds only after QC presses "I have tortured this PC enough" and that sign-off has saved and synced. Ticking every box no longer finishes it early.</li>
+          <li><strong>A better installer:</strong> sharp on high-resolution screens, three steps (Welcome, Installing, Finish).</li>
         </ul>
       </div>
       <div class="modal-footer" style="border-top: 1px solid var(--glass-border); padding-top: 15px; display: flex; justify-content: flex-end; margin-top: 20px;">
-        <button id="btn-close-changelog" data-app-version-label class="primary-pink-btn" style="padding: 10px 24px; font-weight: 700; font-size: 0.95rem;">Launch Neo Service v1.16.0</button>
+        <button id="btn-close-changelog" data-app-version-label class="primary-pink-btn" style="padding: 10px 24px; font-weight: 700; font-size: 0.95rem;">Launch Neo Service v1.16.1</button>
       </div>
     </div>
   </div>
@@ -2734,8 +2886,15 @@
   <script src="service.js"></script>
   <script src="rma.js"></script>
   <!-- 1.16 the read-only ticket summary page (Service and RMA). -->
+  <!-- 1.16.1 Settings options that apply at once (aurora, glass, size, motion, start screen, updates). -->
+  <script src="settings-plus.js"></script>
+  <!-- 1.16.1 Owner tools (hidden; tier 5 + the owner's password). -->
+  <script src="owner-tools.js"></script>
+  <!-- 1.16.1 Neo Glass suggestion lists for <input list> (replaces the native datalist popup). -->
+  <script src="neo-combo.js"></script>
   <script src="ticket-summary.js"></script>
   <!-- 1.16 the QC screen's "After service" tab, and its bench test. -->
+  <script src="build-summary.js"></script>
   <script src="qc-bench.js"></script>
   <script src="qc-service.js"></script>
   <script src="queue.js"></script>

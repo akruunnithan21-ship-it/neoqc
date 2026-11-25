@@ -444,9 +444,9 @@
     }
     return '<ol class="qcb-ol"><li>Start <b>' + esc(g.name) + '</b> on this PC' + (g.settings ? ' at <b>' + esc(g.settings) + '</b>' : '') + '.</li>' +
       '<li>Get into real gameplay: a match, the range or a benchmark run, not a menu.</li>' +
-      '<li>Pick the game below and press Measure. You have 10 seconds to switch back to the game; PresentMon then records 60 seconds.</li></ol>' +
+      '<li>Pick the game below and press Measure. You have ' + fpsDelay() + ' seconds to switch back to the game; PresentMon then records ' + fpsLen() + '.</li></ol>' +
       procPicker(i, r, s) + (r.error ? '<p class="qcb-note qcb-note-bad">' + esc(r.error) + '</p>' : '') + res +
-      '<div class="qcb-acts"><span class="qcb-when">' + esc(r.done ? fmtWhen(r.at) : '') + '</span><button type="button" class="' + (r.done ? 'secondary-btn' : 'primary-pink-btn') + '" data-qa="fps" data-i="' + i + '"' + (anyBusy(s) ? ' disabled' : '') + '>' + (r.done ? 'Measure again' : 'Measure (60 s)') + '</button></div>';
+      '<div class="qcb-acts"><span class="qcb-when">' + esc(r.done ? fmtWhen(r.at) : '') + '</span><button type="button" class="' + (r.done ? 'secondary-btn' : 'primary-pink-btn') + '" data-qa="fps" data-i="' + i + '"' + (anyBusy(s) ? ' disabled' : '') + '>' + (r.done ? 'Measure again' : 'Measure (' + fpsLen() + ')') + '</button></div>';
   }
 
   function workBody(g, i, s) {
@@ -470,6 +470,10 @@
       procPicker(i, r, s) + res +
       '<div class="qcb-acts"><span class="qcb-when">' + esc(r.done ? fmtWhen(r.at) : '') + '</span><button type="button" class="' + (r.done ? 'secondary-btn' : 'primary-pink-btn') + '" data-qa="work-start" data-i="' + i + '"' + (anyBusy(s) ? ' disabled' : '') + '>' + (r.done ? 'Start again' : 'Start the timer') + '</button></div>';
   }
+
+  function fpsDelay() { var P = window.NeoPrefs; return (P && Number(P.get('qcFpsDelay'))) || 10; }
+  function fpsSec() { var P = window.NeoPrefs; return (P && Number(P.get('qcFpsSeconds'))) || 60; }
+  function fpsLen() { var n = fpsSec(); return n >= 120 ? (n / 60) + ' minutes' : n + ' s'; }
 
   function anyBusy(s) {
     return !!(s.healthRunning || (s.stability && s.stability.running) || s.goals.some(function (g) { return g && g.running; }));
@@ -669,7 +673,9 @@
     var proc = procFor(i);
     if (!proc) { toast('Pick the game from the list, or type its .exe name.', 'warning'); return; }
     if (!(await ensureStarted(q))) return;
-    var delay = PRACTICE ? 0 : 10, sec = 60;
+    // Settings → QC & Testing (1.16.1): recording length and switch-over time.
+    var sec = fpsSec();
+    var delay = PRACTICE ? 0 : fpsDelay();
     s.goals[i] = { running: true, process: proc, starts_at: Date.now() + delay * 1000, ends_at: Date.now() + (delay + (PRACTICE ? 6 : sec)) * 1000 };
     paint();
     var out = await bench('sys:qc-fps-capture', { processName: proc, seconds: sec, delaySec: delay }).catch(function (e) { return { ok: false, error: e.message }; });
@@ -834,7 +840,7 @@
       '</table>' +
       (q.charge === 'paid' ? '<p class="qr-small">QC test charge: ' + esc(inr(q.amount)) + '</p>' : '') +
       (track ? '<p class="qr-small">Track this ticket: ' + esc(track) + '</p>' : '') +
-      '<p class="qr-small">Temperatures are the highest reading of the sensors Windows exposes. FPS is measured with Intel PresentMon over 60 seconds of gameplay on this PC; results depend on the game version, drivers and scene.</p>' +
+      '<p class="qr-small">Temperatures are the highest reading of the sensors Windows exposes. FPS is measured with Intel PresentMon over ' + esc(gr.some(function (r) { return r && r.seconds; }) ? Math.round(Math.max.apply(null, gr.map(function (r) { return (r && r.seconds) || 0; }))) + ' seconds' : 'a minute') + ' of gameplay on this PC; results depend on the game version, drivers and scene.</p>' +
     '</div>';
   }
   var printing = false, printAt = 0;

@@ -207,11 +207,52 @@
   }
 
   function setRailActive(section) {
+    var activeBtn = null;
     document.querySelectorAll('#app-rail .rail-item').forEach(function (b) {
       var on = !!section && b.dataset.section === section;
       b.classList.toggle('active', on);
-      if (on) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current');
+      if (on) { b.setAttribute('aria-current', 'page'); activeBtn = b; } else b.removeAttribute('aria-current');
     });
+    placeRailIndicator(activeBtn);
+  }
+
+  // 1.16.1 — the sliding accent bar beside the active item (neo-theme.css
+  // .rail-indicator), and the spotlight that follows the mouse down the rail.
+  function placeRailIndicator(btn) {
+    var rail = el('app-rail');
+    if (!rail) return;
+    if (!btn) { rail.style.setProperty('--rail-ind-o', '0'); return; }
+    var y = btn.offsetTop + (btn.offsetHeight - 26) / 2;
+    rail.style.setProperty('--rail-ind-y', y + 'px');
+    rail.style.setProperty('--rail-ind-o', '1');
+  }
+  function bindRailMotion(rail) {
+    if (!rail || rail.dataset.motion) return;
+    rail.dataset.motion = '1';
+    rail.addEventListener('mousemove', function (e) {
+      var r = rail.getBoundingClientRect();
+      rail.style.setProperty('--rail-my', (e.clientY - r.top) + 'px');
+    });
+    window.addEventListener('resize', function () {
+      placeRailIndicator(rail.querySelector('.rail-item.active'));
+    });
+  }
+
+  // 1.16.1 — line icons for the rail (24 px, stroke = currentColor). An
+  // entry without one keeps its emoji.
+  var RAIL_ICONS = {
+    overview: '<rect x="3.5" y="3.5" width="7" height="8.5" rx="2"/><rect x="13.5" y="3.5" width="7" height="5" rx="2"/><rect x="13.5" y="11.5" width="7" height="9" rx="2"/><rect x="3.5" y="15.5" width="7" height="5" rx="2"/>',
+    queue: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',
+    builds: '<path d="M9 3.5h6"/><path d="M10 3.5v6L5 18a2 2 0 0 0 1.7 3h10.6A2 2 0 0 0 19 18l-5-8.5v-6"/><path d="M7.4 15h9.2"/>',
+    service: '<path d="M14.6 6.4a4 4 0 0 0-5.3 5.2l-5.6 5.6a1.9 1.9 0 0 0 2.7 2.7l5.6-5.6a4 4 0 0 0 5.2-5.3l-2.5 2.5-2.4-.4-.4-2.4z"/>',
+    rma: '<path d="M20.5 7.8 12 3.2 3.5 7.8v8.4l8.5 4.6 8.5-4.6z"/><path d="M3.5 7.8 12 12.4l8.5-4.6"/><path d="M12 12.4v8.4"/><path d="m7.8 5.5 8.5 4.6"/>',
+    neohr: '<circle cx="9" cy="8" r="3.4"/><path d="M2.8 20a6.2 6.2 0 0 1 12.4 0"/><path d="M15.6 4.8a3.4 3.4 0 0 1 0 6.4"/><path d="M17.8 14.3A6.2 6.2 0 0 1 21.2 20"/>',
+    bench: '<path d="M4.6 17.5a8.5 8.5 0 1 1 14.8 0"/><path d="m12 13.5 3.8-3.8"/><circle cx="12" cy="13.5" r="1.4"/>',
+    settings: '<circle cx="12" cy="12" r="3"/><path d="M12 2.8v2.4M12 18.8v2.4M2.8 12h2.4M18.8 12h2.4M5.5 5.5l1.7 1.7M16.8 16.8l1.7 1.7M5.5 18.5l1.7-1.7M16.8 7.2l1.7-1.7"/><circle cx="12" cy="12" r="6.6"/>'
+  };
+  function railIcon(e) {
+    var svg = RAIL_ICONS[e.id] || (e.id === 'bench' ? RAIL_ICONS.bench : null);
+    return svg ? '<svg viewBox="0 0 24 24" aria-hidden="true">' + svg + '</svg>' : esc(e.icon || '•');
   }
 
   function railTitle(e) {
@@ -271,15 +312,21 @@
       parts.push(
         '<button type="button" class="rail-item" data-section="' + esc(e.id) + '" title="' + esc(railTitle(e)) +
           '" aria-label="' + esc(e.label || e.id) + '">' +
-          '<span class="rail-ic" aria-hidden="true">' + esc(e.icon || '•') + '</span>' +
+          '<span class="rail-ic" aria-hidden="true">' + railIcon(e) + '</span>' +
           '<span class="rail-label">' + esc(e.label || e.id) + '</span>' +
         '</button>'
       );
     });
     var s = sig.join(',');
     if (s === railSig) { applyRailAlerts(); return; }
+    var first = railSig === null;
     railSig = s;
-    rail.innerHTML = parts.join('');
+    rail.innerHTML = '<span class="rail-indicator" aria-hidden="true"></span>' + parts.join('');
+    bindRailMotion(rail);
+    if (first) {
+      rail.classList.add('rail-enter');
+      setTimeout(function () { rail.classList.remove('rail-enter'); }, 900);
+    }
     setRailActive(currentSection);
     applyRailAlerts();
   }

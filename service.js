@@ -3175,14 +3175,32 @@
     }
   }
 
+  function moveOptionsByStep(job, moves) {
+    var M = svc();
+    var steps = M && typeof M.stepsFor === 'function' ? M.stepsFor({ service_type: job.service_type, stage: job.stage }).steps : null;
+    if (!steps) return moves.map(function (s) { return '<option value="' + esc(s) + '">' + esc(stageLabel(s)) + '</option>'; }).join('');
+    var groups = steps.map(function (st, i) { return { label: 'Step ' + (i + 1) + ' · ' + st.label, stages: st.stages, opts: [] }; });
+    var other = { label: 'Other', opts: [] };
+    moves.forEach(function (s) {
+      var g = null;
+      for (var i = 0; i < groups.length; i++) { if (groups[i].stages.indexOf(s) !== -1) { g = groups[i]; break; } }
+      var lab = s === 'closed' && g && g.label.indexOf('Collected') !== -1 ? 'Collected — close the ticket'
+        : s === 'verifying' ? 'Testing — verifying / soak' : stageLabel(s);
+      (g || other).opts.push('<option value="' + esc(s) + '">' + esc(lab) + '</option>');
+    });
+    return groups.concat([other]).filter(function (g) { return g.opts.length; }).map(function (g) {
+      return '<optgroup label="' + esc(g.label) + '">' + g.opts.join('') + '</optgroup>';
+    }).join('');
+  }
+
   function moveBoxHtml(job) {
     var t = typeOf(job);
     var moves = nextStagesFor(job) || [];
     var canConvert = job.stage !== 'closed' && job.stage !== 'ready' && !isMirror(job.stage) &&
                      TYPE_KEYS.some(function (k) { return k !== t && convTarget(t, k); });
-    var opts = '<option value="">— Move to —</option>' + moves.map(function (s) {
-      return '<option value="' + esc(s) + '">' + esc(stageLabel(s)) + '</option>';
-    }).join('');
+    // 1.16.1 (owner): the options sit under the step they belong to, in the
+    // step bar's order and words ("Step 4 · Repair" → Parts on order …).
+    var opts = '<option value="">— Move to —</option>' + moveOptionsByStep(job, moves);
     return '<div class="sv-movebox">' +
       '<div class="sv2-move-head"><span class="sv-moves-label">Move this ticket on</span>' +
         (canConvert ? '<button type="button" class="sv-linkbtn" data-dact="convert">Convert type…</button>' : '') + '</div>' +

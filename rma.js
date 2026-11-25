@@ -2840,6 +2840,25 @@
     var s = el('rma-m-stage'), n = el('rma-m-note');
     return !(s && s.value) && !(n && String(n.value || '').trim());
   }
+  // 1.16.1 — "Move to" options under the step they lead to (RMA_STEPS order).
+  var RMA_STAGE_STEP = { logged: 0, with_tech: 0, received: 1, testing: 1, awaiting_docs: 2, ready_to_ship: 3, with_vendor: 3,
+    back_from_vendor: 6, ready_to_return: 6, returning: 7, closed: 7 };
+  function rmaMoveOptions(u, list) {
+    var S = window.NeoQcService;
+    var steps = (S && S.RMA_STEPS) || [];
+    var groups = {};
+    var order = [];
+    list.forEach(function (s) {
+      var i = Object.prototype.hasOwnProperty.call(RMA_STAGE_STEP, s) ? RMA_STAGE_STEP[s] : -1;
+      var key = i >= 0 && steps[i] ? 'Step ' + (i + 1) + ' · ' + steps[i].label : (s === 'customer_decision' ? 'Waiting on the customer' : 'Other');
+      if (!groups[key]) { groups[key] = { i: i < 0 ? 99 : i, opts: [] }; order.push(key); }
+      var lab = staffStage(s) + (s === 'received' && canReceive(u) ? ' (it has arrived)' : '');
+      groups[key].opts.push('<option value="' + esc(s) + '">' + esc(lab) + '</option>');
+    });
+    order.sort(function (a, b) { return groups[a].i - groups[b].i; });
+    return order.map(function (k) { return '<optgroup label="' + esc(k) + '">' + groups[k].opts.join('') + '</optgroup>'; }).join('');
+  }
+
   function paintMoveBox() {
     var host = el('rma-u-movebox');
     var u = unitById(openUnitId);
@@ -2863,10 +2882,8 @@
       '<div class="sv-move-row">' +
         '<select id="rma-m-stage" class="settings-select" aria-label="Move to">' +
           '<option value="">— Move to —</option>' +
-          list.map(function (s) {
-            var lab = staffStage(s) + (s === 'received' && canReceive(u) ? ' (it has arrived)' : '');
-            return '<option value="' + esc(s) + '">' + esc(lab) + '</option>';
-          }).join('') +
+          // 1.16.1 (owner): grouped under the RMA step each stage belongs to.
+          rmaMoveOptions(u, list) +
         '</select>' +
         '<button type="button" id="rma-m-go" class="secondary-btn" disabled>Move</button>' +
       '</div>' +

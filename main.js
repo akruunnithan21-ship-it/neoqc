@@ -490,6 +490,42 @@ ipcMain.handle('app:get-version', () => {
   try { return app.getVersion(); } catch (e) { return null; }
 });
 
+// 1.16.1 — Settings → Updates & about.
+ipcMain.handle('app:about', () => {
+  let osName = '';
+  try { osName = os.version ? os.version() : os.type(); } catch (e) { osName = os.type(); }
+  return {
+    version: app.getVersion(),
+    electron: process.versions.electron, chrome: process.versions.chrome, node: process.versions.node,
+    os: osName + ' (' + os.release() + ', ' + os.arch() + ')',
+    computer: os.hostname(),
+    packaged: app.isPackaged,
+    dataFolder: app.getPath('userData'),
+    logFolder: app.getPath('logs')
+  };
+});
+// A check the person asked for: not rate-limited like the home-screen one.
+// The pill at the top still does the download, as before.
+ipcMain.handle('update:check-now', async () => {
+  if (!app.isPackaged) return { ok: false, error: 'This is a development copy: it does not update itself.' };
+  try {
+    const r = await autoUpdater.checkForUpdates();
+    const latest = r && r.updateInfo ? r.updateInfo.version : null;
+    return { ok: true, current: app.getVersion(), latest, available: !!latest && latest !== app.getVersion() };
+  } catch (e) {
+    return { ok: false, error: (e && e.message) || String(e) };
+  }
+});
+ipcMain.handle('app:open-logs', async () => {
+  try { const err = await shell.openPath(app.getPath('logs')); return { ok: !err, error: err || null }; }
+  catch (e) { return { ok: false, error: e.message }; }
+});
+ipcMain.handle('app:relaunch', () => {
+  app.relaunch();
+  app.exit(0);
+  return true;
+});
+
 // 1.14.1 — Customer view: the customer's tracking page for one ticket, opened
 // with the phone digits filled in, so staff see exactly what the customer sees.
 // A plain browser window: no Node access, sandboxed, its own in-memory session
