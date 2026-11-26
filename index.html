@@ -1497,26 +1497,6 @@
               <div id="modal-inventory-body"></div>
             </div>
 
-            <!-- Price-to-Performance (reads precomputed ticket_ppi; Compute shells to ppi_sync.py) -->
-            <div style="display:flex; align-items:center; justify-content:space-between; margin-top:14px; margin-bottom:8px; flex-wrap:wrap; gap:8px;">
-              <h4 style="color: var(--primary-pink); font-size: 0.82rem; text-transform: uppercase; letter-spacing: 0.05em; margin: 0; display:flex; align-items:center; gap:6px;"><span class="dr-inline-icon" data-icon="price-tag"></span>Price-to-Performance</h4>
-              <div style="display:flex; align-items:center; gap:8px;">
-                <select id="modal-ppi-usecase" title="Customer's intended use — sets component weights and minimum-performance targets" style="padding: 4px 8px; font-size: 0.72rem; border-radius: 4px; border: 1px solid var(--glass-border); background: var(--glass-bg); color: var(--text-dark); outline: none;">
-                  <option value="gaming-1080p">Gaming — 1080p</option>
-                  <option value="gaming-1440p" selected>Gaming — 1440p</option>
-                  <option value="gaming-4k">Gaming — 4K</option>
-                  <option value="streaming">Streaming</option>
-                  <option value="video-editing">Video Editing</option>
-                  <option value="cad-3d">CAD / 3D</option>
-                  <option value="content-creation">Content Creation</option>
-                  <option value="ai-ml">AI / ML</option>
-                  <option value="office">Office / General</option>
-                </select>
-                <button type="button" id="btn-compute-ppi" class="secondary-btn" style="padding: 4px 10px; font-size: 0.72rem;">Compute Price-Performance</button>
-              </div>
-            </div>
-            <div id="modal-ppi-panel"></div>
-
             <!-- telemetry hud grid -->
             <div class="telemetry-hud-grid">
               <!-- CPU Temp Card -->
@@ -2028,46 +2008,6 @@
               </label>
             </div>
 
-            <div class="settings-section">
-              <div class="settings-section-title">⚙️ PPI Engine — Use-Case Tuning</div>
-              <p class="settings-section-desc">
-                These tables drive the Price-Performance Index for every build.
-                <strong>Weights</strong> set how much each part matters per use case and must sum to <strong>1.00</strong>.
-                <strong>Min CPU / Min GPU</strong> are the PassMark scores a build needs to score a good "fit".
-                <strong>ST&nbsp;α</strong> is single-thread emphasis (0–1; higher favours fast single-core CPUs).
-                Edits apply to every PPI calculation the moment you Save.
-              </p>
-              <div class="table-container ppi-tuning-scroll">
-                <table class="settings-table ppi-tuning-table">
-                  <thead>
-                    <tr>
-                      <th class="ppi-col-usecase">Use Case</th>
-                      <th>CPU</th><th>GPU</th><th>RAM</th><th>Storage</th><th>Other</th>
-                      <th class="ppi-col-sum">Σ</th>
-                      <th>Min CPU</th><th>Min GPU</th><th>ST&nbsp;α</th>
-                      <th></th>
-                    </tr>
-                  </thead>
-                  <tbody id="ppi-tuning-body"></tbody>
-                </table>
-              </div>
-              <div class="ppi-add-row margin-top">
-                <input type="text" id="new-ppi-usecase" class="settings-input" placeholder="new-use-case (e.g. gaming-1440p-rt)" style="flex:2">
-                <button id="btn-ppi-add-usecase" class="secondary-btn">+ Add Use Case</button>
-              </div>
-              <div class="ppi-tuning-footer margin-top">
-                <div class="settings-field" style="max-width:260px;">
-                  <label class="settings-label" for="ppi-bottleneck-ratio">Bottleneck Ratio</label>
-                  <input type="number" step="0.05" min="1" id="ppi-bottleneck-ratio" class="settings-input" placeholder="1.6">
-                </div>
-                <div class="ppi-tuning-actions">
-                  <button id="btn-ppi-reset" class="secondary-btn">Reset to Defaults</button>
-                  <button id="btn-ppi-save" class="primary-pink-btn">Save &amp; Apply</button>
-                </div>
-              </div>
-              <div id="ppi-tuning-status" class="hidden" style="margin-top:10px; font-size:0.78rem;"></div>
-            </div>
-
           </div>
 
           <!-- ══ TAB: DASHBOARD PORTAL ══ -->
@@ -2289,16 +2229,6 @@
         <div class="pst-value" id="print-tile-thermal">--</div>
         <div class="pst-label">Thermal Headroom</div>
         <div class="pst-sub" id="print-tile-thermal-sub"></div>
-      </div>
-      <div class="print-score-tile">
-        <div class="pst-value" id="print-tile-ppi">--</div>
-        <div class="pst-label">Price-Performance</div>
-        <div class="pst-sub">index / 100</div>
-      </div>
-      <div class="print-score-tile">
-        <div class="pst-value" id="print-tile-fit">--</div>
-        <div class="pst-label">Use-Case Fit</div>
-        <div class="pst-sub" id="print-tile-fit-sub"></div>
       </div>
     </div>
 
@@ -2658,61 +2588,11 @@
     </div>
     </div><!-- /print-page-2b -->
 
-    <!-- ═══ PAGE 4 — VALUE ANALYSIS & PROVENANCE ═══ -->
+    <!-- ═══ PAGE 4 — ACTIVITY & PROVENANCE ═══ -->
     <div class="print-page" id="print-page-3">
     <div class="print-page-subheader">
-      <span class="print-page-subtitle">VALUE ANALYSIS &amp; REPORT PROVENANCE</span>
+      <span class="print-page-subtitle">ACTIVITY LOG &amp; REPORT PROVENANCE</span>
       <span class="print-page-ref">Ticket #<span class="print-ticket-id-echo">--</span> · NEO TOKYO QA</span>
-    </div>
-
-    <!-- ── PRICE-TO-PERFORMANCE ── -->
-    <div id="print-ppi-section" class="print-section">
-      <h3>Price-to-Performance Analysis</h3>
-      <div class="print-ppi-headline">
-        <div class="print-ppi-index-tile">
-          <div class="ppi-big" id="print-ppi-index">—</div>
-          <div class="ppi-cap">PPI Index / 100</div>
-        </div>
-        <div class="print-ppi-meta">
-          <p><strong>Use-Case Fit:</strong> <span id="print-ppi-fit">—</span> &nbsp;·&nbsp; <strong>Evaluated For:</strong> <span id="print-ppi-usecases">—</span></p>
-          <p style="margin-top:2px;">Each scored component is compared against parts available at the same price (±15%). 100 = "best performance money buys at this exact price". Components without a benchmark are shown unscored — never guessed.</p>
-        </div>
-      </div>
-      <div id="print-ppi-empty-note" class="print-ppi-empty hidden">
-        Price-to-Performance has not been computed for this build. Open the ticket in the admin app and click
-        <strong>Compute Price-Performance</strong>, choose the customer's intended use case, then reprint.
-      </div>
-      <div id="print-ppi-component-bars" class="print-bars hidden"></div>
-      <div id="print-ppi-alternatives" class="hidden" style="margin-top:8px;">
-        <div class="print-subtitle">Same-price alternatives found in the current catalog</div>
-        <table class="print-event-table">
-          <thead><tr><th>Alternative Component</th><th>Category</th><th>Price</th><th>vs. Installed</th></tr></thead>
-          <tbody id="print-ppi-alt-body"></tbody>
-        </table>
-      </div>
-      <div id="print-ppi-flags" class="print-ppi-flags"></div>
-      <p class="print-note">Reference scores: PassMark&reg; (passmark.com), attribution required. Prices: pcstudio.in + live retailer lookups. Your results may vary depending on workload, thermal environment and driver revision.</p>
-    </div>
-
-    <!-- ── COST BREAKDOWN + UPGRADE PATH (2-column) ── -->
-    <div class="print-two-col print-section">
-      <div id="print-cost-section" class="hidden">
-        <h3>Build Cost Breakdown</h3>
-        <table class="print-cost-table">
-          <thead><tr><th>Category</th><th>Component</th><th style="text-align:right;">Price</th></tr></thead>
-          <tbody id="print-cost-body"></tbody>
-          <tfoot>
-            <tr><td colspan="2" style="text-align:right;"><strong>Total (catalog reference)</strong></td>
-                <td style="text-align:right;"><strong id="print-cost-total">—</strong></td></tr>
-          </tfoot>
-        </table>
-        <p class="print-note">Retail prices from the internal component catalog, last synced from supplier. Actual purchase price may differ due to bundles or GST.</p>
-      </div>
-      <div id="print-upgrade-section" class="hidden">
-        <h3>Recommended Upgrade Path</h3>
-        <p class="print-note" style="margin-top:0;margin-bottom:3px;">Highest-value swaps for the selected use case, based on same-price alternatives priced in the catalog.</p>
-        <ul id="print-upgrade-list" class="print-upgrade-list"></ul>
-      </div>
     </div>
 
     <!-- ── ACTIVITY LOG ── -->
@@ -2762,7 +2642,7 @@
     </div>
 
     <div class="print-page-footline">
-      <span>NEO TOKYO — Value Analysis &amp; Report Provenance</span>
+      <span>NEO TOKYO — Activity Log &amp; Report Provenance</span>
       
     </div>
     </div><!-- /print-page-3 -->
@@ -2822,20 +2702,19 @@
     <div class="glass-slab modal-card" style="max-width: 650px; width: 100%; padding: 30px; border-radius: 20px;">
       <div class="modal-header" style="border-bottom: 1px solid var(--glass-border); padding-bottom: 15px; margin-bottom: 20px;">
         <h2 style="font-family: 'Syncopate', sans-serif; font-size: 1.3rem; color: var(--primary-pink); letter-spacing: 0.05em; margin: 0;">NEO SERVICE UPDATED</h2>
-        <span data-app-version style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; font-weight: 700; background: rgba(var(--primary-pink-rgb), 0.1); color: var(--primary-pink); padding: 4px 8px; border-radius: 4px;">v1.17.1</span>
+        <span data-app-version style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; font-weight: 700; background: rgba(var(--primary-pink-rgb), 0.1); color: var(--primary-pink); padding: 4px 8px; border-radius: 4px;">v1.17.2</span>
       </div>
       <div class="modal-body" style="font-size: 0.92rem; line-height: 1.6; color: var(--text-dark); max-height: 420px; overflow-y: auto; padding-right: 5px;">
-        <p style="margin-top: 0;">Here's what's new in <strong data-app-version>v1.17.1</strong>:</p>
+        <p style="margin-top: 0;">Here's what's new in <strong data-app-version>v1.17.2</strong>:</p>
         <ul style="padding-left: 20px; display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px;">
-          <li><strong>Smoother scrolling.</strong> Lists, boards, forms and ticket pages now scroll on the graphics card instead of being redrawn on every step, so scrolling stays smooth.</li>
-          <li><strong>Lighter when idle.</strong> Neo Service no longer keeps redrawing the window when nothing is happening, so switching screens is quicker.</li>
-          <li>The background aurora holds still while you scroll, while a page or dialog is open, and while the window is in the background.</li>
-          <li>Scrollbars are the slim Windows 11 style, in the same colours.</li>
-          <li>Behind dialogs and full-screen pages the app is dimmed instead of blurred. Dialogs keep their frosted glass.</li>
+          <li><strong>No prices on the QC report.</strong> The Price-to-Performance score, the build cost breakdown and the upgrade suggestions are gone. The last page now holds the activity log, where every number comes from, and the sign-off.</li>
+          <li>The front page shows three scores: QC checks, stability and thermal headroom.</li>
+          <li>The ticket window no longer has the Price-to-Performance panel or its Compute button.</li>
+          <li>Settings no longer has the PPI Engine tuning table.</li>
         </ul>
       </div>
       <div class="modal-footer" style="border-top: 1px solid var(--glass-border); padding-top: 15px; display: flex; justify-content: flex-end; margin-top: 20px;">
-        <button id="btn-close-changelog" data-app-version-label class="primary-pink-btn" style="padding: 10px 24px; font-weight: 700; font-size: 0.95rem;">Launch Neo Service v1.17.1</button>
+        <button id="btn-close-changelog" data-app-version-label class="primary-pink-btn" style="padding: 10px 24px; font-weight: 700; font-size: 0.95rem;">Launch Neo Service v1.17.2</button>
       </div>
     </div>
   </div>
@@ -2857,8 +2736,6 @@
   <script src="shared/matcher.js"></script>
   <script src="ssd-grading.js"></script>
   <script src="web-lookup.js"></script>
-  <script src="shared/ppi.js"></script>
-  <script src="shared/ppi-sync.js"></script>
   <script src="print-render.js"></script>
   <script src="shared/invoice-import.js"></script>
   <script src="invoice-ocr.js"></script>

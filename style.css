@@ -885,7 +885,7 @@
      The !important is deliberate and is the only thing that works: there are 20
      scattered `outline: none` declarations, and five of them are INLINE styles
      in index.html (the client ticket input and select, the awaiting-parts row,
-     the PPI use-case select). An inline declaration cannot be beaten by any
+     and a since-removed select). An inline declaration cannot be beaten by any
      selector, so the alternative was editing 20 sites across two files and
      hoping none of them was load-bearing. One !important on a global
      accessibility affordance is the smaller change and the safer one. */
@@ -2143,83 +2143,6 @@
   body.dark-mode .add-rival-form-row input {
     background: rgba(255, 255, 255, 0.05);
     border-color: rgba(255, 255, 255, 0.08);
-  }
-
-  /* ── PPI Engine tuning table ─────────────────────────────────────────── */
-  .ppi-tuning-scroll {
-    overflow-x: auto;
-    padding-bottom: 4px;
-  }
-  .ppi-tuning-table {
-    min-width: 720px;
-    font-size: 0.8rem;
-  }
-  .ppi-tuning-table th {
-    text-align: center;
-    font-size: 0.68rem;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.03em;
-    color: var(--text-muted);
-    white-space: nowrap;
-  }
-  .ppi-tuning-table td {
-    text-align: center;
-    padding: 6px 6px;
-  }
-  .ppi-tuning-table .ppi-col-usecase,
-  .ppi-tuning-table .ppi-usecase-name {
-    text-align: left;
-  }
-  .ppi-usecase-name {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 0.76rem;
-    font-weight: 600;
-    color: var(--text-dark);
-    white-space: nowrap;
-  }
-  .ppi-cell-input {
-    width: 62px;
-    padding: 5px 6px;
-    text-align: center;
-    background: rgba(15, 23, 42, 0.04);
-    border: 1px solid rgba(15, 23, 42, 0.10);
-    border-radius: 6px;
-    color: var(--text-dark);
-    font-size: 0.78rem;
-    font-family: 'JetBrains Mono', monospace;
-    outline: none;
-    transition: border-color 0.15s ease, box-shadow 0.15s ease;
-  }
-  .ppi-cell-input:focus {
-    border-color: var(--primary-pink);
-    box-shadow: 0 0 0 2px rgba(var(--primary-pink-rgb), 0.15);
-  }
-  body.dark-mode .ppi-cell-input {
-    background: rgba(255, 255, 255, 0.05);
-    border-color: rgba(255, 255, 255, 0.10);
-  }
-  .ppi-sum-cell {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 0.78rem;
-  }
-  .ppi-add-row {
-    display: flex;
-    gap: 8px;
-    flex-wrap: wrap;
-    align-items: center;
-  }
-  .ppi-tuning-footer {
-    display: flex;
-    align-items: flex-end;
-    justify-content: space-between;
-    gap: 16px;
-    flex-wrap: wrap;
-  }
-  .ppi-tuning-actions {
-    display: flex;
-    gap: 10px;
-    align-items: center;
   }
 
   /* ── Component condition / damage report ─────────────────────────────── */
@@ -3732,14 +3655,12 @@
     color: #EDF2F9;
   }
   body.dark-mode .settings-input,
-  body.dark-mode .settings-select,
-  body.dark-mode .ppi-cell-input {
+  body.dark-mode .settings-select {
     background: rgba(255, 255, 255, 0.07);
     color: #F1F5FB;
     border-color: rgba(255, 255, 255, 0.14);
   }
-  body.dark-mode .settings-input::placeholder,
-  body.dark-mode .ppi-cell-input::placeholder {
+  body.dark-mode .settings-input::placeholder {
     color: #7C8AA0;
   }
 

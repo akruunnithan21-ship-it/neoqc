@@ -2231,51 +2231,6 @@ ipcMain.handle('sys:check-ssd-health', async () => {
   });
 });
 
-// Directory the bundled Python scripts actually live in at runtime. Inside a
-// packaged build __dirname points INTO app.asar — a single archive FILE, not
-// a real directory — so spawn(..., { cwd: __dirname }) fails with ENOENT and
-// Python couldn't open the scripts anyway. electron-builder.json asarUnpacks
-// *.py + assets/benchmarks/** so the real files exist under app.asar.unpacked.
-const SCRIPTS_DIR = __dirname.includes('app.asar')
-  ? __dirname.replace('app.asar', 'app.asar.unpacked')
-  : __dirname;
-
-// IPC Handler: Compute Price-to-Performance for a ticket. Shells out to
-// ppi_sync.py (matcher → ppi() → upsert ticket_ppi); the renderer then just
-// re-reads the ticket_ppi row. No PPI math lives in JS.
-// NOTE: still requires Python + pip deps on the machine (dev/technician PC).
-// Machines without Python get a clear message instead of a raw spawn error.
-ipcMain.handle('ppi:compute', async (event, { ticketId, useCase }) => {
-  const pyCandidates = [
-    'C:\\Users\\Aladeen\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe',
-    'python'
-  ];
-  const py = pyCandidates.find(p => p === 'python' || fs.existsSync(p));
-  const args = ['ppi_sync.py', '--ticket-id', String(ticketId)];
-  if (useCase) args.push('--use-case', String(useCase));
-
-  return new Promise((resolve) => {
-    let settled = false;
-    const done = (result) => { if (!settled) { settled = true; resolve(result); } };
-    const child = spawn(py, args, { cwd: SCRIPTS_DIR, windowsHide: true });
-    let out = '', errOut = '';
-    child.stdout.on('data', d => { out += d.toString(); });
-    child.stderr.on('data', d => { errOut += d.toString(); });
-    child.on('close', code => done({
-      success: code === 0,
-      output: out.slice(-2000),
-      error: code === 0 ? null : (errOut || out).slice(-1000)
-    }));
-    child.on('error', e => done({
-      success: false,
-      error: e.code === 'ENOENT'
-        ? 'Python is not installed on this PC — Price-to-Performance computation currently runs on the technician workstation only.'
-        : e.message
-    }));
-    setTimeout(() => { try { child.kill(); } catch (_) {} done({ success: false, error: 'ppi_sync timeout (120s)' }); }, 120000);
-  });
-});
-
 // IPC Handler: plain HTTP fetch bridge for the live web lookup.
 // The lookup itself (site configs, HTML parsing, clustering, Supabase upsert)
 // now lives entirely in the renderer (web-lookup.js) — no Python at runtime.

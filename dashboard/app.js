@@ -319,7 +319,6 @@ async function doLookup() {
     if (data.length > 1) { showError('That code matches more than one build. Please enter a few more characters of your ticket code.'); return; }
 
     renderStatusCard(data[0]);
-    appendPpiSection(data[0].id);
     subscribeToTicket(data[0].id);
   } catch (err) {
     console.error('Lookup error:', err);
@@ -409,28 +408,6 @@ function renderDiagnosticsDetail(diag) {
   return html;
 }
 
-// Price-to-Performance — reads the precomputed ticket_ppi row (written by
-// ppi_sync.py on the staff side) and appends it to the status card. Same
-// shared renderPpiPanel the technician app uses, so both show identical data.
-async function appendPpiSection(ticketId) {
-  const R = window.NeoQcDiagnosticsRender;
-  if (!R || !ticketId) return;
-  try {
-    const { data, error } = await db
-      .from('ticket_ppi').select('*').eq('ticket_id', ticketId).maybeSingle();
-    if (error || !data) return;
-    const card = document.getElementById('status-card');
-    if (!card) return;
-    card.querySelectorAll('.sc-ppi-section').forEach(el => el.remove()); // no dupes on realtime refresh
-    const div = document.createElement('div');
-    div.className = 'sc-diag-section sc-ppi-section';
-    div.innerHTML = `<div class="sc-diag-title">Price-to-Performance</div>` + R.renderPpiPanel(data);
-    card.appendChild(div);
-  } catch (e) {
-    console.error('PPI section failed:', e);
-  }
-}
-
 // Realtime — keep the customer's card up-to-date while they watch
 function subscribeToTicket(ticketId) {
   if (realtimeChannel) { db.removeChannel(realtimeChannel); }
@@ -442,10 +419,7 @@ function subscribeToTicket(ticketId) {
       table:  'tickets',
       filter: `id=eq.${ticketId}`,
     }, payload => {
-      if (payload.new) {
-        renderStatusCard(payload.new);
-        appendPpiSection(payload.new.id); // re-attach after full card re-render
-      }
+      if (payload.new) renderStatusCard(payload.new);
     })
     .subscribe();
 }

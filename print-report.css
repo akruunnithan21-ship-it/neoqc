@@ -12,7 +12,7 @@
   Three fixed pages:
     1 — Quality Control Certificate (verdict, score strip, identity, checklist)
     2 — Stress & Diagnostics Lab Data (thermals, benchmarks, torture, health)
-    3 — Value Analysis & Provenance (PPI, activity, data sources, signatures)
+    3 — Activity & Provenance (activity, data sources, signatures)
 */
 
 @media print {
@@ -189,7 +189,7 @@
 
 #print-report-container .print-score-strip {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  grid-template-columns: repeat(3, 1fr);
   gap: 6px;
   margin: 10px 0 14px 0;
 }
@@ -434,55 +434,6 @@
 }
 #print-report-container .print-ssd-reasons li { margin-bottom: 2px; }
 
-/* ─── PPI empty-state placeholder (page 4) ──────────────────────────────── */
-
-#print-report-container .print-ppi-empty {
-  border: 1px dashed #999;
-  padding: 8px 10px;
-  font-size: 8pt;
-  color: #444;
-  background: #fafafa;
-  margin-top: 4px;
-}
-
-/* ─── Cost breakdown + upgrade path (page 4) ────────────────────────────── */
-
-#print-report-container .print-cost-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 8pt;
-}
-#print-report-container .print-cost-table th,
-#print-report-container .print-cost-table td {
-  border: 1px solid #ccc;
-  padding: 2px 8px;
-  font-size: 7.5pt;
-}
-#print-report-container .print-cost-table th {
-  background: #f2f2f2 !important;
-  text-align: left;
-  font-weight: 700;
-}
-#print-report-container .print-cost-table tfoot td {
-  background: #fafafa !important;
-  font-size: 9pt;
-}
-#print-report-container .print-upgrade-list {
-  margin: 3px 0 0 16px;
-  padding: 0;
-  font-size: 7.5pt;
-  color: #222;
-  line-height: 1.4;
-}
-#print-report-container .print-upgrade-list li { margin-bottom: 2px; }
-#print-report-container .print-subtitle {
-  font-size: 7.5pt;
-  color: #666;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  margin: 6px 0 2px 0;
-}
-
 /* ─── Ghosted measured-vs-reference benchmark bars ──────────────────────── */
 
 #print-report-container .print-bars {
@@ -526,44 +477,6 @@
   min-width: 120px;
   text-align: right;
   white-space: nowrap;
-}
-
-/* ─── PPI (page 3) ──────────────────────────────────────────────────────── */
-
-#print-report-container .print-ppi-headline {
-  display: flex;
-  gap: 12px;
-  align-items: stretch;
-  margin-bottom: 5px;
-}
-#print-report-container .print-ppi-index-tile {
-  border: 2px solid #000;
-  padding: 6px 14px;
-  text-align: center;
-  min-width: 95px;
-}
-#print-report-container .print-ppi-index-tile .ppi-big {
-  font-family: 'Space Grotesk', sans-serif;
-  font-size: 17pt;
-  font-weight: 700;
-  line-height: 1;
-}
-#print-report-container .print-ppi-index-tile .ppi-cap {
-  font-size: 6.5pt;
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  color: #555;
-}
-#print-report-container .print-ppi-meta {
-  flex: 1;
-  font-size: 7.8pt;
-  line-height: 1.35;
-}
-#print-report-container .print-ppi-meta p { margin: 1px 0; }
-#print-report-container .print-ppi-flags {
-  font-size: 7.5pt;
-  color: #333;
-  margin-top: 5px;
 }
 
 /* ─── Provenance & integrity ────────────────────────────────────────────── */

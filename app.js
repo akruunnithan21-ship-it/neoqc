@@ -1314,7 +1314,7 @@ async function fillMissingPrice(catalogHit, field) {
       if (entry) entry.priceInr = foundPrice;
     }
     // If the field still holds this pick, upgrade its stored price so the
-    // ticket save carries it into the report's cost breakdown.
+    // ticket save carries it into the stored build value.
     const match = specFieldMatches[field.inputId];
     if (match && match.sku === catalogHit.sku) match.priceInr = foundPrice;
     console.log(`Price filled for ${catalogHit.sku}: ₹${foundPrice}`);
@@ -1767,7 +1767,7 @@ async function upsertInvoiceComponentsToCatalog(build) {
         }
       }
       // Attach the resolved SKU + invoice price to this ticket's spec match so
-      // the report / PPI price the exact part the customer was invoiced for.
+      // the build value uses the exact part the customer was invoiced for.
       const fieldId = CATEGORY_TO_SPEC_FIELD[category];
       if (fieldId && specFieldMatches[fieldId]) {
         specFieldMatches[fieldId].sku = sku;
@@ -1777,164 +1777,6 @@ async function upsertInvoiceComponentsToCatalog(build) {
       console.warn('invoice→catalog upsert failed for', category, err && err.message);
     }
   }
-}
-
-// ==========================================================================
-// PPI ENGINE — Use-Case Tuning (Settings). Lets staff edit the Price-
-// Performance Index knobs (per-use-case component weights, min-recommended
-// PassMark thresholds, single-thread emphasis, bottleneck ratio) with no code
-// change. Persisted in appState.settings.ppiConfig and applied to the live
-// window.NeoQcPpi tables — mutated IN PLACE so ppi.js's closures see them.
-// ==========================================================================
-const PPI_WEIGHT_KEYS = ['cpu', 'gpu', 'ram', 'storage', 'other'];
-let PPI_ENGINE_DEFAULTS = null; // pristine snapshot, captured once before any override
-
-// Read the engine's current tables into a plain editable config object.
-function ppiConfigFromEngine() {
-  const P = window.NeoQcPpi;
-  const out = { version: 1, useCases: {}, bottleneckRatio: (P && P.TUNING && P.TUNING.bottleneckRatio) || 1.6 };
-  if (!P) return out;
-  Object.keys(P.USE_CASE_WEIGHTS).forEach(uc => {
-    const w = P.USE_CASE_WEIGHTS[uc] || {};
-    const m = P.MIN_RECOMMENDED[uc] || {};
-    const st = P.CPU_ST_EMPHASIS ? P.CPU_ST_EMPHASIS[uc] : null;
-    out.useCases[uc] = {
-      cpu: +w.cpu || 0, gpu: +w.gpu || 0, ram: +w.ram || 0, storage: +w.storage || 0, other: +w.other || 0,
-      minCpu: +m.cpu || 0, minGpu: +m.gpu || 0, st: st != null ? +st : 0.4
-    };
-  });
-  return out;
-}
-
-// Write a config object back into the engine's live tables (in place).
-function applyPpiConfig(cfg) {
-  const P = window.NeoQcPpi;
-  if (!P || !cfg || !cfg.useCases) return;
-  const clear = (o) => { if (o) Object.keys(o).forEach(k => delete o[k]); };
-  clear(P.USE_CASE_WEIGHTS); clear(P.MIN_RECOMMENDED); clear(P.CPU_ST_EMPHASIS);
-  Object.keys(cfg.useCases).forEach(uc => {
-    const r = cfg.useCases[uc];
-    P.USE_CASE_WEIGHTS[uc] = { cpu: +r.cpu || 0, gpu: +r.gpu || 0, ram: +r.ram || 0, storage: +r.storage || 0, other: +r.other || 0 };
-    P.MIN_RECOMMENDED[uc] = { cpu: +r.minCpu || 0, gpu: +r.minGpu || 0 };
-    if (P.CPU_ST_EMPHASIS) P.CPU_ST_EMPHASIS[uc] = r.st != null ? +r.st : 0.4;
-  });
-  if (P.TUNING && cfg.bottleneckRatio) P.TUNING.bottleneckRatio = +cfg.bottleneckRatio || 1.6;
-}
-
-// Boot: capture pristine defaults, seed the saved config if absent, apply it.
-function initPpiTuning() {
-  if (!window.NeoQcPpi) return;
-  if (!PPI_ENGINE_DEFAULTS) PPI_ENGINE_DEFAULTS = ppiConfigFromEngine();
-  if (!appState.settings) appState.settings = {};
-  if (!appState.settings.ppiConfig || !appState.settings.ppiConfig.useCases) {
-    appState.settings.ppiConfig = JSON.parse(JSON.stringify(PPI_ENGINE_DEFAULTS));
-  }
-  applyPpiConfig(appState.settings.ppiConfig);
-}
-
-function ppiRowSum(r) { return PPI_WEIGHT_KEYS.reduce((s, k) => s + (+r[k] || 0), 0); }
-
-// Pretty display label for a use-case key: "gaming-1080p" → "GAMING 1080P",
-// "ai-ml" → "AI ML", "content-creation" → "CONTENT CREATION". The raw key
-// (data-uc) stays canonical for the engine; this is display-only.
-function ppiUseCaseLabel(uc) { return String(uc).replace(/-/g, ' ').toUpperCase(); }
-
-function paintPpiSum(cell) {
-  const sum = parseFloat(cell.textContent);
-  const ok = Math.abs(sum - 1) < 0.001;
-  cell.style.color = ok ? 'var(--status-completed, #10b981)' : 'var(--primary-pink)';
-  cell.style.fontWeight = '700';
-  cell.title = ok ? 'Weights sum to 1.00' : 'Weights should sum to 1.00';
-}
-
-function renderPpiConfigTable() {
-  const body = document.getElementById('ppi-tuning-body');
-  if (!body) return;
-  if (!appState.settings.ppiConfig) initPpiTuning();
-  const cfg = appState.settings.ppiConfig;
-  body.innerHTML = '';
-  Object.keys(cfg.useCases).forEach(uc => {
-    const r = cfg.useCases[uc];
-    const tr = document.createElement('tr');
-    const cell = (field, val, step) => `<td><input type="number" step="${step}" class="ppi-cell-input" data-uc="${uc}" data-field="${field}" value="${val}"></td>`;
-    tr.innerHTML =
-      `<td class="ppi-usecase-name">${ppiUseCaseLabel(uc)}</td>` +
-      cell('cpu', r.cpu, '0.05') + cell('gpu', r.gpu, '0.05') + cell('ram', r.ram, '0.05') +
-      cell('storage', r.storage, '0.05') + cell('other', r.other, '0.05') +
-      `<td class="ppi-sum-cell" data-uc="${uc}">${ppiRowSum(r).toFixed(2)}</td>` +
-      cell('minCpu', r.minCpu, '500') + cell('minGpu', r.minGpu, '500') + cell('st', r.st, '0.05') +
-      `<td><button class="text-btn text-crimson ppi-remove-uc" data-uc="${uc}">Remove</button></td>`;
-    body.appendChild(tr);
-  });
-  body.querySelectorAll('.ppi-sum-cell').forEach(c => paintPpiSum(c));
-  const brInput = document.getElementById('ppi-bottleneck-ratio');
-  if (brInput) brInput.value = cfg.bottleneckRatio != null ? cfg.bottleneckRatio : 1.6;
-
-  body.querySelectorAll('.ppi-cell-input').forEach(inp => {
-    inp.addEventListener('input', () => {
-      const uc = inp.getAttribute('data-uc');
-      const field = inp.getAttribute('data-field');
-      const v = parseFloat(inp.value);
-      cfg.useCases[uc][field] = isNaN(v) ? 0 : v;
-      if (PPI_WEIGHT_KEYS.includes(field)) {
-        const sc = body.querySelector(`.ppi-sum-cell[data-uc="${uc}"]`);
-        if (sc) { sc.textContent = ppiRowSum(cfg.useCases[uc]).toFixed(2); paintPpiSum(sc); }
-      }
-    });
-  });
-  body.querySelectorAll('.ppi-remove-uc').forEach(btn => {
-    btn.addEventListener('click', async () => {
-      const uc = btn.getAttribute('data-uc');
-      if (Object.keys(cfg.useCases).length <= 1) { showToast('At least one use case must remain.', 'warning'); return; }
-      if (await showConfirm(`Remove use case "${uc}"? PPI will no longer offer it.`, { title: 'Remove use case', okText: 'Remove', danger: true })) {
-        delete cfg.useCases[uc];
-        renderPpiConfigTable();
-      }
-    });
-  });
-}
-
-// Attached once (from setupEventListeners). The table itself is (re)rendered on
-// each settings open via renderPpiConfigTable().
-function setupPpiTuningHandlers() {
-  const addBtn = document.getElementById('btn-ppi-add-usecase');
-  if (addBtn) addBtn.addEventListener('click', () => {
-    const input = document.getElementById('new-ppi-usecase');
-    const name = (input.value || '').trim().toLowerCase().replace(/\s+/g, '-');
-    if (!name) return;
-    if (!appState.settings.ppiConfig) initPpiTuning();
-    const cfg = appState.settings.ppiConfig;
-    if (cfg.useCases[name]) { showToast('That use case already exists.', 'warning'); return; }
-    cfg.useCases[name] = { cpu: 0.2, gpu: 0.4, ram: 0.1, storage: 0.1, other: 0.2, minCpu: 10000, minGpu: 8000, st: 0.4 };
-    input.value = '';
-    renderPpiConfigTable();
-  });
-
-  const saveBtn = document.getElementById('btn-ppi-save');
-  if (saveBtn) saveBtn.addEventListener('click', async () => {
-    const cfg = appState.settings.ppiConfig;
-    if (!cfg) return;
-    const br = parseFloat(document.getElementById('ppi-bottleneck-ratio').value);
-    cfg.bottleneckRatio = isNaN(br) ? 1.6 : br;
-    const bad = Object.keys(cfg.useCases).filter(uc => Math.abs(ppiRowSum(cfg.useCases[uc]) - 1) >= 0.01);
-    if (bad.length && !(await showConfirm(`These use cases don't sum to 1.00: ${bad.join(', ')}.\nSave anyway? (PPI normalises internally, but 1.00 keeps the weights meaningful.)`, { title: 'Weights don’t sum to 1.00', okText: 'Save anyway' }))) return;
-    applyPpiConfig(cfg);
-    await saveDatabase();
-    const status = document.getElementById('ppi-tuning-status');
-    if (status) { status.classList.remove('hidden'); status.style.color = 'var(--status-completed, #10b981)'; status.textContent = '✓ PPI tuning saved and applied to the engine.'; }
-  });
-
-  const resetBtn = document.getElementById('btn-ppi-reset');
-  if (resetBtn) resetBtn.addEventListener('click', async () => {
-    if (!PPI_ENGINE_DEFAULTS) PPI_ENGINE_DEFAULTS = ppiConfigFromEngine();
-    if (!(await showConfirm('Reset all PPI tuning back to the built-in engine defaults?', { title: 'Reset PPI tuning', okText: 'Reset', danger: true }))) return;
-    appState.settings.ppiConfig = JSON.parse(JSON.stringify(PPI_ENGINE_DEFAULTS));
-    applyPpiConfig(appState.settings.ppiConfig);
-    await saveDatabase();
-    renderPpiConfigTable();
-    const status = document.getElementById('ppi-tuning-status');
-    if (status) { status.classList.remove('hidden'); status.style.color = 'var(--text-muted)'; status.textContent = 'Reset to defaults.'; }
-  });
 }
 
 // App Global State
@@ -1971,7 +1813,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   const bootStart = Date.now();
 
   await loadDatabase();
-  initPpiTuning(); // seed + apply saved PPI engine tuning before any PPI compute
   // Restore this PC's theme (Settings → Appearance; v1.10 adds "Match Windows").
   applyThemeChoice(themeChoiceFromSettings(appState.settings));
   // 1.16.1 — aurora, dots, glass, interface size, motion (settings-plus.js).
@@ -3753,9 +3594,8 @@ function openTicketModal(ticketId = null) {
       // Render event log timeline
       renderEventLog(ticket);
 
-      // Saved diagnostics panels (passport / Prime95) + precomputed PPI
+      // Saved diagnostics panels (passport / Prime95)
       renderSavedDiagnosticsPanels(ticket);
-      loadAndRenderPpi(ticket.id);
       loadTicketQueries(ticket.id);
       renderInventoryPanel(ticket);
       renderStressProgress(ticket);
@@ -3778,9 +3618,7 @@ function openTicketModal(ticketId = null) {
 
     // Clear diagnostics panels from any previously opened ticket
     renderSavedDiagnosticsPanels(null);
-    const ppiPanel = document.getElementById('modal-ppi-panel');
-    if (ppiPanel && window.NeoQcDiagnosticsRender) ppiPanel.innerHTML = window.NeoQcDiagnosticsRender.renderPpiPanel(null);
-    
+
     // Reset specs
     document.getElementById('modal-spec-cpu').textContent = '--';
     document.getElementById('modal-spec-gpu').textContent = '--';
@@ -5087,9 +4925,9 @@ async function handleTicketFormSubmit(e) {
   };
 
   // Persist per-category prices captured during autocomplete pick, so the
-  // printed report's Build Cost Breakdown works without a second Supabase
-  // round-trip. Structure mirrors the form field IDs → normalised category
-  // keys used by the report. Preserves existing prices when an old ticket
+  // internal build value / tier still works when the ticket is reopened.
+  // (The printed QC report no longer shows prices.) Structure mirrors the
+  // form field IDs → normalised category keys. Preserves existing prices when an old ticket
   // is re-saved without re-picking (edit didn't touch that field).
   var fieldToCat = {
     'form-spec-cpu':'cpu', 'form-spec-gpu':'gpu', 'form-spec-ram':'ram',
@@ -5838,8 +5676,7 @@ function populatePrintFields(ticket) {
   try {
     window.NeoQcPrintRender.populate(
       ticket,
-      (appState && appState.settings) || {},
-      ppiCacheByTicket[ticket.id]
+      (appState && appState.settings) || {}
     );
     return true;
   } catch (e) {
@@ -5860,37 +5697,10 @@ function reportEffectiveTicket(ticket) {
   return eff;
 }
 
-// v1.8.0 — the customer should always see the value story. If PPI was never
-// computed for this ticket, compute it now (JS engine, in-process) so the
-// report's value section is populated instead of a placeholder.
-async function ensurePpiForReport(ticket) {
-  if (ppiCacheByTicket[ticket.id]) return;
-  if (!(window.NeoQcPpiSync && window.NeoQcPpi && catalogMatcher && ticket.specs)) return;
-  try {
-    const useCase = (document.getElementById('modal-ppi-usecase') || {}).value || 'gaming-1440p';
-    const ticketPrices = Object.assign({}, ticket.specPrices || (ticket.specs && ticket.specs.__prices) || {});
-    const jsRes = await window.NeoQcPpiSync.computePpi({
-      ticketSpecs: ticket.specs,
-      catalogMatcher: catalogMatcher,
-      useCase: useCase,
-      ticketPrices: ticketPrices,
-      fetchUrl: function (url) { return ipcRenderer.invoke('catalog:fetch-url', { url: url }); },
-      supabaseClient: supabaseClient
-    });
-    if (jsRes && jsRes.success) {
-      ppiCacheByTicket[ticket.id] = jsRes.payload;
-      if (supabaseClient) {
-        window.NeoQcPpiSync.upsertTicketPpi(supabaseClient, ticket.id, jsRes.payload).catch(() => {});
-      }
-    }
-  } catch (e) { console.warn('report-time PPI compute skipped:', e && e.message); }
-}
-
 async function triggerPrintReport(ticketId, shouldPrint = true) {
   const ticket = appState.tickets.find(t => t.id === ticketId);
   if (!ticket) return;
 
-  await ensurePpiForReport(ticket);
   if (!populatePrintFields(reportEffectiveTicket(ticket))) return; // never print an unpopulated skeleton
 
   // Execute print in main Electron window
@@ -5903,7 +5713,6 @@ async function triggerSavePdf(ticketId) {
   const ticket = appState.tickets.find(t => t.id === ticketId);
   if (!ticket) return;
 
-  await ensurePpiForReport(ticket);
   if (!populatePrintFields(reportEffectiveTicket(ticket))) return; // never save an unpopulated skeleton
 
   // Save PDF filename
@@ -5995,9 +5804,6 @@ function openSettingsModal() {
   resetAdminLockState();
   // v1.11 — the per-PC "Technicians" list is gone: technicians claim builds
   // from the Queue, and people are managed in Settings → General → People.
-
-  // Render PPI Engine use-case tuning table (replaces the old rival DB).
-  renderPpiConfigTable();
 
   document.getElementById('settings-supabase-url').value = appState.settings.supabaseUrl || '';
   document.getElementById('settings-supabase-key').value = appState.settings.supabaseAnonKey || '';
@@ -7052,9 +6858,6 @@ function setupEventListeners() {
   // Send to build queue); the per-PC "Add technician" control is gone.
   setupTechAreaButtons();
 
-  // PPI tuning panel handlers (add use-case / save / reset).
-  setupPpiTuningHandlers();
-
   // Ticket create/edit actions
   document.getElementById('btn-new-ticket').addEventListener('click', () => openTicketModal());
   document.getElementById('btn-close-ticket-modal').addEventListener('click', requestCloseTicketModal);
@@ -7591,92 +7394,6 @@ function setupEventListeners() {
     await executeDiagnosticsWorkflow(true);
   });
 
-  // Compute Price-to-Performance. v1.4.4 — runs pure-JS via ppi-sync.js first
-  // (no Python required, works on every build-room PC — the "no python
-  // installed" field bug is fixed here). Falls back to the legacy Python
-  // ppi:compute IPC only if the JS deps aren't loaded (defensive; the
-  // packaged app always ships ppi.js + ppi-sync.js now).
-  const ppiBtn = document.getElementById('btn-compute-ppi');
-  if (ppiBtn) {
-    ppiBtn.addEventListener('click', async () => {
-      if (!editingTicketId) {
-        showToast('Save the ticket first — PPI needs a stored ticket with specs.', 'warning');
-        return;
-      }
-      const useCaseSel = document.getElementById('modal-ppi-usecase');
-      const useCase = useCaseSel ? useCaseSel.value : 'gaming-1440p';
-      ppiBtn.disabled = true;
-      ppiBtn.textContent = 'Computing…';
-      try {
-        const ticket = appState.tickets.find(t => t.id === editingTicketId);
-        var ok = false;
-        if (window.NeoQcPpiSync && window.NeoQcPpi && catalogMatcher && ticket && ticket.specs) {
-          try {
-            var ticketPrices = Object.assign({}, ticket.specPrices || (ticket.specs && ticket.specs.__prices) || {});
-            // Merge in live form picks (invoice auto-fill or manual selection),
-            // so a real price the tech just set is used even before re-saving —
-            // kills spurious "no price on file" flags on the PPI panel.
-            var _fieldToCat = { 'form-spec-cpu': 'cpu', 'form-spec-gpu': 'gpu', 'form-spec-ram': 'ram', 'form-spec-storage': 'storage', 'form-spec-psu': 'psu', 'form-spec-mobo': 'motherboard', 'form-spec-cooler-model': 'cooler', 'form-spec-case': 'case' };
-            Object.keys(_fieldToCat).forEach(function (fid) {
-              var m = specFieldMatches[fid];
-              if (m && m.priceInr != null) ticketPrices[_fieldToCat[fid]] = m.priceInr;
-            });
-            const jsRes = await window.NeoQcPpiSync.computePpi({
-              ticketSpecs: ticket.specs,
-              catalogMatcher: catalogMatcher,
-              useCase: useCase,
-              ticketPrices: ticketPrices,
-              // v1.4.5 — pass the fetch bridge + supabase client so missing
-              // prices get auto-filled from a live retailer scrape before
-              // scoring. Kills the persistent "no price on file" flag when
-              // the internet has the answer.
-              fetchUrl: function (url) { return ipcRenderer.invoke('catalog:fetch-url', { url: url }); },
-              supabaseClient: supabaseClient
-            });
-            if (jsRes && jsRes.success) {
-              // Render straight from the computed payload — do NOT depend on a
-              // Supabase round-trip to show the result. Previously we upserted
-              // to ticket_ppi then re-read it via loadAndRenderPpi(); if that
-              // write/read failed or lagged, the panel rendered null and it
-              // looked like "PPI didn't compute / no prices". Now the panel
-              // shows the fresh result immediately; Supabase is best-effort.
-              ppiCacheByTicket[editingTicketId] = jsRes.payload;
-              const ppiPanelEl = document.getElementById('modal-ppi-panel');
-              if (ppiPanelEl && window.NeoQcDiagnosticsRender) {
-                ppiPanelEl.innerHTML = window.NeoQcDiagnosticsRender.renderPpiPanel(jsRes.payload);
-              }
-              if (supabaseClient) {
-                window.NeoQcPpiSync.upsertTicketPpi(supabaseClient, editingTicketId, jsRes.payload)
-                  .catch(e => console.warn('ticket_ppi upsert failed (panel already shown):', e.message));
-              }
-              ok = true;
-            } else if (jsRes && jsRes.error) {
-              // Real error (e.g. no spec matched). Do NOT silently fall back
-              // to Python — the user needs to see this so they can fix specs.
-              showToast('PPI compute failed: ' + jsRes.error, 'error', 8000);
-              return;
-            }
-          } catch (e) {
-            console.error('JS PPI failed, falling back to Python:', e);
-          }
-        }
-        if (!ok) {
-          const res = await ipcRenderer.invoke('ppi:compute', { ticketId: editingTicketId, useCase });
-          if (res && res.success) {
-            await loadAndRenderPpi(editingTicketId);
-          } else {
-            showToast('PPI compute failed: ' + ((res && res.error) || 'unknown error'), 'error', 8000);
-          }
-        }
-      } catch (e) {
-        showToast('PPI compute failed: ' + e.message, 'error', 8000);
-      } finally {
-        ppiBtn.disabled = false;
-        ppiBtn.textContent = 'Compute Price-Performance';
-      }
-    });
-  }
-
   // Settings executable path browsers
   const setupPathBrowser = (btnId, inputId) => {
     document.getElementById(btnId).addEventListener('click', async () => {
@@ -7739,7 +7456,6 @@ function setupEventListeners() {
               if (!parsed.settings) parsed.settings = appState.settings;
 
               appState = parsed;
-              initPpiTuning(); // re-seed/apply PPI tuning from the restored settings
               await saveDatabase();
               renderDashboard();
               showToast("Database restored successfully.", 'success');
@@ -7791,7 +7507,6 @@ function setupEventListeners() {
             contactInfo: "kochi@neotokyo.in"
           }
         };
-        initPpiTuning(); // seed default PPI tuning into the fresh settings
         await saveDatabase();
         renderDashboard();
         showToast("Database has been factory reset.", 'success');
@@ -9192,38 +8907,6 @@ function renderSavedDiagnosticsPanels(ticket) {
   if (pp) pp.innerHTML = d.componentPassport ? R.renderPassportGrid(d.componentPassport) : '';
   const p95 = document.getElementById('modal-prime95-panel');
   if (p95) p95.innerHTML = (d.prime95 && d.prime95.overallResult) ? R.renderPrime95Panel(d.prime95) : '';
-}
-
-// Fetch the precomputed PPI row for a ticket and render it (read-only; the
-// math lives in ppi.py, invoked via the Compute button → ppi:compute IPC).
-// Rows are cached here so the print report can include PPI without another
-// network round-trip (and without polluting the persisted ticket object).
-const ppiCacheByTicket = {};
-
-async function loadAndRenderPpi(ticketId) {
-  const panel = document.getElementById('modal-ppi-panel');
-  const R = window.NeoQcDiagnosticsRender;
-  if (!panel || !R) return;
-  // Prefer an in-session computed result so a Supabase hiccup can't blank a
-  // PPI that was just calculated. Falls through to the empty state otherwise.
-  panel.innerHTML = R.renderPpiPanel(ppiCacheByTicket[ticketId] || null);
-  if (!supabaseClient || !ticketId) return;
-  try {
-    const { data, error } = await supabaseClient
-      .from('ticket_ppi').select('*').eq('ticket_id', ticketId).maybeSingle();
-    if (!error && data) {
-      ppiCacheByTicket[ticketId] = data;
-      panel.innerHTML = R.renderPpiPanel(data);
-      // Reflect the stored use case in the selector so recompute defaults to
-      // what this ticket was last evaluated for.
-      const sel = document.getElementById('modal-ppi-usecase');
-      if (sel && data.use_cases && data.use_cases.length && [...sel.options].some(o => o.value === data.use_cases[0])) {
-        sel.value = data.use_cases[0];
-      }
-    }
-  } catch (e) {
-    console.error('PPI load failed:', e);
-  }
 }
 
 // SMBIOSMemoryType -> DDR generation (DMTF SMBIOS Memory Device type codes)

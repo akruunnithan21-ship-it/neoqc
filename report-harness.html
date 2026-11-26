@@ -157,24 +157,6 @@ const MOCK_TICKET = {
   }
 };
 
-const MOCK_PPI = {
-  index: 87.9, customer_fit_score: 1.0, use_cases: ['gaming-1440p'], price_band_pct: 0.15,
-  per_component_scores: { cpu: 60.7, gpu: 100.0, psu: null, ram: null, case: null, storage: null },
-  in_range_comparisons: {
-    cpu: [
-      { name: 'Intel Core Ultra 7 270K Plus Desktop Processor', price_inr: 43850, score: 100.0, delta_vs_own: 39.3 },
-      { name: 'Intel Core i9 14900KF 14th Gen Desktop Processor', price_inr: 43000, score: 88.3, delta_vs_own: 27.6 }
-    ],
-    gpu: [
-      { name: 'MSI GeForce RTX 4070 Ti Gaming X Trio 12GB', price_inr: 85890, score: 99.0, delta_vs_own: -1.0 }
-    ]
-  },
-  flags: [
-    'gpu: best performer in its price band ✓',
-    'psu: no objective benchmark exists — shown unscored, not counted in the index'
-  ]
-};
-
 const MOCK_SETTINGS = {
   shopContact: 'Neo Tokyo Kochi · +91 484 000 0000 · service@neotokyo.in',
   cpuMaxTemp: 85, gpuMaxTemp: 80, minCinebench: 15000, minFurmark: 8000, minSsdRead: 5000, minSsdWrite: 4000
@@ -191,7 +173,7 @@ fetch(indexUrl)
     const container = doc.getElementById('print-report-container');
     if (!container) throw new Error('print-report-container not found in index.html');
     document.getElementById('mount').replaceWith(container);
-    window.NeoQcPrintRender.populate(MOCK_TICKET, MOCK_SETTINGS, MOCK_PPI);
+    window.NeoQcPrintRender.populate(MOCK_TICKET, MOCK_SETTINGS);
     document.title = 'harness-ready';
   })
   .catch(e => {

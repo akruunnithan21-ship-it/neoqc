@@ -5,7 +5,7 @@
   Deliberately Electron-free (no require/ipcRenderer/appState): everything it
   needs is passed in, so the exact same code runs in a plain-browser test
   harness. app.js's populatePrintFields() is now a thin wrapper around
-  NeoQcPrintRender.populate(ticket, settings, ppiRow).
+  NeoQcPrintRender.populate(ticket, settings).
 
   Report philosophy (what makes this report different):
     • Every number is labelled by origin — measured on THIS unit, shop QC
@@ -186,7 +186,7 @@
 
   // ─── Main populate ────────────────────────────────────────────────────
 
-  function populate(ticket, settings, ppiRow) {
+  function populate(ticket, settings) {
     settings = settings || {};
     var d = ticket.diagnostics || {};
     var specs = ticket.specs || {};
@@ -697,102 +697,6 @@
         '<tr><td colspan="3" class="dr-muted">No ports enumerated.</td></tr>';
     }
 
-    // ── PPI (page 4) — ALWAYS visible; shows a placeholder if not computed ──
-    if (ppiRow && ppiRow.index != null) {
-      setText('print-ppi-index', String(ppiRow.index));
-      setText('print-ppi-fit', ppiRow.customer_fit_score != null ? Math.round(ppiRow.customer_fit_score * 100) + '%' : '—');
-      setText('print-ppi-usecases', (ppiRow.use_cases || []).join(', ') || '—');
-
-      var pcs = ppiRow.per_component_scores || {};
-      var compBars = [];
-      var unscored = [];
-      Object.keys(pcs).forEach(function (cat) {
-        var v = pcs[cat];
-        if (v == null) { unscored.push(cat.toUpperCase()); return; }
-        compBars.push(barRow(cat.toUpperCase() + ' — % of best at this price', v, 100, '', v >= 99.95));
-      });
-      var compEl = $('print-ppi-component-bars');
-      if (compEl && compBars.length) {
-        var un = unscored.length
-          ? '<div class="print-bar-row"><span class="print-bar-label" style="color:#888;">Not scored (no objective benchmark): ' + esc(unscored.join(', ')) + '</span></div>'
-          : '';
-        compEl.innerHTML = compBars.join('') + un;
-        compEl.classList.remove('hidden');
-      }
-
-      var comps = ppiRow.in_range_comparisons || {};
-      var altRows = [];
-      Object.keys(comps).forEach(function (cat) {
-        (comps[cat] || []).slice(0, 3).forEach(function (e) {
-          var delta = e.delta_vs_own != null ? e.delta_vs_own : 0;
-          altRows.push('<tr><td>' + esc(cleanName(e.name)) + '</td><td>' + esc(cat.toUpperCase()) + '</td><td>₹' +
-            (e.price_inr != null ? Math.round(e.price_inr).toLocaleString('en-IN') : '—') + '</td><td>' +
-            (delta >= 0 ? '+' : '') + delta + ' pts</td></tr>');
-        });
-      });
-      if (altRows.length && $('print-ppi-alt-body')) {
-        $('print-ppi-alt-body').innerHTML = altRows.join('');
-        show('print-ppi-alternatives');
-      }
-
-      if ($('print-ppi-flags')) {
-        $('print-ppi-flags').innerHTML = (ppiRow.flags || []).map(function (f) { return '<div>⚠ ' + esc(f) + '</div>'; }).join('');
-      }
-
-      // Recommended upgrade path — highest-delta same-price swaps
-      var upgList = [];
-      Object.keys(comps).forEach(function (cat) {
-        var top = (comps[cat] || [])[0];
-        if (!top) return;
-        var delta = top.delta_vs_own != null ? top.delta_vs_own : 0;
-        if (delta > 0) {
-          upgList.push({ cat: cat, entry: top, delta: delta });
-        }
-      });
-      upgList.sort(function (a, b) { return b.delta - a.delta; });
-      if (upgList.length && $('print-upgrade-list')) {
-        $('print-upgrade-list').innerHTML = upgList.slice(0, 4).map(function (u) {
-          return '<li><strong>' + esc(u.cat.toUpperCase()) + ':</strong> switch to <strong>' + esc(cleanName(u.entry.name)) +
-                 '</strong> for the same ₹' + (u.entry.price_inr != null ? Math.round(u.entry.price_inr).toLocaleString('en-IN') : '—') +
-                 ' — gains +' + u.delta.toFixed(1) + ' pts of same-price performance.</li>';
-        }).join('');
-        show('print-upgrade-section');
-      }
-    } else {
-      // Never computed — show a friendly placeholder so page 4 isn't a big
-      // blank rectangle for tickets where the tech forgot to hit Compute.
-      var emptyNote = $('print-ppi-empty-note');
-      if (emptyNote) emptyNote.classList.remove('hidden');
-    }
-
-    // ── Build cost breakdown ──
-    // Sum retail prices per component (from the local matcher's specFieldMatches
-    // if present; otherwise from the last stored PPI's comparisons for
-    // reference). Falls through silently if no prices are known.
-    var costRows = [];
-    var totalCost = 0;
-    var specNames = {
-      cpu: specs.cpu, gpu: specs.gpu, ram: specs.ram, storage: specs.storage,
-      psu: specs.psu, motherboard: specs.mobo || specs.motherboard,
-      cooler: specs.cooler || specs.coolerModel, case: specs.case || specs.cabinet
-    };
-    var priceMap = ticket.specPrices || ticket.specFieldPrices || (specs && specs.__prices) || null;
-    // If ticket carries a componentPrices map ({cpu: 42000, gpu: 55000, ...})
-    // sum it up — matches app.js's stored specFieldMatches shape.
-    Object.keys(specNames).forEach(function (cat) {
-      var name = specNames[cat];
-      if (!name) return;
-      var price = priceMap && priceMap[cat] != null ? priceMap[cat] : null;
-      if (price != null) totalCost += Number(price);
-      costRows.push('<tr><td>' + esc(cat.toUpperCase()) + '</td><td>' + esc(cleanName(name)) +
-                    '</td><td style="text-align:right;">' + (price != null ? '₹' + Math.round(price).toLocaleString('en-IN') : '<span style="color:#888;">not priced</span>') + '</td></tr>');
-    });
-    if (costRows.length && $('print-cost-body')) {
-      $('print-cost-body').innerHTML = costRows.join('');
-      setText('print-cost-total', totalCost > 0 ? '₹' + Math.round(totalCost).toLocaleString('en-IN') : '—');
-      show('print-cost-section');
-    }
-
     // ── Activity log ──
     var events = ticket.events || ticket.activityLog || [];
     if (events.length > 0 && $('print-event-log-body')) {
@@ -883,10 +787,6 @@
       setText('print-tile-thermal-sub', 'not measured');
     }
 
-    setText('print-tile-ppi', ppiRow && ppiRow.index != null ? String(ppiRow.index) : '—');
-    setText('print-tile-fit', ppiRow && ppiRow.customer_fit_score != null ? Math.round(ppiRow.customer_fit_score * 100) + '%' : '—');
-    setText('print-tile-fit-sub', ppiRow && ppiRow.use_cases ? (ppiRow.use_cases || []).join(', ') : '');
-
     // ── Provenance (page 3) ──
     var prov = [];
     var measured = [];
@@ -901,11 +801,6 @@
       new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) + ': ' +
       (measured.length ? measured.join(', ') : 'no automated tests recorded') + '.');
     prov.push('<strong>Pass/fail thresholds</strong> are Neo Tokyo\'s own QC policy (configured in shop settings), not manufacturer marketing figures.');
-    if (ppiRow && ppiRow.index != null) {
-      prov.push('<strong>Price-to-performance</strong> compares your parts only against alternatives available at the same price (±' +
-        Math.round((ppiRow.price_band_pct || 0.15) * 100) + '%): reference performance from PassMark® (passmark.com, attribution required), ' +
-        'prices from pcstudio.in and live Indian retailer lookups. Components with no objective benchmark are left unscored — never guessed.');
-    }
     prov.push('<strong>Nothing on this report is auto-passed.</strong> Tests that were not run say "not run"; ports that were not physically verified say "unverified".');
     if ($('print-provenance')) $('print-provenance').innerHTML = prov.map(function (p) { return '<div style="margin-bottom:3px;">' + p + '</div>'; }).join('');
 
@@ -914,7 +809,10 @@
       id: ticket.id, cb: cb, fm: fm, ssdR: ssdR, ssdW: ssdW,
       cpuMax: cpuMax, gpuMax: gpuMax, ram: d.ramStress != null ? d.ramStress : null,
       p95: p95 ? p95.overallResult : null,
-      ppi: ppiRow ? ppiRow.index : null,
+      // The report no longer carries a price-to-performance score. The key
+      // stays (always null) so codes for tickets that never had one still
+      // match their earlier printouts.
+      ppi: null,
       verdict: overallPass
     });
     var h = fnv1a(canonical);
